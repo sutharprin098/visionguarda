@@ -1,0 +1,8 @@
+fastapi==0.111.1
+uvicorn[standard]==0.23.2
+ultralytics==8.1.4
+opencv-python-headless==4.8.1.78
+# Use a slightly older numpy that's widely available
+numpy==1.26.4
+pillow==10.2.0
+python-multipart==0.0.7
