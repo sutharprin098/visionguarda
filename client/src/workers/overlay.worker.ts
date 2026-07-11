@@ -47,7 +47,27 @@ interface Telemetry {
     occupancy: number;
     max_occupancy: number;
     status: 'normal' | 'danger';
+    parking_status?: 'occupied' | 'free';
+    parking_score?: number;
+    parking_reason?: string;
   }>;
+  parking_stats?: {
+    total: number;
+    occupied: number;
+    free: number;
+    occupancy_percent: number;
+    slots: Array<{
+      id: string;
+      name: string;
+      occupied: boolean;
+      status: 'occupied' | 'free';
+      score: number;
+      vehicle_overlap: number;
+      vehicle_track_id: number | null;
+      reason: string;
+      points: number[][];
+    }>;
+  };
 
   capture_latency?: number;
   decode_latency?: number;
@@ -542,7 +562,10 @@ function renderLoop() {
       config.zones.forEach((zone: any) => {
         if (!zone.points || zone.points.length < 3) return;
         const isRoi = !!zone.roi;
+        const isParking = zone.zoneType === 'parking';
         const isEditing = config.editingZoneId === zone.id;
+        const zStats = telemetry?.zone_stats?.[zone.id];
+        const parkingOccupied = zStats?.parking_status === 'occupied';
         ctx.beginPath();
         ctx.moveTo(toX(zone.points[0][0]), toY(zone.points[0][1]));
         for (let i = 1; i < zone.points.length; i++) {
@@ -552,8 +575,12 @@ function renderLoop() {
 
         // ROI (detection region) zones render in a distinct cyan so they
         // read as "gates what's detected" rather than a regular alert zone.
-        const fillColor = isRoi ? '#22d3ee' : (config.colors?.zoneFill || '#ef4444');
-        const borderColor = isRoi ? '#22d3ee' : (config.colors?.zoneBorder || '#ef4444');
+        const fillColor = isParking
+          ? (parkingOccupied ? '#ef4444' : '#22c55e')
+          : (isRoi ? '#22d3ee' : (config.colors?.zoneFill || '#ef4444'));
+        const borderColor = isParking
+          ? (parkingOccupied ? '#f87171' : '#34d399')
+          : (isRoi ? '#22d3ee' : (config.colors?.zoneBorder || '#ef4444'));
 
         if (config.showZoneFill) {
           ctx.fillStyle = fillColor;
@@ -573,13 +600,13 @@ function renderLoop() {
         if (config.showZoneName) {
           ctx.font = `bold ${config.fontSize}px Inter, sans-serif`;
           ctx.fillStyle = isRoi ? '#22d3ee' : (config.colors?.zoneName || '#ef4444');
-          const zStats = telemetry?.zone_stats?.[zone.id];
           const roiTag = isRoi ? '[ROI] ' : '';
+          const parkingTag = isParking ? `[${parkingOccupied ? 'FULL' : 'FREE'}] ` : '';
           const zoneLabel = zStats
-            ? `${roiTag}${zone.name || 'Zone'} [${zStats.status.toUpperCase()}] ${zStats.occupancy}/${zStats.max_occupancy}`
-            : `${roiTag}${zone.name || 'Restricted Zone'}`;
+            ? `${roiTag}${parkingTag}${zone.name || 'Zone'}${isParking ? ` ${zStats.parking_score ?? 0}` : ` [${zStats.status.toUpperCase()}] ${zStats.occupancy}/${zStats.max_occupancy}`}`
+            : `${roiTag}${parkingTag}${zone.name || (isParking ? 'Parking Slot' : 'Restricted Zone')}`;
           ctx.fillText(zoneLabel, toX(zone.points[0][0]) + 5, toY(zone.points[0][1]) + 15);
-          if (zStats && zStats.status === 'danger') {
+          if (zStats && zStats.status === 'danger' && !isParking) {
             ctx.strokeStyle = '#ef4444';
             ctx.lineWidth = (config.borderWidth || 2) + 2;
             ctx.stroke(); // re-stroke the already-built zone path in a heavier alert color
@@ -883,6 +910,10 @@ function renderLoop() {
       }
       if (config.showVehicleCount && telemetry.vehicles !== undefined) {
         hudLines.push(`VEHICLES: ${telemetry.vehicles}`);
+      }
+      if (telemetry.parking_stats && telemetry.parking_stats.total > 0) {
+        hudLines.push(`PARKING: ${telemetry.parking_stats.free}/${telemetry.parking_stats.total} FREE`);
+        hudLines.push(`PARK FULL: ${telemetry.parking_stats.occupancy_percent.toFixed(1)}%`);
       }
 
       if (hudLines.length > 0) {

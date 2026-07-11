@@ -68,7 +68,27 @@ export interface Telemetry {
     loitering_count: number;
     utilization: number;
     status: 'normal' | 'danger';
+    parking_status?: 'occupied' | 'free';
+    parking_score?: number;
+    parking_reason?: string;
   }>;
+  parking_stats?: {
+    total: number;
+    occupied: number;
+    free: number;
+    occupancy_percent: number;
+    slots: Array<{
+      id: string;
+      name: string;
+      occupied: boolean;
+      status: 'occupied' | 'free';
+      score: number;
+      vehicle_overlap: number;
+      vehicle_track_id: number | null;
+      reason: string;
+      points: number[][];
+    }>;
+  };
   crowd_stats?: {
     total_people: number;
     peak_cell_count: number;

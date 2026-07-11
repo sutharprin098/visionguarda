@@ -9,7 +9,9 @@ memory/project_tracker_reid_rewrite.md for why the grace window exists.
 """
 import time
 
-from app.analytics import CameraAnalytics
+import numpy as np
+
+from app.analytics import CameraAnalytics, _object_category
 
 FW, FH = 640, 480
 
@@ -50,26 +52,97 @@ def test_no_alert_when_owner_present():
 def test_zone_occupancy_categorizes_person_vehicle_item_separately():
     a = CameraAnalytics("cam3")
     dets = [det(1, "backpack", 300, 300, 340, 340), det(2, "person", 100, 100, 140, 200), det(3, "car", 400, 400, 460, 440)]
-    _, _, _, zone_stats, _, _ = a.update(dets, zones=[zone()], lines=[], frame_w=FW, frame_h=FH)
+    _, _, _, zone_stats, _, _, _ = a.update(dets, zones=[zone()], lines=[], frame_w=FW, frame_h=FH)
     stats = zone_stats["z1"]
     assert (stats["people_count"], stats["vehicles_count"], stats["items_count"], stats["occupancy"]) == (1, 1, 1, 3)
+
+
+def test_static_traffic_infrastructure_is_not_counted_as_person_vehicle_or_item():
+    a = CameraAnalytics("cam_static")
+    dets = [
+        det(1, "traffic_light", 100, 100, 120, 180),
+        det(2, "stop_sign", 200, 100, 250, 150),
+    ]
+    _, _, _, zone_stats, line_stats, _, _ = a.update(dets, zones=[zone()], lines=[], frame_w=FW, frame_h=FH)
+    stats = zone_stats["z1"]
+    assert (stats["people_count"], stats["vehicles_count"], stats["items_count"], stats["occupancy"]) == (0, 0, 0, 0)
+    assert line_stats == {}
+
+
+def test_object_category_boundaries():
+    assert _object_category("person") == "person"
+    assert _object_category("car") == "vehicle"
+    assert _object_category("backpack") == "item"
+    assert _object_category("traffic_light") == "infrastructure"
+    assert _object_category("license_plate") == "other"
+
+
+def parking_zone(**overrides):
+    base = zone(
+        z_id="park1",
+        name="P1",
+        zoneType="parking",
+        points=[[0.25, 0.25], [0.55, 0.25], [0.55, 0.65], [0.25, 0.65]],
+    )
+    base.update(overrides)
+    return base
+
+
+def test_parking_slot_occupied_by_vehicle_overlap():
+    a = CameraAnalytics("cam_parking")
+    pz = parking_zone()
+    vehicle = det(7, "car", 180, 140, 350, 310)
+    _, _, _, zone_stats, _, _, parking_stats = a.update([vehicle], zones=[pz], lines=[], frame_w=FW, frame_h=FH)
+
+    assert parking_stats["total"] == 1
+    assert parking_stats["occupied"] == 1
+    assert parking_stats["free"] == 0
+    assert parking_stats["slots"][0]["status"] == "occupied"
+    assert parking_stats["slots"][0]["vehicle_track_id"] == 7
+    assert parking_stats["slots"][0]["reason"] == "vehicle_overlap"
+    assert zone_stats["park1"]["parking_status"] == "occupied"
+
+
+def test_parking_slot_free_when_no_vehicle_and_clean_visual_score():
+    a = CameraAnalytics("cam_parking_free")
+    pz = parking_zone()
+    clean_frame = np.full((FH, FW, 3), 120, dtype=np.uint8)
+    _, _, _, zone_stats, _, _, parking_stats = a.update([], zones=[pz], lines=[], frame_w=FW, frame_h=FH, frame=clean_frame)
+
+    assert parking_stats["total"] == 1
+    assert parking_stats["occupied"] == 0
+    assert parking_stats["free"] == 1
+    assert parking_stats["slots"][0]["status"] == "free"
+    assert zone_stats["park1"]["parking_status"] == "free"
+
+
+def test_parking_slot_visual_score_fallback_marks_occupied():
+    a = CameraAnalytics("cam_parking_visual")
+    pz = parking_zone(parkingScoreThreshold=5)
+    textured_frame = np.full((FH, FW, 3), 120, dtype=np.uint8)
+    textured_frame[120:320, 160:360] = 20
+    textured_frame[120:320:8, 160:360] = 240
+    _, _, _, _, _, _, parking_stats = a.update([], zones=[pz], lines=[], frame_w=FW, frame_h=FH, frame=textured_frame)
+
+    assert parking_stats["occupied"] == 1
+    assert parking_stats["slots"][0]["reason"] == "visual_score"
 
 
 def test_zone_dwell_survives_brief_occlusion():
     a = CameraAnalytics("cam4")
     z = zone()
     for _ in range(5):
-        _, _, _, zone_stats, _, _ = a.update([det(1, "person", 200, 200, 240, 300)], zones=[z], lines=[], frame_w=FW, frame_h=FH)
+        _, _, _, zone_stats, _, _, _ = a.update([det(1, "person", 200, 200, 240, 300)], zones=[z], lines=[], frame_w=FW, frame_h=FH)
     assert zone_stats["z1"]["entry_count"] == 1
     assert zone_stats["z1"]["exit_count"] == 0
 
     for _ in range(6):  # occluded — tracker emits nothing for this id
-        _, _, _, zone_stats, _, _ = a.update([], zones=[z], lines=[], frame_w=FW, frame_h=FH)
+        _, _, _, zone_stats, _, _, _ = a.update([], zones=[z], lines=[], frame_w=FW, frame_h=FH)
     assert zone_stats["z1"]["exit_count"] == 0, "spurious zone exit during brief occlusion"
     assert zone_stats["z1"]["occupancy"] == 1, "occupancy dropped during occlusion"
 
     for _ in range(3):  # reappears under the same id
-        _, _, _, zone_stats, _, _ = a.update([det(1, "person", 205, 205, 245, 305)], zones=[z], lines=[], frame_w=FW, frame_h=FH)
+        _, _, _, zone_stats, _, _, _ = a.update([det(1, "person", 205, 205, 245, 305)], zones=[z], lines=[], frame_w=FW, frame_h=FH)
     assert zone_stats["z1"]["entry_count"] == 1, "double-counted entry after reappearing"
     assert zone_stats["z1"]["exit_count"] == 0
 
@@ -80,7 +153,7 @@ def test_permanently_gone_track_is_eventually_cleaned_up():
     z = zone()
     a.update([det(1, "person", 200, 200, 240, 300)], zones=[z], lines=[], frame_w=FW, frame_h=FH)
     time.sleep(0.1)
-    _, _, _, zone_stats, _, _ = a.update([], zones=[z], lines=[], frame_w=FW, frame_h=FH)
+    _, _, _, zone_stats, _, _, _ = a.update([], zones=[z], lines=[], frame_w=FW, frame_h=FH)
     assert zone_stats["z1"]["exit_count"] == 1
     assert 1 not in a.track_history
 
@@ -88,7 +161,7 @@ def test_permanently_gone_track_is_eventually_cleaned_up():
 def test_crowd_density_low_for_scattered_people():
     a = CameraAnalytics("cam6")
     dets = [det(1, "person", 10, 10, 50, 100), det(2, "person", 590, 400, 630, 470)]
-    _, _, _, _, _, crowd_stats = a.update(dets, zones=[], lines=[], frame_w=FW, frame_h=FH)
+    _, _, _, _, _, crowd_stats, _ = a.update(dets, zones=[], lines=[], frame_w=FW, frame_h=FH)
     assert crowd_stats["density_level"] == "low"
     assert crowd_stats["total_people"] == 2
     assert crowd_stats["peak_cell_count"] == 1
@@ -98,7 +171,7 @@ def test_crowd_density_flags_tight_cluster():
     a = CameraAnalytics("cam7")
     # 10 people packed into the same small area -> one grid cell, "critical"
     dets = [det(i, "person", 300 + i, 300, 300 + i + 20, 380) for i in range(10)]
-    alerts, _, _, _, _, crowd_stats = a.update(dets, zones=[], lines=[], frame_w=FW, frame_h=FH)
+    alerts, _, _, _, _, crowd_stats, _ = a.update(dets, zones=[], lines=[], frame_w=FW, frame_h=FH)
     assert crowd_stats["density_level"] == "critical"
     assert crowd_stats["peak_cell_count"] == 10
     assert any(al["type"] == "crowd_density" for al in alerts)

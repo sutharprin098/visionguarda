@@ -1,6 +1,6 @@
 import React, { useRef, useEffect, useState, useCallback, memo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Edit2, Trash2, Check, X, ShieldAlert, Navigation, HelpCircle, Eye, EyeOff, Layout, Settings, Download, Upload, Save, Camera as CameraIcon, Maximize2, CircleDot, PauseCircle } from 'lucide-react';
+import { Edit2, Trash2, Check, X, ShieldAlert, Navigation, HelpCircle, Eye, EyeOff, Layout, Settings, Download, Upload, Save, Camera as CameraIcon, Maximize2, CircleDot, PauseCircle, Car } from 'lucide-react';
 import axios from 'axios';
 import { useMutation } from '@tanstack/react-query';
 import { useTelemetry, useCameraTelemetry } from '../../contexts/TelemetryContext';
@@ -130,6 +130,50 @@ const TrackedObjectsPanel = memo(function TrackedObjectsPanel({ cameraId }: { ca
   );
 });
 
+const ParkingSlotsPanel = memo(function ParkingSlotsPanel({ cameraId }: { cameraId: string }) {
+  const telemetry = useCameraTelemetry(cameraId);
+  const parking = telemetry?.parking_stats;
+  if (!parking || parking.total === 0) return null;
+  return (
+    <div className="p-2.5 rounded-lg bg-slate-900/60 border border-emerald-500/10 space-y-2">
+      <span className="text-[10px] font-bold text-slate-400 block uppercase tracking-wider flex items-center gap-1.5 font-sans">
+        <Car size={12} className="text-emerald-300" />
+        Parking ({parking.free}/{parking.total} free)
+      </span>
+      <div className="grid grid-cols-3 gap-1.5 text-[10px] font-mono">
+        <div className="bg-slate-950 rounded p-1.5">
+          <div className="text-slate-500">Total</div>
+          <div className="text-white font-bold">{parking.total}</div>
+        </div>
+        <div className="bg-slate-950 rounded p-1.5">
+          <div className="text-slate-500">Free</div>
+          <div className="text-emerald-400 font-bold">{parking.free}</div>
+        </div>
+        <div className="bg-slate-950 rounded p-1.5">
+          <div className="text-slate-500">Full</div>
+          <div className="text-red-400 font-bold">{parking.occupied}</div>
+        </div>
+      </div>
+      <div className="max-h-28 overflow-y-auto pr-1 space-y-1 custom-scrollbar">
+        {parking.slots.map((slot) => (
+          <div key={slot.id} className="flex items-center justify-between bg-slate-950 p-1.5 rounded text-[10px] font-mono">
+            <div className="flex items-center gap-1.5 min-w-0">
+              <span className={`w-1.5 h-1.5 rounded-full ${slot.occupied ? 'bg-red-400' : 'bg-emerald-400'}`} />
+              <span className="text-white truncate">{slot.name}</span>
+              {slot.vehicle_track_id !== null && slot.vehicle_track_id !== undefined && (
+                <span className="text-[8px] bg-slate-900 text-cyan-300 px-1 py-0.5 rounded">ID:{slot.vehicle_track_id}</span>
+              )}
+            </div>
+            <div className={slot.occupied ? 'text-red-300' : 'text-emerald-300'}>
+              {slot.status.toUpperCase()} {slot.score.toFixed(0)}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+});
+
 // Renders nothing — just resets the screen-share backpressure flag whenever
 // this camera's telemetry updates, without making the whole player
 // re-render every time (isProcessingRef is a plain ref, not React state).
@@ -208,6 +252,7 @@ export function CCTVPlayer({ cameraId, cameraName, cameraType = 'webcam', initia
 
   // Interactive drawing states
   const [drawMode, setDrawMode] = useState<'none' | 'zone' | 'line'>('none');
+  const [newZoneType, setNewZoneType] = useState<'intrusion' | 'parking'>('intrusion');
   const [points, setPoints] = useState<number[][]>([]);
   const [zones, setZones] = useState<any[]>(() => JSON.parse(initialZones));
   const [lines, setLines] = useState<any[]>(() => JSON.parse(initialLines));
@@ -728,10 +773,15 @@ export function CCTVPlayer({ cameraId, cameraName, cameraType = 'webcam', initia
     let updatedLines = [...lines];
 
     if (drawMode === 'zone') {
+      const isParking = newZoneType === 'parking';
+      const parkingIndex = zones.filter((z) => z.zoneType === 'parking').length + 1;
       updatedZones.push({
         id: `zone_${Date.now()}`,
-        name: `Restricted Zone ${zones.length + 1}`,
-        points: points
+        name: isParking ? `Parking Slot ${parkingIndex}` : `Restricted Zone ${zones.length + 1}`,
+        points: points,
+        zoneType: newZoneType,
+        maxOccupancy: isParking ? 1 : 5,
+        dwellLimit: 10
       });
       setZones(updatedZones);
     } else {
@@ -752,6 +802,7 @@ export function CCTVPlayer({ cameraId, cameraName, cameraType = 'webcam', initia
       });
       setPoints([]);
       setDrawMode('none');
+      setNewZoneType('intrusion');
       if (onConfigChange) onConfigChange();
     } catch (err) {
       console.error('Failed to save camera configurations:', err);
@@ -977,6 +1028,7 @@ export function CCTVPlayer({ cameraId, cameraName, cameraType = 'webcam', initia
                 <div className="flex-1 overflow-y-auto p-3 space-y-4">
                   {/* Active Tracked Objects */}
                   <TrackedObjectsPanel cameraId={cameraId} />
+                  <ParkingSlotsPanel cameraId={cameraId} />
 
                   {activeTab === 'analytics' ? (
                     <>
@@ -1042,6 +1094,7 @@ export function CCTVPlayer({ cameraId, cameraName, cameraType = 'webcam', initia
                                     <option value="intrusion">Intrusion</option>
                                     <option value="loitering">Loitering</option>
                                     <option value="lane">Lane</option>
+                                    <option value="parking">Parking</option>
                                   </select>
                                   <label className="flex items-center gap-1 text-[9px] text-slate-500" title="Overcrowding alert threshold">
                                     Max
@@ -1401,11 +1454,18 @@ export function CCTVPlayer({ cameraId, cameraName, cameraType = 'webcam', initia
         {drawMode === 'none' ? (
           <>
             <button
-              onClick={() => { setEditingZoneId(null); setDrawMode('zone'); }}
+              onClick={() => { setEditingZoneId(null); setNewZoneType('intrusion'); setDrawMode('zone'); }}
               className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold text-red-400 hover:bg-red-500/10 transition-colors border border-red-500/20"
             >
               <ShieldAlert size={13} />
               + Zone
+            </button>
+            <button
+              onClick={() => { setEditingZoneId(null); setNewZoneType('parking'); setDrawMode('zone'); }}
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold text-emerald-400 hover:bg-emerald-500/10 transition-colors border border-emerald-500/20"
+            >
+              <Car size={13} />
+              + Parking
             </button>
             <button
               onClick={() => { setEditingZoneId(null); setDrawMode('line'); }}
@@ -1445,7 +1505,7 @@ export function CCTVPlayer({ cameraId, cameraName, cameraType = 'webcam', initia
         ) : (
           <div className="flex items-center gap-2 w-full justify-between">
             <span className="text-xs text-brand-300 animate-pulse font-medium">
-              Click to place {drawMode === 'zone' ? 'polygon vertices' : 'line endpoints'}...
+              Click to place {drawMode === 'zone' ? (newZoneType === 'parking' ? 'parking slot corners' : 'polygon vertices') : 'line endpoints'}...
             </span>
             <div className="flex items-center gap-2">
               <button
@@ -1467,6 +1527,7 @@ export function CCTVPlayer({ cameraId, cameraName, cameraType = 'webcam', initia
                 onClick={() => {
                   setPoints([]);
                   setDrawMode('none');
+                  setNewZoneType('intrusion');
                 }}
                 className="flex items-center gap-1 px-2 py-1 rounded bg-red-500 hover:bg-red-600 text-white text-xs font-bold"
               >

@@ -33,6 +33,8 @@ COCO_CLASS_MAP = {
     3: "motorcycle",
     5: "bus",
     7: "truck",
+    9: "traffic_light",
+    11: "stop_sign",
     # Unattended-item classes — enabled specifically so abandoned-object
     # detection (CameraAnalytics.ITEM_CLASSES) has real detections to work
     # with instead of being permanently a no-op.
@@ -59,6 +61,8 @@ _GEOMETRY_BOUNDS = {
     "car":        {"min_area_frac": 0.00010, "max_area_frac": 0.85, "max_aspect": 6.0},
     "bus":        {"min_area_frac": 0.00010, "max_area_frac": 0.90, "max_aspect": 8.0},
     "truck":      {"min_area_frac": 0.00010, "max_area_frac": 0.90, "max_aspect": 8.0},
+    "traffic_light": {"min_area_frac": 0.00001, "max_area_frac": 0.20, "max_aspect": 8.0},
+    "stop_sign":     {"min_area_frac": 0.00002, "max_area_frac": 0.25, "max_aspect": 4.0},
 }
 _DEFAULT_GEOMETRY_BOUNDS = {"min_area_frac": 0.00005, "max_area_frac": 0.90, "max_aspect": 8.0}
 

@@ -12,7 +12,7 @@ from scipy.optimize import linear_sum_assignment
 from app.ai.backend import EngineBackend
 from app.storage import insert_alert, insert_history_record
 from app.recorder import CCTVRecorder
-from app.analytics import CameraAnalytics, VEHICLE_CLASSES, _point_in_zone_shape
+from app.analytics import CameraAnalytics, VEHICLE_CLASSES, _object_category, _point_in_zone_shape
 from app.config import RECORDINGS_DIR
 from app.gpu_monitor import get_gpu_usage
 
@@ -1201,21 +1201,23 @@ class PipelineCoordinator:
             # bbox is already the tracker's smoothed position; analytics.update()
             # only adds det["speed"] and drives zone/line/dwell logic from it.
             # track_overlays: [{track_id, class, points: [[cx,cy]...]}] — normalized
-            alerts, track_overlays, heatmap, zone_stats, line_stats, crowd_stats = self.analytics.update(
-                detections, self.zones, self.lines, orig_w, orig_h
+            alerts, track_overlays, heatmap, zone_stats, line_stats, crowd_stats, parking_stats = self.analytics.update(
+                detections, self.zones, self.lines, orig_w, orig_h, frame=frame
             )
 
             # ── Build normalized client_dets AFTER analytics has smoothed bbox─
             client_dets = []
-            people_count = vehicles_count = 0
+            people_count = vehicles_count = items_count = other_count = 0
             max_conf = 0.0
             for det in detections:
                 bbox = det["bbox"]
                 conf = det["confidence"]
                 max_conf = max(max_conf, conf)
-                is_person = det["class"] == "person"
-                people_count   += int(is_person)
-                vehicles_count += int(not is_person)
+                category = _object_category(det["class"])
+                people_count += int(category == "person")
+                vehicles_count += int(category == "vehicle")
+                items_count += int(category == "item")
+                other_count += int(category in ("infrastructure", "other"))
                 client_dets.append({
                     "class":      det["class"],
                     "confidence": round(float(conf), 2),
@@ -1272,10 +1274,13 @@ class PipelineCoordinator:
                 "tracks":         track_overlays,
                 "people_count":   people_count,
                 "vehicles_count": vehicles_count,
+                "items_count":    items_count,
+                "other_count":    other_count,
                 "heatmap":        heatmap,
                 "zone_stats":     zone_stats,
                 "line_stats":     line_stats,
                 "crowd_stats":    crowd_stats,
+                "parking_stats":  parking_stats,
                 "trk_lat":        trk_lat,
             })
 
@@ -1343,6 +1348,8 @@ class PipelineCoordinator:
                 "success":   True,
                 "people":    data["people_count"],
                 "vehicles":  data["vehicles_count"],
+                "items":     data.get("items_count", 0),
+                "other_objects": data.get("other_count", 0),
                 "detections": data["client_dets"],
                 "masks":     data["masks_polygons"],
                 "tracks":    data["tracks"],
@@ -1386,6 +1393,7 @@ class PipelineCoordinator:
                 "zone_stats": data["zone_stats"],
                 "line_stats": data["line_stats"],
                 "crowd_stats": data["crowd_stats"],
+                "parking_stats": data.get("parking_stats", {"total": 0, "occupied": 0, "free": 0, "occupancy_percent": 0.0, "slots": []}),
                 "stage_errors": dict(self._stage_errors),
                 "queue_depth": 1 if self._grabbed_slot._ready.is_set() else 0,
                 "debug_tracks": len(self.tracker.tracks),
@@ -1541,4 +1549,3 @@ class PipelineCoordinator:
         if 0.10 * orig_w * orig_h <= area <= 0.90 * orig_w * orig_h:
             return rx1, ry1, rx2, ry2
         return None
-

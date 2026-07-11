@@ -7,17 +7,23 @@ import numpy as np
 # sync with the classes enabled in app/ai/backend.py's COCO_CLASS_MAP.
 ITEM_CLASSES = {"backpack", "handbag", "suitcase", "umbrella"}
 VEHICLE_CLASSES = {"car", "bus", "truck", "motorcycle", "bicycle"}
+INFRASTRUCTURE_CLASSES = {"traffic_light", "stop_sign", "traffic_cone", "traffic_barrier"}
+PARKING_OCCUPANCY_SCORE_THRESHOLD = 24.0
 
 
 def _object_category(class_name: str) -> str:
-    """person | vehicle | item — used everywhere a detection needs to be
+    """person | vehicle | item | infrastructure | other — used everywhere a detection needs to be
     bucketed for counting/alerting so item-class detections (added for
     abandoned-object detection) don't silently get miscounted as vehicles."""
     if class_name in ITEM_CLASSES:
         return "item"
     if class_name in VEHICLE_CLASSES:
         return "vehicle"
-    return "person"
+    if class_name in INFRASTRUCTURE_CLASSES:
+        return "infrastructure"
+    if class_name == "person":
+        return "person"
+    return "other"
 
 # --- Geometry Utilities ---
 
@@ -104,6 +110,83 @@ def _lane_for_point(px: float, py: float, zones) -> str:
         if len(pts) >= 2 and _point_in_zone_shape(px, py, pts, zone.get("shapeType", "polygon")):
             return zone.get("name") or zone.get("id")
     return None
+
+
+def _polygon_bbox(points):
+    arr = np.array(points, dtype=np.float32)
+    return float(arr[:, 0].min()), float(arr[:, 1].min()), float(arr[:, 0].max()), float(arr[:, 1].max())
+
+
+def _bbox_overlap_ratio(bbox, poly_pts, frame_w: int, frame_h: int) -> float:
+    """Approximate bbox-vs-polygon overlap as a fraction of the smaller area.
+
+    Parking slots are operator-drawn polygons, while detections arrive as
+    boxes. A mask rasterization keeps this robust for angled slots without
+    pulling in a heavyweight geometry dependency.
+    """
+    if len(poly_pts) < 3:
+        return 0.0
+    x1 = max(0, min(frame_w - 1, int(bbox["x1"])))
+    y1 = max(0, min(frame_h - 1, int(bbox["y1"])))
+    x2 = max(x1 + 1, min(frame_w, int(bbox["x2"])))
+    y2 = max(y1 + 1, min(frame_h, int(bbox["y2"])))
+    rx1, ry1, rx2, ry2 = _polygon_bbox(poly_pts)
+    ix1 = max(x1, int(rx1))
+    iy1 = max(y1, int(ry1))
+    ix2 = min(x2, int(rx2))
+    iy2 = min(y2, int(ry2))
+    if ix2 <= ix1 or iy2 <= iy1:
+        return 0.0
+
+    mask_shape = (iy2 - iy1, ix2 - ix1)
+    poly_mask = np.zeros(mask_shape, dtype=np.uint8)
+    box_mask = np.zeros(mask_shape, dtype=np.uint8)
+    local_poly = np.array([[p[0] - ix1, p[1] - iy1] for p in poly_pts], dtype=np.int32)
+    cv2.fillPoly(poly_mask, [local_poly], 255)
+    cv2.rectangle(box_mask, (x1 - ix1, y1 - iy1), (x2 - ix1, y2 - iy1), 255, thickness=-1)
+    inter = cv2.countNonZero(cv2.bitwise_and(poly_mask, box_mask))
+    poly_area = max(1, cv2.countNonZero(poly_mask))
+    box_area = max(1, cv2.countNonZero(box_mask))
+    return float(inter / max(1, min(poly_area, box_area)))
+
+
+def _parking_visual_score(frame, poly_pts) -> float:
+    """Parking occupancy score adapted from devakashkumar/AI-parking-slot.
+
+    Uses grayscale texture, edges, dark-pixel ratio, brightness deviation and
+    saturation inside an operator-drawn slot. YOLO vehicle overlap is still
+    the primary signal; this is a fixed-camera fallback when the detector
+    misses part of a parked vehicle.
+    """
+    if frame is None or len(poly_pts) < 3:
+        return 0.0
+    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+    pts = np.array(poly_pts, dtype=np.int32)
+    mask = np.zeros(gray.shape, dtype=np.uint8)
+    cv2.fillPoly(mask, [pts], 255)
+    mask_area = cv2.countNonZero(mask)
+    if mask_area == 0:
+        return 0.0
+
+    pixels = gray[mask == 255]
+    std = float(np.std(pixels))
+    roi = cv2.bitwise_and(gray, gray, mask=mask)
+    blur = cv2.GaussianBlur(roi, (3, 3), 0)
+    edges = cv2.Canny(blur, 20, 90)
+    edges = cv2.dilate(edges, np.ones((3, 3), np.uint8), iterations=1)
+    edge_ratio = cv2.countNonZero(edges) / mask_area
+    dark_ratio = float(np.sum(pixels < 100) / len(pixels))
+    brightness = float(np.mean(pixels))
+    brightness_score = abs(brightness - 120.0) / 120.0
+    saturation = float(np.mean(hsv[:, :, 1][mask == 255]) / 255.0)
+    return float(
+        std * 0.45
+        + edge_ratio * 120.0 * 0.25
+        + dark_ratio * 100.0 * 0.15
+        + saturation * 30.0 * 0.10
+        + brightness_score * 30.0 * 0.05
+    )
 
 
 class _SpeedKalman1D:
@@ -234,7 +317,7 @@ class CameraAnalytics:
         self.CROWD_GRID = 4  # 4x4 cells
         self.CROWD_THRESHOLDS = {"moderate": 3, "high": 6, "critical": 10}  # people per cell
 
-    def update(self, detections, zones, lines, frame_w: int = 640, frame_h: int = 480):
+    def update(self, detections, zones, lines, frame_w: int = 640, frame_h: int = 480, frame=None):
         active_track_ids = set()
         alerts = []
         now = time.time()
@@ -434,6 +517,8 @@ class CameraAnalytics:
                 })
                 self.alert_cooldowns[alert_key] = now
 
+        parking_slots = []
+
         # --- Advanced Zone Analytics ---
         zone_stats = {}
         for zone in zones:
@@ -444,6 +529,7 @@ class CameraAnalytics:
             max_occupancy = zone.get("maxOccupancy", 5)
             dwell_limit = zone.get("dwellLimit", 10)
             pts = zone["points"]
+            is_parking_slot = zone_type == "parking"
             
             self.zone_total_frames[z_id] += 1
             
@@ -467,6 +553,58 @@ class CameraAnalytics:
                     if is_inside:
                         tracks_inside_this_frame.add(track_id)
             
+            # Parking slots are occupancy regions, not intrusion/loitering
+            # zones. They still reuse the polygon editor and output a
+            # zone_stats row, but they do not raise generic entry/exit/full
+            # alerts; slot state is reported in parking_stats below.
+            if is_parking_slot:
+                abs_pts = [[p[0] * frame_w, p[1] * frame_h] for p in pts]
+                best_vehicle = None
+                best_overlap = 0.0
+                for det in detections:
+                    if _object_category(det.get("class", "")) != "vehicle":
+                        continue
+                    overlap = _bbox_overlap_ratio(det["bbox"], abs_pts, frame_w, frame_h)
+                    if overlap > best_overlap:
+                        best_overlap = overlap
+                        best_vehicle = det
+                visual_score = _parking_visual_score(frame, abs_pts)
+                occupied_by_vehicle = best_overlap >= float(zone.get("parkingOverlapThreshold", 0.12))
+                occupied_by_visual = visual_score >= float(zone.get("parkingScoreThreshold", PARKING_OCCUPANCY_SCORE_THRESHOLD))
+                occupied = occupied_by_vehicle or occupied_by_visual
+                reason = "vehicle_overlap" if occupied_by_vehicle else ("visual_score" if occupied_by_visual else "clear")
+                parking_slots.append({
+                    "id": z_id,
+                    "name": z_name,
+                    "occupied": bool(occupied),
+                    "status": "occupied" if occupied else "free",
+                    "score": round(visual_score, 1),
+                    "vehicle_overlap": round(best_overlap, 3),
+                    "vehicle_track_id": best_vehicle.get("track_id") if best_vehicle else None,
+                    "reason": reason,
+                    "points": pts,
+                })
+                if occupied:
+                    self.zone_occupied_frames[z_id] += 1
+                util = float(self.zone_occupied_frames[z_id]) / max(1.0, float(self.zone_total_frames[z_id]))
+                zone_stats[z_id] = {
+                    "people_count": 0,
+                    "vehicles_count": 1 if occupied else 0,
+                    "items_count": 0,
+                    "occupancy": 1 if occupied else 0,
+                    "max_occupancy": 1,
+                    "entry_count": 0,
+                    "exit_count": 0,
+                    "avg_dwell_time": 0.0,
+                    "loitering_count": 0,
+                    "utilization": round(util * 100, 1),
+                    "status": "danger" if occupied else "normal",
+                    "parking_status": "occupied" if occupied else "free",
+                    "parking_score": round(visual_score, 1),
+                    "parking_reason": reason,
+                }
+                continue
+
             # 2. Compute Entry, Exit, and Dwell metrics
             people_count = 0
             vehicles_count = 0
@@ -484,7 +622,12 @@ class CameraAnalytics:
                     # Entry alerts
                     class_name = self.track_classes.get(tid, "person")
                     category = _object_category(class_name)
-                    alert_type = {"vehicle": "vehicle_entry", "item": "item_entry"}.get(category, "human_entry")
+                    alert_type = {
+                        "person": "human_entry",
+                        "vehicle": "vehicle_entry",
+                        "item": "item_entry",
+                        "infrastructure": "infrastructure_present",
+                    }.get(category, "object_entry")
                     
                     alert_key = f"{alert_type}_{z_id}_{tid}"
                     if now - self.alert_cooldowns.get(alert_key, 0) > self.cooldown_period:
@@ -517,7 +660,7 @@ class CameraAnalytics:
                     people_count += 1
                 elif category == "vehicle":
                     vehicles_count += 1
-                else:
+                elif category == "item":
                     items_count += 1
                 
                 # Check loitering
@@ -593,6 +736,16 @@ class CameraAnalytics:
                 "status": "danger" if loitering_count > 0 or occupancy > int(max_occupancy) else "normal"
             }
 
+        parking_total = len(parking_slots)
+        parking_occupied = sum(1 for slot in parking_slots if slot["occupied"])
+        parking_stats = {
+            "total": parking_total,
+            "occupied": parking_occupied,
+            "free": max(0, parking_total - parking_occupied),
+            "occupancy_percent": round((parking_occupied / parking_total) * 100.0, 1) if parking_total else 0.0,
+            "slots": parking_slots,
+        }
+
         # --- Advanced Line Crossing Analytics ---
         line_stats = {}
         for line in lines:
@@ -643,7 +796,6 @@ class CameraAnalytics:
                     class_name = self.track_classes.get(track_id, "person")
                     category = _object_category(class_name)
                     is_vehicle = category == "vehicle"
-                    is_item = category == "item"
 
                     # Crossing events
                     is_in = side_prev < 0 <= side_curr
@@ -657,9 +809,9 @@ class CameraAnalytics:
                         if is_vehicle:
                             self.counter_in_vehicle += 1
                             self.counter_in += 1
-                        elif not is_item:
-                            self.counter_in_person += 1
-                            self.counter_in += 1
+                    elif category == "person":
+                        self.counter_in_person += 1
+                        self.counter_in += 1
                         
                         # Raise Alert
                         alert_key = f"crossing_{l_id}_{track_id}"
@@ -676,7 +828,7 @@ class CameraAnalytics:
                         if is_vehicle:
                             self.counter_out_vehicle += 1
                             self.counter_out += 1
-                        elif not is_item:
+                        elif category == "person":
                             self.counter_out_person += 1
                             self.counter_out += 1
                         
@@ -773,7 +925,7 @@ class CameraAnalytics:
         # Serialize heatmap grid
         heatmap_list = self.heatmap_grid.tolist()
 
-        return alerts, track_overlays, heatmap_list, zone_stats, line_stats, crowd_stats
+        return alerts, track_overlays, heatmap_list, zone_stats, line_stats, crowd_stats, parking_stats
 
     def _update_speed_gate(self, track_id, l_id, line, lines_by_id, crossing_ts):
         """Two-line, known-real-world-distance speed measurement.
