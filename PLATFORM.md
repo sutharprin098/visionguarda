@@ -57,7 +57,7 @@ Two products, one backend:
 cd supabase
 npx supabase init            # if linking fresh
 npx supabase link --project-ref <your-ref>
-npx supabase db push         # applies migrations 0001–0003
+npx supabase db push         # applies migrations 0001–0005
 npx supabase functions deploy activate-license my-keys desktop-sync invite-user add-camera
 npx supabase secrets set CAMAI_AES_KEY=$(openssl rand -hex 32)
 ```
@@ -128,9 +128,34 @@ auto-login forever after (refresh-token rotation kept in sync with the vault).
 - Activation endpoint rate-limited; strict input validation on key/fingerprint format.
 - Append-only audit log with actor, IP, device, timestamp.
 
+## Portal modules (all implemented against live schema — no mock data)
+
+Dashboard · Organizations (super-admin) · Users · Roles & Permissions · Licenses
+(generate/transfer/suspend/revoke, one-time reveal) · Devices (hardware inventory,
+transfer, deactivate) · Desktop Activations (revoke = fail-closed) · Cameras
+(health telemetry, assignment, AES-encrypted connection) · Camera Groups · Sites ·
+GIS · AI Analytics (live aggregation over alerts/usage) · Alerts (realtime, ack,
+snapshots) · Incidents (workflow + notes thread) · Reports (CSV archived to
+storage + PDF, history) · Downloads · Billing (subscription, invoices, metered
+usage) · Audit (old/new diffs, client context) · Notifications (realtime, mark
+read) · Settings (org, branding upload, AI defaults, SMTP, retention, webhook,
+API keys) · Support (ticket threads, realtime).
+
+## Device lifecycle guarantees
+
+- `activate-license` records the hardware inventory (CPU/RAM/GPU/disk) and IP,
+  and never resurrects an admin-deactivated fingerprint (status is preserved on
+  re-activation upserts and then checked).
+- `desktop-sync` requires the `x-device-id` header: deactivated devices and
+  revoked activations get `403 {code:"deactivated"}` and the app wipes its vault
+  and returns to the activation screen. Syncs also heartbeat
+  `last_seen_at`/`is_online`/`last_ip` (stale-guarded to once per minute).
+- `org_stats().devices_online` only counts devices seen in the last 3 minutes,
+  so crashed desktops don't show as online forever.
+
 ## Current gaps (next milestones)
 
-- Email + browser push notification delivery (tables exist; needs a provider hook).
-- Super-admin console (flag + policies exist; no dedicated UI yet).
+- Email + browser push notification delivery (tables + SMTP settings exist;
+  needs a provider hook in an edge function).
 - Auto-update feed for the desktop (electron-builder `publish` + `app_releases`).
 - ONVIF discovery and NVR channel enumeration in `add-camera`.

@@ -32,15 +32,18 @@ function tpmPresent(): string {
 export interface FingerprintResult {
   hash: string;
   osInfo: Record<string, unknown>;
+  hardware: Record<string, unknown>; // inventory shown in the admin portal
   deviceName: string;
 }
 
 export async function computeFingerprint(): Promise<FingerprintResult> {
-  const [cpu, board, disks, os] = await Promise.all([
+  const [cpu, board, disks, os, mem, graphics] = await Promise.all([
     si.cpu(),
     si.baseboard(),
     si.diskLayout(),
     si.osInfo(),
+    si.mem(),
+    si.graphics(),
   ]);
   const systemDisk = disks[0];
 
@@ -61,6 +64,12 @@ export async function computeFingerprint(): Promise<FingerprintResult> {
       release: `${os.distro} ${os.release}`,
       arch: os.arch,
       hostname: os.hostname,
+    },
+    hardware: {
+      cpu: `${cpu.manufacturer} ${cpu.brand}`.trim(),
+      ram_gb: Math.round(mem.total / 1024 ** 3),
+      gpu: graphics.controllers?.[0]?.model ?? "",
+      disk_gb: systemDisk ? Math.round(systemDisk.size / 1024 ** 3) : 0,
     },
     deviceName: os.hostname || "Windows PC",
   };

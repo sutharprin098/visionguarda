@@ -23,8 +23,14 @@ Deno.serve(async (req) => {
   );
   if (!allowed) return json({ error: "forbidden" }, 403);
 
-  const { name, source_type, connection, site_id } = await req.json();
+  const { name, source_type, connection, site_id, lat, lng } = await req.json();
   if (!name) return json({ error: "name required" }, 400);
+  if (lat != null && (typeof lat !== "number" || lat < -90 || lat > 90)) {
+    return json({ error: "invalid latitude" }, 400);
+  }
+  if (lng != null && (typeof lng !== "number" || lng < -180 || lng > 180)) {
+    return json({ error: "invalid longitude" }, 400);
+  }
 
   const { data: cam, error } = await db
     .from("cameras")
@@ -34,6 +40,8 @@ Deno.serve(async (req) => {
       source_type: source_type ?? "rtsp",
       connection_encrypted: connection ? await encryptSecret(connection) : "",
       site_id: site_id ?? null,
+      lat: lat ?? null,
+      lng: lng ?? null,
     })
     .select("id, name, source_type, status")
     .single();

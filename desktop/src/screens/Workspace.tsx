@@ -1,25 +1,26 @@
 import { useEffect, useState } from "react";
 import { Cctv, Video, Map, Bell, Settings2, LogOut, Wifi, WifiOff } from "lucide-react";
 import clsx from "clsx";
-import { startRealtimeSync, SyncBundle } from "../lib/sync";
+import { startRealtimeSync, DeactivatedError, SyncBundle } from "../lib/sync";
 
 export default function Workspace({ onDeactivated }: { onDeactivated: () => void }) {
   const [bundle, setBundle] = useState<SyncBundle | null>(null);
   const [tab, setTab] = useState<"cameras" | "gis" | "alerts" | "settings">("cameras");
   const [syncError, setSyncError] = useState(false);
 
-  useEffect(() => {
-    let stop: (() => void) | undefined;
-    startRealtimeSync(setBundle)
-      .then((s) => (stop = s))
-      .catch(() => setSyncError(true));
-    return () => stop?.();
-  }, []);
-
   async function deactivate() {
     await window.camai.deactivate();
     onDeactivated();
   }
+
+  useEffect(() => {
+    let stop: (() => void) | undefined;
+    // admin revocation fails closed: wipe the vault, back to activation
+    startRealtimeSync(setBundle, deactivate)
+      .then((s) => (stop = s))
+      .catch((e) => (e instanceof DeactivatedError ? deactivate() : setSyncError(true)));
+    return () => stop?.();
+  }, []);
 
   if (syncError) {
     return (

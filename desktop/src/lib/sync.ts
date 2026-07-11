@@ -17,21 +17,41 @@ export interface SyncBundle {
   notifications: any[];
 }
 
+/** Thrown when the cloud says this device/activation is revoked — the app
+ *  must clear the vault and fall back to the activation screen. */
+export class DeactivatedError extends Error {
+  constructor() { super("device deactivated by admin"); }
+}
+
 export async function fetchBundle(): Promise<SyncBundle> {
   const sb = await getSupabase();
-  const { data, error } = await sb.functions.invoke<SyncBundle>("desktop-sync");
-  if (error || !data) throw new Error("sync failed");
+  const stored = await window.camai.getStoredSession();
+  const { data, error } = await sb.functions.invoke<SyncBundle>("desktop-sync", {
+    headers: stored.ok && stored.device_id ? { "x-device-id": stored.device_id } : {},
+  });
+  if (error) {
+    // 403 {code:"deactivated"} → admin revoked this device or its activation
+    const status = (error as any)?.context?.status;
+    if (status === 403) throw new DeactivatedError();
+    throw new Error("sync failed");
+  }
+  if (!data) throw new Error("sync failed");
   return data;
 }
 
 const WATCHED_TABLES = [
   "cameras", "camera_assignments", "gis_layers", "gis_layer_assignments",
   "polygon_roi", "line_roi", "speed_zones", "settings", "user_roles",
-  "role_permissions", "licenses", "devices", "profiles", "notifications",
+  "role_permissions", "licenses", "license_activations", "devices",
+  "profiles", "notifications",
 ];
 
-/** Re-fetches the bundle (debounced) whenever anything relevant changes. */
-export async function startRealtimeSync(onBundle: (b: SyncBundle) => void): Promise<() => void> {
+/** Re-fetches the bundle (debounced) whenever anything relevant changes.
+ *  Calls onDeactivated when the cloud fails this device closed. */
+export async function startRealtimeSync(
+  onBundle: (b: SyncBundle) => void,
+  onDeactivated?: () => void,
+): Promise<() => void> {
   const sb = await getSupabase();
   let timer: ReturnType<typeof setTimeout> | null = null;
 
@@ -40,7 +60,10 @@ export async function startRealtimeSync(onBundle: (b: SyncBundle) => void): Prom
     timer = setTimeout(async () => {
       try {
         onBundle(await fetchBundle());
-      } catch { /* transient — next event retries */ }
+      } catch (e) {
+        if (e instanceof DeactivatedError) onDeactivated?.();
+        // other errors are transient — the next event retries
+      }
     }, 400);
   };
 
@@ -50,7 +73,7 @@ export async function startRealtimeSync(onBundle: (b: SyncBundle) => void): Prom
   }
   channel.subscribe();
 
-  onBundle(await fetchBundle()); // initial load
+  onBundle(await fetchBundle()); // initial load — DeactivatedError propagates to the caller
 
   return () => {
     sb.removeChannel(channel);

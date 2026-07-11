@@ -45,6 +45,7 @@ ipcMain.handle("activate", async (_evt, licenseKey: string) => {
       fingerprint_hash: fp.hash,
       device_name: fp.deviceName,
       os_info: fp.osInfo,
+      hardware: fp.hardware,
       app_version: app.getVersion(),
     }),
   });

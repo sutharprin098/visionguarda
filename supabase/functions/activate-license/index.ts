@@ -8,6 +8,7 @@ interface ActivateBody {
   fingerprint_hash: string; // sha256 over CPU+board+disk+TPM+MachineGuid+OS, computed on device
   device_name?: string;
   os_info?: Record<string, unknown>;
+  hardware?: Record<string, unknown>; // cpu, ram_gb, gpu, disk_gb — admin-portal inventory
   app_version?: string;
 }
 
@@ -61,7 +62,14 @@ Deno.serve(async (req) => {
         name: body.device_name ?? "Windows PC",
         fingerprint_hash: body.fingerprint_hash,
         os_info: body.os_info ?? {},
-        status: "active",
+        hardware: body.hardware ?? {},
+        // status intentionally omitted: new rows default to 'active', while a
+        // re-activation keeps the existing status — an admin-deactivated or
+        // removed fingerprint stays blocked (checked below) until an admin
+        // reactivates it. Including it here would let banned hardware
+        // self-reactivate with any valid key.
+        is_online: true,
+        last_ip: ip === "unknown" ? null : ip.split(",")[0].trim(),
         last_seen_at: new Date().toISOString(),
       },
       { onConflict: "org_id,fingerprint_hash" },
