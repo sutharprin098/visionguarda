@@ -53,9 +53,10 @@ accounts. The buyer deploys their own Supabase project via
 4. Detection accuracy in adverse conditions (night/rain/fog), cross-camera
    ReID, and 100+ camera scale need validation on representative footage
    and target hardware (`production_readiness_report.json` §limitations).
-5. A third-party API token was committed early in the repo's life and has
-   been purged from history; the token was revoked. No other secrets have
-   ever been tracked (audited 2026-07-11).
+5. A third-party (Replicate) API token was committed early in the repo's
+   life. It has been purged from the delivered history, and the seller must
+   revoke it at the provider before transfer. No other secrets have ever
+   been tracked (audited 2026-07-11).
 
 ## 4. Validation the buyer can re-run
 
