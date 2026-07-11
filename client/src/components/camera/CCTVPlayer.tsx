@@ -1,9 +1,12 @@
 import React, { useRef, useEffect, useState, useCallback, memo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Edit2, Trash2, Check, X, ShieldAlert, Navigation, HelpCircle, Eye, EyeOff, Layout, Settings, Download, Upload, Save } from 'lucide-react';
+import { Edit2, Trash2, Check, X, ShieldAlert, Navigation, HelpCircle, Eye, EyeOff, Layout, Settings, Download, Upload, Save, Camera as CameraIcon, Maximize2, CircleDot, PauseCircle } from 'lucide-react';
 import axios from 'axios';
+import { useMutation } from '@tanstack/react-query';
 import { useTelemetry, useCameraTelemetry } from '../../contexts/TelemetryContext';
 import { OverlaySettings, OverlayProfile } from '../../types';
+import { computeContainRect } from '../../utils/geometry';
+import { setCameraRecording } from '../../utils/api';
 
 interface CCTVPlayerProps {
   cameraId: string;
@@ -31,6 +34,28 @@ const CameraLiveBadge = memo(function CameraLiveBadge({ cameraId }: { cameraId: 
       <span className="opacity-40">|</span>
       <span>{telemetry?.latency ?? 0} ms</span>
     </div>
+  );
+});
+
+const RecordingControl = memo(function RecordingControl({ cameraId }: { cameraId: string }) {
+  const telemetry = useCameraTelemetry(cameraId);
+  const mutation = useMutation({
+    mutationFn: (enabled: boolean) => setCameraRecording(cameraId, enabled),
+  });
+  const recording = telemetry?.recording ?? false;
+
+  return (
+    <button
+      onClick={() => mutation.mutate(!recording)}
+      disabled={mutation.isPending}
+      title={recording ? 'Pause recording' : 'Resume recording'}
+      className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold transition-colors disabled:opacity-50 ${
+        recording ? 'text-red-400 hover:text-red-300' : 'text-slate-500 hover:text-slate-300'
+      }`}
+    >
+      {recording ? <CircleDot size={11} className="animate-pulse" /> : <PauseCircle size={11} />}
+      {recording ? 'REC' : 'PAUSED'}
+    </button>
   );
 });
 
@@ -196,6 +221,35 @@ export function CCTVPlayer({ cameraId, cameraName, cameraType = 'webcam', initia
   const canvasTransferredRef = useRef<boolean>(false);
   const deregisterTimeoutRef = useRef<number | null>(null);
   const isProcessingRef = useRef<boolean>(false);
+  const contentRectRef = useRef<{ x: number; y: number; width: number; height: number } | null>(null);
+  const [resolution, setResolution] = useState<{ w: number; h: number } | null>(null);
+
+  const captureSnapshot = useCallback(() => {
+    const source = cameraType === 'screenshare' ? videoRef.current : imgRef.current;
+    if (!source) return;
+    const w = cameraType === 'screenshare' ? (source as HTMLVideoElement).videoWidth : (source as HTMLImageElement).naturalWidth;
+    const h = cameraType === 'screenshare' ? (source as HTMLVideoElement).videoHeight : (source as HTMLImageElement).naturalHeight;
+    if (!w || !h) return;
+    const canvas = document.createElement('canvas');
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    ctx.drawImage(source as CanvasImageSource, 0, 0, w, h);
+    canvas.toBlob((blob) => {
+      if (!blob) return;
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${cameraName.replace(/\s+/g, '_')}_${Date.now()}.jpg`;
+      a.click();
+      URL.revokeObjectURL(url);
+    }, 'image/jpeg', 0.92);
+  }, [cameraType, cameraName]);
+
+  const enterTileFullscreen = useCallback(() => {
+    playerRef.current?.requestFullscreen?.().catch(() => {});
+  }, []);
 
   const startScreenShare = async () => {
     try {
@@ -459,10 +513,43 @@ export function CCTVPlayer({ cameraId, cameraName, cameraType = 'webcam', initia
     }
   }, [worker, cameraId, drawMode, points]);
 
-  // Monitor resize observer to update Web Worker
+  // Monitor resize observer to update Web Worker. Also recomputes the
+  // object-contain letterbox rect (see computeContainRect) whenever the
+  // container resizes or the media element's intrinsic resolution becomes
+  // known/changes, and pushes it to the worker so drawing stays aligned
+  // with the actual visible video pixels instead of the full canvas.
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas || !worker) return;
+
+    const sendContentRect = () => {
+      const parent = playerRef.current;
+      if (!parent) return;
+      const containerW = parent.clientWidth;
+      const containerH = parent.clientHeight;
+
+      let contentW = 0;
+      let contentH = 0;
+      if (cameraType === 'screenshare' && videoRef.current) {
+        contentW = videoRef.current.videoWidth;
+        contentH = videoRef.current.videoHeight;
+      } else if (imgRef.current) {
+        contentW = imgRef.current.naturalWidth;
+        contentH = imgRef.current.naturalHeight;
+      }
+
+      if (contentW && contentH) {
+        setResolution((prev) => (prev && prev.w === contentW && prev.h === contentH ? prev : { w: contentW, h: contentH }));
+      }
+
+      const rect = computeContainRect(containerW, containerH, contentW, contentH);
+      const last = contentRectRef.current;
+      if (last && last.x === rect.x && last.y === rect.y && last.width === rect.width && last.height === rect.height) {
+        return; // unchanged — skip the extra postMessage (img 'load' fires every MJPEG frame)
+      }
+      contentRectRef.current = rect;
+      worker.postMessage({ type: 'content_rect', viewportId, rect });
+    };
 
     const handleResize = () => {
       const parent = playerRef.current;
@@ -474,6 +561,7 @@ export function CCTVPlayer({ cameraId, cameraName, cameraType = 'webcam', initia
           height: parent.clientHeight
         });
       }
+      sendContentRect();
     };
 
     const resizeObserver = new ResizeObserver(() => handleResize());
@@ -481,12 +569,21 @@ export function CCTVPlayer({ cameraId, cameraName, cameraType = 'webcam', initia
       resizeObserver.observe(playerRef.current);
     }
 
+    const imgEl = imgRef.current;
+    const videoEl = videoRef.current;
+    imgEl?.addEventListener('load', sendContentRect);
+    videoEl?.addEventListener('loadedmetadata', sendContentRect);
+    videoEl?.addEventListener('resize', sendContentRect);
+
     handleResize();
 
     return () => {
       resizeObserver.disconnect();
+      imgEl?.removeEventListener('load', sendContentRect);
+      videoEl?.removeEventListener('loadedmetadata', sendContentRect);
+      videoEl?.removeEventListener('resize', sendContentRect);
     };
-  }, [worker, viewportId]);
+  }, [worker, viewportId, cameraType]);
 
   // Click handler for drawing points
   const handleCanvasClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
@@ -498,9 +595,19 @@ export function CCTVPlayer({ cameraId, cameraName, cameraType = 'webcam', initia
     const clientX = e.clientX - rect.left;
     const clientY = e.clientY - rect.top;
 
-    // Normalize coordinates (0.0 to 1.0)
-    const normX = Number((clientX / rect.width).toFixed(3));
-    const normY = Number((clientY / rect.height).toFixed(3));
+    // Map through the same letterboxed content rect the worker draws
+    // against, so a click on the video maps to the same normalized point
+    // the backend (which normalizes against the real frame) expects —
+    // otherwise zones/lines drawn here would be offset by the letterbox
+    // bars whenever the video's aspect ratio doesn't match the container's.
+    const content = contentRectRef.current;
+    const cx = clientX - (content?.x ?? 0);
+    const cy = clientY - (content?.y ?? 0);
+    const cw = content?.width || rect.width;
+    const ch = content?.height || rect.height;
+
+    const normX = Number(Math.min(1, Math.max(0, cx / cw)).toFixed(3));
+    const normY = Number(Math.min(1, Math.max(0, cy / ch)).toFixed(3));
 
     if (drawMode === 'line') {
       if (points.length < 2) {
@@ -600,15 +707,53 @@ export function CCTVPlayer({ cameraId, cameraName, cameraType = 'webcam', initia
     }
   };
 
+  // Two-line speed gate: pairing this line with another + a real-world
+  // distance (meters) between them lets the backend compute calibrated
+  // km/h (distance / time-between-crossings) instead of the rough
+  // per-frame motion estimate. Persists like the other line fields.
+  const handleUpdateLineField = async (id: string, field: 'speedPairId' | 'distanceM', value: string) => {
+    const updatedLines = lines.map(l => {
+      if (l.id !== id) return l;
+      if (field === 'distanceM') {
+        const n = value === '' ? undefined : Number(value);
+        return { ...l, distanceM: n !== undefined && !Number.isNaN(n) ? n : undefined };
+      }
+      return { ...l, speedPairId: value || undefined };
+    });
+    setLines(updatedLines);
+
+    try {
+      await axios.post(`/api/cameras/${cameraId}/config`, {
+        zones: JSON.stringify(zones),
+        lines: JSON.stringify(updatedLines)
+      });
+      if (onConfigChange) onConfigChange();
+    } catch (err) {
+      console.error('Failed to update line speed-gate config:', err);
+    }
+  };
+
   return (
-    <div className="glass-card flex flex-col h-full overflow-hidden border border-brand-500/20">
+    <div className="panel flex flex-col h-full overflow-hidden">
       {/* Feed Header */}
       <div className="flex items-center justify-between px-4 py-2 border-b bg-slate-900/60" style={{ borderColor: 'rgba(99,102,241,0.1)' }}>
-        <div className="flex items-center gap-2">
-          <div className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse" />
-          <span className="text-sm font-semibold text-white">{cameraName}</span>
+        <div className="flex items-center gap-2 min-w-0">
+          <div className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse shrink-0" />
+          <span className="text-sm font-semibold text-white truncate">{cameraName}</span>
+          {resolution && (
+            <span className="text-[10px] font-mono text-slate-500 shrink-0">{resolution.w}×{resolution.h}</span>
+          )}
         </div>
-        <CameraLiveBadge cameraId={cameraId} />
+        <div className="flex items-center gap-2.5 shrink-0">
+          <RecordingControl cameraId={cameraId} />
+          <CameraLiveBadge cameraId={cameraId} />
+          <button onClick={captureSnapshot} title="Take snapshot" className="text-slate-400 hover:text-white transition-colors">
+            <CameraIcon size={13} />
+          </button>
+          <button onClick={enterTileFullscreen} title="Fullscreen this camera" className="text-slate-400 hover:text-white transition-colors">
+            <Maximize2 size={13} />
+          </button>
+        </div>
       </div>
       <ScreenShareBackpressureReset cameraId={cameraId} isProcessingRef={isProcessingRef} />
 
@@ -678,7 +823,7 @@ export function CCTVPlayer({ cameraId, cameraName, cameraType = 'webcam', initia
                 className="absolute right-0 top-0 bottom-0 w-[320px] border-l border-brand-500/10 bg-slate-950/95 flex flex-col h-full overflow-hidden backdrop-blur-md z-20"
               >
                 <div className="p-3 border-b border-brand-500/10 flex items-center justify-between bg-slate-900/40">
-                  <span className="text-[11px] font-bold text-brand-300 uppercase tracking-wider">Camera Options</span>
+                  <span className="text-[11px] font-bold text-brand-300 uppercase tracking-wider">Control Center</span>
                   <button
                     onClick={() => setShowConfigPanel(false)}
                     className="p-1 rounded hover:bg-slate-800 text-slate-500 hover:text-slate-300 transition-colors"
@@ -792,6 +937,42 @@ export function CCTVPlayer({ cameraId, cameraName, cameraType = 'webcam', initia
                                 </button>
                               </div>
                             ))}
+
+                            {lines.length >= 2 && (
+                              <div className="mt-1 pt-2 border-t border-slate-800/60 space-y-1.5 px-1">
+                                <p className="text-[9px] text-slate-500 uppercase tracking-widest font-semibold">
+                                  Speed Gate (2-line real distance)
+                                </p>
+                                {lines.map((l) => (
+                                  <div key={`gate_${l.id}`} className="flex items-center gap-1">
+                                    <span className="text-[10px] text-slate-500 w-16 truncate shrink-0" title={l.name}>{l.name}</span>
+                                    <select
+                                      value={l.speedPairId || ''}
+                                      onChange={(e) => handleUpdateLineField(l.id, 'speedPairId', e.target.value)}
+                                      className="flex-1 bg-slate-950 border border-slate-800 rounded px-1 py-0.5 text-[10px] text-white outline-none"
+                                      title="Pair with another line to form a speed gate"
+                                    >
+                                      <option value="">Not paired</option>
+                                      {lines.filter(o => o.id !== l.id).map(o => (
+                                        <option key={o.id} value={o.id}>Pair: {o.name}</option>
+                                      ))}
+                                    </select>
+                                    <input
+                                      type="number"
+                                      min={0}
+                                      step={0.1}
+                                      placeholder="m"
+                                      value={l.distanceM ?? ''}
+                                      onChange={(e) => setLines(lines.map(item => item.id === l.id ? { ...item, distanceM: e.target.value === '' ? undefined : Number(e.target.value) } : item))}
+                                      onBlur={(e) => handleUpdateLineField(l.id, 'distanceM', e.target.value)}
+                                      disabled={!l.speedPairId}
+                                      className="w-12 bg-slate-950 border border-slate-800 rounded px-1 py-0.5 text-[10px] text-white outline-none disabled:opacity-40"
+                                      title="Real-world distance to the paired line (meters)"
+                                    />
+                                  </div>
+                                ))}
+                              </div>
+                            )}
                           </div>
                         )}
                       </div>

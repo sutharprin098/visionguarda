@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap');
 
 @tailwind base;
 @tailwind components;
@@ -7,22 +7,19 @@
 @layer base {
   :root {
     --color-bg: #0a0a0f;
+    --color-canvas: #08080c;
     --color-surface: #12121a;
-    --color-border: rgba(99, 102, 241, 0.15);
-    --color-text: #e2e8f0;
-    --color-text-muted: #64748b;
+    --color-surface-raised: #16161f;
+    --color-border: rgba(148, 152, 200, 0.12);
+    --color-border-strong: rgba(148, 152, 200, 0.22);
+    --color-text: #e7e8f2;
+    --color-text-muted: #8b8ea8;
+    --color-text-faint: #5b5e78;
     --color-brand: #6366f1;
     --color-success: #10b981;
     --color-warning: #f59e0b;
     --color-danger: #ef4444;
-  }
-
-  .light {
-    --color-bg: #f1f5f9;
-    --color-surface: #ffffff;
-    --color-border: rgba(99, 102, 241, 0.2);
-    --color-text: #0f172a;
-    --color-text-muted: #64748b;
+    --shadow-panel: 0 1px 0 rgba(255, 255, 255, 0.03) inset, 0 8px 24px -12px rgba(0, 0, 0, 0.5);
   }
 
   * {
@@ -39,7 +36,6 @@
   body {
     background-color: var(--color-bg);
     color: var(--color-text);
-    transition: background-color 0.3s ease, color 0.3s ease;
   }
 
   ::-webkit-scrollbar {
@@ -52,117 +48,87 @@
   }
 
   ::-webkit-scrollbar-thumb {
-    background: rgba(99, 102, 241, 0.4);
+    background: rgba(148, 152, 200, 0.25);
     border-radius: 3px;
   }
 
   ::-webkit-scrollbar-thumb:hover {
-    background: rgba(99, 102, 241, 0.7);
+    background: rgba(148, 152, 200, 0.45);
+  }
+
+  ::selection {
+    background: rgba(99, 102, 241, 0.35);
   }
 }
 
 @layer components {
-  .glass-card {
-    @apply rounded-2xl border backdrop-blur-md;
-    background: rgba(18, 18, 26, 0.8);
+  /* Static elevated surface — no blur, no per-instance color literals.
+     Use for cards/panels throughout the app instead of ad-hoc bg/border. */
+  .panel {
+    @apply rounded-2xl border;
+    background: var(--color-surface);
     border-color: var(--color-border);
+    box-shadow: var(--shadow-panel);
   }
 
-  .light .glass-card {
-    background: rgba(255, 255, 255, 0.85);
-    border-color: rgba(99, 102, 241, 0.2);
-  }
-
-  .btn-primary {
-    @apply px-4 py-2 rounded-xl font-semibold text-sm text-white transition-all duration-200;
-    background: linear-gradient(135deg, #6366f1, #4f46e5);
-    box-shadow: 0 0 20px rgba(99, 102, 241, 0.3);
-  }
-
-  .btn-primary:hover {
-    @apply scale-[1.02];
-    box-shadow: 0 0 30px rgba(99, 102, 241, 0.5);
-  }
-
-  .btn-primary:active {
-    @apply scale-[0.98];
-  }
-
-  .btn-danger {
-    @apply px-4 py-2 rounded-xl font-semibold text-sm text-white transition-all duration-200;
-    background: linear-gradient(135deg, #ef4444, #dc2626);
-  }
-
-  .btn-danger:hover {
-    @apply scale-[1.02];
-    box-shadow: 0 0 20px rgba(239, 68, 68, 0.4);
-  }
-
-  .btn-ghost {
-    @apply px-4 py-2 rounded-xl font-medium text-sm transition-all duration-200;
-    color: var(--color-text-muted);
-  }
-
-  .btn-ghost:hover {
-    @apply scale-[1.02];
-    background: rgba(99, 102, 241, 0.1);
-    color: var(--color-brand);
+  .panel-raised {
+    @apply rounded-2xl border;
+    background: var(--color-surface-raised);
+    border-color: var(--color-border-strong);
+    box-shadow: var(--shadow-panel);
   }
 
   .status-dot {
-    @apply w-2.5 h-2.5 rounded-full;
+    @apply w-2 h-2 rounded-full shrink-0;
   }
 
   .status-dot.online {
     @apply bg-emerald-400;
     box-shadow: 0 0 8px rgba(52, 211, 153, 0.6);
-    animation: pulse 2s ease-in-out infinite;
   }
 
   .status-dot.offline {
     @apply bg-red-500;
   }
 
-  .status-dot.processing {
+  .status-dot.warn {
     @apply bg-amber-400;
-    animation: pulse 1s ease-in-out infinite;
   }
 
   .sidebar-item {
-    @apply flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-200 cursor-pointer;
+    @apply flex items-center gap-3 px-3 py-2 rounded-lg text-[13px] font-medium transition-colors duration-150 cursor-pointer;
     color: var(--color-text-muted);
   }
 
   .sidebar-item:hover {
-    background: rgba(99, 102, 241, 0.1);
-    color: var(--color-brand);
+    background: rgba(148, 152, 200, 0.08);
+    color: var(--color-text);
   }
 
   .sidebar-item.active {
-    background: rgba(99, 102, 241, 0.15);
-    color: #818cf8;
-    border: 1px solid rgba(99, 102, 241, 0.25);
+    background: rgba(99, 102, 241, 0.14);
+    color: #a5b4fc;
   }
 
-  .metric-value {
-    @apply text-3xl font-bold tracking-tight;
-    background: linear-gradient(135deg, #a5b4fc, #6366f1);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
+  .custom-scrollbar::-webkit-scrollbar {
+    width: 5px;
+    height: 5px;
+  }
+
+  .kbd {
+    @apply px-1.5 py-0.5 rounded text-[10px] font-mono border;
+    background: rgba(148, 152, 200, 0.08);
+    border-color: var(--color-border);
+    color: var(--color-text-muted);
   }
 }
 
 @layer utilities {
   .text-gradient {
-    background: linear-gradient(135deg, #a5b4fc, #6366f1, #818cf8);
+    background: linear-gradient(135deg, #a5b4fc, #6366f1);
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
     background-clip: text;
-  }
-
-  .border-glow {
-    border-color: rgba(99, 102, 241, 0.4);
-    box-shadow: 0 0 20px rgba(99, 102, 241, 0.1);
   }
 
   .no-select {

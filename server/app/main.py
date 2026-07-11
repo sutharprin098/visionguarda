@@ -1,6 +1,8 @@
 import asyncio
 import time
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Depends
+import uuid
+from pathlib import PurePosixPath
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Depends, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -8,7 +10,7 @@ from pydantic import BaseModel
 from typing import List, Dict, Optional
 import cv2
 
-from app.config import HOST, PORT, RECORDINGS_DIR
+from app.config import HOST, PORT, RECORDINGS_DIR, UPLOADS_DIR
 from app.storage import (
     init_db, get_all_cameras, get_camera, save_camera, delete_camera,
     get_recent_alerts, clear_all_alerts, get_history, clear_all_history,
@@ -211,6 +213,13 @@ class CameraAnalyticsPayload(BaseModel):
     zones: str
     lines: str
 
+class CameraDisplayPayload(BaseModel):
+    max_width: Optional[int] = None
+    quality: Optional[int] = None
+
+class CameraRecordingPayload(BaseModel):
+    enabled: bool
+
 # --- REST APIs ---
 
 class ModelSelectPayload(BaseModel):
@@ -284,6 +293,22 @@ def select_model(payload: ModelSelectPayload):
 def list_cameras():
     return get_all_cameras()
 
+ALLOWED_UPLOAD_EXTENSIONS = {".mp4", ".mov", ".avi", ".mkv", ".webm"}
+
+@app.post("/api/cameras/upload")
+async def upload_camera_video(file: UploadFile = File(...)):
+    ext = PurePosixPath(file.filename or "").suffix.lower()
+    if ext not in ALLOWED_UPLOAD_EXTENSIONS:
+        raise HTTPException(status_code=400, detail=f"Unsupported file type. Allowed: {', '.join(sorted(ALLOWED_UPLOAD_EXTENSIONS))}")
+
+    safe_name = f"{uuid.uuid4().hex}{ext}"
+    dest_path = UPLOADS_DIR / safe_name
+    with open(dest_path, "wb") as out:
+        while chunk := await file.read(1024 * 1024):
+            out.write(chunk)
+
+    return {"success": True, "path": str(dest_path)}
+
 @app.post("/api/cameras")
 def add_or_update_camera(payload: CameraConfigPayload):
     save_camera(
@@ -332,6 +357,20 @@ def update_camera_analytics(camera_id: str, payload: CameraAnalyticsPayload):
     # Update live thread on-the-fly
     manager.update_camera_analytics_config(camera_id, payload.zones, payload.lines)
     return {"success": True, "message": "Analytics config updated"}
+
+@app.post("/api/cameras/{camera_id}/display")
+def update_camera_display(camera_id: str, payload: CameraDisplayPayload):
+    if camera_id not in manager.camera_threads:
+        raise HTTPException(status_code=404, detail="Camera thread not running")
+    manager.update_camera_display_config(camera_id, payload.max_width, payload.quality)
+    return {"success": True, "message": "Display settings updated"}
+
+@app.post("/api/cameras/{camera_id}/recording")
+def set_camera_recording(camera_id: str, payload: CameraRecordingPayload):
+    ok = manager.set_camera_recording(camera_id, payload.enabled)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Camera thread not running")
+    return {"success": True, "message": f"Recording {'resumed' if payload.enabled else 'paused'}"}
 
 # Per-camera detailed telemetry (for profiling and diagnostics)
 @app.get("/api/cameras/{camera_id}/telemetry")

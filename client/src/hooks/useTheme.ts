@@ -1,30 +1,14 @@
-import { useState, useEffect, useCallback } from 'react';
-import type { Theme } from '../types';
+import { useEffect } from 'react';
 
-const STORAGE_KEY = 'camai-theme';
-
+// CamAI is a dark-only enterprise console by design (matches the low-light
+// control-room context it's used in). Kept as a hook — rather than an inline
+// effect in App.tsx — so the "apply the theme class on mount" concern stays
+// in one place if that ever changes.
 export function useTheme() {
-  const [theme, setTheme] = useState<Theme>(() => {
-    const stored = localStorage.getItem(STORAGE_KEY) as Theme | null;
-    if (stored) return stored;
-    return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
-  });
-
   useEffect(() => {
-    const root = document.documentElement;
-    if (theme === 'dark') {
-      root.classList.add('dark');
-      root.classList.remove('light');
-    } else {
-      root.classList.add('light');
-      root.classList.remove('dark');
-    }
-    localStorage.setItem(STORAGE_KEY, theme);
-  }, [theme]);
-
-  const toggle = useCallback(() => {
-    setTheme((prev) => (prev === 'dark' ? 'light' : 'dark'));
+    document.documentElement.classList.add('dark');
+    document.documentElement.classList.remove('light');
   }, []);
 
-  return { theme, toggle };
+  return { theme: 'dark' as const };
 }

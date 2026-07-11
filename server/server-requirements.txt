@@ -6,3 +6,12 @@ opencv-python-headless==4.8.1.78
 numpy==1.26.4
 pillow==10.2.0
 python-multipart==0.0.7
+# Hard dependency of app/ai/pipeline.py's ByteTracker (Hungarian assignment
+# for multi-object data association) — not optional/try-except like the
+# inference backends below.
+scipy==1.13.1
+# Hard dependency of app/recorder.py's H.264 encode path — cv2.VideoWriter's
+# own H.264 support needs the OpenH264 DLL, which isn't reliably present and
+# silently falls back to a browser-unplayable codec (mp4v) instead of
+# raising. imageio-ffmpeg bundles a portable ffmpeg binary with libx264.
+imageio-ffmpeg==0.6.0

@@ -2,12 +2,81 @@ import os
 import cv2
 import time
 import queue
+import subprocess
 import threading
 from collections import deque
 from datetime import datetime
 from uuid import uuid4
+import imageio_ffmpeg
 from app.config import RECORDINGS_DIR, RECORDING_FPS, RECORDING_WIDTH, RECORDING_HEIGHT
 from app.storage import start_recording_entry, end_recording_entry
+
+_FFMPEG_EXE = imageio_ffmpeg.get_ffmpeg_exe()
+
+
+class _H264Writer:
+    """
+    cv2.VideoWriter-compatible wrapper (isOpened/write/release) that pipes
+    raw BGR24 frames into ffmpeg for H.264 encoding.
+
+    cv2.VideoWriter's own H.264 path depends on the OpenH264 DLL being
+    present on the machine; when it's missing, cv2 silently falls back to
+    mp4v (MPEG-4 Part 2) instead of raising — which produces valid,
+    ffprobe-readable video files that no web browser can actually play
+    (Chrome/Firefox/Edge only support H.264/VP8/VP9/AV1 in <video>). This
+    reuses the ffmpeg binary already bundled via imageio_ffmpeg (same one
+    used by _mini_rtsp_server.py) with libx264, sidestepping the OpenH264
+    dependency entirely.
+    """
+    def __init__(self, file_path: str, fps: float, frame_size: tuple):
+        self._proc = None
+        self._opened = False
+        w, h = frame_size
+        cmd = [
+            _FFMPEG_EXE, "-y", "-loglevel", "error",
+            "-f", "rawvideo", "-pixel_format", "bgr24",
+            "-video_size", f"{w}x{h}", "-framerate", str(fps),
+            "-i", "-",
+            "-c:v", "libx264", "-preset", "ultrafast", "-tune", "zerolatency",
+            "-pix_fmt", "yuv420p", "-movflags", "+faststart",
+            file_path,
+        ]
+        try:
+            self._proc = subprocess.Popen(
+                cmd, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
+            self._opened = True
+        except Exception as e:
+            print(f"[Recorder] Failed to launch ffmpeg for H.264 encode: {e}", flush=True)
+
+    def isOpened(self) -> bool:
+        return self._opened and self._proc is not None and self._proc.poll() is None
+
+    def write(self, frame):
+        if not self.isOpened():
+            return
+        try:
+            self._proc.stdin.write(frame.tobytes())
+        except (BrokenPipeError, OSError) as e:
+            print(f"[Recorder] ffmpeg write failed (encoder process died): {e}", flush=True)
+            self._opened = False
+
+    def release(self):
+        if self._proc is None:
+            return
+        try:
+            if self._proc.stdin:
+                self._proc.stdin.close()
+            self._proc.wait(timeout=10)
+        except Exception:
+            try:
+                self._proc.kill()
+            except Exception:
+                pass
+        self._proc = None
+        self._opened = False
+
 
 class CCTVRecorder:
     def __init__(self, camera_id: str, fps: int = RECORDING_FPS):
@@ -120,10 +189,7 @@ class CCTVRecorder:
         filename = f"cam_{self.camera_id}_{timestamp}_continuous.mp4"
         file_path = str(RECORDINGS_DIR / filename)
         
-        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-        self.continuous_writer = cv2.VideoWriter(
-            file_path, fourcc, self.fps, self.frame_size
-        )
+        self.continuous_writer = _H264Writer(file_path, self.fps, self.frame_size)
         
         if self.continuous_writer.isOpened():
             self.continuous_rec_id = rec_id
@@ -160,10 +226,7 @@ class CCTVRecorder:
         filename = f"cam_{self.camera_id}_{timestamp}_event.mp4"
         file_path = str(RECORDINGS_DIR / filename)
         
-        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-        self.event_writer = cv2.VideoWriter(
-            file_path, fourcc, self.fps, self.frame_size
-        )
+        self.event_writer = _H264Writer(file_path, self.fps, self.frame_size)
         
         if self.event_writer.isOpened():
             self.event_rec_id = rec_id

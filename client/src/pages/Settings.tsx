@@ -1,12 +1,12 @@
 import React from 'react';
-import { Header } from '../components/layout/Header';
+import { Topbar } from '../components/layout/Topbar';
 import { SettingsPanel } from '../components/settings/SettingsPanel';
 
 export default function SettingsPage() {
   return (
-    <div className="flex flex-col h-full">
-      <Header title="Settings" subtitle="Configure CamAI detection parameters" />
-      <div className="flex-1 overflow-y-auto p-6">
+    <div className="flex flex-col h-full overflow-hidden">
+      <Topbar title="Settings" subtitle="Configure detection performance and system preferences" />
+      <div className="flex-1 overflow-y-auto custom-scrollbar p-6">
         <SettingsPanel />
       </div>
     </div>

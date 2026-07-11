@@ -32,8 +32,16 @@ COCO_CLASS_MAP = {
     2: "car",
     3: "motorcycle",
     5: "bus",
-    7: "truck"
+    7: "truck",
+    # Unattended-item classes — enabled specifically so abandoned-object
+    # detection (CameraAnalytics.ITEM_CLASSES) has real detections to work
+    # with instead of being permanently a no-op.
+    24: "backpack",
+    25: "umbrella",
+    26: "handbag",
+    28: "suitcase",
 }
+CLASS_IDS_OF_INTEREST = list(COCO_CLASS_MAP.keys())
 
 
 def nms(boxes, scores, iou_threshold):
@@ -112,6 +120,41 @@ class EngineBackend:
         # Load and configure the backend
         self._initialize_backend()
 
+    def _backend_score(self, backend_type: str) -> int:
+        """Higher = stronger real acceleration available right now on this
+        machine. Candidates are tried in descending score order so a genuine
+        NVIDIA CUDA/TensorRT path (goal: "GPU inference with CUDA. TensorRT
+        or ONNX optimization. FP16 inference.") always wins when present,
+        instead of whichever backend happens to be listed first in
+        preferred_backends — that list only filters which backend *types*
+        are eligible at all, ordering is decided by actual hardware.
+        """
+        if backend_type == "onnx" and HAS_ONNXRUNTIME:
+            try:
+                providers = ort.get_available_providers()
+            except Exception:
+                providers = []
+            if "TensorrtExecutionProvider" in providers:
+                return 100  # TensorRT: fused FP16 engine, fastest available
+            if "CUDAExecutionProvider" in providers:
+                return 90   # plain CUDA EP
+            return 10        # CPU-only ONNX Runtime build
+        if backend_type == "pytorch" and HAS_ULTRALYTICS:
+            try:
+                if torch.cuda.is_available():
+                    return 85
+            except Exception:
+                pass
+            return 5
+        if backend_type == "openvino" and HAS_OPENVINO:
+            try:
+                if "GPU" in ov.Core().available_devices:
+                    return 80  # Intel iGPU/dGPU — real GPU accel, but not CUDA/TensorRT
+            except Exception:
+                pass
+            return 15
+        return 0
+
     def _initialize_backend(self):
         base_name = os.path.splitext(self.model_name)[0]
         ov_xml_path = os.path.join(os.path.dirname(self.model_name) or ".", f"{base_name}_openvino_model", f"{base_name}.xml")
@@ -136,6 +179,11 @@ class EngineBackend:
                 f"No supported backend source found for {self.model_name}. "
                 f"OpenVINO model path: {ov_xml_path}, ONNX path: {onnx_path}, PT path: {pt_path}"
             )
+
+        # Stable sort: ties (e.g. two CPU-only options) keep preferred_backends order.
+        candidates.sort(key=lambda c: self._backend_score(c[0]), reverse=True)
+        print(f"[AI Backend] Candidate order (best acceleration first): "
+              f"{[(bt, self._backend_score(bt)) for bt, _ in candidates]}", flush=True)
 
         for backend_type, path in candidates:
             try:
@@ -162,8 +210,19 @@ class EngineBackend:
 
         config = {"PERFORMANCE_HINT": "LATENCY"}
         if target_device == "CPU":
-            config["CPU_THREADS_NUM"] = str(min(4, max(1, os.cpu_count() or 1)))
-            config["AFFINITY"] = "CORE"
+            # Legacy string-keyed CPU tuning properties ("AFFINITY",
+            # "CPU_THREADS_NUM") were removed from the CPU plugin in newer
+            # OpenVINO releases (both raise NotFound on 2026.2.1) — every
+            # CPU startup wasted a full model compile attempt on these
+            # before falling back below. The CPU plugin auto-tunes thread
+            # count reasonably under PERFORMANCE_HINT=LATENCY on its own.
+            pass
+        else:
+            # FP16 inference on GPU: halves activation/weight bandwidth and is
+            # the throughput win the goal's "FP16 inference" requirement is
+            # after. Left off on CPU — most CPUs have no native fp16 compute
+            # path, so this would cost accuracy for zero speedup there.
+            config["INFERENCE_PRECISION_HINT"] = "f16"
 
         try:
             self.ov_compiled = self.ov_core.compile_model(model, target_device, config)
@@ -185,22 +244,58 @@ class EngineBackend:
         providers = ort.get_available_providers()
         print(f"[AI Backend] ONNX Runtime available providers: {providers}")
 
-        if "CUDAExecutionProvider" in providers:
-            provider = "CUDAExecutionProvider"
-            device = "CUDA"
-        elif "CPUExecutionProvider" in providers:
-            provider = "CPUExecutionProvider"
-            device = "CPU"
-        else:
-            raise RuntimeError("ONNX Runtime does not expose CUDA or CPU provider.")
-
         sess_opts = ort.SessionOptions()
         sess_opts.intra_op_num_threads = min(4, max(1, os.cpu_count() or 1))
         sess_opts.inter_op_num_threads = 1
         sess_opts.execution_mode = ort.ExecutionMode.ORT_SEQUENTIAL
         sess_opts.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
 
-        self.ort_session = ort.InferenceSession(model_path, sess_options=sess_opts, providers=[provider])
+        # TensorRT EP first when present — it JIT-builds (and caches) a fused
+        # FP16 engine for this exact input shape, which is faster than the
+        # CUDA EP's generic fp32 kernels. Falls through to plain CUDA, then
+        # CPU, exactly like before if TensorRT isn't installed.
+        if "TensorrtExecutionProvider" in providers:
+            trt_cache_dir = os.path.join(os.path.dirname(model_path) or ".", "trt_cache")
+            os.makedirs(trt_cache_dir, exist_ok=True)
+            provider_list = [
+                ("TensorrtExecutionProvider", {
+                    "trt_fp16_enable": True,
+                    "trt_engine_cache_enable": True,
+                    "trt_engine_cache_path": trt_cache_dir,
+                }),
+                "CUDAExecutionProvider",
+                "CPUExecutionProvider",
+            ]
+            device = "TensorRT"
+        elif "CUDAExecutionProvider" in providers:
+            provider_list = ["CUDAExecutionProvider"]
+            device = "CUDA"
+            # The CUDA EP (unlike TensorRT above) has no runtime fp16-cast
+            # option — it just runs whatever precision the graph's weights
+            # already are. Goal requires FP16 inference on CUDA, so use a
+            # `<model>_fp16.onnx` sibling if one has been exported
+            # (e.g. `model.export(format="onnx", half=True)`); otherwise
+            # fall back to the fp32 graph rather than fail to load.
+            fp16_path = f"{os.path.splitext(model_path)[0]}_fp16.onnx"
+            if os.path.exists(fp16_path):
+                model_path = fp16_path
+                device = "CUDA-FP16"
+        elif "CPUExecutionProvider" in providers:
+            provider_list = ["CPUExecutionProvider"]
+            device = "CPU"
+        else:
+            raise RuntimeError("ONNX Runtime does not expose TensorRT, CUDA, or CPU provider.")
+
+        try:
+            self.ort_session = ort.InferenceSession(model_path, sess_options=sess_opts, providers=provider_list)
+        except Exception as e:
+            if device == "TensorRT":
+                print(f"[AI Backend] Warning: TensorRT EP init failed: {e}. Falling back to CUDA/CPU.")
+                fallback = [p for p in ["CUDAExecutionProvider", "CPUExecutionProvider"] if p in providers]
+                self.ort_session = ort.InferenceSession(model_path, sess_options=sess_opts, providers=fallback)
+                device = "CUDA" if "CUDAExecutionProvider" in fallback else "CPU"
+            else:
+                raise
         self.backend_type = "onnx"
         self.backend_device = device
         print(f"[AI Backend] Successfully initialized ONNX Runtime engine on {device}.")
@@ -317,7 +412,7 @@ class EngineBackend:
                     if conf < conf_threshold:
                         continue
                     class_id = int(clss[idx])
-                    if class_id not in [0, 1, 2, 3, 5, 7]:
+                    if class_id not in COCO_CLASS_MAP:
                         continue
 
                     class_name = COCO_CLASS_MAP.get(class_id, "unknown")
@@ -364,7 +459,7 @@ class EngineBackend:
         y2 = y_center + h / 2
 
         boxes = np.stack([x1, y1, x2, y2], axis=1)
-        class_ids_of_interest = [0, 1, 2, 3, 5, 7]
+        class_ids_of_interest = CLASS_IDS_OF_INTEREST
         scores_interest = out0[:, 4:84][:, class_ids_of_interest]
 
         max_score_idx = np.argmax(scores_interest, axis=1)

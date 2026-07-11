@@ -30,22 +30,6 @@ export interface DetectResponse {
   error?: string;
 }
 
-export interface DetectionRecord {
-  id: string;
-  timestamp: string;
-  imageBase64: string;
-  detections: Detection[];
-  segmentedImage: string | null;
-  masks?: number[][][];
-  peopleCount: number;
-  confidence: number | null;
-  processingTime: number;
-  yoloLatency: number;
-  samLatency: number;
-  fps: number;
-  status: 'human_found' | 'no_human';
-}
-
 export interface StatusResponse {
   server: 'online';
   uptime: number;
@@ -58,18 +42,15 @@ export interface StatusResponse {
     latency: number;
     counters: { in: number; out: number };
   }>;
-}
-
-export interface ApiLogEntry {
-  id: string;
-  timestamp: string;
-  endpoint: string;
-  method: string;
-  statusCode: number;
-  duration: number;
-  requestSize: number;
-  responseSize: number;
-  error?: string;
+  selectedModel: string;
+  // Heterogeneous bag: top-level status/selected/device fields plus one
+  // ModelBenchmark entry per model key — indexed access is cast at call sites.
+  benchmark: Record<string, any>;
+  recommendation: {
+    should_switch: boolean;
+    message: string;
+    suggested_model: string;
+  };
 }
 
 export type Theme = 'dark' | 'light';

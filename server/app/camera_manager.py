@@ -261,6 +261,22 @@ class CameraManager:
         if cam_id in self.camera_threads:
             self.camera_threads[cam_id].update_config(zones_json, lines_json)
 
+    def update_camera_display_config(self, cam_id: str, max_width: int = None, quality: int = None):
+        """Update MJPEG preview resolution/quality on the fly (display only)."""
+        if cam_id in self.camera_threads:
+            self.camera_threads[cam_id].update_display_config(max_width, quality)
+
+    def set_camera_recording(self, cam_id: str, enabled: bool) -> bool:
+        """Manually pause/resume continuous recording for a running camera thread."""
+        thread = self.camera_threads.get(cam_id)
+        if not thread:
+            return False
+        if enabled:
+            thread.recorder.start_continuous()
+        else:
+            thread.recorder.stop_continuous()
+        return True
+
     def stop_all(self):
         for cam_id in list(self.camera_threads.keys()):
             self.stop_camera_thread(cam_id)

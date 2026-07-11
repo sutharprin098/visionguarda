@@ -1,83 +1,87 @@
-import React from 'react';
-import { NavLink, useLocation } from 'react-router-dom';
-import { motion } from 'framer-motion';
+import React, { useState } from 'react';
+import { NavLink } from 'react-router-dom';
 import {
   LayoutDashboard,
   Camera,
-  History,
-  FileJson,
+  Video,
+  BarChart3,
+  ListTree,
+  ShieldAlert,
+  Film,
+  FileBarChart,
+  Users,
   Settings,
-  Zap,
-  ChevronRight,
-  Monitor,
+  ChevronsLeft,
+  ChevronsRight,
+  ScanEye,
 } from 'lucide-react';
 import clsx from 'clsx';
 
 const NAV_ITEMS = [
-  { to: '/', label: 'Dashboard', icon: LayoutDashboard, exact: true },
-  { to: '/camera', label: 'Live Camera', icon: Camera },
-  { to: '/screenshare', label: 'Screen Share', icon: Monitor },
-  { to: '/history', label: 'Detection History', icon: History },
-  { to: '/logs', label: 'API Logs', icon: FileJson },
+  { to: '/', label: 'Dashboard', icon: LayoutDashboard, end: true },
+  { to: '/live', label: 'Live Monitoring', icon: Video },
+  { to: '/cameras', label: 'Cameras', icon: Camera },
+  { to: '/analytics', label: 'AI Analytics', icon: BarChart3 },
+  { to: '/events', label: 'Events', icon: ListTree },
+  { to: '/alerts', label: 'Alerts', icon: ShieldAlert },
+  { to: '/recordings', label: 'Recordings', icon: Film },
+  { to: '/reports', label: 'Reports', icon: FileBarChart },
+  { to: '/users', label: 'Users', icon: Users },
   { to: '/settings', label: 'Settings', icon: Settings },
 ];
 
+const COLLAPSE_KEY = 'camai:sidebar-collapsed';
+
 export function Sidebar() {
-  const location = useLocation();
+  const [collapsed, setCollapsed] = useState(() => localStorage.getItem(COLLAPSE_KEY) === '1');
+
+  const toggle = () => {
+    setCollapsed((prev) => {
+      localStorage.setItem(COLLAPSE_KEY, prev ? '0' : '1');
+      return !prev;
+    });
+  };
 
   return (
-    <aside className="w-64 flex-shrink-0 flex flex-col h-screen sticky top-0 overflow-hidden"
-      style={{ background: 'rgba(10,10,15,0.95)', borderRight: '1px solid rgba(99,102,241,0.12)' }}>
-      
-      {/* Logo */}
-      <div className="flex items-center gap-3 px-5 py-6">
-        <div className="w-9 h-9 rounded-xl flex items-center justify-center"
-          style={{ background: 'linear-gradient(135deg, #6366f1, #4f46e5)', boxShadow: '0 0 20px rgba(99,102,241,0.5)' }}>
-          <Zap size={18} className="text-white" />
+    <aside
+      className={clsx(
+        'flex-shrink-0 flex flex-col h-screen sticky top-0 overflow-hidden border-r border-white/[0.06] transition-[width] duration-200',
+        collapsed ? 'w-[64px]' : 'w-[236px]'
+      )}
+      style={{ background: 'var(--color-canvas)' }}
+    >
+      {/* Brand */}
+      <div className="flex items-center gap-2.5 h-14 px-4 shrink-0">
+        <div className="w-7 h-7 rounded-lg flex items-center justify-center bg-brand-500 shrink-0">
+          <ScanEye size={15} className="text-white" />
         </div>
-        <div>
-          <p className="text-sm font-bold text-white leading-tight">CamAI</p>
-          <p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>Human Detection</p>
-        </div>
+        {!collapsed && <span className="text-[13px] font-bold text-white tracking-tight">CamAI</span>}
       </div>
 
-      {/* Divider */}
-      <div className="mx-4 mb-4 h-px" style={{ background: 'rgba(99,102,241,0.12)' }} />
-
       {/* Navigation */}
-      <nav className="flex-1 px-3 space-y-1 overflow-y-auto">
-        <p className="px-3 pb-2 text-[10px] font-semibold uppercase tracking-widest"
-          style={{ color: 'var(--color-text-muted)' }}>Navigation</p>
-        {NAV_ITEMS.map(({ to, label, icon: Icon }) => {
-          const isActive = to === '/'
-            ? location.pathname === '/'
-            : location.pathname.startsWith(to);
-
-          return (
-            <NavLink key={to} to={to}>
-              <motion.div
-                whileHover={{ x: 2 }}
-                className={clsx('sidebar-item', isActive && 'active')}
-              >
-                <Icon size={16} />
-                <span className="flex-1">{label}</span>
-                {isActive && <ChevronRight size={12} className="opacity-60" />}
-              </motion.div>
-            </NavLink>
-          );
-        })}
+      <nav className="flex-1 px-2.5 py-2 space-y-0.5 overflow-y-auto custom-scrollbar">
+        {NAV_ITEMS.map(({ to, label, icon: Icon, end }) => (
+          <NavLink key={to} to={to} end={end}>
+            {({ isActive }) => (
+              <div className={clsx('sidebar-item', isActive && 'active', collapsed && 'justify-center px-0')} title={collapsed ? label : undefined}>
+                <Icon size={16} strokeWidth={2} />
+                {!collapsed && <span className="flex-1 truncate">{label}</span>}
+              </div>
+            )}
+          </NavLink>
+        ))}
       </nav>
 
-      {/* Footer */}
-      <div className="p-4 mx-3 mb-4 rounded-xl" style={{ background: 'rgba(99,102,241,0.08)', border: '1px solid rgba(99,102,241,0.15)' }}>
-        <p className="text-xs font-semibold text-white mb-1">YOLO11n Seg</p>
-        <p className="text-[11px]" style={{ color: 'var(--color-text-muted)' }}>
-          Powered by local model inference
-        </p>
-        <div className="mt-2 flex items-center gap-1.5">
-          <div className="status-dot online" />
-          <span className="text-[11px] text-emerald-400">Model Ready</span>
-        </div>
+      {/* Collapse toggle */}
+      <div className="p-2.5 border-t border-white/[0.06]">
+        <button
+          onClick={toggle}
+          className={clsx('sidebar-item w-full', collapsed && 'justify-center px-0')}
+          title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+        >
+          {collapsed ? <ChevronsRight size={16} /> : <ChevronsLeft size={16} />}
+          {!collapsed && <span>Collapse</span>}
+        </button>
       </div>
     </aside>
   );

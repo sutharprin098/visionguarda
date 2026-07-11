@@ -9,6 +9,11 @@ interface Telemetry {
     track_id: number | null;
     bbox: { x1: number; y1: number; x2: number; y2: number };
     speed?: number;
+    speed_calibrated?: boolean;
+    tracking_status?: 'tracked' | 'coasting';
+    dwell_time?: number;
+    direction?: string;
+    lane?: string | null;
   }>;
   masks: number[][][];
   tracks: Array<{
@@ -36,8 +41,14 @@ interface Telemetry {
   gpu?: number;
   status: string;
   recording?: boolean;
+  queue_depth?: number;
   line_stats?: Record<string, { in_count: number; out_count: number }>;
-  
+  zone_stats?: Record<string, {
+    occupancy: number;
+    max_occupancy: number;
+    status: 'normal' | 'danger';
+  }>;
+
   capture_latency?: number;
   decode_latency?: number;
   inference_latency?: number;
@@ -168,14 +179,42 @@ interface DrawPreview {
 const canvases = new Map<string, OffscreenCanvas>(); // viewportId -> OffscreenCanvas
 const contexts = new Map<string, OffscreenCanvasRenderingContext2D>(); // viewportId -> Context
 const telemetryData: { [cameraId: string]: Telemetry } = {}; // cameraId -> Telemetry
+
+// Per-track motion state used to extrapolate bounding-box position between
+// AI telemetry ticks. The AI pipeline runs well under the video's own frame
+// rate (its latency budget is dominated by inference, not decode), but this
+// render loop repaints every rAF at full video FPS — without extrapolation,
+// a box just sits at its last known position and "steps" to the next one
+// each time telemetry arrives, which reads as visible lag/trailing behind a
+// fast-moving object. Storing velocity (normalized units/ms) computed from
+// consecutive ticks and dead-reckoning forward by elapsed wall-clock time
+// keeps the box moving smoothly with the vehicle in between.
+interface TrackMotionState {
+  cx: number; cy: number;   // normalized center at last telemetry receipt
+  w: number; h: number;     // normalized box size at last receipt
+  vx: number; vy: number;   // normalized units per ms
+  receiptTime: number;      // performance.now() when this tick was received
+}
+const trackMotion = new Map<string, Map<number, TrackMotionState>>(); // cameraId -> track_id -> state
+// Cap how far we'll dead-reckon past the last real update — bounds runaway
+// drift if telemetry stalls (occlusion longer than the tracker's own coast
+// window, dropped WS messages) instead of flying the box off to nowhere.
+const MAX_EXTRAPOLATE_MS = 350;
 const cameraConfigs = new Map<string, CameraConfig>(); // cameraId -> Config
 const viewportToCameraMap = new Map<string, string>(); // viewportId -> cameraId
 const drawPreviews = new Map<string, DrawPreview>(); // cameraId -> DrawPreview
+// The video/img element renders with object-contain, so it's letterboxed
+// inside its container whenever its native aspect ratio differs from the
+// container's — this holds the actual displayed content rect (in CSS
+// pixels, within the canvas) per viewport so every normalized-coordinate
+// draw call below can map onto the real video pixels instead of the full
+// (possibly letterboxed) canvas. Falls back to the full canvas if unset.
+const contentRects = new Map<string, { x: number; y: number; width: number; height: number }>();
 
 let ws: WebSocket | null = null;
 
 self.onmessage = (event) => {
-  const { type, cameraId, viewportId, canvas, width, height, config, wsUrl, telemetry, drawMode, points } = event.data;
+  const { type, cameraId, viewportId, canvas, width, height, config, wsUrl, telemetry, drawMode, points, rect } = event.data;
 
   if (type === 'init_ws') {
     initWebSocket(wsUrl);
@@ -199,6 +238,7 @@ self.onmessage = (event) => {
       }
       canvases.delete(id);
       contexts.delete(id);
+      contentRects.delete(id);
       viewportToCameraMap.delete(id);
     }
   } else if (type === 'associate_camera') {
@@ -222,6 +262,11 @@ self.onmessage = (event) => {
         cv.width = width;
         cv.height = height;
       }
+    }
+  } else if (type === 'content_rect') {
+    const id = viewportId || cameraId;
+    if (id && rect) {
+      contentRects.set(id, rect);
     }
   } else if (type === 'update_config') {
     if (cameraId) {
@@ -334,6 +379,52 @@ async function processPendingFrames() {
   processingFrame = false;
 }
 
+function updateTrackMotion(cameraId: string, telemetry: Telemetry, recvTime: number) {
+  const prevMap = trackMotion.get(cameraId);
+  const nextMap = new Map<number, TrackMotionState>();
+  const dets = telemetry.detections || [];
+  for (const det of dets) {
+    if (det.track_id === null || det.track_id === undefined) continue;
+    const { x1, y1, x2, y2 } = det.bbox;
+    const cx = (x1 + x2) / 2;
+    const cy = (y1 + y2) / 2;
+    const w = x2 - x1;
+    const h = y2 - y1;
+    let vx = 0, vy = 0;
+    const prev = prevMap?.get(det.track_id);
+    if (prev) {
+      const dt = recvTime - prev.receiptTime;
+      // Only trust velocity between two consecutive, closely-spaced ticks —
+      // a long gap (track was lost and re-identified, or a stall) means the
+      // position delta over dt is not a meaningful instantaneous velocity.
+      if (dt > 5 && dt < 1500) {
+        vx = (cx - prev.cx) / dt;
+        vy = (cy - prev.cy) / dt;
+      }
+    }
+    nextMap.set(det.track_id, { cx, cy, w, h, vx, vy, receiptTime: recvTime });
+  }
+  trackMotion.set(cameraId, nextMap);
+}
+
+// Returns the extrapolated bbox for a track at the current render time, or
+// the telemetry's own bbox if no motion state exists yet (first tick).
+function getRenderBbox(cameraId: string, trackId: number | null, bbox: { x1: number; y1: number; x2: number; y2: number }, renderNow: number) {
+  if (trackId === null || trackId === undefined) return bbox;
+  const state = trackMotion.get(cameraId)?.get(trackId);
+  if (!state) return bbox;
+  const elapsed = Math.min(renderNow - state.receiptTime, MAX_EXTRAPOLATE_MS);
+  if (elapsed <= 0) return bbox;
+  const pcx = state.cx + state.vx * elapsed;
+  const pcy = state.cy + state.vy * elapsed;
+  return {
+    x1: pcx - state.w / 2,
+    y1: pcy - state.h / 2,
+    x2: pcx + state.w / 2,
+    y2: pcy + state.h / 2,
+  };
+}
+
 function initWebSocket(wsUrl: string) {
   if (ws) {
     try { ws.close(); } catch (e) {}
@@ -358,9 +449,11 @@ function initWebSocket(wsUrl: string) {
       if (payload.type === 'telemetry') {
         const data = payload.data;
         const changedIds = Object.keys(data);
+        const recvTime = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
         for (const camId in data) {
           // Store AI telemetry only — no video frames (video served via MJPEG)
           telemetryData[camId] = data[camId];
+          updateTrackMotion(camId, data[camId], recvTime);
         }
         // Forward only the cameras that changed in this message (`data`),
         // not the full `telemetryData` accumulator. The server already only
@@ -392,6 +485,10 @@ function initWebSocket(wsUrl: string) {
 // Render FPS tracking (sliding 2-second window)
 const renderTimestamps: number[] = [];
 let renderFps = 0.0;
+// Reported to the main thread (for the system-wide dashboard) at 1Hz, not
+// every rAF — the render loop itself repaints at full display refresh rate,
+// but nothing needs a render-FPS number updated that often outside this HUD.
+let lastRenderFpsReport = 0;
 
 // Render loop using requestAnimationFrame inside Web Worker
 function renderLoop() {
@@ -403,6 +500,10 @@ function renderLoop() {
     renderTimestamps.shift();
   }
   renderFps = renderTimestamps.length > 1 ? renderTimestamps.length / 2 : 0;
+  if (now - lastRenderFpsReport > 1000) {
+    lastRenderFpsReport = now;
+    self.postMessage({ type: 'render_fps', fps: renderFps });
+  }
   contexts.forEach((ctx, viewportId) => {
     const canvas = canvases.get(viewportId);
     if (!canvas) return;
@@ -417,15 +518,31 @@ function renderLoop() {
     const cameraId = viewportToCameraMap.get(viewportId) || viewportId;
 
     const config = cameraConfigs.get(cameraId) || DEFAULT_CONFIG;
+    const telemetry = telemetryData[cameraId];
+
+    // All normalized (0..1) coordinates below map onto this content rect,
+    // not the raw canvas — the video/img renders with object-contain, so
+    // whenever its native aspect ratio differs from the container's there
+    // are letterbox bars the canvas covers but the video doesn't. Falls
+    // back to the full canvas if no content rect has been reported yet
+    // (e.g. before the media element's first frame loads).
+    const cr = contentRects.get(viewportId);
+    const cx0 = cr?.x ?? 0;
+    const cy0 = cr?.y ?? 0;
+    const cw = cr?.width || width;
+    const ch = cr?.height || height;
+    // Map a normalized (0..1) coordinate onto the actual video content rect.
+    const toX = (n: number) => cx0 + n * cw;
+    const toY = (n: number) => cy0 + n * ch;
 
     // 1. Draw Zones
     if (config.zones) {
       config.zones.forEach((zone: any) => {
         if (!zone.points || zone.points.length < 3) return;
         ctx.beginPath();
-        ctx.moveTo(zone.points[0][0] * width, zone.points[0][1] * height);
+        ctx.moveTo(toX(zone.points[0][0]), toY(zone.points[0][1]));
         for (let i = 1; i < zone.points.length; i++) {
-          ctx.lineTo(zone.points[i][0] * width, zone.points[i][1] * height);
+          ctx.lineTo(toX(zone.points[i][0]), toY(zone.points[i][1]));
         }
         ctx.closePath();
 
@@ -445,7 +562,16 @@ function renderLoop() {
         if (config.showZoneName) {
           ctx.font = `bold ${config.fontSize}px Inter, sans-serif`;
           ctx.fillStyle = config.colors?.zoneName || '#ef4444';
-          ctx.fillText(zone.name || 'Restricted Zone', zone.points[0][0] * width + 5, zone.points[0][1] * height + 15);
+          const zStats = telemetry?.zone_stats?.[zone.id];
+          const zoneLabel = zStats
+            ? `${zone.name || 'Zone'} [${zStats.status.toUpperCase()}] ${zStats.occupancy}/${zStats.max_occupancy}`
+            : (zone.name || 'Restricted Zone');
+          ctx.fillText(zoneLabel, toX(zone.points[0][0]) + 5, toY(zone.points[0][1]) + 15);
+          if (zStats && zStats.status === 'danger') {
+            ctx.strokeStyle = '#ef4444';
+            ctx.lineWidth = (config.borderWidth || 2) + 2;
+            ctx.stroke(); // re-stroke the already-built zone path in a heavier alert color
+          }
         }
       });
     }
@@ -457,33 +583,31 @@ function renderLoop() {
         ctx.strokeStyle = config.colors?.zoneBorder || '#3b82f6';
         ctx.lineWidth = config.borderWidth + 1.5;
         ctx.beginPath();
-        ctx.moveTo(line.points[0][0] * width, line.points[0][1] * height);
-        ctx.lineTo(line.points[1][0] * width, line.points[1][1] * height);
+        ctx.moveTo(toX(line.points[0][0]), toY(line.points[0][1]));
+        ctx.lineTo(toX(line.points[1][0]), toY(line.points[1][1]));
         ctx.stroke();
 
         ctx.font = `bold ${config.fontSize}px Inter, sans-serif`;
         ctx.fillStyle = config.colors?.zoneBorder || '#3b82f6';
-        
-        const telemetry = telemetryData[cameraId];
+
         const lineStats = telemetry?.line_stats?.[line.id];
         const countText = lineStats && config.showLineCrossingStatus 
           ? ` (IN: ${lineStats.in_count} | OUT: ${lineStats.out_count})` 
           : '';
         
-        ctx.fillText((line.name || 'Crossing Line') + countText, line.points[0][0] * width + 5, line.points[0][1] * height - 5);
+        ctx.fillText((line.name || 'Crossing Line') + countText, toX(line.points[0][0]) + 5, toY(line.points[0][1]) - 5);
       });
     }
 
     // 3. Draw Telemetry
-    const telemetry = telemetryData[cameraId];
     if (telemetry) {
       // Heatmap rendering
       if (config.showHeatmap && telemetry.heatmap) {
         const rows = telemetry.heatmap.length;
         const cols = telemetry.heatmap[0]?.length || 0;
         if (rows > 0 && cols > 0) {
-          const cellW = width / cols;
-          const cellH = height / rows;
+          const cellW = cw / cols;
+          const cellH = ch / rows;
           const heatColor = config.colors?.heatmap || '#f43f5e';
           for (let r = 0; r < rows; r++) {
             for (let c = 0; c < cols; c++) {
@@ -492,7 +616,7 @@ function renderLoop() {
                 const opacity = Math.min(val / 10, 0.85);
                 ctx.fillStyle = heatColor;
                 ctx.globalAlpha = opacity * config.transparency;
-                ctx.fillRect(c * cellW, r * cellH, cellW + 1, cellH + 1);
+                ctx.fillRect(cx0 + c * cellW, cy0 + r * cellH, cellW + 1, cellH + 1);
               }
             }
           }
@@ -514,9 +638,9 @@ function renderLoop() {
           }
           ctx.fillStyle = config.colors?.segmentationMask || '#818cf8';
           ctx.beginPath();
-          ctx.moveTo(poly[0][0] * width, poly[0][1] * height);
+          ctx.moveTo(toX(poly[0][0]), toY(poly[0][1]));
           for (let i = 1; i < poly.length; i++) {
-            ctx.lineTo(poly[i][0] * width, poly[i][1] * height);
+            ctx.lineTo(toX(poly[i][0]), toY(poly[i][1]));
           }
           ctx.closePath();
           ctx.fill();
@@ -539,9 +663,9 @@ function renderLoop() {
           if (isVehicle && !config.showVehicle) return;
 
           ctx.beginPath();
-          ctx.moveTo(track.points[0][0] * width, track.points[0][1] * height);
+          ctx.moveTo(toX(track.points[0][0]), toY(track.points[0][1]));
           for (let i = 1; i < track.points.length; i++) {
-            ctx.lineTo(track.points[i][0] * width, track.points[i][1] * height);
+            ctx.lineTo(toX(track.points[i][0]), toY(track.points[i][1]));
           }
           ctx.stroke();
         });
@@ -555,20 +679,28 @@ function renderLoop() {
           if (className === 'person' && !config.showPerson) return;
           if (isVehicle && !config.showVehicle) return;
 
-          const { x1, y1, x2, y2 } = det.bbox;
-          const bx1 = x1 * width;
-          const by1 = y1 * height;
-          const bw = (x2 - x1) * width;
-          const bh = (y2 - y1) * height;
+          const { x1, y1, x2, y2 } = getRenderBbox(cameraId, det.track_id, det.bbox, now);
+          const bx1 = toX(x1);
+          const by1 = toY(y1);
+          const bw = (x2 - x1) * cw;
+          const bh = (y2 - y1) * ch;
           const baseColor = config.colors?.boundingBox || (isVehicle ? '#10b981' : '#6366f1');
           const labelColor = isVehicle ? (config.colors?.vehicleId || '#34d399') : (config.colors?.personId || '#38bdf8');
+          // "coasting" = tracker is predicting this box through a missed
+          // detection (occlusion/blur), not drawing from a fresh match this
+          // frame — dashed outline makes that state visible per goal spec's
+          // "Tracking Status" requirement instead of looking identical to a
+          // normal confirmed detection.
+          const isCoasting = det.tracking_status === 'coasting';
 
           // Glow outline
           ctx.shadowColor = baseColor;
           ctx.shadowBlur = 8;
           ctx.strokeStyle = baseColor;
           ctx.lineWidth = config.borderWidth;
+          ctx.setLineDash(isCoasting ? [6, 4] : []);
           ctx.strokeRect(bx1, by1, bw, bh);
+          ctx.setLineDash([]);
           ctx.shadowBlur = 0;
 
           // Corner ticks
@@ -602,8 +734,22 @@ function renderLoop() {
             details.push(`${(det.confidence * 100).toFixed(0)}%`);
           }
 
+          details.push(isCoasting ? 'COASTING' : 'TRACKED');
+
           if (config.showSpeed && det.speed !== undefined && det.speed > 0) {
-            details.push(`${Math.round(det.speed)}km/h`);
+            // speed_calibrated = measured via a real-world-distance speed
+            // gate (two paired lines); otherwise it's the rough per-frame
+            // motion estimate — mark calibrated readings so they read as
+            // trustworthy km/h rather than an approximation.
+            details.push(det.speed_calibrated ? `${Math.round(det.speed)}km/h ✓` : `~${Math.round(det.speed)}km/h`);
+          }
+
+          if (det.direction && det.direction !== 'stationary') {
+            details.push(det.direction);
+          }
+
+          if (isVehicle && det.lane) {
+            details.push(`LANE:${det.lane}`);
           }
 
           const labelText = details.join(' | ');
@@ -641,8 +787,8 @@ function renderLoop() {
             if (trk && trk.points && trk.points.length >= 2) {
               const p1 = trk.points[trk.points.length - 2];
               const p2 = trk.points[trk.points.length - 1];
-              const dx = (p2[0] - p1[0]) * width;
-              const dy = (p2[1] - p1[1]) * height;
+              const dx = (p2[0] - p1[0]) * cw;
+              const dy = (p2[1] - p1[1]) * ch;
               const len = Math.sqrt(dx*dx + dy*dy);
               if (len > 2) {
                 const cx = bx1 + bw / 2;
@@ -697,6 +843,7 @@ function renderLoop() {
         if (telemetry.cpu !== undefined) hudLines.push(`CPU: ${telemetry.cpu.toFixed(0)}%`);
         if (telemetry.memory !== undefined) hudLines.push(`RAM: ${telemetry.memory.toFixed(0)}%`);
         if (telemetry.gpu !== undefined) hudLines.push(`GPU: ${telemetry.gpu.toFixed(0)}%`);
+        if (telemetry.queue_depth !== undefined) hudLines.push(`QUEUE: ${telemetry.queue_depth}`);
       }
       if (config.showPersonCount) {
         hudLines.push(`PEOPLE: ${telemetry.people}`);
@@ -757,11 +904,11 @@ function renderLoop() {
       ctx.fillStyle = preview.mode === 'zone' ? 'rgba(239, 68, 68, 0.2)' : 'transparent';
       
       ctx.beginPath();
-      ctx.moveTo(preview.points[0][0] * width, preview.points[0][1] * height);
+      ctx.moveTo(toX(preview.points[0][0]), toY(preview.points[0][1]));
       for (let i = 1; i < preview.points.length; i++) {
-        ctx.lineTo(preview.points[i][0] * width, preview.points[i][1] * height);
+        ctx.lineTo(toX(preview.points[i][0]), toY(preview.points[i][1]));
       }
-      
+
       if (preview.mode === 'zone' && preview.points.length >= 3) {
         ctx.closePath();
       }
@@ -772,7 +919,7 @@ function renderLoop() {
       preview.points.forEach(([px, py]) => {
         ctx.fillStyle = '#fff';
         ctx.beginPath();
-        ctx.arc(px * width, py * height, 4, 0, Math.PI * 2);
+        ctx.arc(toX(px), toY(py), 4, 0, Math.PI * 2);
         ctx.fill();
       });
     }

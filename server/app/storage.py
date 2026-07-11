@@ -208,12 +208,35 @@ def end_recording_entry(rec_id: str, end_time: str):
 def get_all_recordings():
     with get_db() as conn:
         rows = conn.execute("""
-            SELECT r.*, c.name as camera_name 
+            SELECT r.*, c.name as camera_name
             FROM recordings r
             LEFT JOIN cameras c ON r.camera_id = c.id
             ORDER BY r.start_time DESC
         """, ()).fetchall()
-        return [dict(row) for row in rows]
+        records = [dict(row) for row in rows]
+
+    # Filter out recordings whose file is missing or too small to contain a
+    # valid MP4 container (moov atom etc). This happens when a recorder was
+    # killed ungracefully (crash, force-kill, unclean shutdown) before
+    # cv2.VideoWriter.release() could finalize the file — the DB row exists
+    # and looks legitimate, but the video can never actually play. Without
+    # this filter these show up in the Recordings UI as clickable cards that
+    # open a playback modal with a permanently-broken <video>.
+    # 1KB is comfortably below any real encoded segment (even a single
+    # frame) and comfortably above an empty/header-only stub.
+    MIN_VALID_SIZE_BYTES = 1024
+    valid = []
+    for rec in records:
+        filename = (rec.get("file_path") or "").rsplit("/", 1)[-1]
+        if not filename:
+            continue
+        path = RECORDINGS_DIR / filename
+        try:
+            if path.stat().st_size >= MIN_VALID_SIZE_BYTES:
+                valid.append(rec)
+        except FileNotFoundError:
+            continue
+    return valid
 
 def delete_single_alert(alert_id: str):
     with get_db() as conn:

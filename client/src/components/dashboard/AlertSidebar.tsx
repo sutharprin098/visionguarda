@@ -10,7 +10,7 @@ interface Alert {
   camera_name: string;
   alert_type: string;
   message: string;
-  screenshot_path?: string;
+  screenshot_path?: string | null;
 }
 
 interface AlertSidebarProps {
@@ -48,8 +48,8 @@ export function AlertSidebar({ alerts, onClear }: AlertSidebarProps) {
   };
 
   return (
-    <div className="glass-card flex flex-col h-full border border-brand-500/10 overflow-hidden">
-      <div className="flex items-center justify-between p-4 border-b bg-slate-900/60" style={{ borderColor: 'rgba(99,102,241,0.1)' }}>
+    <div className="panel flex flex-col h-full overflow-hidden">
+      <div className="flex items-center justify-between p-4 border-b border-white/[0.06]">
         <h3 className="text-sm font-semibold text-white">Live Event Timeline</h3>
         {alerts.length > 0 && (
           <button

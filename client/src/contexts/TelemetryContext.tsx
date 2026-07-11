@@ -9,6 +9,11 @@ export interface Telemetry {
     track_id: number | null;
     bbox: { x1: number; y1: number; x2: number; y2: number };
     speed?: number;
+    speed_calibrated?: boolean;
+    tracking_status?: 'tracked' | 'coasting';
+    dwell_time?: number;
+    direction?: string;
+    lane?: string | null;
   }>;
   masks: number[][][]; // normalized polygons [[x,y], ...]
   tracks: Array<{
@@ -36,7 +41,40 @@ export interface Telemetry {
   gpu?: number;
   status: string;
   recording?: boolean;
+  queue_depth?: number;
+  capture_latency?: number;
+  decode_latency?: number;
+  preprocess_latency?: number;
+  inference_latency?: number;
+  postprocess_latency?: number;
+  tracking_latency?: number;
+  rendering_latency?: number;
+  total_latency?: number;
+  bottleneck?: string;
+  backend?: string;
+  device?: string;
+  imgsz?: number;
+  stage_errors?: Record<string, number>;
   line_stats?: Record<string, { in_count: number; out_count: number }>;
+  zone_stats?: Record<string, {
+    people_count: number;
+    vehicles_count: number;
+    items_count: number;
+    occupancy: number;
+    max_occupancy: number;
+    entry_count: number;
+    exit_count: number;
+    avg_dwell_time: number;
+    loitering_count: number;
+    utilization: number;
+    status: 'normal' | 'danger';
+  }>;
+  crowd_stats?: {
+    total_people: number;
+    peak_cell_count: number;
+    density_level: 'low' | 'moderate' | 'high' | 'critical';
+    grid_size: number;
+  };
   profile?: {
     capture_ms: number;
     preprocess_ms: number;
@@ -56,6 +94,7 @@ interface TelemetryContextType {
   sendMessage: (message: any) => void;
   worker: Worker | null;
   profiling?: { [cameraId: string]: { encode_ms: number; send_ms: number; total_ms: number; ts: number } };
+  renderFps: number;
 }
 
 const TelemetryContext = createContext<TelemetryContextType>({
@@ -64,6 +103,7 @@ const TelemetryContext = createContext<TelemetryContextType>({
   sendMessage: () => {},
   worker: null,
   profiling: {},
+  renderFps: 0,
 });
 
 // Per-camera subscription store, kept outside React state on purpose.
@@ -114,6 +154,7 @@ export function TelemetryProvider({ children }: { children: React.ReactNode }) {
   const [worker, setWorker] = useState<Worker | null>(null);
   const workerRef = useRef<Worker | null>(null);
   const [profiling, setProfiling] = useState<{ [cameraId: string]: { encode_ms: number; send_ms: number; total_ms: number; ts: number } }>({});
+  const [renderFps, setRenderFps] = useState(0);
 
   const sendMessage = useCallback((message: any) => {
     if (workerRef.current) {
@@ -171,6 +212,8 @@ export function TelemetryProvider({ children }: { children: React.ReactNode }) {
             setTelemetry(latestTelemetry);
           }, AGGREGATE_THROTTLE_MS - elapsed);
         }
+      } else if (type === 'render_fps') {
+        setRenderFps(event.data.fps || 0);
       } else if (type === 'profiling') {
         try {
           const d = data as any;
@@ -193,7 +236,7 @@ export function TelemetryProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   return (
-    <TelemetryContext.Provider value={{ telemetry, isConnected, sendMessage, worker, profiling }}>
+    <TelemetryContext.Provider value={{ telemetry, isConnected, sendMessage, worker, profiling, renderFps }}>
       {children}
     </TelemetryContext.Provider>
   );

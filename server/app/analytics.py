@@ -2,6 +2,23 @@ import time
 import cv2
 import numpy as np
 
+# Classes treated as "items" for abandoned-object detection — anything that
+# isn't a person or vehicle and can plausibly be left behind. Must stay in
+# sync with the classes enabled in app/ai/backend.py's COCO_CLASS_MAP.
+ITEM_CLASSES = {"backpack", "handbag", "suitcase", "umbrella"}
+VEHICLE_CLASSES = {"car", "bus", "truck", "motorcycle", "bicycle"}
+
+
+def _object_category(class_name: str) -> str:
+    """person | vehicle | item — used everywhere a detection needs to be
+    bucketed for counting/alerting so item-class detections (added for
+    abandoned-object detection) don't silently get miscounted as vehicles."""
+    if class_name in ITEM_CLASSES:
+        return "item"
+    if class_name in VEHICLE_CLASSES:
+        return "vehicle"
+    return "person"
+
 # --- Geometry Utilities ---
 
 def ccw(A, B, C):
@@ -20,6 +37,101 @@ def get_point_line_side(P, A, B):
     return (P[0] - A[0]) * (B[1] - A[1]) - (P[1] - A[1]) * (B[0] - A[0])
 
 
+def segment_crossing_fraction(p1, p2, a, b):
+    """Fraction t in [0,1] along segment p1->p2 where it crosses infinite
+    line a-b, or None if the segment doesn't cross it.
+
+    Used to interpolate the real-world instant a track crossed a speed-gate
+    line, rather than crediting the crossing to whatever timestamp the
+    tracking cycle happened to land on. At highway speeds a vehicle can move
+    a large fraction of the frame between two tracking cycles, so the frame
+    boundary can be a poor stand-in for "when it actually crossed" — this
+    interpolation keeps two-line speed-gate measurements accurate at both
+    low and high tracking frame rates instead of degrading as tracking FPS
+    drops relative to vehicle speed.
+    """
+    if not check_line_intersection(p1, p2, a, b):
+        return None
+    x1, y1 = p1; x2, y2 = p2
+    x3, y3 = a;  x4, y4 = b
+    denom = (x1 - x2) * (y3 - y4) - (y1 - y2) * (x3 - x4)
+    if abs(denom) < 1e-9:
+        return None
+    t = ((x1 - x3) * (y3 - y4) - (y1 - y3) * (x3 - x4)) / denom
+    return float(min(1.0, max(0.0, t)))
+
+
+_DIRECTION_SECTORS = ["E", "NE", "N", "NW", "W", "SW", "S", "SE"]
+_DIRECTION_MIN_DIST = 0.003  # normalized units; below this, motion is just detector/bbox jitter
+
+
+def _direction_label(dx: float, dy: float) -> str:
+    """8-way compass label for a track's recent screen-space motion (N is up).
+    "stationary" when the displacement is too small to be a real heading."""
+    if np.hypot(dx, dy) < _DIRECTION_MIN_DIST:
+        return "stationary"
+    angle = np.degrees(np.arctan2(-dy, dx)) % 360  # -dy: screen y grows downward
+    idx = int(((angle + 22.5) % 360) // 45)
+    return _DIRECTION_SECTORS[idx]
+
+
+def _point_in_zone_shape(px: float, py: float, pts, shape_type: str) -> bool:
+    """True if point (px, py) falls inside a zone's configured shape.
+    Shared by zone occupancy analytics and lane assignment so both agree on
+    exactly the same geometry test."""
+    if shape_type == "circle" and len(pts) >= 2:
+        cx_c, cy_c = pts[0][0], pts[0][1]
+        ex_c, ey_c = pts[1][0], pts[1][1]
+        radius = np.sqrt((ex_c - cx_c) ** 2 + (ey_c - cy_c) ** 2)
+        return np.sqrt((px - cx_c) ** 2 + (py - cy_c) ** 2) <= radius
+    if shape_type in ("rect", "rectangle") and len(pts) >= 2:
+        x1 = min(pts[0][0], pts[1][0]); x2 = max(pts[0][0], pts[1][0])
+        y1 = min(pts[0][1], pts[1][1]); y2 = max(pts[0][1], pts[1][1])
+        return (x1 <= px <= x2) and (y1 <= py <= y2)
+    poly_points = np.array(pts, dtype=np.float32)
+    return cv2.pointPolygonTest(poly_points, (px, py), False) >= 0
+
+
+def _lane_for_point(px: float, py: float, zones) -> str:
+    """Name (or id) of the first zoneType=="lane" zone containing this point,
+    else None. Lanes are just regular zones with zoneType "lane" — no
+    separate lane-editor concept is needed since the zone polygon tool
+    already lets an operator draw one region per lane."""
+    for zone in zones:
+        if zone.get("zoneType") != "lane":
+            continue
+        pts = zone.get("points") or []
+        if len(pts) >= 2 and _point_in_zone_shape(px, py, pts, zone.get("shapeType", "polygon")):
+            return zone.get("name") or zone.get("id")
+    return None
+
+
+class _SpeedKalman1D:
+    """Scalar Kalman filter smoothing a per-frame noisy speed measurement
+    into a stable continuous value.
+
+    Replaces a fixed-weight EMA (0.7 old + 0.3 new), which has one fixed
+    time constant no matter how confident the filter is: too slow and a
+    real speed change reads as "frozen" for several frames, too fast and
+    detector jitter reads as a spike. An adaptive Kalman gain widens when
+    uncertain (converges quickly to a real value/change) and narrows once
+    confident (damps frame-to-frame detector noise) — this is what
+    "Kalman smoothing" for speed means, not just another exponential blend.
+    """
+    __slots__ = ("value", "variance")
+
+    def __init__(self):
+        self.value = 0.0
+        self.variance = 100.0  # high initial uncertainty: first reading should pass through almost unfiltered
+
+    def update(self, measurement: float, process_var: float = 4.0, measurement_var: float = 10.0) -> float:
+        self.variance += process_var
+        k = self.variance / (self.variance + measurement_var)
+        self.value += k * (measurement - self.value)
+        self.variance *= (1.0 - k)
+        return self.value
+
+
 # --- Analytics Engines ---
 
 class CameraAnalytics:
@@ -29,13 +141,46 @@ class CameraAnalytics:
         # Track history: {track_id: list of [x, y] centroids}
         self.track_history = {}
         self.track_history_maxlen = 30
+        # {track_id: list of timestamps}, one per self.track_history entry —
+        # lets line-crossing detection interpolate the real instant a fast
+        # track crossed a line instead of crediting it to the tracking
+        # cycle's timestamp (see segment_crossing_fraction).
+        self.track_history_ts = {}
         
         # New track state mappings
         self.track_classes = {}   # track_id -> class_name
-        self.bbox_history = {}    # track_id -> bbox {x1, y1, x2, y2}
-        self.track_speeds = {}    # track_id -> speed (km/h)
+        self.track_speeds = {}    # track_id -> speed (km/h), Kalman-smoothed
         self.track_last_pts = {}  # track_id -> (timestamp, (cx, cy))
-        
+        self.speed_filters = {}   # track_id -> _SpeedKalman1D
+        # Approximate pixel-to-world scale factor for the uncalibrated speed
+        # estimate below (heuristic — see _update_speed_gate for the actually
+        # calibrated two-line/real-distance measurement, which always takes
+        # priority over this one whenever a camera has a gate configured).
+        self.SPEED_SCALE = 100.0
+        self.SPEED_HARD_CAP = 200.0  # sanity bound only, not a per-class heuristic
+
+        # track_id -> ts this id last appeared in detections. The tracker
+        # (ByteTracker in app/ai/pipeline.py) keeps a track's ID alive across
+        # brief/long occlusion via Kalman coasting + a lost-track re-id
+        # gallery, but only EMITS a track_id in detections on frames it's
+        # actually matched. Without this grace window, a single occluded
+        # frame would wipe this track's history/zone-dwell/EMA state here,
+        # so a re-identified same-ID track would restart from scratch —
+        # defeating the whole point of the tracker preserving the ID.
+        self.track_last_seen = {}
+        self.REID_GRACE_SECONDS = 60.0
+
+        # --- Calibrated speed gates (two-line, known real-world distance) ---
+        # {track_id: (line_id, t_crossed)} — set when a track crosses one
+        # half of a declared speed-gate line pair; cleared once the paired
+        # line is crossed (speed computed) or overwritten by a fresh gate.
+        self.speed_gate_pending = {}
+        # {track_id: {"speed_kmh": float, "ts": float}} — last calibrated
+        # reading for a track. A gate crossing is a one-shot event, not a
+        # continuous measurement, so it's kept visible for a short TTL.
+        self.track_calibrated_speed = {}
+        self.CALIBRATED_SPEED_TTL = 8.0
+
         # Line-crossed tracker to avoid multiple counts: {line_id: set(track_ids)}
         self.crossed_ids = {}
         
@@ -73,6 +218,22 @@ class CameraAnalytics:
         # {line_id: {in_count, out_count}}
         self.line_counters = {}
 
+        # --- Abandoned Object Detection ---
+        self.item_stationary_since = {}  # track_id -> ts when it first became stationary
+        self.abandoned_object_ids = set()  # track_ids currently flagged abandoned
+        self.ABANDONED_DWELL_SECONDS = 15.0
+        self.ABANDONED_MOVEMENT_EPS = 0.02   # normalized max-spread over recent history to count as "stationary"
+        self.PERSON_PROXIMITY = 0.15         # normalized distance under which a person "owns" a nearby item
+
+        # --- Crowd Density Estimation ---
+        # Grids the whole frame (independent of any drawn zone) so local
+        # crowding is caught anywhere, not only inside a manually-configured
+        # zone polygon. Density is measured as peak people-per-cell rather
+        # than total frame count, since a scattered crowd of 20 and a
+        # packed cluster of 20 in one corner are very different situations.
+        self.CROWD_GRID = 4  # 4x4 cells
+        self.CROWD_THRESHOLDS = {"moderate": 3, "high": 6, "critical": 10}  # people per cell
+
     def update(self, detections, zones, lines, frame_w: int = 640, frame_h: int = 480):
         active_track_ids = set()
         alerts = []
@@ -100,6 +261,7 @@ class CameraAnalytics:
             l_id = line["id"]
             if l_id not in self.line_counters:
                 self.line_counters[l_id] = {"in_count": 0, "out_count": 0}
+        lines_by_id = {line["id"]: line for line in lines}
 
         # Process active detections
         for det in detections:
@@ -112,66 +274,165 @@ class CameraAnalytics:
             active_track_ids.add(track_id)
             self.track_classes[track_id] = class_name
             
+            # bbox arrives already Kalman-filtered by the tracker (see
+            # PipelineCoordinator._tracking_loop_iteration) — no further
+            # smoothing here. An EMA pass used to run on this box too; two
+            # independent smoothers in series is what produced a box that
+            # visibly trailed behind fast-moving objects instead of staying
+            # locked to them.
             bbox = det["bbox"]
-            
-            # EMA Smoothing
-            if track_id in self.bbox_history:
-                alpha = 0.5
-                old_bbox = self.bbox_history[track_id]
-                bbox["x1"] = int(alpha * bbox["x1"] + (1 - alpha) * old_bbox["x1"])
-                bbox["y1"] = int(alpha * bbox["y1"] + (1 - alpha) * old_bbox["y1"])
-                bbox["x2"] = int(alpha * bbox["x2"] + (1 - alpha) * old_bbox["x2"])
-                bbox["y2"] = int(alpha * bbox["y2"] + (1 - alpha) * old_bbox["y2"])
-            self.bbox_history[track_id] = bbox
-            
+
             # Centroid
             cx = (bbox["x1"] + bbox["x2"]) / 2.0 / frame_w
             cy = (bbox["y1"] + bbox["y2"]) / 2.0 / frame_h
             bottom_x = cx
             bottom_y = bbox["y2"] / frame_h  # bottom edge collision point
             
-            # Speed Estimation
-            speed = 0.0
+            # Speed Estimation — raw per-frame pixel displacement fed through
+            # a Kalman filter (_SpeedKalman1D) instead of a fixed-weight EMA,
+            # so the displayed value tracks real speed changes continuously
+            # without spiking on single-frame detector noise or visibly
+            # freezing while the true speed is changing. This heuristic
+            # estimate (SPEED_SCALE is an approximate, uncalibrated pixel-
+            # to-world factor) is overridden below whenever a calibrated
+            # two-line real-distance gate reading exists for this track —
+            # see _update_speed_gate / "Apply calibrated speed" further down.
+            speed = self.track_speeds.get(track_id, 0.0)
             if track_id in self.track_last_pts:
                 last_time, (last_cx, last_cy) = self.track_last_pts[track_id]
                 dt = now - last_time
-                if dt >= 0.1:
+                MIN_DT = 0.02  # guards only against near-zero dt, not a throttle on update rate
+                if dt >= MIN_DT:
                     dx = cx - last_cx
                     dy = cy - last_cy
                     dist = np.sqrt(dx*dx + dy*dy)
-                    raw_speed = (dist / dt) * 100.0 / (cy + 0.2)
-                    
-                    if class_name == "person":
-                        raw_speed = min(raw_speed * 0.15, 15.0)
-                    else:
-                        raw_speed = min(raw_speed * 0.6, 120.0)
-                        
-                    if raw_speed < 1.5:
-                        raw_speed = 0.0
-                        
-                    prev_speed = self.track_speeds.get(track_id, 0.0)
-                    speed = 0.7 * prev_speed + 0.3 * raw_speed
+                    raw_speed = min((dist / dt) * self.SPEED_SCALE / (cy + 0.2), self.SPEED_HARD_CAP)
+                    filt = self.speed_filters.setdefault(track_id, _SpeedKalman1D())
+                    speed = max(0.0, filt.update(raw_speed))
                     self.track_speeds[track_id] = speed
                     self.track_last_pts[track_id] = (now, (cx, cy))
-                else:
-                    speed = self.track_speeds.get(track_id, 0.0)
             else:
                 self.track_last_pts[track_id] = (now, (cx, cy))
+                self.speed_filters[track_id] = _SpeedKalman1D()
                 self.track_speeds[track_id] = 0.0
-            
-            det["speed"] = speed
-            
+
+            det["speed"] = round(float(speed), 1)
+
+            # Direction: 8-way compass label from recent screen-space motion.
+            last_pt = self.track_history[track_id][-1] if self.track_history.get(track_id) else None
+            det["direction"] = _direction_label(cx - last_pt[0], cy - last_pt[1]) if last_pt else "stationary"
+
+            # Lane: name/id of the zoneType=="lane" zone (if any) this
+            # detection's centroid currently falls inside.
+            det["lane"] = _lane_for_point(cx, cy, zones)
+
             # Update Track History
             if track_id not in self.track_history:
                 self.track_history[track_id] = []
+                self.track_history_ts[track_id] = []
             self.track_history[track_id].append([cx, cy])
+            self.track_history_ts[track_id].append(now)
             if len(self.track_history[track_id]) > self.track_history_maxlen:
                 self.track_history[track_id].pop(0)
+                self.track_history_ts[track_id].pop(0)
 
             # Accumulate Heatmap
             grid_x = min(max(int(cx * 32), 0), 31)
             grid_y = min(max(int(cy * 32), 0), 31)
             self.heatmap_grid[grid_y, grid_x] += 0.5
+
+            self.track_last_seen[track_id] = now
+
+        # IDs still "in grace" — either detected this frame, or occluded
+        # recently enough that the tracker may still re-identify them under
+        # the same id. Zone occupancy below uses this (not just this frame's
+        # active_track_ids) so a momentarily-occluded track's last known
+        # position keeps counting as "inside", instead of registering a
+        # spurious zone-exit/re-entry the instant it's out of view.
+        tracked_ids_in_grace = {
+            tid for tid in self.track_history
+            if now - self.track_last_seen.get(tid, 0) <= self.REID_GRACE_SECONDS
+        }
+
+        # --- Abandoned Object Detection ---
+        # An item-class track (bag/suitcase/backpack/umbrella) that stops
+        # moving and has no person within proximity for longer than
+        # ABANDONED_DWELL_SECONDS is flagged. Stationarity is measured as the
+        # spread of its recent centroid history rather than frame-to-frame
+        # delta so normal detector/bbox jitter doesn't reset the timer.
+        person_positions = [
+            self.track_history[tid][-1]
+            for tid in active_track_ids
+            if self.track_classes.get(tid) == "person" and self.track_history.get(tid)
+        ]
+
+        # --- Crowd Density Estimation ---
+        grid_n = self.CROWD_GRID
+        density_grid = np.zeros((grid_n, grid_n), dtype=np.int32)
+        for px, py in person_positions:
+            gx = min(grid_n - 1, max(0, int(px * grid_n)))
+            gy = min(grid_n - 1, max(0, int(py * grid_n)))
+            density_grid[gy, gx] += 1
+        peak_cell_count = int(density_grid.max()) if density_grid.size else 0
+        if peak_cell_count >= self.CROWD_THRESHOLDS["critical"]:
+            density_level = "critical"
+        elif peak_cell_count >= self.CROWD_THRESHOLDS["high"]:
+            density_level = "high"
+        elif peak_cell_count >= self.CROWD_THRESHOLDS["moderate"]:
+            density_level = "moderate"
+        else:
+            density_level = "low"
+        crowd_stats = {
+            "total_people": len(person_positions),
+            "peak_cell_count": peak_cell_count,
+            "density_level": density_level,
+            "grid_size": grid_n,
+        }
+        if density_level in ("high", "critical"):
+            alert_key = "crowd_density"
+            cooldown = 5.0 if density_level == "critical" else 15.0
+            if now - self.alert_cooldowns.get(alert_key, 0) > cooldown:
+                alerts.append({
+                    "type": "crowd_density",
+                    "message": f"Crowd density {density_level}: {peak_cell_count} people clustered in one area "
+                               f"({len(person_positions)} total in frame)",
+                })
+                self.alert_cooldowns[alert_key] = now
+
+        for tid in active_track_ids:
+            cls_name = self.track_classes.get(tid)
+            if cls_name not in ITEM_CLASSES:
+                continue
+            hist = self.track_history.get(tid, [])
+            if len(hist) < 5:
+                continue
+            recent = np.array(hist[-10:])
+            spread = float(np.max(recent.max(axis=0) - recent.min(axis=0)))
+            if spread > self.ABANDONED_MOVEMENT_EPS:
+                self.item_stationary_since.pop(tid, None)
+                self.abandoned_object_ids.discard(tid)
+                continue
+            if tid not in self.item_stationary_since:
+                self.item_stationary_since[tid] = now
+                continue
+            stationary_for = now - self.item_stationary_since[tid]
+            if stationary_for < self.ABANDONED_DWELL_SECONDS:
+                continue
+            px, py = hist[-1]
+            has_owner_nearby = any(
+                np.hypot(px - ppx, py - ppy) < self.PERSON_PROXIMITY for ppx, ppy in person_positions
+            )
+            if has_owner_nearby:
+                self.abandoned_object_ids.discard(tid)
+                continue
+            self.abandoned_object_ids.add(tid)
+            alert_key = f"abandoned_{tid}"
+            if now - self.alert_cooldowns.get(alert_key, 0) > 20.0:
+                alerts.append({
+                    "type": "abandoned_object",
+                    "message": f"{cls_name.capitalize()} (ID: {tid}) left unattended for {int(stationary_for)}s",
+                })
+                self.alert_cooldowns[alert_key] = now
 
         # --- Advanced Zone Analytics ---
         zone_stats = {}
@@ -186,11 +447,14 @@ class CameraAnalytics:
             
             self.zone_total_frames[z_id] += 1
             
-            # 1. Identify which active tracks are inside this zone
+            # 1. Identify which active tracks are inside this zone. Uses
+            # tracked_ids_in_grace (not just this frame's active_track_ids)
+            # so a track occluded mid-zone keeps its last known position
+            # counted as "inside" instead of falsely exiting/re-entering.
             tracks_inside_this_frame = set()
-            
+
             if len(pts) >= 2:
-                for track_id in active_track_ids:
+                for track_id in tracked_ids_in_grace:
                     hist = self.track_history.get(track_id, [])
                     if not hist:
                         continue
@@ -198,31 +462,15 @@ class CameraAnalytics:
                     px = hist[-1][0]
                     py = hist[-1][1]
                     
-                    is_inside = False
-                    if shape_type == "circle" and len(pts) >= 2:
-                        # Circle is defined by center pts[0] and edge pts[1]
-                        cx_c, cy_c = pts[0][0], pts[0][1]
-                        ex_c, ey_c = pts[1][0], pts[1][1]
-                        radius = np.sqrt((ex_c - cx_c)**2 + (ey_c - cy_c)**2)
-                        dist = np.sqrt((px - cx_c)**2 + (py - cy_c)**2)
-                        is_inside = dist <= radius
-                    elif shape_type in ["rect", "rectangle"] and len(pts) >= 2:
-                        x1 = min(pts[0][0], pts[1][0])
-                        x2 = max(pts[0][0], pts[1][0])
-                        y1 = min(pts[0][1], pts[1][1])
-                        y2 = max(pts[0][1], pts[1][1])
-                        is_inside = (x1 <= px <= x2) and (y1 <= py <= y2)
-                    else:
-                        # Polygon or Freehand Zone
-                        poly_points = np.array(pts, dtype=np.float32)
-                        is_inside = cv2.pointPolygonTest(poly_points, (px, py), False) >= 0
-                        
+                    is_inside = _point_in_zone_shape(px, py, pts, shape_type)
+
                     if is_inside:
                         tracks_inside_this_frame.add(track_id)
             
             # 2. Compute Entry, Exit, and Dwell metrics
             people_count = 0
             vehicles_count = 0
+            items_count = 0
             loitering_count = 0
             
             current_active = self.zone_active_tracks[z_id] # track_id -> enter_time
@@ -235,8 +483,8 @@ class CameraAnalytics:
                     
                     # Entry alerts
                     class_name = self.track_classes.get(tid, "person")
-                    is_vehicle = class_name in ["car", "bus", "truck", "motorcycle", "bicycle"]
-                    alert_type = "vehicle_entry" if is_vehicle else "human_entry"
+                    category = _object_category(class_name)
+                    alert_type = {"vehicle": "vehicle_entry", "item": "item_entry"}.get(category, "human_entry")
                     
                     alert_key = f"{alert_type}_{z_id}_{tid}"
                     if now - self.alert_cooldowns.get(alert_key, 0) > self.cooldown_period:
@@ -264,10 +512,13 @@ class CameraAnalytics:
             # Current class classification inside zone
             for tid in tracks_inside_this_frame:
                 cls_name = self.track_classes.get(tid, "person")
-                if cls_name == "person":
+                category = _object_category(cls_name)
+                if category == "person":
                     people_count += 1
-                else:
+                elif category == "vehicle":
                     vehicles_count += 1
+                else:
+                    items_count += 1
                 
                 # Check loitering
                 enter_t = current_active.get(tid, now)
@@ -284,7 +535,7 @@ class CameraAnalytics:
                         self.alert_cooldowns[alert_key] = now
 
             # Overcrowding / Occupancy stats
-            occupancy = people_count + vehicles_count
+            occupancy = people_count + vehicles_count + items_count
             if occupancy > 0:
                 self.zone_occupied_frames[z_id] += 1
                 
@@ -331,6 +582,7 @@ class CameraAnalytics:
             zone_stats[z_id] = {
                 "people_count": people_count,
                 "vehicles_count": vehicles_count,
+                "items_count": items_count,
                 "occupancy": occupancy,
                 "max_occupancy": self.zone_max_occupancy[z_id],
                 "entry_count": self.zone_entry_counts[z_id],
@@ -367,28 +619,47 @@ class CameraAnalytics:
                     
                 p_prev = hist[-2]
                 p_curr = hist[-1]
-                
+
                 # Check line intersection
                 if check_line_intersection(p_prev, p_curr, A, B):
                     self.crossed_ids[l_id].add(track_id)
-                    
+
+                    # Interpolate the real instant of crossing along the
+                    # prev->curr motion instead of using this tracking
+                    # cycle's timestamp — see segment_crossing_fraction.
+                    ts_hist = self.track_history_ts.get(track_id, [])
+                    if len(ts_hist) >= 2:
+                        frac = segment_crossing_fraction(p_prev, p_curr, A, B)
+                        ts_prev, ts_curr = ts_hist[-2], ts_hist[-1]
+                        crossing_ts = ts_prev + (frac if frac is not None else 1.0) * (ts_curr - ts_prev)
+                    else:
+                        crossing_ts = now
+
+                    self._update_speed_gate(track_id, l_id, line, lines_by_id, crossing_ts)
+
                     side_prev = get_point_line_side(p_prev, A, B)
                     side_curr = get_point_line_side(p_curr, A, B)
                     
                     class_name = self.track_classes.get(track_id, "person")
-                    is_vehicle = class_name in ["car", "bus", "truck", "motorcycle", "bicycle"]
-                    
+                    category = _object_category(class_name)
+                    is_vehicle = category == "vehicle"
+                    is_item = category == "item"
+
                     # Crossing events
                     is_in = side_prev < 0 <= side_curr
                     is_out = side_prev > 0 >= side_curr
-                    
+
                     if is_in:
                         self.line_counters[l_id]["in_count"] += 1
+                        # Items (bags, etc.) crossing a line are tallied in the
+                        # per-line total below but excluded from the global
+                        # people/vehicle in-out counters — they're neither.
                         if is_vehicle:
                             self.counter_in_vehicle += 1
-                        else:
+                            self.counter_in += 1
+                        elif not is_item:
                             self.counter_in_person += 1
-                        self.counter_in += 1
+                            self.counter_in += 1
                         
                         # Raise Alert
                         alert_key = f"crossing_{l_id}_{track_id}"
@@ -404,9 +675,10 @@ class CameraAnalytics:
                         self.line_counters[l_id]["out_count"] += 1
                         if is_vehicle:
                             self.counter_out_vehicle += 1
-                        else:
+                            self.counter_out += 1
+                        elif not is_item:
                             self.counter_out_person += 1
-                        self.counter_out += 1
+                            self.counter_out += 1
                         
                         # Wrong Direction / Reverse checks
                         if line_type in ["one_way", "wrong_direction"]:
@@ -435,14 +707,37 @@ class CameraAnalytics:
                 "total_count": self.line_counters[l_id]["in_count"] + self.line_counters[l_id]["out_count"]
             }
 
-        # Cleanup disappeared tracks (avoid memory leaks)
-        dead_tracks = [tid for tid in list(self.track_history.keys()) if tid not in active_track_ids]
+        # --- Apply calibrated (real-world) speed over the heuristic estimate ---
+        # A gate crossing is a one-shot event, so the reading stays visible
+        # for CALIBRATED_SPEED_TTL seconds after being measured instead of
+        # only flashing for the single frame it was computed on.
+        for det in detections:
+            track_id = det.get("track_id")
+            if track_id is None:
+                continue
+            calibrated = self.track_calibrated_speed.get(track_id)
+            if calibrated and now - calibrated["ts"] <= self.CALIBRATED_SPEED_TTL:
+                det["speed"] = round(calibrated["speed_kmh"], 1)
+                det["speed_calibrated"] = True
+            else:
+                det["speed_calibrated"] = False
+
+        # Cleanup tracks that have been gone long enough to be presumed
+        # permanently gone (not just occluded — see REID_GRACE_SECONDS /
+        # tracked_ids_in_grace above, which must stay in sync with this).
+        dead_tracks = [tid for tid in list(self.track_history.keys()) if tid not in tracked_ids_in_grace]
         for tid in dead_tracks:
             if tid in self.track_history: del self.track_history[tid]
+            self.track_history_ts.pop(tid, None)
             if tid in self.track_classes: del self.track_classes[tid]
-            if tid in self.bbox_history: del self.bbox_history[tid]
             if tid in self.track_speeds: del self.track_speeds[tid]
             if tid in self.track_last_pts: del self.track_last_pts[tid]
+            self.speed_filters.pop(tid, None)
+            self.track_last_seen.pop(tid, None)
+            self.item_stationary_since.pop(tid, None)
+            self.abandoned_object_ids.discard(tid)
+            self.speed_gate_pending.pop(tid, None)
+            self.track_calibrated_speed.pop(tid, None)
 
             # Clean active track zone bindings
             for z_id in self.zone_active_tracks:
@@ -478,7 +773,48 @@ class CameraAnalytics:
         # Serialize heatmap grid
         heatmap_list = self.heatmap_grid.tolist()
 
-        return alerts, track_overlays, heatmap_list, zone_stats, line_stats
+        return alerts, track_overlays, heatmap_list, zone_stats, line_stats, crowd_stats
+
+    def _update_speed_gate(self, track_id, l_id, line, lines_by_id, crossing_ts):
+        """Two-line, known-real-world-distance speed measurement.
+
+        Same method used by line-crossing vehicle speed estimators (e.g.
+        YOLO+DeepSORT speed-gate projects): a track's speed is measured once
+        it crosses two lines a known distance_m apart on the ground —
+        speed_kmh = (distance_m / dt) * 3.6. A line declares its gate
+        partner via speedPairId (the other line's id) and carries the real
+        distance between the two lines in distanceM (meters).
+
+        crossing_ts is the interpolated instant of this crossing (see
+        segment_crossing_fraction), not just the tracking cycle's timestamp —
+        this keeps dt (and therefore speed_kmh) accurate even when a fast
+        vehicle covers a large fraction of the frame between cycles.
+        """
+        pending = self.speed_gate_pending.get(track_id)
+        if pending is None:
+            self.speed_gate_pending[track_id] = (l_id, crossing_ts)
+            return
+
+        prev_line_id, t1 = pending
+        if prev_line_id == l_id:
+            return  # re-crossed the same line without hitting its pair yet
+
+        prev_line = lines_by_id.get(prev_line_id)
+        paired = (
+            (prev_line is not None and prev_line.get("speedPairId") == l_id)
+            or line.get("speedPairId") == prev_line_id
+        )
+        if not paired:
+            # Not a declared gate pair — treat this crossing as a fresh gate start.
+            self.speed_gate_pending[track_id] = (l_id, crossing_ts)
+            return
+
+        distance_m = line.get("distanceM") or (prev_line.get("distanceM") if prev_line else None)
+        dt = crossing_ts - t1
+        if distance_m and dt >= 0.02:
+            speed_kmh = (float(distance_m) / dt) * 3.6
+            self.track_calibrated_speed[track_id] = {"speed_kmh": speed_kmh, "ts": crossing_ts}
+        del self.speed_gate_pending[track_id]
 
     def reset_counters(self):
         self.counter_in = 0
@@ -496,3 +832,5 @@ class CameraAnalytics:
         self.zone_total_frames.clear()
         self.line_counters.clear()
         self.crossed_ids.clear()
+        self.speed_gate_pending.clear()
+        self.track_calibrated_speed.clear()

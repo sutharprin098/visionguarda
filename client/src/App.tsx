@@ -3,10 +3,14 @@ import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Sidebar } from './components/layout/Sidebar';
 import Dashboard from './pages/Dashboard';
-import LiveCamera from './pages/LiveCamera';
-import ScreenShareDetection from './pages/ScreenShareDetection';
-import HistoryPage from './pages/History';
-import APILogsPage from './pages/APILogs';
+import LiveMonitoring from './pages/LiveMonitoring';
+import Cameras from './pages/Cameras';
+import AIAnalytics from './pages/AIAnalytics';
+import Events from './pages/Events';
+import Alerts from './pages/Alerts';
+import Recordings from './pages/Recordings';
+import Reports from './pages/Reports';
+import Users from './pages/Users';
 import SettingsPage from './pages/Settings';
 import { useTheme } from './hooks/useTheme';
 import { TelemetryProvider } from './contexts/TelemetryContext';
@@ -21,7 +25,6 @@ const queryClient = new QueryClient({
 });
 
 function AppInner() {
-  // Apply theme class to document root
   useTheme();
 
   return (
@@ -31,10 +34,14 @@ function AppInner() {
         <main className="flex-1 overflow-hidden flex flex-col min-w-0">
           <Routes>
             <Route path="/" element={<Dashboard />} />
-            <Route path="/camera" element={<LiveCamera />} />
-            <Route path="/screenshare" element={<ScreenShareDetection />} />
-            <Route path="/history" element={<HistoryPage />} />
-            <Route path="/logs" element={<APILogsPage />} />
+            <Route path="/live" element={<LiveMonitoring />} />
+            <Route path="/cameras" element={<Cameras />} />
+            <Route path="/analytics" element={<AIAnalytics />} />
+            <Route path="/events" element={<Events />} />
+            <Route path="/alerts" element={<Alerts />} />
+            <Route path="/recordings" element={<Recordings />} />
+            <Route path="/reports" element={<Reports />} />
+            <Route path="/users" element={<Users />} />
             <Route path="/settings" element={<SettingsPage />} />
           </Routes>
         </main>

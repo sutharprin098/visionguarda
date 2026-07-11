@@ -7,6 +7,7 @@ import threading
 from collections import deque
 import numpy as np
 from uuid import uuid4
+from scipy.optimize import linear_sum_assignment
 
 from app.ai.backend import EngineBackend
 from app.storage import insert_alert, insert_history_record
@@ -68,40 +69,175 @@ class LightweightKalmanFilter:
         return [cx - w/2, cy - h/2, cx + w/2, cy + h/2]
 
 
+class AppearanceEmbedder:
+    """
+    Fast HSV color-histogram appearance descriptor used for re-identification.
+
+    A full deep ReID network would be more discriminative but costs a second
+    model forward pass per detection on every frame, which does not fit the
+    sub-10ms/frame latency budget this pipeline is held to (see
+    project_pipeline_rebuild_complete memory: 9.6ms avg). A coarse HSV
+    histogram is ~cheap (small crop, single cv2.calcHist call) and is more
+    than sufficient to disambiguate "is this the same person/vehicle that
+    was just occluded" from "is this a different object entirely" — it only
+    has to survive short gaps, not lifetime cross-camera re-identification.
+    """
+    _H_BINS, _S_BINS, _V_BINS = 8, 8, 4
+
+    @staticmethod
+    def extract(frame, bbox):
+        if frame is None:
+            return None
+        h, w = frame.shape[:2]
+        x1 = max(0, min(w - 1, int(bbox[0]))); x2 = max(x1 + 1, min(w, int(bbox[2])))
+        y1 = max(0, min(h - 1, int(bbox[1]))); y2 = max(y1 + 1, min(h, int(bbox[3])))
+        crop = frame[y1:y2, x1:x2]
+        if crop.size == 0:
+            return None
+        crop = cv2.resize(crop, (32, 64), interpolation=cv2.INTER_LINEAR)
+        hsv = cv2.cvtColor(crop, cv2.COLOR_BGR2HSV)
+        hist = cv2.calcHist(
+            [hsv], [0, 1, 2], None,
+            [AppearanceEmbedder._H_BINS, AppearanceEmbedder._S_BINS, AppearanceEmbedder._V_BINS],
+            [0, 180, 0, 256, 0, 256],
+        )
+        cv2.normalize(hist, hist, alpha=1.0, norm_type=cv2.NORM_L1)
+        return hist.flatten().astype(np.float32)
+
+    @staticmethod
+    def distance(a, b):
+        """0.0 = identical appearance, 1.0 = maximally different. 1.0 (worst) if either is missing."""
+        if a is None or b is None:
+            return 1.0
+        d = cv2.compareHist(a, b, cv2.HISTCMP_BHATTACHARYYA)
+        if not np.isfinite(d):
+            return 1.0
+        return float(np.clip(d, 0.0, 1.0))
+
+
 class Track:
-    def __init__(self, track_id, bbox, class_name, confidence):
+    """
+    A single tracked object. Combines Kalman motion prediction with an
+    EMA-smoothed appearance embedding and a majority-vote class label so
+    that transient detector noise (a one-frame misclassification, a jittery
+    box) never forces an ID change — the goal is one stable ID for the
+    object's entire time in view, not one ID per detection streak.
+    """
+    def __init__(self, track_id, bbox, class_name, confidence, embedding=None, n_init=2):
         self.track_id   = track_id
         self.class_name = class_name
+        self._class_votes = deque([class_name], maxlen=7)
         self.confidence = confidence
         self.kf = LightweightKalmanFilter(bbox)
         self.time_since_update = 0
         self.hits = 1
         self.age  = 1
+        self.n_init = n_init
+        # Tentative tracks are held back from telemetry output until they
+        # accumulate n_init hits — this is what stops a single spurious
+        # detection from ever being handed out as a "new" ID.
+        self.state = "tentative" if n_init > 1 else "confirmed"
+        self.embedding = embedding
+        now = time.time()
+        self.first_seen = now
+        self.last_seen  = now
 
     def predict(self):
         self.age += 1
-        if self.time_since_update > 0:
-            self.hits = 0
         self.time_since_update += 1
         return self.kf.predict()
 
-    def update(self, bbox, confidence):
+    def _vote_class(self, class_name):
+        if class_name:
+            self._class_votes.append(class_name)
+            self.class_name = max(set(self._class_votes), key=self._class_votes.count)
+
+    def _blend_embedding(self, embedding, new_weight):
+        if embedding is None:
+            return
+        if self.embedding is None:
+            self.embedding = embedding
+            return
+        blended = (1.0 - new_weight) * self.embedding + new_weight * embedding
+        norm = np.linalg.norm(blended)
+        self.embedding = blended / norm if norm > 1e-6 else blended
+
+    def update(self, bbox, confidence, embedding=None, class_name=None):
         self.time_since_update = 0
         self.hits += 1
         self.confidence = confidence
+        self.last_seen = time.time()
         self.kf.update(bbox)
+        self._vote_class(class_name)
+        self._blend_embedding(embedding, new_weight=0.15)
+        if self.state == "tentative" and self.hits >= self.n_init:
+            self.state = "confirmed"
+
+    def revive(self, bbox, confidence, embedding, class_name):
+        """Re-activate a track pulled from the lost gallery under its ORIGINAL id.
+
+        This is the re-identification path: the object was gone long enough
+        to leave the short-term occlusion window, but a new detection's
+        appearance matched it closely enough (see ByteTracker._reid_gate) to
+        be confident it's the same object, not a new one.
+        """
+        self.kf = LightweightKalmanFilter(bbox)
+        self.time_since_update = 0
+        self.hits += 1
+        self.confidence = confidence
+        self.last_seen = time.time()
+        self.state = "confirmed"
+        self._vote_class(class_name)
+        self._blend_embedding(embedding, new_weight=0.35)
 
     def get_bbox(self):
         return self.kf.get_bbox()
 
 
 class ByteTracker:
-    def __init__(self, max_lost_frames=90):
-        self.max_lost_frames = max_lost_frames
-        self.tracks = []
+    """
+    Multi-object tracker built for ID persistence under occlusion, overlap,
+    stopping, and lighting change:
+
+      1. Kalman constant-velocity motion prediction per track (unchanged).
+      2. Optimal (Hungarian / scipy linear_sum_assignment) data association
+         instead of greedy nearest-match — greedy matching is a well-known
+         source of avoidable ID switches whenever two tracks' candidate
+         detections overlap in ambiguous ways (crowds, crossing paths).
+      3. Appearance re-identification: every detection gets an HSV-histogram
+         embedding; association cost fuses IoU with appearance distance, and
+         weighting shifts toward appearance the longer a track has gone
+         unmatched (motion prediction alone drifts increasingly wrong the
+         longer an object is occluded).
+      4. A "lost gallery": tracks that exceed the short active-occlusion
+         window move into long-term memory (id, last embedding, class,
+         first_seen) instead of being deleted. New detections that don't
+         match any active track are checked against the gallery — on an
+         appearance + spatial match, the ORIGINAL id is revived rather than
+         minting a new one. This is what lets an object that fully leaves
+         Kalman's prediction window (walked behind a truck for 4 seconds,
+         say) keep its ID when it reappears.
+    """
+
+    # Bhattacharyya distance threshold for gallery re-identification. Same
+    # object under consistent lighting typically lands well under this;
+    # different objects (even same clothing color family) typically clear it.
+    _REID_APPEARANCE_GATE = 0.40
+    # Cap how far (as a fraction of the frame diagonal) a revived track's new
+    # position may be from its last known position — appearance alone is not
+    # discriminative enough to safely re-identify across the whole frame.
+    _REID_SPATIAL_GATE = 0.5
+
+    def __init__(self, max_lost_frames=45, reid_ttl=60.0, n_init=2):
+        self.max_lost_frames = max_lost_frames  # frames a track stays actively coasted before moving to the gallery
+        self.reid_ttl        = reid_ttl         # seconds a track stays re-identifiable in the gallery
+        self.n_init          = n_init
+        self.tracks = []          # active + short-term-occluded (predicted every frame)
+        self.lost_gallery = {}    # track_id -> Track, long-term re-id memory
         self.next_track_id = 1
 
-    def _compute_iou(self, boxA, boxB):
+    @staticmethod
+    def _compute_iou(boxA, boxB):
         xA = max(boxA[0], boxB[0]); yA = max(boxA[1], boxB[1])
         xB = min(boxA[2], boxB[2]); yB = min(boxA[3], boxB[3])
         inter = max(0.0, xB - xA) * max(0.0, yB - yA)
@@ -109,49 +245,131 @@ class ByteTracker:
         areaB = (boxB[2]-boxB[0]) * (boxB[3]-boxB[1])
         return inter / max(1.0, areaA + areaB - inter)
 
-    def update(self, detections, frame_shape=None, conf_thresh=0.25):
+    @staticmethod
+    def _hungarian_match(tracks, dets, iou_gate, w_iou, w_app, app_gate=None, spatial_gate=None, frame_diag=None):
+        """Optimal assignment on a fused IoU + appearance cost, with hard gates.
+
+        Invalid pairs (class mismatch, or failing a gate) get a sentinel cost
+        strictly above any achievable real cost (max 1.0), so Hungarian only
+        ever falls back to them when no valid pairing exists to complete the
+        assignment — then the post-hoc validity check discards those.
+        """
+        n_t, n_d = len(tracks), len(dets)
+        if n_t == 0 or n_d == 0:
+            return [], [], list(range(n_t)), list(range(n_d))
+        INVALID = 10.0
+        cost  = np.full((n_t, n_d), INVALID, dtype=np.float32)
+        for ti, t in enumerate(tracks):
+            tb = t.get_bbox()
+            for di, d in enumerate(dets):
+                if t.class_name != d["class"]:
+                    continue
+                iou = ByteTracker._compute_iou(tb, d["bbox"])
+                if iou < iou_gate:
+                    continue
+                app_d = AppearanceEmbedder.distance(t.embedding, d["embedding"])
+                if app_gate is not None and app_d > app_gate:
+                    continue
+                if spatial_gate is not None and frame_diag:
+                    tcx, tcy = (tb[0] + tb[2]) / 2.0, (tb[1] + tb[3]) / 2.0
+                    dcx, dcy = (d["bbox"][0] + d["bbox"][2]) / 2.0, (d["bbox"][1] + d["bbox"][3]) / 2.0
+                    dist = np.hypot(tcx - dcx, tcy - dcy) / frame_diag
+                    if dist > spatial_gate:
+                        continue
+                cost[ti, di] = w_iou * (1.0 - iou) + w_app * app_d
+        row_ind, col_ind = linear_sum_assignment(cost)
+        m_t, m_d = [], []
+        unmatched_t, unmatched_d = set(range(n_t)), set(range(n_d))
+        for r, c in zip(row_ind, col_ind):
+            if cost[r, c] >= INVALID:
+                continue
+            m_t.append(r); m_d.append(c)
+            unmatched_t.discard(r); unmatched_d.discard(c)
+        return m_t, m_d, sorted(unmatched_t), sorted(unmatched_d)
+
+    def update(self, detections, frame=None, frame_shape=None, conf_thresh=0.25):
         for t in self.tracks:
             t.predict()
 
-        high_dets = []; low_dets = []
+        high_dets, low_dets = [], []
         for det in detections:
             b = det["bbox"]
-            item = {"bbox": [b["x1"], b["y1"], b["x2"], b["y2"]],
-                    "class": det["class"], "confidence": det["confidence"]}
-            (high_dets if det["confidence"] >= conf_thresh else
-             low_dets  if det["confidence"] >= 0.08 else []).append(item)
+            bbox = [b["x1"], b["y1"], b["x2"], b["y2"]]
+            embedding = AppearanceEmbedder.extract(frame, bbox)
+            item = {"bbox": bbox, "class": det["class"], "confidence": det["confidence"], "embedding": embedding}
+            if det["confidence"] >= conf_thresh:
+                high_dets.append(item)
+            elif det["confidence"] >= 0.08:
+                low_dets.append(item)
 
-        def _greedy_match(tracks, dets, iou_min):
-            matched_t, matched_d = [], []
-            if not tracks or not dets:
-                return matched_t, matched_d
-            mat = np.zeros((len(tracks), len(dets)))
-            for ti, t in enumerate(tracks):
-                for di, d in enumerate(dets):
-                    mat[ti, di] = (self._compute_iou(t.get_bbox(), d["bbox"])
-                                   if t.class_name == d["class"] else -1.0)
-            for _ in range(min(len(tracks), len(dets))):
-                v = mat.max()
-                if v < iou_min:
-                    break
-                ti, di = np.unravel_index(mat.argmax(), mat.shape)
-                tracks[ti].update(dets[di]["bbox"], dets[di]["confidence"])
-                matched_t.append(tracks[ti]); matched_d.append(dets[di])
-                mat[ti, :] = mat[:, di] = -1.0
-            return matched_t, matched_d
+        frame_diag = np.hypot(*frame_shape) if frame_shape else None
 
-        m_tracks, m_high = _greedy_match(list(self.tracks), high_dets, 0.3)
-        rem_tracks = [t for t in self.tracks if t not in m_tracks]
-        rem_high   = [d for d in high_dets   if d not in m_high]
-        _greedy_match(rem_tracks, low_dets, 0.1)
+        # ── Stage 1: freshly-updated tracks — motion is trustworthy, weight IoU ──
+        active_tracks   = [t for t in self.tracks if t.time_since_update <= 1]
+        occluded_tracks = [t for t in self.tracks if t.time_since_update > 1]
 
-        for det in rem_high:
-            self.tracks.append(Track(self.next_track_id, det["bbox"], det["class"], det["confidence"]))
+        m_t, m_d, _, un_d = self._hungarian_match(active_tracks, high_dets, iou_gate=0.2, w_iou=0.75, w_app=0.25)
+        matched_track_objs = set()
+        for ti, di in zip(m_t, m_d):
+            trk, det = active_tracks[ti], high_dets[di]
+            trk.update(det["bbox"], det["confidence"], det["embedding"], det["class"])
+            matched_track_objs.add(id(trk))
+        rem_high   = [high_dets[i] for i in un_d]
+        rem_active = [t for t in active_tracks if id(t) not in matched_track_objs]
+
+        # ── Stage 2: coasting/occluded tracks — motion prediction is drifting,
+        # weight appearance more heavily and loosen the IoU gate ──────────────
+        m_t2, m_d2, un_t2, un_d2 = self._hungarian_match(
+            occluded_tracks, rem_high, iou_gate=0.05, w_iou=0.4, w_app=0.6, app_gate=0.5
+        )
+        for ti, di in zip(m_t2, m_d2):
+            trk, det = occluded_tracks[ti], rem_high[di]
+            trk.update(det["bbox"], det["confidence"], det["embedding"], det["class"])
+            matched_track_objs.add(id(trk))
+        rem_high2 = [rem_high[i] for i in un_d2]
+        rem_unmatched_tracks = rem_active + [occluded_tracks[i] for i in un_t2]
+
+        # ── Stage 3 (ByteTrack second pass): low-confidence detections rescue
+        # remaining unmatched tracks by IoU only ───────────────────────────────
+        m_t3, m_d3, _, _ = self._hungarian_match(rem_unmatched_tracks, low_dets, iou_gate=0.1, w_iou=1.0, w_app=0.0)
+        for ti, di in zip(m_t3, m_d3):
+            trk, det = rem_unmatched_tracks[ti], low_dets[di]
+            trk.update(det["bbox"], det["confidence"], det.get("embedding"), det["class"])
+
+        # ── Stage 4: re-identify remaining detections against the lost gallery
+        # BEFORE minting new ids — the whole point of the gallery ─────────────
+        still_unmatched_high = rem_high2
+        if still_unmatched_high and self.lost_gallery:
+            gallery_ids     = list(self.lost_gallery.keys())
+            gallery_tracks  = [self.lost_gallery[tid] for tid in gallery_ids]
+            g_t, g_d, _, _  = self._hungarian_match(
+                gallery_tracks, still_unmatched_high, iou_gate=0.0, w_iou=0.0, w_app=1.0,
+                app_gate=self._REID_APPEARANCE_GATE,
+                spatial_gate=self._REID_SPATIAL_GATE, frame_diag=frame_diag,
+            )
+            revived_det_idx = set()
+            for ti, di in zip(g_t, g_d):
+                trk, det = gallery_tracks[ti], still_unmatched_high[di]
+                trk.revive(det["bbox"], det["confidence"], det["embedding"], det["class"])
+                self.tracks.append(trk)
+                del self.lost_gallery[trk.track_id]
+                revived_det_idx.add(di)
+            still_unmatched_high = [d for i, d in enumerate(still_unmatched_high) if i not in revived_det_idx]
+
+        # ── New tracks for anything left over ──────────────────────────────────
+        for det in still_unmatched_high:
+            self.tracks.append(Track(self.next_track_id, det["bbox"], det["class"], det["confidence"],
+                                      embedding=det["embedding"], n_init=self.n_init))
             self.next_track_id += 1
 
-        active = []
+        # ── Age out: long-lost active tracks move to the gallery instead of
+        # vanishing; edge-exits (object left frame, not occluded) are dropped
+        # outright since they are genuinely gone, not re-identifiable ─────────
+        still_active = []
         for t in self.tracks:
             if t.time_since_update > self.max_lost_frames:
+                if t.state == "confirmed" and t.embedding is not None:
+                    self.lost_gallery[t.track_id] = t
                 continue
             if t.time_since_update > 5 and frame_shape:
                 h, w = frame_shape
@@ -159,17 +377,30 @@ class ByteTracker:
                 mx, my = 0.03 * w, 0.03 * h
                 if bbox[0] < mx or bbox[2] > w - mx or bbox[1] < my or bbox[3] > h - my:
                     continue
-            active.append(t)
-        self.tracks = active
+            still_active.append(t)
+        self.tracks = still_active
+
+        now = time.time()
+        expired = [tid for tid, t in self.lost_gallery.items() if now - t.last_seen > self.reid_ttl]
+        for tid in expired:
+            del self.lost_gallery[tid]
+        # Hard cap so a very busy scene over a long shift can't grow this
+        # dict unbounded — evict the oldest entries first.
+        if len(self.lost_gallery) > 300:
+            oldest = sorted(self.lost_gallery.items(), key=lambda kv: kv[1].last_seen)[:len(self.lost_gallery) - 300]
+            for tid, _ in oldest:
+                del self.lost_gallery[tid]
 
         out = []
         for t in self.tracks:
-            if t.time_since_update == 0:
+            if t.time_since_update == 0 and t.state == "confirmed":
                 bbox = t.get_bbox()
                 out.append({
                     "track_id":  t.track_id,
                     "class":     t.class_name,
                     "confidence": round(float(t.confidence), 2),
+                    "first_seen": t.first_seen,
+                    "dwell_time": round(now - t.first_seen, 1),
                     "bbox": {
                         "x1": round(bbox[0]), "y1": round(bbox[1]),
                         "x2": round(bbox[2]), "y2": round(bbox[3]),
@@ -298,6 +529,12 @@ class PipelineCoordinator:
         self.jpeg_lock         = threading.Lock()
         self.current_jpeg_bytes = None
 
+        # Display-only encode knobs, mutable at runtime via update_display_config().
+        # Plain int/float attributes are fine to read/write without a lock here —
+        # this only affects how Module 2 encodes the MJPEG preview, never the AI path.
+        self.display_max_width = 960
+        self.jpeg_quality = 65
+
         # ── Per-stage FPS sliding windows ───────────────────────────────────
         # maxlen bounds memory even if the stage that normally trims a given
         # deque (via _fps(), called only from _telemetry_loop) ever stalls —
@@ -402,6 +639,14 @@ class PipelineCoordinator:
         self.lines = json.loads(lines_json)
         self.analytics.reset_counters()
 
+    def update_display_config(self, max_width: int = None, quality: int = None):
+        """Adjust the MJPEG preview encode target at runtime (display only —
+        never touches capture, inference, or recording resolution)."""
+        if max_width is not None:
+            self.display_max_width = max(320, min(1920, int(max_width)))
+        if quality is not None:
+            self.jpeg_quality = max(30, min(95, int(quality)))
+
     # -----------------------------------------------------------------------
     # Module 1: Video Capture
     # Grabs raw compressed packets at full camera rate.
@@ -420,11 +665,22 @@ class PipelineCoordinator:
         """
         self.recorder.start_continuous()
 
+        # Hardware-accelerated decode (CAP_PROP_HW_ACCELERATION=ANY) can
+        # silently produce zero frames — isOpened() stays True, read() just
+        # never succeeds — when it lands on the same GPU that's concurrently
+        # doing AI compute (observed on an Intel iGPU: OpenVINO GPU inference
+        # running while HW-accel video decode is requested on the same
+        # device). _cap_hw_accel starts True and _capture_loop flips it to
+        # False (falls back to software decode) after repeated total-failure
+        # reconnects, so a real, otherwise-healthy source doesn't just spin
+        # forever on a decode path this process's GPU usage has broken.
+        self._cap_hw_accel = True
+
         if self.source_type != "screenshare":
             src = (int(self.source)
                    if self.source_type in ("webcam", "usb") and str(self.source).isdigit()
                    else self.source)
-            self.cap = self._open_capture(src)
+            self.cap = self._open_capture(src, hw_accel=self._cap_hw_accel)
             if self.cap.isOpened():
                 self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
                 self.cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
@@ -458,7 +714,7 @@ class PipelineCoordinator:
                             self.cap.release()
                         backoff = min(30.0, 2.0 * (1.5 ** min(self._cap_consecutive_failures, 12)))
                         time.sleep(backoff)
-                        self.cap = self._open_capture(src)
+                        self.cap = self._open_capture(src, hw_accel=self._cap_hw_accel)
                         if self.cap.isOpened():
                             self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
                             self.cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
@@ -478,6 +734,23 @@ class PipelineCoordinator:
                             self.cap = None
                             last_good_frame_ts = time.time()
                             self._cap_consecutive_failures += 1
+                            # A total-failure reconnect on a source that DID
+                            # successfully open (isOpened True) but never
+                            # yielded a single frame in a full 3s window
+                            # points at the HW-accel decode path itself, not
+                            # a transient network/device hiccup — drop to
+                            # software decode instead of retrying the same
+                            # broken path. One strike, not two: when this
+                            # path is broken, cap.read() itself blocks for
+                            # several seconds per attempt (GPU driver
+                            # contention) rather than failing fast, so
+                            # waiting for a second failed cycle before
+                            # recovering roughly doubles an already-slow
+                            # recovery time for no added confidence.
+                            if self._cap_hw_accel and self._cap_consecutive_failures >= 1:
+                                self._cap_hw_accel = False
+                                print(f"[Cap-{self.camera_id}] Falling back to software decode "
+                                      f"after repeated frameless reconnects.", flush=True)
                         retry_sleep = min(2.0, 0.05 * (1.5 ** min(self._cap_consecutive_failures, 12)))
                         time.sleep(retry_sleep)
                         continue
@@ -535,14 +808,15 @@ class PipelineCoordinator:
                 frame = data["frame"]
 
                 # ── MJPEG stream: encode at full camera FPS, never blocked by AI ─
-                # Resize to 960-wide max before encoding to reduce JPEG cost.
+                # Resize to display_max_width before encoding to reduce JPEG cost.
+                max_w = self.display_max_width
                 h, w = frame.shape[:2]
-                if w > 960:
-                    scale   = 960.0 / w
-                    mjpeg_f = cv2.resize(frame, (960, int(h * scale)), interpolation=cv2.INTER_LINEAR)
+                if w > max_w:
+                    scale   = max_w / w
+                    mjpeg_f = cv2.resize(frame, (max_w, int(h * scale)), interpolation=cv2.INTER_LINEAR)
                 else:
                     mjpeg_f = frame
-                ok, jpg = cv2.imencode('.jpg', mjpeg_f, [cv2.IMWRITE_JPEG_QUALITY, 65])
+                ok, jpg = cv2.imencode('.jpg', mjpeg_f, [cv2.IMWRITE_JPEG_QUALITY, self.jpeg_quality])
                 if ok:
                     with self.jpeg_lock:
                         self.current_jpeg_bytes = jpg.tobytes()
@@ -737,14 +1011,25 @@ class PipelineCoordinator:
             orig_w     = data["orig_w"]
             orig_h     = data["orig_h"]
 
-            # ── ByteTrack: input and output in absolute pixel coords ─────────
+            # ── Track: input and output in absolute pixel coords ─────────────
             tracks_raw = self.tracker.update(
-                detections, frame_shape=(orig_h, orig_w), conf_thresh=data["conf_thresh"]
+                detections, frame=frame, frame_shape=(orig_h, orig_w), conf_thresh=data["conf_thresh"]
             )
             # Update shared counter so _ai_loop can decide whether to keep inferring
             self._n_active_tracks = len(self.tracker.tracks)
 
-            # ── Assign ByteTrack IDs back to YOLO detections via IoU ────────
+            # ── Assign track IDs (+ dwell time) back to YOLO detections via IoU,
+            # and hand rendering over to the tracker's own Kalman-filtered
+            # position instead of the raw per-frame detector box. The raw box
+            # jitters frame to frame (detector noise) and was previously run
+            # through a *second*, independent EMA smoothing pass in
+            # analytics.py — two uncoordinated smoothers stacked in series is
+            # exactly what produces a box that visibly trails a fast-moving
+            # vehicle instead of staying locked to it. The tracker already
+            # solved this (constant-velocity Kalman model, updated every real
+            # detection) — Module 4 should just use that state directly. ──
+            tracks_by_id = {trk["track_id"]: trk for trk in tracks_raw}
+            matched_track_ids = set()
             for det in detections:
                 bd = [det["bbox"]["x1"], det["bbox"]["y1"],
                       det["bbox"]["x2"], det["bbox"]["y2"]]
@@ -757,13 +1042,43 @@ class PipelineCoordinator:
                         best_iou, best_id = iou, trk["track_id"]
                 if best_iou > 0.3:
                     det["track_id"] = best_id
+                    det["dwell_time"] = tracks_by_id[best_id]["dwell_time"]
+                    det["bbox"] = dict(tracks_by_id[best_id]["bbox"])
+                    det["confidence"] = tracks_by_id[best_id]["confidence"]
+                    det["tracking_status"] = "tracked"
+                    matched_track_ids.add(best_id)
+
+            # ── Coasting tracks: a confirmed track the tracker is still
+            # predicting through a brief missed detection (occlusion, motion
+            # blur, one bad frame) but that didn't match a raw detection this
+            # frame. Emit its Kalman-predicted box anyway so the vehicle never
+            # simply loses its box mid-occlusion — this is what "automatic
+            # recovery after missed detections" requires: the box has to keep
+            # existing (and moving) through the gap, not disappear and
+            # reappear. Bounded to a short window; beyond that the tracker
+            # itself ages the track out (see ByteTracker.update).
+            COAST_RENDER_FRAMES = 5
+            for t in self.tracker.tracks:
+                if t.track_id in matched_track_ids or t.state != "confirmed":
+                    continue
+                if not (0 < t.time_since_update <= COAST_RENDER_FRAMES):
+                    continue
+                cbbox = t.get_bbox()
+                detections.append({
+                    "class": t.class_name,
+                    "confidence": round(float(t.confidence), 2),
+                    "track_id": t.track_id,
+                    "dwell_time": round(time.time() - t.first_seen, 1),
+                    "bbox": {"x1": cbbox[0], "y1": cbbox[1], "x2": cbbox[2], "y2": cbbox[3]},
+                    "tracking_status": "coasting",
+                })
+                masks.append([])
 
             # ── Rule engine + analytics: MUST receive absolute pixel coords ──
-            # analytics.update() mutates det["bbox"] in-place (EMA smoothing)
-            # and adds det["speed"]. It expects bbox in pixel space and
-            # normalizes internally using frame_w/frame_h.
+            # bbox is already the tracker's smoothed position; analytics.update()
+            # only adds det["speed"] and drives zone/line/dwell logic from it.
             # track_overlays: [{track_id, class, points: [[cx,cy]...]}] — normalized
-            alerts, track_overlays, heatmap, zone_stats, line_stats = self.analytics.update(
+            alerts, track_overlays, heatmap, zone_stats, line_stats, crowd_stats = self.analytics.update(
                 detections, self.zones, self.lines, orig_w, orig_h
             )
 
@@ -783,6 +1098,11 @@ class PipelineCoordinator:
                     "confidence": round(float(conf), 2),
                     "track_id":   det.get("track_id"),
                     "speed":      round(float(det.get("speed", 0.0)), 1),
+                    "speed_calibrated": bool(det.get("speed_calibrated", False)),
+                    "dwell_time": det.get("dwell_time", 0.0),
+                    "tracking_status": det.get("tracking_status", "tracked"),
+                    "direction":  det.get("direction", "stationary"),
+                    "lane":       det.get("lane"),
                     "bbox": {
                         "x1": round(float(bbox["x1"]) / orig_w, 4),
                         "y1": round(float(bbox["y1"]) / orig_h, 4),
@@ -832,6 +1152,7 @@ class PipelineCoordinator:
                 "heatmap":        heatmap,
                 "zone_stats":     zone_stats,
                 "line_stats":     line_stats,
+                "crowd_stats":    crowd_stats,
                 "trk_lat":        trk_lat,
             })
 
@@ -941,6 +1262,7 @@ class PipelineCoordinator:
                 "recording":  self.recorder.is_recording(),
                 "zone_stats": data["zone_stats"],
                 "line_stats": data["line_stats"],
+                "crowd_stats": data["crowd_stats"],
                 "stage_errors": dict(self._stage_errors),
                 "queue_depth": 1 if self._grabbed_slot._ready.is_set() else 0,
                 "debug_tracks": len(self.tracker.tracks),
@@ -1001,7 +1323,11 @@ class PipelineCoordinator:
         # A single small threshold here previously caused a self-inflicted
         # restart loop: each restart pays the slow first-inference cost
         # again, the watchdog fired again before it finished, forever.
-        startup_grace = 90.0
+        # Bumped from 90s after benchmarking on this hardware showed a cold
+        # GPU InferRequest's first shape-specific kernel compile can take
+        # several minutes, not just "tens of seconds" — 90s was still short
+        # enough to risk exactly the restart loop this comment warns about.
+        startup_grace = 240.0
         steady_stall  = 20.0
         pipeline_start = time.time()
         while self.running:
@@ -1031,9 +1357,24 @@ class PipelineCoordinator:
     # Internal helpers
     # -----------------------------------------------------------------------
 
-    def _open_capture(self, src):
-        params = [cv2.CAP_PROP_HW_ACCELERATION, cv2.VIDEO_ACCELERATION_ANY,
-                  cv2.CAP_PROP_BUFFERSIZE, 1]
+    def _open_capture(self, src, hw_accel: bool = True):
+        # CAP_PROP_BUFFERSIZE is not a valid *open-time* parameter for the
+        # FFMPEG backend on this OpenCV build (4.11.0) — passing it in the
+        # params array makes VideoCapture.open() reject the whole params
+        # list ("unsupported parameters ... Bailout") and isOpened() come
+        # back False, silently pushing every source onto the DSHOW/MSMF
+        # fallback backends instead (worse RTSP/container support, and on at
+        # least MSMF, setting CAP_PROP_FOURCC afterward on some sources
+        # leaves the reader producing isOpened()==True but zero frames — a
+        # capture stall that looks identical to a genuinely dead source).
+        # Buffer size is still applied correctly via cap.set() right after
+        # this returns (see _capture_loop) — only the open-time list changes.
+        #
+        # hw_accel=False forces software decode — see _capture_loop's
+        # fallback logic: HW-accel decode can silently yield zero frames
+        # when it shares a GPU with concurrent AI compute on that device.
+        accel_mode = cv2.VIDEO_ACCELERATION_ANY if hw_accel else cv2.VIDEO_ACCELERATION_NONE
+        params = [cv2.CAP_PROP_HW_ACCELERATION, accel_mode]
         for backend in [cv2.CAP_FFMPEG, None, cv2.CAP_DSHOW, cv2.CAP_MSMF]:
             try:
                 cap = cv2.VideoCapture(src, backend, params) if backend else cv2.VideoCapture(src)

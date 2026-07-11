@@ -72,10 +72,10 @@ export function HeatmapViewer({ heatmapData }: HeatmapViewerProps) {
   }, [heatmapData]);
 
   return (
-    <div className="relative w-full h-full bg-slate-950/60 rounded-xl overflow-hidden border border-brand-500/10">
+    <div className="relative w-full h-full rounded-xl overflow-hidden border border-white/[0.06] bg-black/30">
       <canvas ref={canvasRef} className="w-full h-full" />
-      <div className="absolute top-2 left-2 px-2 py-1 rounded bg-slate-950/80 border border-brand-500/10 text-[9px] font-bold font-mono text-brand-300">
-        LIVE ACTIVITY HEATMAP
+      <div className="absolute top-2 left-2 px-2 py-1 rounded-md bg-black/60 border border-white/[0.08] text-[9px] font-bold font-mono text-brand-300 uppercase tracking-wider">
+        Live Activity Heatmap
       </div>
     </div>
   );

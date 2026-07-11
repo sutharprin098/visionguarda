@@ -6,10 +6,12 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 HISTORY_DIR = BASE_DIR / "history"
 RECORDINGS_DIR = HISTORY_DIR / "recordings"
 DB_PATH = HISTORY_DIR / "db.sqlite"
+UPLOADS_DIR = BASE_DIR / "uploads"
 
 # Ensure directories exist
 HISTORY_DIR.mkdir(parents=True, exist_ok=True)
 RECORDINGS_DIR.mkdir(parents=True, exist_ok=True)
+UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
 
 # YOLO Settings
 YOLO_MODEL = "yolo11n-seg.pt"
