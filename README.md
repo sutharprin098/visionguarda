@@ -1,179 +1,91 @@
-# CamAI — Enterprise Human Detection & Segmentation
+# CamAI — AI Video Analytics Platform
 
-A production-quality localhost web application for real-time AI human detection using your webcam, powered by **YOLO11n Seg** running locally on your machine.
+Real-time CCTV analytics: multi-camera YOLO11 detection + segmentation,
+persistent multi-object tracking, zone/line/dwell/speed/crowd/parking
+analytics, recording, and an enterprise licensing platform (SaaS portal +
+Windows desktop app on Supabase).
 
----
+| Workspace | What it is | Stack |
+|---|---|---|
+| `server/` | Local AI engine — cameras in, telemetry out | FastAPI, OpenVINO/ONNX Runtime, YOLO11-seg, ByteTrack-style tracker |
+| `client/` | Local CCTV viewer (MJPEG video + WebSocket telemetry overlay) | React 18, Vite, Tailwind |
+| `portal/` | SaaS admin portal (orgs, users, roles, licenses, devices, cameras, GIS) | React, Supabase JS |
+| `desktop/` | Windows app with license activation + DPAPI vault | Electron, electron-builder |
+| `supabase/` | Multi-tenant backend: Postgres + RLS, Auth, Realtime, Edge Functions | Supabase |
 
-## ✨ Features
+`PLATFORM.md` explains how the pieces fit; `LICENSING.md` is the third-party
+license inventory; `HANDOVER.md` is the buyer/due-diligence guide.
 
-- 🎥 **Live webcam** feed with 500ms frame capture
-- 🔍 **YOLO11** person detection — bounding boxes, confidence scores
-- 🎭 **Segmentation** mask overlay from local YOLO11n Seg
-- 📊 **Enterprise dashboard** — 8 stat cards, activity feed, AI pipeline status
-- 📂 **Detection history** — browse, expand, download JSON
-- 📋 **API logs** — full request log table
-- ⚙️ **Settings** — capture interval, quality, toggles
-- 🌙 **Dark / Light mode** with system preference detection
-- ⚡ **Single-request lock** — never freezes the UI
+## Quick start (local engine + viewer)
 
----
-
-## 🚀 Quick Start
-
-### 1. Prerequisites
-
-- Node.js ≥ 18
-- A local Python environment with the required packages installed
-
-### 2. Clone & Install
+Prerequisites: Python 3.11+, Node.js ≥ 18.
 
 ```bash
-cd d:\camAI
+# 1. AI engine
+cd server
+python -m pip install -r server-requirements.txt
+copy .env.example .env
+python -m app.main            # http://127.0.0.1:8000
 
-# Install root dependencies (concurrently)
+# 2. Viewer (second terminal)
+cd client
 npm install
-
-# Install server + client dependencies
-npm run install:all
+npm run dev                   # http://localhost:5173
 ```
 
-### 3. Configure Environment
+Add a camera in the viewer (RTSP URL, HTTP/MJPEG, or a local webcam index
+like `0`) and draw zones/lines/parking slots on the live view.
+
+Model files: the engine looks for `yolo11{n,s,m}-seg` OpenVINO/ONNX exports
+in `server/`. To (re)generate exports from `.pt` weights:
 
 ```bash
-copy server\.env.example server\.env
+python -m pip install -r server/dev-requirements.txt   # includes ultralytics — see LICENSING.md
+python server/export_models.py
 ```
 
-Edit `server/.env`:
+The engine auto-selects the fastest available backend at startup:
+TensorRT/CUDA (via onnxruntime-gpu) → OpenVINO GPU/CPU → ONNX Runtime CPU.
 
-```env
-PORT=3000
-PYTHON_MODEL_PORT=5001
-YOLO_MODEL_PATH=yolo11n-seg.pt
-YOLO_CONFIDENCE=0.25
-YOLO_IOU=0.45
-YOLO_IMAGE_SIZE=640
-```
+## Architecture — AI engine
 
-Install Python dependencies and run the local model server:
+Video and AI are decoupled: MJPEG delivers frames at camera FPS while a
+WebSocket carries AI-only telemetry (detections, masks, tracks, analytics);
+the client draws overlays on a canvas above the video. The per-camera
+pipeline (`server/app/ai/pipeline.py`) is a 5-module slot design — capture,
+detect, track, analyze, publish — measured at 30 fps with ~10 ms average
+AI-cycle latency on Intel iGPU (OpenVINO).
+
+Analytics per camera: intrusion/loitering zones, line crossing with
+interpolated crossing instants, dwell, Kalman-smoothed speed, crowd
+density, abandoned-object detection, parking-slot occupancy (vehicle
+overlap + visual fallback), heatmaps.
+
+## Enterprise platform
+
+Portal + desktop + Supabase backend: hash-only license keys, device
+fingerprint binding, org-scoped RLS multi-tenancy, realtime config sync,
+append-only audit log. Setup and account flows: see `PLATFORM.md`.
 
 ```bash
-python -m pip install -r server/server-requirements.txt
-python server/python_model_server.py
+cd portal && npm install && npm run dev      # http://localhost:5174
+cd desktop && npm install && npm run start   # dev; npm run build → NSIS installer
 ```
 
-### 4. Start
+## Tests
 
 ```bash
-npm run dev
+cd server && python -m pip install -r dev-requirements.txt && python -m pytest tests
+cd client && npm run test:e2e                # Playwright (needs engine running)
 ```
 
-- **Frontend**: http://localhost:5173
-- **Backend**: http://localhost:3000
+`server/production_readiness_report.py` runs the deterministic validation
+suite and writes a machine-readable report.
 
----
+## Security posture
 
-## 🧭 Usage
-
-1. Open http://localhost:5173
-2. Click **Live Camera** in the sidebar
-3. Click **Start Camera** and allow browser camera permission
-4. Click **Auto Detect ON** — frames are sent every 500ms
-5. Watch bounding boxes and segmentation masks appear over detected humans
-
----
-
-## 🏗️ Architecture
-
-```
-camAI/
-├── client/                    # React 18 + Vite + TypeScript + Tailwind
-│   └── src/
-│       ├── components/
-│       │   ├── camera/        # CameraFeed, DetectionOverlay
-│       │   ├── dashboard/     # StatCard, AIStatusCard
-│       │   ├── history/       # HistoryTable
-│       │   ├── layout/        # Sidebar, Header
-│       │   ├── logs/          # APILogs
-│       │   └── settings/      # SettingsPanel
-│       ├── hooks/             # useWebcam, useDetection, useHistory, useTheme
-│       ├── pages/             # Dashboard, LiveCamera, History, APILogs, Settings
-│       ├── types/             # Shared TypeScript interfaces
-│       └── utils/             # api.ts (Axios), formatters.ts
-│
-└── server/                    # Express + TypeScript + local model proxy
-    └── src/
-        ├── routes/            # detect.ts, history.ts, status.ts
-        ├── services/          # replicateService.ts (modular AI provider)
-        │                      # storageService.ts (file-based JSON history)
-        ├── types/             # Shared interfaces
-        └── utils/             # imageUtils.ts
-```
-
----
-
-## 🔌 API Reference
-
-### `POST /api/detect`
-Upload a webcam frame for detection.
-
-**Body**: `multipart/form-data` — field `image` (JPEG/PNG)
-
-**Response**:
-```json
-{
-  "success": true,
-  "people": 1,
-  "detections": [{ "class": "person", "confidence": 0.91, "bbox": { "x1":10, "y1":20, "x2":300, "y2":500 } }],
-  "segmentedImage": "<base64>",
-  "processingTime": 2800,
-  "yoloLatency": 1200,
-  "samLatency": 1600,
-  "status": "human_found",
-  "timestamp": "2026-07-08T01:00:00.000Z",
-  "id": "uuid"
-}
-```
-
-### `GET /api/history` — Full detection history
-### `DELETE /api/history` — Clear history
-### `GET /api/history/logs` — API request log
-### `DELETE /api/history/logs` — Clear logs
-### `GET /api/status` — Server health
-
----
-
-## 🔧 Swapping to a Self-Hosted Model
-
-The local Python model is proxyed through `server/src/services/replicateService.ts` to `server/python_model_server.py`.
-
-If you want to swap the local backend to a different inference provider, update the `AIProvider` implementation in `server/src/services/replicateService.ts`.
-
-No route or controller code changes are required.
-
----
-
-## 🛠️ Scripts
-
-| Command | Description |
-|---|---|
-| `npm run dev` | Start both server + client |
-| `npm run install:all` | Install all dependencies |
-| `npm run build` | Build both for production |
-
----
-
-## 📝 Environment Variables
-
-| Variable | Required | Description |
-|---|---|---|
-| `PORT` | Optional | Server port (default: 3000) |
-| `PYTHON_MODEL_PORT` | Optional | Local Python model server port (default: 5001) |
-| `YOLO_MODEL_PATH` | Optional | Local YOLO model path (default: yolo11n-seg.pt) |
-
----
-
-## 🤖 Models
-
-| Model | Purpose | Deployment |
-|---|---|---|
-| YOLO11n Seg | Person detection + segmentation | Local Python model |
+- The engine binds `127.0.0.1` by default and has no auth of its own — it
+  is fronted by the desktop app/viewer. Set `CAMAI_HOST` only on trusted
+  networks or behind an authenticating proxy.
+- Platform security (RLS, key hashing, DPAPI vault, audit): `PLATFORM.md`.
+- Secrets live in untracked `.env` files; only `.env.example` is committed.
