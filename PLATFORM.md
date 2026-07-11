@@ -130,7 +130,6 @@ auto-login forever after (refresh-token rotation kept in sync with the vault).
 
 ## Current gaps (next milestones)
 
-- Analytics / Reports / Billing pages are scaffolded placeholders (schema is live).
 - Email + browser push notification delivery (tables exist; needs a provider hook).
 - Super-admin console (flag + policies exist; no dedicated UI yet).
 - Auto-update feed for the desktop (electron-builder `publish` + `app_releases`).
