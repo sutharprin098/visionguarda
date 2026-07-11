@@ -1,21 +1,45 @@
-# OpenVINO on-disk kernel cache (server/app/ai/backend.py CACHE_DIR) --
-# machine/driver-specific compiled artifacts, safe and fast to regenerate.
-ov_cache/
+# ── Dependencies ────────────────────────────────────────────────
+node_modules/
 
-# Python bytecode cache
+# ── Python ──────────────────────────────────────────────────────
 __pycache__/
 *.pyc
+.venv/
+venv/
 
-# Runtime data - recordings/snapshots/db are generated at runtime, not source
-server/history/recordings/
-server/history/db.sqlite
-
-# Enterprise platform workspaces
-node_modules/
+# ── Build output (regenerate with each workspace's build script) ─
+client/dist/
 portal/dist/
 desktop/dist/
 desktop/dist-electron/
 desktop/release/
+server/dist/
+
+# ── Model weights & exports (see server/export_models.py) ───────
+*.pt
+*.onnx
+*_openvino_model/
+
+# OpenVINO on-disk kernel cache (server/app/ai/backend.py CACHE_DIR) --
+# machine/driver-specific compiled artifacts, safe and fast to regenerate.
+ov_cache/
+
+# ── Runtime data — generated while the app runs, never source ───
+server/history/
+server/uploads/
+server/test-results/
+
+# ── Logs / scratch / generated reports ──────────────────────────
+*.log
+server/kernel.errors.txt
+server/production_readiness_report.json
+
+# ── Secrets — only .env.example files are tracked ───────────────
 .env
 .env.local
+.env.*.local
+
+# ── Tooling ─────────────────────────────────────────────────────
 supabase/.temp/
+.DS_Store
+Thumbs.db
