@@ -1,7 +1,12 @@
 fastapi==0.111.1
 uvicorn[standard]==0.23.2
-ultralytics==8.1.4
 opencv-python-headless==4.8.1.78
+# Inference backends. app/ai/backend.py auto-selects the fastest available:
+# TensorRT/CUDA (onnxruntime-gpu, install manually on NVIDIA hosts) >
+# OpenVINO (Intel CPU/iGPU) > ONNX Runtime CPU. The engine runs fully on
+# these two; no AGPL packages are required at runtime (see LICENSING.md).
+openvino==2026.2.1
+onnxruntime==1.27.0
 # Use a slightly older numpy that's widely available
 numpy==1.26.4
 pillow==10.2.0

@@ -1,2 +1,8 @@
 -r server-requirements.txt
 pytest==8.3.3
+# Dev/offline-only. ultralytics (AGPL-3.0) is used exclusively by
+# export_models.py to convert .pt weights to ONNX/OpenVINO, and as a
+# last-resort .pt inference fallback in backend.py when no exported model
+# exists. It is NOT required to run the product — see LICENSING.md before
+# shipping it to any customer environment.
+ultralytics==8.4.90

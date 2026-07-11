@@ -151,42 +151,47 @@ def _bbox_overlap_ratio(bbox, poly_pts, frame_w: int, frame_h: int) -> float:
 
 
 def _parking_visual_score(frame, poly_pts) -> float:
-    """Parking occupancy score adapted from devakashkumar/AI-parking-slot.
+    """Visual evidence (0–100) that an operator-drawn parking slot is occupied.
 
-    Uses grayscale texture, edges, dark-pixel ratio, brightness deviation and
-    saturation inside an operator-drawn slot. YOLO vehicle overlap is still
-    the primary signal; this is a fixed-camera fallback when the detector
-    misses part of a parked vehicle.
+    An empty slot is a patch of roughly uniform pavement; a vehicle drops a
+    large textured, high-contrast object into it. Three slot-interior
+    statistics capture that difference without any per-site training:
+
+    - gradient fraction: share of pixels whose Sobel gradient magnitude
+      exceeds a fixed threshold (vehicle bodywork, windows, shadows produce
+      strong local gradients; asphalt does not)
+    - intensity spread: interquartile range of grayscale values, robust to
+      the odd bright/dark speck that would inflate a variance measure
+    - median deviation: share of pixels far from the slot's median intensity,
+      i.e. how much of the slot is covered by something that isn't pavement
+
+    YOLO vehicle-bbox overlap is still the primary occupancy signal; this
+    score is a fixed-camera fallback for when the detector misses a parked
+    vehicle (partial occlusion, unusual vehicle type). Thresholds are
+    calibrated per camera via the zone's parkingScoreThreshold.
     """
     if frame is None or len(poly_pts) < 3:
         return 0.0
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-    hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
     pts = np.array(poly_pts, dtype=np.int32)
     mask = np.zeros(gray.shape, dtype=np.uint8)
     cv2.fillPoly(mask, [pts], 255)
-    mask_area = cv2.countNonZero(mask)
-    if mask_area == 0:
+    inside = mask == 255
+    n_pixels = int(np.count_nonzero(inside))
+    if n_pixels == 0:
         return 0.0
 
-    pixels = gray[mask == 255]
-    std = float(np.std(pixels))
-    roi = cv2.bitwise_and(gray, gray, mask=mask)
-    blur = cv2.GaussianBlur(roi, (3, 3), 0)
-    edges = cv2.Canny(blur, 20, 90)
-    edges = cv2.dilate(edges, np.ones((3, 3), np.uint8), iterations=1)
-    edge_ratio = cv2.countNonZero(edges) / mask_area
-    dark_ratio = float(np.sum(pixels < 100) / len(pixels))
-    brightness = float(np.mean(pixels))
-    brightness_score = abs(brightness - 120.0) / 120.0
-    saturation = float(np.mean(hsv[:, :, 1][mask == 255]) / 255.0)
-    return float(
-        std * 0.45
-        + edge_ratio * 120.0 * 0.25
-        + dark_ratio * 100.0 * 0.15
-        + saturation * 30.0 * 0.10
-        + brightness_score * 30.0 * 0.05
-    )
+    gx = cv2.Sobel(gray, cv2.CV_32F, 1, 0, ksize=3)
+    gy = cv2.Sobel(gray, cv2.CV_32F, 0, 1, ksize=3)
+    grad_mag = cv2.magnitude(gx, gy)
+    grad_frac = float(np.count_nonzero(grad_mag[inside] > 60.0)) / n_pixels
+
+    pixels = gray[inside].astype(np.float32)
+    q25, median, q75 = np.percentile(pixels, [25.0, 50.0, 75.0])
+    spread = min(1.0, float(q75 - q25) / 128.0)
+    deviant_frac = float(np.count_nonzero(np.abs(pixels - median) > 45.0)) / n_pixels
+
+    return float(100.0 * (0.45 * grad_frac + 0.35 * spread + 0.20 * deviant_frac))
 
 
 class _SpeedKalman1D:
