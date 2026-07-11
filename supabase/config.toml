@@ -1,0 +1,47 @@
+project_id = "camai"
+
+[api]
+enabled = true
+port = 54321
+schemas = ["public", "app", "storage"]
+
+[db]
+port = 54322
+major_version = 15
+
+[auth]
+enabled = true
+site_url = "http://localhost:5174"
+additional_redirect_urls = ["http://localhost:5174", "camai-desktop://auth"]
+jwt_expiry = 3600
+enable_refresh_token_rotation = true
+refresh_token_reuse_interval = 10
+
+[auth.email]
+enable_signup = true
+enable_confirmations = false
+
+[realtime]
+enabled = true
+
+[storage]
+enabled = true
+file_size_limit = "500MiB"
+
+[functions.activate-license]
+verify_jwt = false   # activation happens before any session exists
+
+[functions.my-keys]
+verify_jwt = true
+
+[functions.desktop-sync]
+verify_jwt = true
+
+[functions.invite-user]
+verify_jwt = true
+
+[functions.add-camera]
+verify_jwt = true
+
+[functions.admin-users]
+verify_jwt = true

@@ -5,7 +5,7 @@ import axios from 'axios';
 import { useMutation } from '@tanstack/react-query';
 import { useTelemetry, useCameraTelemetry } from '../../contexts/TelemetryContext';
 import { OverlaySettings, OverlayProfile } from '../../types';
-import { computeContainRect } from '../../utils/geometry';
+import { computeContainRect, isPointInPolygon } from '../../utils/geometry';
 import { setCameraRecording } from '../../utils/api';
 
 interface CCTVPlayerProps {
@@ -212,6 +212,17 @@ export function CCTVPlayer({ cameraId, cameraName, cameraType = 'webcam', initia
   const [zones, setZones] = useState<any[]>(() => JSON.parse(initialZones));
   const [lines, setLines] = useState<any[]>(() => JSON.parse(initialLines));
   const [showConfigPanel, setShowConfigPanel] = useState(false);
+
+  // Zone edit mode: the zone (if any) currently reshapeable/movable by
+  // dragging its vertex handles or its body directly on the canvas.
+  const [editingZoneId, setEditingZoneId] = useState<string | null>(null);
+  const VERTEX_HIT_RADIUS_PX = 10;
+  const dragRef = useRef<{
+    zoneId: string;
+    vertexIndex: number | null; // null = dragging the whole polygon body
+    startNorm: [number, number];
+    originalPoints: number[][];
+  } | null>(null);
 
   const playerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -495,11 +506,12 @@ export function CCTVPlayer({ cameraId, cameraName, cameraType = 'webcam', initia
         config: {
           zones,
           lines,
+          editingZoneId,
           ...settings
         }
       });
     }
-  }, [worker, cameraId, zones, lines, settings]);
+  }, [worker, cameraId, zones, lines, settings, editingZoneId]);
 
   // Update Draw Preview configs in Web Worker
   useEffect(() => {
@@ -585,29 +597,38 @@ export function CCTVPlayer({ cameraId, cameraName, cameraType = 'webcam', initia
     };
   }, [worker, viewportId, cameraType]);
 
+  // Maps a mouse event's client coords onto the same normalized (0..1)
+  // space zones/lines are stored in, through the letterboxed content rect
+  // the worker draws against — otherwise clicks would be offset by the
+  // letterbox bars whenever the video's aspect ratio doesn't match the
+  // container's. Also returns the content rect's pixel size so callers can
+  // convert a normalized distance into a screen-pixel one (for hit-testing).
+  const clientToNorm = useCallback((clientX: number, clientY: number) => {
+    const rect = canvasRef.current?.getBoundingClientRect();
+    if (!rect) return null;
+    const lx = clientX - rect.left;
+    const ly = clientY - rect.top;
+    const content = contentRectRef.current;
+    const cx = lx - (content?.x ?? 0);
+    const cy = ly - (content?.y ?? 0);
+    const cw = content?.width || rect.width;
+    const ch = content?.height || rect.height;
+    return {
+      x: Number(Math.min(1, Math.max(0, cx / cw)).toFixed(4)),
+      y: Number(Math.min(1, Math.max(0, cy / ch)).toFixed(4)),
+      cw,
+      ch,
+    };
+  }, []);
+
   // Click handler for drawing points
   const handleCanvasClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
     if (drawMode === 'none') return;
 
-    const rect = canvasRef.current?.getBoundingClientRect();
-    if (!rect) return;
-
-    const clientX = e.clientX - rect.left;
-    const clientY = e.clientY - rect.top;
-
-    // Map through the same letterboxed content rect the worker draws
-    // against, so a click on the video maps to the same normalized point
-    // the backend (which normalizes against the real frame) expects —
-    // otherwise zones/lines drawn here would be offset by the letterbox
-    // bars whenever the video's aspect ratio doesn't match the container's.
-    const content = contentRectRef.current;
-    const cx = clientX - (content?.x ?? 0);
-    const cy = clientY - (content?.y ?? 0);
-    const cw = content?.width || rect.width;
-    const ch = content?.height || rect.height;
-
-    const normX = Number(Math.min(1, Math.max(0, cx / cw)).toFixed(3));
-    const normY = Number(Math.min(1, Math.max(0, cy / ch)).toFixed(3));
+    const norm = clientToNorm(e.clientX, e.clientY);
+    if (!norm) return;
+    const normX = norm.x;
+    const normY = norm.y;
 
     if (drawMode === 'line') {
       if (points.length < 2) {
@@ -617,6 +638,86 @@ export function CCTVPlayer({ cameraId, cameraName, cameraType = 'webcam', initia
     } else if (drawMode === 'zone') {
       setPoints([...points, [normX, normY]]);
     }
+  };
+
+  const persistZonesLines = async (updatedZones: any[], updatedLines: any[]) => {
+    try {
+      await axios.post(`/api/cameras/${cameraId}/config`, {
+        zones: JSON.stringify(updatedZones),
+        lines: JSON.stringify(updatedLines),
+      });
+      if (onConfigChange) onConfigChange();
+    } catch (err) {
+      console.error('Failed to save camera configurations:', err);
+    }
+  };
+
+  // Zone edit mode: mousedown either grabs a vertex handle (reshape/resize)
+  // or, if the click landed inside the polygon body but not on a handle,
+  // starts a whole-shape move. Nothing happens on empty canvas so this
+  // never fights with the normal pan/scroll/other camera-tile interactions.
+  const handleCanvasMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    if (!editingZoneId || drawMode !== 'none') return;
+    const zone = zones.find((z) => z.id === editingZoneId);
+    if (!zone?.points || zone.points.length < 3) return;
+    const norm = clientToNorm(e.clientX, e.clientY);
+    if (!norm) return;
+
+    let vertexIndex: number | null = null;
+    for (let i = 0; i < zone.points.length; i++) {
+      const [zx, zy] = zone.points[i];
+      const dx = (zx - norm.x) * norm.cw;
+      const dy = (zy - norm.y) * norm.ch;
+      if (Math.sqrt(dx * dx + dy * dy) <= VERTEX_HIT_RADIUS_PX) {
+        vertexIndex = i;
+        break;
+      }
+    }
+
+    if (vertexIndex === null && !isPointInPolygon([norm.x, norm.y], zone.points)) {
+      return; // clicked outside the shape and not on a handle — ignore
+    }
+
+    dragRef.current = {
+      zoneId: editingZoneId,
+      vertexIndex,
+      startNorm: [norm.x, norm.y],
+      originalPoints: zone.points.map((p: number[]) => [p[0], p[1]]),
+    };
+  };
+
+  const handleCanvasMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    const drag = dragRef.current;
+    if (!drag) return;
+    const norm = clientToNorm(e.clientX, e.clientY);
+    if (!norm) return;
+
+    setZones((prev) =>
+      prev.map((z) => {
+        if (z.id !== drag.zoneId) return z;
+        if (drag.vertexIndex !== null) {
+          const pts = drag.originalPoints.map((p, i) => (i === drag.vertexIndex ? [norm.x, norm.y] : p));
+          return { ...z, points: pts };
+        }
+        // Whole-shape move: translate every vertex by the drag delta, clamped to [0,1]
+        const dx = norm.x - drag.startNorm[0];
+        const dy = norm.y - drag.startNorm[1];
+        const pts = drag.originalPoints.map(([x, y]) => [
+          Math.min(1, Math.max(0, x + dx)),
+          Math.min(1, Math.max(0, y + dy)),
+        ]);
+        return { ...z, points: pts };
+      })
+    );
+  };
+
+  // Fires on mouseup AND mouseleave (dragging off the canvas edge shouldn't
+  // leave the drag stuck active) — persists the final shape once, then
+  // clears drag state either way.
+  const handleCanvasDragEnd = () => {
+    if (!dragRef.current) return;
+    dragRef.current = null;
+    persistZonesLines(zones, lines);
   };
 
   const handleSaveDrawing = async () => {
@@ -668,6 +769,7 @@ export function CCTVPlayer({ cameraId, cameraName, cameraType = 'webcam', initia
     if (type === 'zone') {
       updatedZones = updatedZones.filter(z => z.id !== id);
       setZones(updatedZones);
+      if (editingZoneId === id) setEditingZoneId(null);
     } else {
       updatedLines = updatedLines.filter(l => l.id !== id);
       setLines(updatedLines);
@@ -705,6 +807,17 @@ export function CCTVPlayer({ cameraId, cameraName, cameraType = 'webcam', initia
     } catch (err) {
       console.error('Failed to rename config:', err);
     }
+  };
+
+  // Any zone field that just needs its value swapped and persisted: the
+  // roi flag (gates detection — see task), zoneType (labels alerts/lane
+  // assignment), maxOccupancy (overcrowding threshold) and dwellLimit
+  // (loitering threshold) — all already consumed by analytics.py, just not
+  // previously exposed in this UI.
+  const handleUpdateZoneField = (id: string, field: 'roi' | 'zoneType' | 'maxOccupancy' | 'dwellLimit', value: any) => {
+    const updatedZones = zones.map(z => z.id === id ? { ...z, [field]: value } : z);
+    setZones(updatedZones);
+    persistZonesLines(updatedZones, lines);
   };
 
   // Two-line speed gate: pairing this line with another + a real-world
@@ -807,7 +920,13 @@ export function CCTVPlayer({ cameraId, cameraName, cameraType = 'webcam', initia
         <canvas
           ref={canvasRef}
           onClick={handleCanvasClick}
-          className={`absolute inset-0 w-full h-full ${drawMode !== 'none' ? 'cursor-crosshair' : 'pointer-events-auto'}`}
+          onMouseDown={handleCanvasMouseDown}
+          onMouseMove={handleCanvasMouseMove}
+          onMouseUp={handleCanvasDragEnd}
+          onMouseLeave={handleCanvasDragEnd}
+          className={`absolute inset-0 w-full h-full ${
+            drawMode !== 'none' ? 'cursor-crosshair' : editingZoneId ? 'cursor-move pointer-events-auto' : 'pointer-events-auto'
+          }`}
         />
 
         {/* Counters & HUD details */}
@@ -872,29 +991,82 @@ export function CCTVPlayer({ cameraId, cameraName, cameraType = 'webcam', initia
                         ) : (
                           <div className="space-y-1">
                             {zones.map((z) => (
-                              <div key={z.id} className="flex items-center gap-1.5 py-1 px-1.5 rounded hover:bg-slate-900 group/item">
-                                <input
-                                  type="text"
-                                  value={z.name}
-                                  onChange={(e) => {
-                                    const val = e.target.value;
-                                    setZones(zones.map(item => item.id === z.id ? { ...item, name: val } : item));
-                                  }}
-                                  onBlur={() => handleRename(z.id, z.name, 'zone')}
-                                  onKeyDown={(e) => {
-                                    if (e.key === 'Enter') {
-                                      (e.target as HTMLInputElement).blur();
-                                    }
-                                  }}
-                                  className="bg-transparent border-b border-transparent hover:border-slate-800 focus:border-brand-500/50 text-xs text-white/95 font-medium px-1 py-0.5 w-full outline-none transition-colors"
-                                />
-                                <button
-                                  onClick={() => handleRemoveZone(z.id, 'zone')}
-                                  className="p-1 rounded text-slate-600 hover:text-red-400 hover:bg-red-500/10 transition-colors opacity-0 group-hover/item:opacity-100"
-                                  title="Delete Zone"
-                                >
-                                  <Trash2 size={11} />
-                                </button>
+                              <div key={z.id} className={`rounded px-1.5 py-1 space-y-1 ${editingZoneId === z.id ? 'bg-brand-500/10 ring-1 ring-brand-500/30' : 'hover:bg-slate-900'} group/item`}>
+                                <div className="flex items-center gap-1.5">
+                                  <input
+                                    type="text"
+                                    value={z.name}
+                                    onChange={(e) => {
+                                      const val = e.target.value;
+                                      setZones(zones.map(item => item.id === z.id ? { ...item, name: val } : item));
+                                    }}
+                                    onBlur={() => handleRename(z.id, z.name, 'zone')}
+                                    onKeyDown={(e) => {
+                                      if (e.key === 'Enter') {
+                                        (e.target as HTMLInputElement).blur();
+                                      }
+                                    }}
+                                    className="bg-transparent border-b border-transparent hover:border-slate-800 focus:border-brand-500/50 text-xs text-white/95 font-medium px-1 py-0.5 w-full outline-none transition-colors"
+                                  />
+                                  <button
+                                    onClick={() => setEditingZoneId(editingZoneId === z.id ? null : z.id)}
+                                    className={`p-1 rounded transition-colors ${editingZoneId === z.id ? 'text-brand-400 bg-brand-500/10' : 'text-slate-600 hover:text-brand-400 hover:bg-brand-500/10 opacity-0 group-hover/item:opacity-100'}`}
+                                    title={editingZoneId === z.id ? 'Done editing shape' : 'Edit shape (drag vertices to resize, drag inside to move)'}
+                                  >
+                                    <Edit2 size={11} />
+                                  </button>
+                                  <button
+                                    onClick={() => handleRemoveZone(z.id, 'zone')}
+                                    className="p-1 rounded text-slate-600 hover:text-red-400 hover:bg-red-500/10 transition-colors opacity-0 group-hover/item:opacity-100"
+                                    title="Delete Zone"
+                                  >
+                                    <Trash2 size={11} />
+                                  </button>
+                                </div>
+                                <div className="flex items-center gap-2 flex-wrap px-1">
+                                  <label className="flex items-center gap-1 text-[9px] text-cyan-400 font-semibold cursor-pointer" title="Only detect/track/analyze objects inside this polygon">
+                                    <input
+                                      type="checkbox"
+                                      checked={!!z.roi}
+                                      onChange={(e) => handleUpdateZoneField(z.id, 'roi', e.target.checked)}
+                                      className="rounded border-slate-800 bg-slate-900 text-cyan-500 focus:ring-cyan-500 w-3 h-3"
+                                    />
+                                    Detection ROI
+                                  </label>
+                                  <select
+                                    value={z.zoneType || 'intrusion'}
+                                    onChange={(e) => handleUpdateZoneField(z.id, 'zoneType', e.target.value)}
+                                    className="bg-slate-950 border border-slate-800 rounded px-1 py-0.5 text-[9px] text-slate-300 outline-none"
+                                    title="Zone type (labels alerts; lane also feeds vehicle lane assignment)"
+                                  >
+                                    <option value="intrusion">Intrusion</option>
+                                    <option value="loitering">Loitering</option>
+                                    <option value="lane">Lane</option>
+                                  </select>
+                                  <label className="flex items-center gap-1 text-[9px] text-slate-500" title="Overcrowding alert threshold">
+                                    Max
+                                    <input
+                                      type="number"
+                                      min={1}
+                                      value={z.maxOccupancy ?? 5}
+                                      onChange={(e) => setZones(zones.map(item => item.id === z.id ? { ...item, maxOccupancy: Number(e.target.value) } : item))}
+                                      onBlur={(e) => handleUpdateZoneField(z.id, 'maxOccupancy', Number(e.target.value))}
+                                      className="w-9 bg-slate-950 border border-slate-800 rounded px-1 py-0.5 text-[9px] text-white outline-none"
+                                    />
+                                  </label>
+                                  <label className="flex items-center gap-1 text-[9px] text-slate-500" title="Loitering alert threshold (seconds)">
+                                    Dwell
+                                    <input
+                                      type="number"
+                                      min={1}
+                                      value={z.dwellLimit ?? 10}
+                                      onChange={(e) => setZones(zones.map(item => item.id === z.id ? { ...item, dwellLimit: Number(e.target.value) } : item))}
+                                      onBlur={(e) => handleUpdateZoneField(z.id, 'dwellLimit', Number(e.target.value))}
+                                      className="w-9 bg-slate-950 border border-slate-800 rounded px-1 py-0.5 text-[9px] text-white outline-none"
+                                    />
+                                    s
+                                  </label>
+                                </div>
                               </div>
                             ))}
                           </div>
@@ -1229,14 +1401,14 @@ export function CCTVPlayer({ cameraId, cameraName, cameraType = 'webcam', initia
         {drawMode === 'none' ? (
           <>
             <button
-              onClick={() => setDrawMode('zone')}
+              onClick={() => { setEditingZoneId(null); setDrawMode('zone'); }}
               className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold text-red-400 hover:bg-red-500/10 transition-colors border border-red-500/20"
             >
               <ShieldAlert size={13} />
               + Zone
             </button>
             <button
-              onClick={() => setDrawMode('line')}
+              onClick={() => { setEditingZoneId(null); setDrawMode('line'); }}
               className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold text-blue-400 hover:bg-blue-500/10 transition-colors border border-blue-500/20"
             >
               <Navigation size={13} />

@@ -12,7 +12,7 @@ from scipy.optimize import linear_sum_assignment
 from app.ai.backend import EngineBackend
 from app.storage import insert_alert, insert_history_record
 from app.recorder import CCTVRecorder
-from app.analytics import CameraAnalytics
+from app.analytics import CameraAnalytics, VEHICLE_CLASSES, _point_in_zone_shape
 from app.config import RECORDINGS_DIR
 from app.gpu_monitor import get_gpu_usage
 
@@ -20,6 +20,14 @@ from app.gpu_monitor import get_gpu_usage
 os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = (
     "rtsp_transport;tcp|threads;4|fflags;nobuffer|flags;low_delay"
 )
+
+
+def _vehicle_classes_compatible(a: str, b: str) -> bool:
+    """True if a and b are both vehicle-family classes (car/bus/truck/
+    motorcycle/bicycle) -- used to let track-continuation matching survive
+    a detector's frame-to-frame class flip between visually similar vehicle
+    subtypes, without ever conflating a vehicle with a person or item."""
+    return a in VEHICLE_CLASSES and b in VEHICLE_CLASSES
 
 
 # ---------------------------------------------------------------------------
@@ -262,7 +270,26 @@ class ByteTracker:
         for ti, t in enumerate(tracks):
             tb = t.get_bbox()
             for di, d in enumerate(dets):
-                if t.class_name != d["class"]:
+                if t.class_name == d["class"]:
+                    class_penalty = 0.0
+                elif _vehicle_classes_compatible(t.class_name, d["class"]):
+                    # Detectors routinely flip a single real vehicle between
+                    # visually-similar vehicle subtypes frame to frame (car
+                    # vs truck vs van is a classic confusion). A hard class
+                    # gate here means every flip fragments one real vehicle
+                    # into two tracks that then fight over the same
+                    # detection stream every subsequent frame (confirmed via
+                    # a real MOT-metrics run: one physical vehicle produced
+                    # 7 ID switches alternating between a "car" track and a
+                    # "truck" track for the same box). Track.class_name is
+                    # majority-voted (see Track._vote_class) so allowing a
+                    # same-vehicle-family continuation here doesn't make the
+                    # DISPLAYED class flicker — it just stops the class
+                    # noise from splitting one object into two ids. A small
+                    # cost penalty still makes Hungarian prefer a genuine
+                    # same-class match when one is available.
+                    class_penalty = 0.15
+                else:
                     continue
                 iou = ByteTracker._compute_iou(tb, d["bbox"])
                 if iou < iou_gate:
@@ -276,7 +303,7 @@ class ByteTracker:
                     dist = np.hypot(tcx - dcx, tcy - dcy) / frame_diag
                     if dist > spatial_gate:
                         continue
-                cost[ti, di] = w_iou * (1.0 - iou) + w_app * app_d
+                cost[ti, di] = min(INVALID - 1e-3, w_iou * (1.0 - iou) + w_app * app_d + class_penalty)
         row_ind, col_ind = linear_sum_assignment(cost)
         m_t, m_d = [], []
         unmatched_t, unmatched_d = set(range(n_t)), set(range(n_d))
@@ -361,6 +388,42 @@ class ByteTracker:
             self.tracks.append(Track(self.next_track_id, det["bbox"], det["class"], det["confidence"],
                                       embedding=det["embedding"], n_init=self.n_init))
             self.next_track_id += 1
+
+        # ── Duplicate-track suppression: two simultaneously confirmed tracks
+        # of the same class with heavy mutual bbox overlap are almost
+        # certainly one physical object that ended up spawning two IDs (a
+        # new track created a frame before the original's next real match
+        # arrived, or a brief mismatch during a crossing). Left alone,
+        # Hungarian's one-to-one assignment has only one real detection to
+        # give to the two of them each frame, so it would alternate which
+        # one "wins" — a ping-pong of ID switches on a SINGLE vehicle rather
+        # than any genuine tracking loss. General safety net for genuine
+        # same-class duplicates; the specific class-flicker fragmentation
+        # case (one vehicle alternating "car"/"truck" tracks, confirmed via
+        # a real MOT-metrics run) is fixed separately above, in
+        # _hungarian_match's class gate — this same-class-only check never
+        # even evaluated that pair (different class_name skipped it before
+        # any IoU comparison), which is exactly why it needed a separate
+        # fix rather than a wider IoU threshold here. Still required by the
+        # goal ("Prevent duplicate IDs") for the genuinely-co-located case.
+        DUP_IOU_THRESH = 0.6
+        merged_ids = set()
+        for i in range(len(self.tracks)):
+            ti = self.tracks[i]
+            if ti.track_id in merged_ids or ti.state != "confirmed":
+                continue
+            for j in range(i + 1, len(self.tracks)):
+                tj = self.tracks[j]
+                if (tj.track_id in merged_ids or tj.state != "confirmed"
+                        or tj.class_name != ti.class_name):
+                    continue
+                if min(ti.time_since_update, tj.time_since_update) > 1:
+                    continue  # neither matched recently -- not a live duplicate conflict
+                if self._compute_iou(ti.get_bbox(), tj.get_bbox()) >= DUP_IOU_THRESH:
+                    dup = tj if ti.hits >= tj.hits else ti
+                    merged_ids.add(dup.track_id)
+        if merged_ids:
+            self.tracks = [t for t in self.tracks if t.track_id not in merged_ids]
 
         # ── Age out: long-lost active tracks move to the gallery instead of
         # vanishing; edge-exits (object left frame, not occluded) are dropped
@@ -564,11 +627,25 @@ class PipelineCoordinator:
         self.restart_callback = None  # set by CameraManager; called if watchdog gives up on this instance
 
         # ── Adaptive inference resolution ────────────────────────────────────
+        # GPU used to start at 960 on the theory that "GPU" implies headroom
+        # to spare — measured wrong on real hardware: a clean (uncontended),
+        # real-video benchmark on this machine's GPU backend showed imgsz=960
+        # costs 179ms for pre+inference+postprocess ALONE (already over the
+        # goal's 150ms end-to-end budget before capture/tracking/render are
+        # even added), while imgsz=640 costs 87.8ms with comparable detection
+        # recall (5 vs 6 vehicles on the same test frame) — i.e. the 960
+        # starting point was violating the latency target by default and
+        # relying on the rolling-window step-down (10 samples, ~4s at typical
+        # fps) to claw it back. Starting at the already-proven-safe value
+        # closes that gap immediately instead of eating it as startup lag on
+        # every camera start/restart; the adaptive logic above/below this
+        # value still applies (can step down to min_imgsz if this hardware is
+        # still slow, or up toward max_imgsz if it's faster than expected).
         device = getattr(backend_model, "backend_device", "CPU").upper()
         if "GPU" in device or "CUDA" in device:
-            self.current_imgsz = 960
+            self.current_imgsz = 640
             self.max_imgsz     = 1280
-            self.min_imgsz     = 640
+            self.min_imgsz     = 320
         else:
             self.current_imgsz = 640
             self.max_imgsz     = 960
@@ -594,6 +671,15 @@ class PipelineCoordinator:
         # ── Motion detection state ───────────────────────────────────────────
         self._prev_motion = None
         self._motion_thr  = 0.004
+        # Wall-clock time of the last frame actually sent through inference.
+        # should_infer normally gates on frame-diff motion, but a slow-moving
+        # or newly-appeared-but-still object can sit below that threshold
+        # indefinitely — the object simply never gets its first detection.
+        # Forcing a real inference pass at least once a second bounds that
+        # worst case instead of leaving it unbounded (previously observed as
+        # boxes taking up to ~10s to appear).
+        self._last_infer_ts = 0.0
+        self._FORCE_INFER_INTERVAL = 1.0
 
         # Shared counter: _tracking_loop writes, _ai_loop reads.
         # Safe under CPython GIL — int assignment is atomic.
@@ -894,9 +980,13 @@ class PipelineCoordinator:
             motion  = self._detect_motion(frame)
 
             # Keep inferring when active tracks exist (person standing still has no motion
-            # between consecutive frames but must stay tracked).
+            # between consecutive frames but must stay tracked). force_infer bounds the
+            # worst-case gap between real inference passes even when neither is true, so
+            # a slow-entering or already-present-but-still object still gets its first
+            # detection within ~1s instead of waiting indefinitely for a motion spike.
             # _n_active_tracks is written by _tracking_loop — safe under CPython GIL.
-            should_infer = motion or self._n_active_tracks > 0
+            force_infer  = (time.time() - self._last_infer_ts) > self._FORCE_INFER_INTERVAL
+            should_infer = motion or self._n_active_tracks > 0 or force_infer
 
             detections:     list = []
             masks_polygons: list = []
@@ -949,6 +1039,39 @@ class PipelineCoordinator:
                             for p in poly
                         ])
                     masks_polygons = scaled
+
+                # ── Strict polygon ROI gate: cameras with one or more zones
+                # flagged roi=true only detect/track/analyze objects whose
+                # centroid falls inside the union of those polygons. This is
+                # separate from the `_get_roi` bbox pre-crop above (which is
+                # a rectangular performance optimization over ALL zones+lines
+                # and never excludes anything precisely) — this is the actual
+                # per-object containment gate, applied to real detections in
+                # full-frame coords. Detections dropped here never reach the
+                # tracker, so no track ID is ever minted for them and no
+                # analytics (counting/line-crossing/speed/intrusion/
+                # loitering/alerts) ever sees them either, since every
+                # downstream stage only operates on this `detections` list.
+                # No-op (full-frame detection, unchanged behavior) for any
+                # camera that hasn't defined a detection ROI.
+                roi_zones = [z for z in self.zones if z.get("roi") and z.get("points")]
+                if roi_zones and detections:
+                    kept = [
+                        i for i, det in enumerate(detections)
+                        if any(
+                            _point_in_zone_shape(
+                                (det["bbox"]["x1"] + det["bbox"]["x2"]) / 2.0 / orig_w,
+                                (det["bbox"]["y1"] + det["bbox"]["y2"]) / 2.0 / orig_h,
+                                z["points"], z.get("shapeType", "polygon"),
+                            )
+                            for z in roi_zones
+                        )
+                    ]
+                    if len(kept) != len(detections):
+                        detections = [detections[i] for i in kept]
+                        masks_polygons = [masks_polygons[i] for i in kept] if masks_polygons else masks_polygons
+
+                self._last_infer_ts = time.time()
 
             # Adaptive resolution tuning based on rolling inference latency
             if should_infer and t_inf > 0:
@@ -1397,8 +1520,14 @@ class PipelineCoordinator:
         return np.count_nonzero(thresh) / thresh.size > self._motion_thr
 
     def _get_roi(self, orig_h: int, orig_w: int):
+        # Prefer the tight bbox of explicit detection-ROI zones (roi=true)
+        # when any are configured — inference only ever needs to cover the
+        # region objects can actually be kept from, so this crops harder
+        # (faster inference) than unioning every zone/line on the camera.
+        roi_zones = [z for z in self.zones if z.get("roi") and z.get("points")]
+        source_objs = roi_zones if roi_zones else (*self.zones, *self.lines)
         pts = []
-        for obj in (*self.zones, *self.lines):
+        for obj in source_objs:
             if "points" in obj:
                 pts.extend([[p[0]*orig_w, p[1]*orig_h] for p in obj["points"]])
         if not pts:

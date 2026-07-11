@@ -64,7 +64,8 @@ interface Telemetry {
 interface CameraConfig {
   zones: any[];
   lines: any[];
-  
+  editingZoneId?: string | null;
+
   showBoundingBox: boolean;
   showSegmentationMask: boolean;
   showPerson: boolean;
@@ -120,6 +121,7 @@ interface CameraConfig {
 const DEFAULT_CONFIG: CameraConfig = {
   zones: [],
   lines: [],
+  editingZoneId: null,
   showBoundingBox: true,
   showSegmentationMask: true,
   showPerson: true,
@@ -539,6 +541,8 @@ function renderLoop() {
     if (config.zones) {
       config.zones.forEach((zone: any) => {
         if (!zone.points || zone.points.length < 3) return;
+        const isRoi = !!zone.roi;
+        const isEditing = config.editingZoneId === zone.id;
         ctx.beginPath();
         ctx.moveTo(toX(zone.points[0][0]), toY(zone.points[0][1]));
         for (let i = 1; i < zone.points.length; i++) {
@@ -546,32 +550,61 @@ function renderLoop() {
         }
         ctx.closePath();
 
+        // ROI (detection region) zones render in a distinct cyan so they
+        // read as "gates what's detected" rather than a regular alert zone.
+        const fillColor = isRoi ? '#22d3ee' : (config.colors?.zoneFill || '#ef4444');
+        const borderColor = isRoi ? '#22d3ee' : (config.colors?.zoneBorder || '#ef4444');
+
         if (config.showZoneFill) {
-          ctx.fillStyle = config.colors?.zoneFill || '#ef4444';
+          ctx.fillStyle = fillColor;
           ctx.globalAlpha = config.transparency;
           ctx.fill();
           ctx.globalAlpha = 1.0;
         }
 
         if (config.showZoneBorder) {
-          ctx.strokeStyle = config.colors?.zoneBorder || '#ef4444';
-          ctx.lineWidth = config.borderWidth;
+          ctx.strokeStyle = borderColor;
+          ctx.lineWidth = isEditing ? config.borderWidth + 1.5 : config.borderWidth;
+          ctx.setLineDash(isEditing ? [6, 4] : []);
           ctx.stroke();
+          ctx.setLineDash([]);
         }
 
         if (config.showZoneName) {
           ctx.font = `bold ${config.fontSize}px Inter, sans-serif`;
-          ctx.fillStyle = config.colors?.zoneName || '#ef4444';
+          ctx.fillStyle = isRoi ? '#22d3ee' : (config.colors?.zoneName || '#ef4444');
           const zStats = telemetry?.zone_stats?.[zone.id];
+          const roiTag = isRoi ? '[ROI] ' : '';
           const zoneLabel = zStats
-            ? `${zone.name || 'Zone'} [${zStats.status.toUpperCase()}] ${zStats.occupancy}/${zStats.max_occupancy}`
-            : (zone.name || 'Restricted Zone');
+            ? `${roiTag}${zone.name || 'Zone'} [${zStats.status.toUpperCase()}] ${zStats.occupancy}/${zStats.max_occupancy}`
+            : `${roiTag}${zone.name || 'Restricted Zone'}`;
           ctx.fillText(zoneLabel, toX(zone.points[0][0]) + 5, toY(zone.points[0][1]) + 15);
           if (zStats && zStats.status === 'danger') {
             ctx.strokeStyle = '#ef4444';
             ctx.lineWidth = (config.borderWidth || 2) + 2;
             ctx.stroke(); // re-stroke the already-built zone path in a heavier alert color
           }
+        }
+
+        // Draggable vertex handles for the zone currently being edited —
+        // gives the operator a visible grab target for reshape/resize, and
+        // a distinct fill (white ring) so it doesn't get lost against the
+        // zone's own fill/border color.
+        if (isEditing) {
+          zone.points.forEach(([px, py]: number[]) => {
+            const hx = toX(px), hy = toY(py);
+            ctx.beginPath();
+            ctx.arc(hx, hy, 7, 0, Math.PI * 2);
+            ctx.fillStyle = '#0f172a';
+            ctx.fill();
+            ctx.lineWidth = 2;
+            ctx.strokeStyle = '#facc15';
+            ctx.stroke();
+            ctx.beginPath();
+            ctx.arc(hx, hy, 3, 0, Math.PI * 2);
+            ctx.fillStyle = '#facc15';
+            ctx.fill();
+          });
         }
       });
     }

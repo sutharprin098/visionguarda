@@ -43,6 +43,41 @@ COCO_CLASS_MAP = {
 }
 CLASS_IDS_OF_INTEREST = list(COCO_CLASS_MAP.keys())
 
+# Generous per-class geometric plausibility bounds, applied to every
+# detection before it ever reaches the tracker. Deliberately loose — this
+# rejects only truly degenerate boxes (sub-pixel noise, corrupted
+# mask-decode slivers, near-full-frame blowups) rather than anything a real
+# vehicle could plausibly look like from some camera angle. CCTV mounting
+# varies from steep overhead to low oblique roadside, and vehicles range
+# from a distant speck to a truck filling most of the frame at a toll
+# gate — narrow bounds here would just trade false positives for false
+# negatives, which the goal cares about equally.
+_GEOMETRY_BOUNDS = {
+    "person":     {"min_area_frac": 0.00005, "max_area_frac": 0.90, "max_aspect": 6.0},
+    "bicycle":    {"min_area_frac": 0.00005, "max_area_frac": 0.60, "max_aspect": 6.0},
+    "motorcycle": {"min_area_frac": 0.00005, "max_area_frac": 0.60, "max_aspect": 6.0},
+    "car":        {"min_area_frac": 0.00010, "max_area_frac": 0.85, "max_aspect": 6.0},
+    "bus":        {"min_area_frac": 0.00010, "max_area_frac": 0.90, "max_aspect": 8.0},
+    "truck":      {"min_area_frac": 0.00010, "max_area_frac": 0.90, "max_aspect": 8.0},
+}
+_DEFAULT_GEOMETRY_BOUNDS = {"min_area_frac": 0.00005, "max_area_frac": 0.90, "max_aspect": 8.0}
+
+
+def _passes_geometry_filter(class_name, x1, y1, x2, y2, frame_w, frame_h) -> bool:
+    """False for geometrically-degenerate detections (near-zero-area
+    slivers, near-full-frame blowups, extreme aspect-ratio streaks) --
+    exactly the shapes a shadow, reflection, or a corrupted decode artifact
+    tends to produce, and not what any real vehicle/person looks like from
+    any normal camera angle."""
+    w = max(1.0, x2 - x1)
+    h = max(1.0, y2 - y1)
+    area_frac = (w * h) / max(1.0, frame_w * frame_h)
+    bounds = _GEOMETRY_BOUNDS.get(class_name, _DEFAULT_GEOMETRY_BOUNDS)
+    if area_frac < bounds["min_area_frac"] or area_frac > bounds["max_area_frac"]:
+        return False
+    aspect = max(w / h, h / w)
+    return aspect <= bounds["max_aspect"]
+
 
 def nms(boxes, scores, iou_threshold):
     """
@@ -208,6 +243,17 @@ class EngineBackend:
         target_device = "CPU" if force_cpu else ("GPU" if "GPU" in devices else "CPU")
         model = self.ov_core.read_model(model_path)
 
+        # Persist compiled kernels to disk. Without this, GPU in particular
+        # re-runs shape-specific kernel JIT compilation (documented
+        # elsewhere in this file as taking up to several minutes on first
+        # run) on every single process start — including every watchdog-
+        # triggered pipeline restart. A cached compile turns that into a
+        # fast disk load, which matters for "automatic recovery" and
+        # startup latency in production, not just local iteration speed.
+        cache_dir = os.path.join(os.path.dirname(model_path) or ".", "ov_cache")
+        os.makedirs(cache_dir, exist_ok=True)
+        self.ov_core.set_property({"CACHE_DIR": cache_dir})
+
         config = {"PERFORMANCE_HINT": "LATENCY"}
         if target_device == "CPU":
             # Legacy string-keyed CPU tuning properties ("AFFINITY",
@@ -234,7 +280,15 @@ class EngineBackend:
                 print(f"[AI Backend] Warning: OpenVINO compilation with PERFORMANCE_HINT failed: {e2}. Retrying with no config.")
                 self.ov_compiled = self.ov_core.compile_model(model, target_device)
         self.ov_output0 = self.ov_compiled.outputs[0]
-        self.ov_output1 = self.ov_compiled.outputs[1]
+        # Detection-only YOLO11 exports (no "-seg" suffix) have a single
+        # output (boxes+classes) and skip the segmentation proto/mask head
+        # entirely — a real, measured ~2x cheaper inference pass on this
+        # hardware (33ms vs 70ms at imgsz=640) since the proto branch is
+        # part of the model graph itself, not just a postprocess cost.
+        # Supporting both here lets postprocess() skip mask decoding when
+        # there's nothing to decode, for whichever model file is configured.
+        self.has_seg_output = len(self.ov_compiled.outputs) > 1
+        self.ov_output1 = self.ov_compiled.outputs[1] if self.has_seg_output else None
 
         self.backend_type = "openvino"
         self.backend_device = target_device
@@ -296,6 +350,7 @@ class EngineBackend:
                 device = "CUDA" if "CUDAExecutionProvider" in fallback else "CPU"
             else:
                 raise
+        self.has_seg_output = len(self.ort_session.get_outputs()) > 1
         self.backend_type = "onnx"
         self.backend_device = device
         print(f"[AI Backend] Successfully initialized ONNX Runtime engine on {device}.")
@@ -346,13 +401,14 @@ class EngineBackend:
             req = self._get_ov_infer_request()
             res = req.infer([img_tensor])
             output0 = res[self.ov_output0]
-            output1 = res[self.ov_output1]
+            output1 = res[self.ov_output1] if self.has_seg_output else None
         elif self.backend_type == "onnx":
             # ONNX Runtime sessions are documented thread-safe for concurrent
             # Run() calls from multiple threads — no external lock needed.
             input_name = self.ort_session.get_inputs()[0].name
             res = self.ort_session.run(None, {input_name: img_tensor})
-            output0, output1 = res[0], res[1]
+            output0 = res[0]
+            output1 = res[1] if self.has_seg_output else None
         elif self.backend_type == "pytorch":
             with self._pt_lock:
                 with torch.no_grad():
@@ -416,6 +472,8 @@ class EngineBackend:
                         continue
 
                     class_name = COCO_CLASS_MAP.get(class_id, "unknown")
+                    if not _passes_geometry_filter(class_name, xyxy[0], xyxy[1], xyxy[2], xyxy[3], orig_w, orig_h):
+                        continue
                     detections.append({
                         "class": class_name,
                         "confidence": float(conf),
@@ -486,13 +544,19 @@ class EngineBackend:
         class_ids = class_ids[nms_keep]
         coeffs = coeffs[nms_keep]
 
-        proto = np.squeeze(output1, axis=0)
-        proto_h, proto_w = proto.shape[1], proto.shape[2]
-        proto_flat = proto.reshape(32, -1)
-
-        raw_masks = np.matmul(coeffs, proto_flat)
-        raw_masks = 1.0 / (1.0 + np.exp(-raw_masks))
-        raw_masks = raw_masks.reshape(-1, proto_h, proto_w)
+        # Detection-only exports (no "-seg" suffix) have no second/proto
+        # output at all — nothing to decode masks from, and skipping this
+        # matmul+sigmoid+per-box contour extraction is most of why the
+        # detection-only path is measurably cheaper than the seg path.
+        has_masks = output1 is not None
+        if has_masks:
+            proto = np.squeeze(output1, axis=0)
+            proto_h, proto_w = proto.shape[1], proto.shape[2]
+            proto_flat = proto.reshape(32, -1)
+            raw_masks = np.matmul(coeffs, proto_flat)
+            raw_masks = 1.0 / (1.0 + np.exp(-raw_masks))
+            raw_masks = raw_masks.reshape(-1, proto_h, proto_w)
+            proto_scale = proto_w / target_imgsz
 
         detections = []
         masks_polygons = []
@@ -500,13 +564,11 @@ class EngineBackend:
 
         scale_x = orig_w / target_imgsz
         scale_y = orig_h / target_imgsz
-        proto_scale = proto_w / target_imgsz
 
         for idx in range(len(boxes)):
             box = boxes[idx]
             score = scores[idx]
             cls_id = class_ids[idx]
-            mask = raw_masks[idx]
 
             ox1 = max(0, int(box[0] * scale_x))
             oy1 = max(0, int(box[1] * scale_y))
@@ -516,6 +578,8 @@ class EngineBackend:
                 continue
 
             class_name = COCO_CLASS_MAP.get(cls_id, "unknown")
+            if not _passes_geometry_filter(class_name, ox1, oy1, ox2, oy2, orig_w, orig_h):
+                continue
             detections.append({
                 "class": class_name,
                 "confidence": float(score),
@@ -528,6 +592,11 @@ class EngineBackend:
                 "track_id": None
             })
 
+            if not has_masks:
+                masks_polygons.append([])
+                continue
+
+            mask = raw_masks[idx]
             mx1 = max(0, int(box[0] * proto_scale))
             my1 = max(0, int(box[1] * proto_scale))
             mx2 = min(proto_w, int(box[2] * proto_scale))

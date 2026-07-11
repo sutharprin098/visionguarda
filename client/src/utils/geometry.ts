@@ -32,3 +32,20 @@ export function computeContainRect(
   }
   return { x: (containerW - width) / 2, y: (containerH - height) / 2, width, height };
 }
+
+// Ray-casting point-in-polygon test. `point` and `polygon` are both in the
+// same normalized (0..1) space zones/lines are stored in — used by the
+// zone editor to tell "click landed inside this shape" (move the whole
+// polygon) apart from "click landed on empty canvas" or on a vertex handle.
+export function isPointInPolygon(point: [number, number], polygon: number[][]): boolean {
+  const [x, y] = point;
+  let inside = false;
+  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+    const [xi, yi] = polygon[i];
+    const [xj, yj] = polygon[j];
+    const intersect = (yi > y) !== (yj > y) &&
+      x < ((xj - xi) * (y - yi)) / ((yj - yi) || 1e-12) + xi;
+    if (intersect) inside = !inside;
+  }
+  return inside;
+}

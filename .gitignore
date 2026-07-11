@@ -1,1 +1,21 @@
-fuf
+# OpenVINO on-disk kernel cache (server/app/ai/backend.py CACHE_DIR) --
+# machine/driver-specific compiled artifacts, safe and fast to regenerate.
+ov_cache/
+
+# Python bytecode cache
+__pycache__/
+*.pyc
+
+# Runtime data - recordings/snapshots/db are generated at runtime, not source
+server/history/recordings/
+server/history/db.sqlite
+
+# Enterprise platform workspaces
+node_modules/
+portal/dist/
+desktop/dist/
+desktop/dist-electron/
+desktop/release/
+.env
+.env.local
+supabase/.temp/

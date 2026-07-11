@@ -1,0 +1,19 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    @apply bg-surface-0 text-zinc-200 antialiased;
+  }
+}
+
+@layer components {
+  .card {
+    @apply rounded-lg border border-line bg-surface-1;
+  }
+  .btn-primary {
+    @apply inline-flex items-center justify-center gap-2 rounded-md bg-accent px-3.5 py-2 text-sm
+           font-medium text-white transition hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-50;
+  }
+}
