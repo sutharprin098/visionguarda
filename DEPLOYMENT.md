@@ -41,6 +41,14 @@ Required Vercel environment variables (Project Settings → Environment Variable
 | `VITE_SUPABASE_ANON_KEY` | anon key from the Supabase project's API settings |
 | `VITE_SUPABASE_PROJECT_ID` | `mxymrxzhsogfkvkhtwjl` |
 
+**Required one-time Dashboard step:** Authentication → URL Configuration — set
+Site URL to `https://portal-gilt-iota.vercel.app` and add it (plus
+`http://localhost:5174` for local dev) to Redirect URLs. `supabase/config.toml`
+documents the intended values, but the hosted project's Auth service reads its
+redirect allowlist from Dashboard settings, not from a CLI push — without this,
+password-reset and email-confirmation links redirect to `localhost` in
+production and silently fail.
+
 `portal/vercel.json` sets the build command (`npm run build`), output directory
 (`dist`), and an SPA rewrite (`/* → /index.html`) so client-side routing works.
 

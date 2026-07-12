@@ -37,6 +37,9 @@ export default function SignIn() {
                    onChange={(e) => setEmail(e.target.value)} required />
             <input className="input" type="password" placeholder="Password" value={password}
                    onChange={(e) => setPassword(e.target.value)} required />
+            <div className="text-right">
+              <Link to="/forgot-password" className="text-xs text-accent hover:underline">Forgot password?</Link>
+            </div>
             {error && <p className="text-sm text-danger">{error}</p>}
             <button className="btn-primary w-full" disabled={busy}>
               {busy ? "Signing in…" : "Sign In"}

@@ -11,8 +11,12 @@ major_version = 15
 
 [auth]
 enabled = true
-site_url = "http://localhost:5174"
-additional_redirect_urls = ["http://localhost:5174", "camai-desktop://auth"]
+site_url = "https://portal-gilt-iota.vercel.app"
+additional_redirect_urls = [
+  "http://localhost:5174",
+  "https://portal-gilt-iota.vercel.app",
+  "camai-desktop://auth",
+]
 jwt_expiry = 3600
 enable_refresh_token_rotation = true
 refresh_token_reuse_interval = 10
@@ -51,3 +55,12 @@ verify_jwt = false   # called only by Postgres (pg_net) with the service-role ke
 
 [functions.decrypt-camera]
 verify_jwt = true
+
+[functions.test-camera]
+verify_jwt = true
+
+[functions.download-release]
+verify_jwt = true
+
+[functions.github-releases]
+verify_jwt = false   # public release metadata; still rate-limited per-IP in the function

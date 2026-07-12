@@ -4,6 +4,8 @@ import AppShell from "./components/AppShell";
 import Landing from "./pages/Landing";
 import SignIn from "./pages/SignIn";
 import SignUp from "./pages/SignUp";
+import ForgotPassword from "./pages/ForgotPassword";
+import ResetPassword from "./pages/ResetPassword";
 import Dashboard from "./pages/app/Dashboard";
 import OrganizationsPage from "./pages/app/Organizations";
 import UsersPage from "./pages/app/Users";
@@ -39,6 +41,8 @@ export default function App() {
       <Route path="/" element={<Landing />} />
       <Route path="/signin" element={<SignIn />} />
       <Route path="/signup" element={<SignUp />} />
+      <Route path="/forgot-password" element={<ForgotPassword />} />
+      <Route path="/reset-password" element={<ResetPassword />} />
       <Route path="/app" element={<Protected><AppShell /></Protected>}>
         <Route index element={<Dashboard />} />
         <Route path="organizations" element={<OrganizationsPage />} />
