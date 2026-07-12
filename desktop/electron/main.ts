@@ -3,8 +3,8 @@ import { join } from "node:path";
 import { computeFingerprint } from "./fingerprint";
 import { saveCredentials, loadCredentials, clearCredentials } from "./secureStore";
 
-const SUPABASE_URL = process.env.CAMAI_SUPABASE_URL ?? "https://YOUR-PROJECT.supabase.co";
-const ANON_KEY = process.env.CAMAI_SUPABASE_ANON_KEY ?? "YOUR-ANON-KEY";
+const SUPABASE_URL = process.env.CAMAI_SUPABASE_URL ?? "https://mxymrxzhsogfkvkhtwjl.supabase.co";
+const ANON_KEY = process.env.CAMAI_SUPABASE_ANON_KEY ?? "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im14eW1yeHpoc29nZmt2a2h0d2psIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzEyNDYyMDMsImV4cCI6MjA4NjgyMjIwM30.jKzz84M7YI67J_Vxunw3et2usNmXF9SBx7Rb6DyeQrY";
 
 let win: BrowserWindow | null = null;
 
