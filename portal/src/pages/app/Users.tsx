@@ -31,6 +31,7 @@ export default function UsersPage() {
   const [viewing, setViewing] = useState<UserRow | null>(null);
   const [confirm, setConfirm] = useState<{ title: string; body: string; danger?: boolean; run: () => Promise<void> } | null>(null);
   const [revealed, setRevealed] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   const { data: users } = useQuery({
     queryKey: ["users"],
@@ -97,6 +98,12 @@ export default function UsersPage() {
           </button>
         }
       />
+      {actionError && (
+        <div className="mb-4 flex items-center justify-between rounded-md border border-danger/40 bg-danger/10 px-3 py-2 text-sm text-danger">
+          <span>{actionError}</span>
+          <button className="text-xs underline" onClick={() => setActionError(null)}>Dismiss</button>
+        </div>
+      )}
       <DataTable
         rows={users ?? []}
         columns={columns}
@@ -108,15 +115,25 @@ export default function UsersPage() {
           {
             label: "Suspend",
             run: async (rows) => {
-              await Promise.all(rows.map((u) => adminAction("set_status", u.id, { status: "suspended" })));
-              refresh();
+              setActionError(null);
+              try {
+                await Promise.all(rows.map((u) => adminAction("set_status", u.id, { status: "suspended" })));
+                refresh();
+              } catch (e: any) {
+                setActionError(e?.message ?? "Action failed");
+              }
             },
           },
           {
             label: "Activate",
             run: async (rows) => {
-              await Promise.all(rows.map((u) => adminAction("set_status", u.id, { status: "active" })));
-              refresh();
+              setActionError(null);
+              try {
+                await Promise.all(rows.map((u) => adminAction("set_status", u.id, { status: "active" })));
+                refresh();
+              } catch (e: any) {
+                setActionError(e?.message ?? "Action failed");
+              }
             },
           },
         ]}
@@ -156,7 +173,16 @@ export default function UsersPage() {
       <ConfirmDialog
         open={!!confirm}
         onClose={() => setConfirm(null)}
-        onConfirm={async () => { await confirm!.run(); refresh(); setViewing(null); }}
+        onConfirm={async () => {
+          setActionError(null);
+          try {
+            await confirm!.run();
+            refresh();
+            setViewing(null);
+          } catch (e: any) {
+            setActionError(e?.message ?? "Action failed");
+          }
+        }}
         title={confirm?.title ?? ""}
         body={confirm?.body ?? ""}
         danger={confirm?.danger}
@@ -255,7 +281,8 @@ function UserDetail({ user, onAction, onReveal, onChanged }: {
               danger: true,
               run: async () => {
                 const { data, error } = await supabase.rpc("reset_license", { p_license_id: activeLicense.id });
-                if (!error && data) onReveal(data as string);
+                if (error) throw new Error(error.message);
+                onReveal(data as string);
               },
             })}>
             Reset License
@@ -307,13 +334,27 @@ function ProfileTab({ user, onSaved }: { user: UserRow; onSaved: () => void }) {
     queryFn: async () => (await supabase.from("roles").select("*").order("name")).data as Role[],
   });
   const [roleId, setRoleId] = useState(user.user_roles?.[0]?.role_id ?? "");
+  const [error, setError] = useState("");
 
   async function save() {
     setBusy(true);
-    await supabase.from("profiles").update(form).eq("id", user.id);
+    setError("");
+    const { error: updateErr } = await supabase.from("profiles").update(form).eq("id", user.id);
+    if (updateErr) {
+      setBusy(false);
+      return setError(updateErr.message);
+    }
     if (roleId && roleId !== user.user_roles?.[0]?.role_id) {
-      await supabase.from("user_roles").delete().eq("user_id", user.id);
-      await supabase.from("user_roles").insert({ user_id: user.id, role_id: roleId });
+      const { error: delErr } = await supabase.from("user_roles").delete().eq("user_id", user.id);
+      if (delErr) {
+        setBusy(false);
+        return setError(delErr.message);
+      }
+      const { error: insErr } = await supabase.from("user_roles").insert({ user_id: user.id, role_id: roleId });
+      if (insErr) {
+        setBusy(false);
+        return setError(insErr.message);
+      }
     }
     audit("user.update", "user", user.id, {
       module: "users",
@@ -352,6 +393,7 @@ function ProfileTab({ user, onSaved }: { user: UserRow; onSaved: () => void }) {
         <div>Last IP: {user.last_ip ?? "—"}</div>
         <div>Joined: {fmtDateTime(user.created_at)}</div>
       </div>
+      {error && <p className="text-sm text-danger">{error}</p>}
       <button className="btn-primary w-full" onClick={save} disabled={busy}>
         {busy ? "Saving…" : "Save Changes"}
       </button>
@@ -367,7 +409,7 @@ function AssignList({ title, items }: { title: string; items: string[] }) {
         <p className="text-sm text-ink-3">None assigned.</p>
       ) : (
         <div className="flex flex-wrap gap-1.5">
-          {items.map((i) => <Badge key={i}>{i}</Badge>)}
+          {items.map((i, idx) => <Badge key={`${idx}-${i}`}>{i}</Badge>)}
         </div>
       )}
     </div>

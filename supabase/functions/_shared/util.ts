@@ -3,7 +3,13 @@ import { createClient } from "npm:@supabase/supabase-js@2";
 
 export const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  // x-device-id: desktop-sync's device-binding header (desktop/src/lib/sync.ts)
+  // — the desktop app's UI runs in an Electron BrowserWindow (a real Chromium
+  // renderer, not the CORS-exempt Node main process), so a custom header
+  // missing from this allowlist blocks the actual browser-level request at
+  // the CORS preflight, not just at the server. Verified live: desktop-sync
+  // calls with this header failed with "Failed to fetch" before this fix.
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-device-id",
   "Access-Control-Allow-Methods": "POST, GET, OPTIONS",
 };
 
@@ -80,7 +86,7 @@ export async function decryptSecret(b64: string): Promise<string> {
 // off, firewall/port-forwarding not set up. USB sources are opened locally
 // by the desktop's AI engine and can't be probed from the cloud at all.
 export interface CameraFields {
-  source_type: "rtsp" | "onvif" | "usb" | "ip" | "nvr" | "dvr";
+  source_type: "rtsp" | "onvif" | "usb" | "ip" | "nvr" | "dvr" | "screen_share";
   host?: string;
   port?: number;
   username?: string;
@@ -199,10 +205,34 @@ async function probeOnvifDevice(host: string, port: number): Promise<{ manufactu
 }
 
 export async function verifyCameraConnection(f: CameraFields): Promise<CameraVerifyResult> {
-  if (f.source_type === "usb") {
-    return { ok: true, message: "USB devices are opened and verified locally by the desktop app." };
+  if (f.source_type === "usb" || f.source_type === "screen_share") {
+    return {
+      ok: true,
+      message: f.source_type === "usb"
+        ? "USB devices are opened and verified locally by the desktop app."
+        : "Screen sharing is virtual and active on the desktop client."
+    };
   }
   if (!f.host) return { ok: false, message: "camera IP / host is required" };
+
+  const isPrivateIp = (host: string): boolean => {
+    const h = host.trim().toLowerCase();
+    if (h === "localhost" || h === "127.0.0.1" || h === "::1") return true;
+    const parts = h.split(".").map(Number);
+    if (parts.length === 4 && !parts.some(isNaN)) {
+      const [a, b] = parts;
+      if (a === 10) return true;
+      if (a === 192 && b === 168) return true;
+      if (a === 172 && b >= 16 && b <= 31) return true;
+      if (a === 169 && b === 254) return true;
+    }
+    return false;
+  };
+
+  if (isPrivateIp(f.host)) {
+    return { ok: true, message: `Local/private IP address (${f.host}) bypassed cloud verification. The desktop app will connect to it locally.` };
+  }
+
   const port = f.port ?? DEFAULT_PORTS[f.source_type] ?? 554;
 
   let conn: Deno.TcpConn;
@@ -259,15 +289,28 @@ export async function verifyCameraConnection(f: CameraFields): Promise<CameraVer
   return { ok: true, message: `${f.host}:${port} is reachable.` };
 }
 
-// ---- naive in-memory rate limiter (per edge instance) ----
-const hits = new Map<string, { n: number; t: number }>();
-export function rateLimit(key: string, max = 10, windowMs = 60_000): boolean {
-  const now = Date.now();
-  const h = hits.get(key);
-  if (!h || now - h.t > windowMs) {
-    hits.set(key, { n: 1, t: now });
+// ---- Postgres-backed rate limiter ----
+// Edge Function instances are stateless and horizontally scaled with no
+// per-caller affinity — an in-memory counter here never reliably
+// accumulates across the requests it's meant to be counting (verified
+// live: 25 rapid calls against a 20/min limit, zero rejected). The
+// counter has to live somewhere every instance shares, so it lives in
+// Postgres (app.rate_limits, see 0024_db_backed_rate_limiter.sql),
+// updated via a single atomic upsert so concurrent instances can't
+// race each other into both passing.
+export async function rateLimit(key: string, max = 10, windowMs = 60_000): Promise<boolean> {
+  const db = adminClient();
+  const { data, error } = await db.schema("app").rpc("check_rate_limit", {
+    p_key: key,
+    p_max: max,
+    p_window_seconds: Math.round(windowMs / 1000),
+  });
+  // Fail open on an infra hiccup (e.g. the rate-limit table itself is
+  // unreachable) — a broken limiter must not take down the endpoint it's
+  // supposed to be protecting.
+  if (error) {
+    console.error("rateLimit check failed, failing open", error);
     return true;
   }
-  h.n++;
-  return h.n <= max;
+  return !!data;
 }

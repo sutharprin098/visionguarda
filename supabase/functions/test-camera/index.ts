@@ -10,7 +10,7 @@ Deno.serve(async (req) => {
   const { data: auth } = await userClient(req).auth.getUser();
   if (!auth?.user) return json({ error: "unauthorized" }, 401);
 
-  if (!rateLimit(`test-camera:${auth.user.id}`, 20, 60_000)) {
+  if (!(await rateLimit(`test-camera:${auth.user.id}`, 20, 60_000))) {
     return json({ error: "too many attempts, retry later" }, 429);
   }
 

@@ -4,6 +4,7 @@ import { Plus, ShieldCheck, Trash2 } from "lucide-react";
 import clsx from "clsx";
 import { supabase } from "../../lib/supabase";
 import { audit } from "../../lib/audit";
+import { useAuth } from "../../contexts/AuthContext";
 import { Role } from "../../lib/types";
 import { PageHeader, Modal, Badge, ConfirmDialog, Field } from "../../components/ui";
 
@@ -16,10 +17,13 @@ const MODULE_LABELS: Record<string, string> = {
 
 export default function RolesPage() {
   const qc = useQueryClient();
+  const { can } = useAuth();
+  const canManage = can("roles.manage");
   const [selected, setSelected] = useState<Role | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
   const [deleting, setDeleting] = useState<Role | null>(null);
   const [newName, setNewName] = useState("");
+  const [actionError, setActionError] = useState<string | null>(null);
 
   const { data: roles } = useQuery({
     queryKey: ["roles"],
@@ -47,8 +51,11 @@ export default function RolesPage() {
 
   async function togglePerm(perm: string, on: boolean) {
     if (!selected) return;
-    if (on) await supabase.from("role_permissions").insert({ role_id: selected.id, permission: perm });
-    else await supabase.from("role_permissions").delete().eq("role_id", selected.id).eq("permission", perm);
+    setActionError(null);
+    const { error } = on
+      ? await supabase.from("role_permissions").insert({ role_id: selected.id, permission: perm })
+      : await supabase.from("role_permissions").delete().eq("role_id", selected.id).eq("permission", perm);
+    if (error) return setActionError(error.message);
     audit(on ? "role.grant" : "role.revoke", "role", selected.id, {
       module: "roles", detail: { permission: perm, role: selected.name },
     });
@@ -56,9 +63,12 @@ export default function RolesPage() {
   }
 
   async function createRole() {
-    const { data: org } = await supabase.from("organizations").select("id").maybeSingle();
+    setActionError(null);
+    const { data: org, error: orgErr } = await supabase.from("organizations").select("id").maybeSingle();
+    if (orgErr) return setActionError(orgErr.message);
     if (!org) return;
-    const { data } = await supabase.from("roles").insert({ name: newName.trim(), org_id: org.id }).select().maybeSingle();
+    const { data, error } = await supabase.from("roles").insert({ name: newName.trim(), org_id: org.id }).select().maybeSingle();
+    if (error) return setActionError(error.message);
     if (data) audit("role.create", "role", data.id, { module: "roles", new: { name: newName } });
     setCreateOpen(false);
     setNewName("");
@@ -67,7 +77,9 @@ export default function RolesPage() {
 
   async function deleteRole() {
     if (!deleting) return;
-    await supabase.from("roles").delete().eq("id", deleting.id);
+    setActionError(null);
+    const { error } = await supabase.from("roles").delete().eq("id", deleting.id);
+    if (error) return setActionError(error.message);
     audit("role.delete", "role", deleting.id, { module: "roles", old: { name: deleting.name } });
     if (selected?.id === deleting.id) setSelected(null);
     qc.invalidateQueries({ queryKey: ["roles"] });
@@ -79,11 +91,19 @@ export default function RolesPage() {
         title="Roles & Permissions"
         subtitle="System roles plus unlimited custom roles. Changes apply to desktops in realtime."
         actions={
-          <button className="btn-primary" onClick={() => setCreateOpen(true)}>
-            <Plus size={15} /> New Role
-          </button>
+          canManage && (
+            <button className="btn-primary" onClick={() => setCreateOpen(true)}>
+              <Plus size={15} /> New Role
+            </button>
+          )
         }
       />
+      {actionError && (
+        <div className="mb-4 flex items-center justify-between rounded-md border border-danger/40 bg-danger/10 px-3 py-2 text-sm text-danger">
+          <span>{actionError}</span>
+          <button className="text-xs underline" onClick={() => setActionError(null)}>Dismiss</button>
+        </div>
+      )}
       <div className="grid gap-4 lg:grid-cols-[280px_1fr]">
         <div className="card h-fit divide-y divide-line">
           {roles?.map((r) => (
@@ -99,12 +119,12 @@ export default function RolesPage() {
                 <span className="text-[10px] text-ink-3">{r.user_roles?.[0]?.count ?? 0}</span>
                 {r.is_system ? (
                   <Badge>system</Badge>
-                ) : (
+                ) : canManage ? (
                   <button className="hidden text-ink-3 hover:text-danger group-hover:block"
                           onClick={() => setDeleting(r)}>
                     <Trash2 size={13} />
                   </button>
-                )}
+                ) : null}
               </div>
             </div>
           ))}
@@ -135,7 +155,8 @@ export default function RolesPage() {
                               <div className="truncate font-mono text-xs text-ink-1">{p.key}</div>
                               <div className="truncate text-xs text-ink-3">{p.description}</div>
                             </div>
-                            <input type="checkbox" checked={on} className="ml-2 h-4 w-4 shrink-0 accent-[#5b8cff]"
+                            <input type="checkbox" checked={on} disabled={!canManage}
+                                   className="ml-2 h-4 w-4 shrink-0 accent-[#5b8cff] disabled:cursor-not-allowed disabled:opacity-50"
                                    onChange={(e) => togglePerm(p.key, e.target.checked)} />
                           </label>
                         );

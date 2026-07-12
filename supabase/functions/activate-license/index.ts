@@ -17,7 +17,7 @@ Deno.serve(async (req) => {
   if (req.method !== "POST") return json({ error: "method not allowed" }, 405);
 
   const ip = req.headers.get("x-forwarded-for") ?? "unknown";
-  if (!rateLimit(`activate:${ip}`, 5, 60_000)) {
+  if (!(await rateLimit(`activate:${ip}`, 5, 60_000))) {
     return json({ error: "too many attempts, retry later" }, 429);
   }
 

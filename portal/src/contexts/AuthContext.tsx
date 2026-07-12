@@ -36,9 +36,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // profile an admin removed) must not throw — it should just render
       // as "no identity yet" instead of wedging the whole app on a
       // rejected Promise.all with loading stuck true forever.
-      const [{ data: prof }, { data: orgRow }, { data: perms }] = await Promise.all([
-        supabase.from("profiles").select("*").eq("id", s.user.id).maybeSingle(),
-        supabase.from("organizations").select("*").maybeSingle(),
+      //
+      // profile is fetched first (not in the same Promise.all as org) because
+      // the org lookup must filter by the caller's own org_id: organizations_read
+      // grants a super admin every org row (correctly — see 0020_camera_management_
+      // fixes.sql, cameras and friends now follow the same pattern), and an
+      // unfiltered `.maybeSingle()` throws the moment there's more than one row.
+      // "current org" in this context means the super admin's own home org for
+      // branding/display purposes; cross-org data (cameras, licenses, users, ...)
+      // is still returned in full by their own list queries, RLS-scoped separately.
+      const { data: prof } = await supabase.from("profiles").select("*").eq("id", s.user.id).maybeSingle();
+      const [{ data: orgRow }, { data: perms }] = await Promise.all([
+        prof?.org_id
+          ? supabase.from("organizations").select("*").eq("id", prof.org_id).maybeSingle()
+          : Promise.resolve({ data: null }),
         supabase
           .from("user_roles")
           .select("roles(role_permissions(permission))")

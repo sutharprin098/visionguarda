@@ -20,9 +20,16 @@ def init_db():
                 source TEXT NOT NULL, -- '0', '1', or RTSP URL
                 is_active INTEGER DEFAULT 1,
                 zones TEXT DEFAULT '[]', -- JSON string of restricted zone polygons
-                lines TEXT DEFAULT '[]'   -- JSON string of crossing lines
+                lines TEXT DEFAULT '[]',   -- JSON string of crossing lines
+                rules TEXT DEFAULT '[]' -- JSON string of rule engine rules
             )
         """)
+        
+        # Alter table if rules column is missing on upgrade
+        try:
+            conn.execute("ALTER TABLE cameras ADD COLUMN rules TEXT DEFAULT '[]'")
+        except sqlite3.OperationalError:
+            pass
 
         # Alerts table
         conn.execute("""
@@ -70,14 +77,15 @@ def init_db():
         cursor.execute("SELECT COUNT(*) FROM cameras")
         if cursor.fetchone()[0] == 0:
             conn.execute("""
-                INSERT INTO cameras (id, name, type, source, is_active, zones, lines)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO cameras (id, name, type, source, is_active, zones, lines, rules)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 "cam_default",
                 "Default Webcam",
                 "webcam",
                 "0",
                 1,
+                "[]",
                 "[]",
                 "[]"
             ))
@@ -86,14 +94,15 @@ def init_db():
         cursor.execute("SELECT COUNT(*) FROM cameras WHERE id = ?", ("live_webcam",))
         if cursor.fetchone()[0] == 0:
             conn.execute("""
-                INSERT INTO cameras (id, name, type, source, is_active, zones, lines)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO cameras (id, name, type, source, is_active, zones, lines, rules)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 "live_webcam",
                 "Live Webcam Share",
                 "screenshare",
                 "client",
                 1,
+                "[]",
                 "[]",
                 "[]"
             ))
@@ -102,14 +111,15 @@ def init_db():
         cursor.execute("SELECT COUNT(*) FROM cameras WHERE id = ?", ("live_screenshare",))
         if cursor.fetchone()[0] == 0:
             conn.execute("""
-                INSERT INTO cameras (id, name, type, source, is_active, zones, lines)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO cameras (id, name, type, source, is_active, zones, lines, rules)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 "live_screenshare",
                 "Live Screen Share",
                 "screenshare",
                 "client",
                 1,
+                "[]",
                 "[]",
                 "[]"
             ))
@@ -128,12 +138,12 @@ def get_camera(camera_id: str):
         row = conn.execute("SELECT * FROM cameras WHERE id = ?", (camera_id,)).fetchone()
         return dict(row) if row else None
 
-def save_camera(camera_id: str, name: str, type_: str, source: str, is_active: int, zones: str = "[]", lines: str = "[]"):
+def save_camera(camera_id: str, name: str, type_: str, source: str, is_active: int, zones: str = "[]", lines: str = "[]", rules: str = "[]"):
     with get_db() as conn:
         conn.execute("""
-            INSERT OR REPLACE INTO cameras (id, name, type, source, is_active, zones, lines)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-        """, (camera_id, name, type_, source, is_active, zones, lines))
+            INSERT OR REPLACE INTO cameras (id, name, type, source, is_active, zones, lines, rules)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """, (camera_id, name, type_, source, is_active, zones, lines, rules))
         conn.commit()
 
 def delete_camera(camera_id: str):

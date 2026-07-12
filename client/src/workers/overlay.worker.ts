@@ -452,7 +452,6 @@ function initWebSocket(wsUrl: string) {
     try { ws.close(); } catch (e) {}
   }
 
-  console.log('[Worker WS] Connecting to:', wsUrl);
   ws = new WebSocket(wsUrl);
 
   ws.onopen = () => {

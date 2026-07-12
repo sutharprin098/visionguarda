@@ -99,7 +99,7 @@ export default function AnalyticsPage() {
       const d = format(subDays(new Date(), days - 1 - i), "dd MMM");
       buckets.set(d, { day: d, stream_minutes: 0, inference_frames: 0 });
     }
-    for (const u of usage as any[]) {
+    for (const u of usage ?? []) {
       const d = format(new Date(u.recorded_at), "dd MMM");
       const b = buckets.get(d);
       if (b) (b as any)[u.metric] += Number(u.quantity);
@@ -109,7 +109,7 @@ export default function AnalyticsPage() {
 
   const total = alerts?.length ?? 0;
   const critical = alerts?.filter((a) => a.severity === "critical").length ?? 0;
-  const hasUsage = (usage as any[]).length > 0;
+  const hasUsage = (usage ?? []).length > 0;
 
   return (
     <>

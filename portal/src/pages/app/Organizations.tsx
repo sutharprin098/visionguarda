@@ -5,7 +5,7 @@ import { Navigate } from "react-router-dom";
 import { supabase } from "../../lib/supabase";
 import { useAuth } from "../../contexts/AuthContext";
 import { audit } from "../../lib/audit";
-import { PageHeader, Badge, statusTone, Kpi, ConfirmDialog } from "../../components/ui";
+import { PageHeader, Badge, statusTone, Kpi, ConfirmDialog, Modal, Field } from "../../components/ui";
 import DataTable, { Column } from "../../components/DataTable";
 import { fmtDate, fmtMoney } from "../../lib/format";
 
@@ -19,6 +19,8 @@ export default function OrganizationsPage() {
   const { profile } = useAuth();
   const qc = useQueryClient();
   const [confirm, setConfirm] = useState<{ org: OrgRow; action: "suspend" | "reactivate" | "delete" } | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [creating, setCreating] = useState(false);
 
   const { data: platform } = useQuery({
     queryKey: ["platform-stats"],
@@ -38,13 +40,16 @@ export default function OrganizationsPage() {
 
   async function run() {
     if (!confirm) return;
+    setActionError(null);
     const { org, action } = confirm;
     if (action === "delete") {
-      await supabase.from("organizations").delete().eq("id", org.id);
+      const { error } = await supabase.from("organizations").delete().eq("id", org.id);
+      if (error) return setActionError(error.message);
       audit("org.delete", "organization", org.id, { module: "organizations", old: { name: org.name } });
     } else {
       const is_active = action === "reactivate";
-      await supabase.from("organizations").update({ is_active }).eq("id", org.id);
+      const { error } = await supabase.from("organizations").update({ is_active }).eq("id", org.id);
+      if (error) return setActionError(error.message);
       audit(`org.${action}`, "organization", org.id, {
         module: "organizations", old: { is_active: org.is_active }, new: { is_active },
       });
@@ -89,7 +94,14 @@ export default function OrganizationsPage() {
 
   return (
     <>
-      <PageHeader title="Organizations" subtitle="Platform-wide tenant administration (super admin)." />
+      <PageHeader title="Organizations" subtitle="Platform-wide tenant administration (super admin)."
+        actions={<button className="btn-primary" onClick={() => setCreating(true)}>Create Organization</button>} />
+      {actionError && (
+        <div className="mb-4 flex items-center justify-between rounded-md border border-danger/40 bg-danger/10 px-3 py-2 text-sm text-danger">
+          <span>{actionError}</span>
+          <button className="text-xs underline" onClick={() => setActionError(null)}>Dismiss</button>
+        </div>
+      )}
       <div className="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <Kpi label="Organizations" value={platform?.organizations ?? "—"} />
         <Kpi label="Total Users" value={platform?.users ?? "—"} />
@@ -120,6 +132,53 @@ export default function OrganizationsPage() {
         }
         confirmLabel={confirm?.action === "delete" ? "Delete permanently" : "Confirm"}
       />
+
+      <Modal open={creating} onClose={() => setCreating(false)} title="Create organization">
+        <CreateOrgForm onDone={() => { setCreating(false); qc.invalidateQueries({ queryKey: ["all-orgs"] }); }} />
+      </Modal>
     </>
+  );
+}
+
+function CreateOrgForm({ onDone }: { onDone: () => void }) {
+  const [name, setName] = useState("");
+  const [kind, setKind] = useState<"organization" | "personal">("organization");
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  async function submit() {
+    setBusy(true);
+    setError("");
+    // create_organization lives in the `app` schema, not `public` — the
+    // default client targets `public`, so this 404s ("could not find the
+    // function") without the explicit .schema() call.
+    const { data, error } = await supabase.schema("app").rpc("create_organization", { p_name: name.trim(), p_kind: kind });
+    setBusy(false);
+    if (error) return setError(error.message);
+    const org = Array.isArray(data) ? data[0] : data;
+    audit("org.create", "organization", org?.id, { module: "organizations", new: { name, kind } });
+    onDone();
+  }
+
+  return (
+    <div className="space-y-4">
+      <Field label="Organization name">
+        <input className="input" value={name} onChange={(e) => setName(e.target.value)} autoFocus />
+      </Field>
+      <Field label="Type">
+        <select className="input" value={kind} onChange={(e) => setKind(e.target.value as any)}>
+          <option value="organization">Organization</option>
+          <option value="personal">Personal</option>
+        </select>
+      </Field>
+      <p className="text-xs text-ink-3">
+        Creates the org and its system roles only — no owner or license. Invite the first user from
+        inside the org afterward.
+      </p>
+      {error && <p className="text-sm text-danger">{error}</p>}
+      <button className="btn-primary w-full" onClick={submit} disabled={busy || !name.trim()}>
+        {busy ? "Creating…" : "Create Organization"}
+      </button>
+    </div>
   );
 }

@@ -1,6 +1,6 @@
 import { FormEvent, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { Cctv, User, Building2, Copy, Check } from "lucide-react";
+import { User, Building2, Copy, Check } from "lucide-react";
 import clsx from "clsx";
 import { supabase, invokeFn } from "../lib/supabase";
 
@@ -52,9 +52,7 @@ export default function SignUp() {
     <div className="flex min-h-screen items-center justify-center px-4">
       <div className="w-full max-w-sm">
         <Link to="/" className="mb-8 flex items-center justify-center gap-2.5">
-          <div className="flex h-9 w-9 items-center justify-center rounded-md bg-accent/20 text-accent">
-            <Cctv size={20} />
-          </div>
+          <img src="/favicon.svg" alt="CamAI" className="h-9 w-9 rounded-md" />
           <span className="font-semibold text-ink-1">CamAI</span>
         </Link>
         <div className="card p-6">

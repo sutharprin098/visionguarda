@@ -57,8 +57,8 @@ Two products, one backend:
 cd supabase
 npx supabase init            # if linking fresh
 npx supabase link --project-ref <your-ref>
-npx supabase db push         # applies migrations 0001–0012
-npx supabase functions deploy activate-license my-keys desktop-sync invite-user add-camera github-releases download-release test-camera send-email decrypt-camera
+npx supabase db push         # applies migrations 0001–0014
+npx supabase functions deploy activate-license my-keys desktop-sync invite-user add-camera update-camera admin-users github-releases download-release test-camera send-email decrypt-camera
 npx supabase secrets set CAMAI_AES_KEY=$(openssl rand -hex 32)
 npx supabase secrets set GITHUB_RELEASES_REPO=<owner>/<repo>   # powers the Downloads page
 npx supabase secrets set GITHUB_TOKEN=<pat-with-public-repo-read>  # optional, raises the GitHub API rate limit

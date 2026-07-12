@@ -25,6 +25,7 @@ export default function ActivationsPage() {
   const { can } = useAuth();
   const [confirm, setConfirm] = useState<{ title: string; body: string; run: () => Promise<void> } | null>(null);
   const [transferFor, setTransferFor] = useState<ActivationRow | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   const { data: activations } = useQuery({
     queryKey: ["activations"],
@@ -45,15 +46,19 @@ export default function ActivationsPage() {
   const refresh = () => qc.invalidateQueries({ queryKey: ["activations"] });
 
   async function setDeviceStatus(a: ActivationRow, status: "active" | "deactivated") {
-    await supabase.from("devices").update({ status, is_online: false }).eq("id", a.device_id);
+    setActionError(null);
+    const { error } = await supabase.from("devices").update({ status, is_online: false }).eq("id", a.device_id);
+    if (error) return setActionError(error.message);
     if (status !== "active") {
-      await supabase.from("license_activations")
+      const { error: revokeErr } = await supabase.from("license_activations")
         .update({ revoked_at: new Date().toISOString() }).eq("device_id", a.device_id).is("revoked_at", null);
+      if (revokeErr) return setActionError(revokeErr.message);
     } else {
       // clear the revoke too, or desktop-sync keeps failing closed even
       // though the device row now reads "active"
-      await supabase.from("license_activations")
+      const { error: clearErr } = await supabase.from("license_activations")
         .update({ revoked_at: null }).eq("id", a.id);
+      if (clearErr) return setActionError(clearErr.message);
     }
     audit(`device.${status}`, "device", a.device_id, { module: "licenses" });
     refresh();
@@ -128,8 +133,10 @@ export default function ActivationsPage() {
                     title: "Reset activation",
                     body: `Restore this activation for ${a.devices?.name ?? "the device"} on ${a.licenses?.key_hint}, undoing the earlier revoke? The device counts against the license's device limit again immediately.`,
                     run: async () => {
-                      await supabase.from("license_activations")
+                      setActionError(null);
+                      const { error } = await supabase.from("license_activations")
                         .update({ revoked_at: null }).eq("id", a.id);
+                      if (error) return setActionError(error.message);
                       audit("activation.reset", "activation", a.id, { module: "licenses" });
                       refresh();
                     },
@@ -140,8 +147,10 @@ export default function ActivationsPage() {
                     title: "Revoke activation",
                     body: `Unbind ${a.devices?.name ?? "this device"} from ${a.licenses?.key_hint}? The desktop falls back to the activation screen on its next sync.`,
                     run: async () => {
-                      await supabase.from("license_activations")
+                      setActionError(null);
+                      const { error } = await supabase.from("license_activations")
                         .update({ revoked_at: new Date().toISOString() }).eq("id", a.id);
+                      if (error) return setActionError(error.message);
                       audit("activation.revoke", "activation", a.id, { module: "licenses" });
                       refresh();
                     },
@@ -159,6 +168,12 @@ export default function ActivationsPage() {
         title="Desktop Activations"
         subtitle="Every license → device binding. Revoking forces the desktop back to the activation screen within one sync."
       />
+      {actionError && (
+        <div className="mb-4 flex items-center justify-between rounded-md border border-danger/40 bg-danger/10 px-3 py-2 text-sm text-danger">
+          <span>{actionError}</span>
+          <button className="text-xs underline" onClick={() => setActionError(null)}>Dismiss</button>
+        </div>
+      )}
       <DataTable
         rows={activations ?? []}
         columns={columns}
@@ -188,6 +203,7 @@ export default function ActivationsPage() {
 function TransferDeviceForm({ activation, onDone }: { activation: ActivationRow; onDone: () => void }) {
   const [userId, setUserId] = useState("");
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
 
   const { data: users } = useQuery({
     queryKey: ["users-brief"],
@@ -196,10 +212,19 @@ function TransferDeviceForm({ activation, onDone }: { activation: ActivationRow;
 
   async function submit() {
     setBusy(true);
-    await supabase.from("devices").update({ user_id: userId }).eq("id", activation.device_id);
-    await supabase.from("license_activations")
+    setError("");
+    const { error: updErr } = await supabase.from("devices").update({ user_id: userId }).eq("id", activation.device_id);
+    if (updErr) {
+      setBusy(false);
+      return setError(updErr.message);
+    }
+    const { error: revokeErr } = await supabase.from("license_activations")
       .update({ revoked_at: new Date().toISOString() })
       .eq("device_id", activation.device_id).is("revoked_at", null);
+    if (revokeErr) {
+      setBusy(false);
+      return setError(revokeErr.message);
+    }
     audit("device.transfer", "device", activation.device_id, { module: "licenses" });
     setBusy(false);
     onDone();
@@ -216,6 +241,7 @@ function TransferDeviceForm({ activation, onDone }: { activation: ActivationRow;
       <p className="text-xs text-warn">
         The current activation is revoked; the new owner activates on this machine with their own license key.
       </p>
+      {error && <p className="text-sm text-danger">{error}</p>}
       <button className="btn-primary w-full" onClick={submit} disabled={busy || !userId}>
         {busy ? "Transferring…" : "Transfer Device"}
       </button>

@@ -13,7 +13,6 @@ import {
   Settings,
   ChevronsLeft,
   ChevronsRight,
-  ScanEye,
 } from 'lucide-react';
 import clsx from 'clsx';
 
@@ -52,9 +51,7 @@ export function Sidebar() {
     >
       {/* Brand */}
       <div className="flex items-center gap-2.5 h-14 px-4 shrink-0">
-        <div className="w-7 h-7 rounded-lg flex items-center justify-center bg-brand-500 shrink-0">
-          <ScanEye size={15} className="text-white" />
-        </div>
+        <img src="/favicon.svg" alt="CamAI" className="w-7 h-7 rounded-lg shrink-0" />
         {!collapsed && <span className="text-[13px] font-bold text-white tracking-tight">CamAI</span>}
       </div>
 

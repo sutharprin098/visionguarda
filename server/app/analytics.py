@@ -322,10 +322,30 @@ class CameraAnalytics:
         self.CROWD_GRID = 4  # 4x4 cells
         self.CROWD_THRESHOLDS = {"moderate": 3, "high": 6, "critical": 10}  # people per cell
 
-    def update(self, detections, zones, lines, frame_w: int = 640, frame_h: int = 480, frame=None):
+    def update(self, detections, zones, lines, frame_w: int = 640, frame_h: int = 480, frame=None, rules=None):
         active_track_ids = set()
         alerts = []
         now = time.time()
+        
+        # Filter detections inside privacy masks or exclusion zones
+        filtered_detections = []
+        for det in detections:
+            bbox = det["bbox"]
+            cx = (bbox["x1"] + bbox["x2"]) / 2.0 / frame_w
+            cy = (bbox["y1"] + bbox["y2"]) / 2.0 / frame_h
+            
+            is_masked = False
+            for zone in zones:
+                z_type = zone.get("zoneType")
+                if z_type in ("privacy_mask", "exclusion_zone"):
+                    pts = zone.get("points", [])
+                    shape_type = zone.get("shapeType", "polygon")
+                    if len(pts) >= 2 and _point_in_zone_shape(cx, cy, pts, shape_type):
+                        is_masked = True
+                        break
+            if not is_masked:
+                filtered_detections.append(det)
+        detections = filtered_detections
         
         # Read or initialize metadata tracking structures
         for zone in zones:
@@ -634,14 +654,53 @@ class CameraAnalytics:
                         "infrastructure": "infrastructure_present",
                     }.get(category, "object_entry")
                     
-                    alert_key = f"{alert_type}_{z_id}_{tid}"
-                    if now - self.alert_cooldowns.get(alert_key, 0) > self.cooldown_period:
-                        alerts.append({
-                            "type": alert_type,
-                            "message": f"{class_name.capitalize()} (ID: {tid}) entered {zone_type} Zone '{z_name}'",
-                            "zone_id": z_id
-                        })
-                        self.alert_cooldowns[alert_key] = now
+                    # Custom rule check for zone_intrusion
+                    custom_triggered = False
+                    if rules:
+                        for rule in rules:
+                            if not rule.get("is_enabled", True):
+                                continue
+                            if rule.get("trigger_type") == "zone_intrusion" and rule.get("trigger_source_id") == z_id:
+                                conds = rule.get("conditions", {})
+                                target_class = conds.get("class")
+                                min_conf = conds.get("min_confidence", 0.0)
+                                
+                                trk_conf = 1.0
+                                for d in detections:
+                                    if d.get("track_id") == tid:
+                                        trk_conf = d.get("confidence", 1.0)
+                                        break
+                                        
+                                class_match = not target_class or target_class == class_name or target_class == category
+                                conf_match = trk_conf >= float(min_conf)
+                                
+                                if class_match and conf_match:
+                                    custom_triggered = True
+                                    alert_msg = f"Rule '{rule.get('name')}': Custom intrusion detected in '{z_name}'"
+                                    for act in rule.get("actions", []):
+                                        if act.get("type") == "alert" and act.get("message"):
+                                            alert_msg = act.get("message")
+                                            break
+                                            
+                                    alert_key = f"custom_intrusion_{rule.get('id')}_{tid}"
+                                    if now - self.alert_cooldowns.get(alert_key, 0) > self.cooldown_period:
+                                        alerts.append({
+                                            "type": "custom_rule",
+                                            "message": alert_msg,
+                                            "zone_id": z_id,
+                                            "rule_id": rule.get("id")
+                                        })
+                                        self.alert_cooldowns[alert_key] = now
+                    
+                    if not custom_triggered:
+                        alert_key = f"{alert_type}_{z_id}_{tid}"
+                        if now - self.alert_cooldowns.get(alert_key, 0) > self.cooldown_period:
+                            alerts.append({
+                                "type": alert_type,
+                                "message": f"{class_name.capitalize()} (ID: {tid}) entered {zone_type} Zone '{z_name}'",
+                                "zone_id": z_id
+                            })
+                            self.alert_cooldowns[alert_key] = now
                         
             # Exits
             exited_tids = []
@@ -671,7 +730,47 @@ class CameraAnalytics:
                 # Check loitering
                 enter_t = current_active.get(tid, now)
                 time_inside = now - enter_t
-                if time_inside > float(dwell_limit):
+                
+                custom_loiter_triggered = False
+                if rules:
+                    for rule in rules:
+                        if not rule.get("is_enabled", True):
+                            continue
+                        if rule.get("trigger_type") == "loitering" and rule.get("trigger_source_id") == z_id:
+                            conds = rule.get("conditions", {})
+                            target_class = conds.get("class")
+                            min_conf = conds.get("min_confidence", 0.0)
+                            custom_dwell = float(conds.get("dwell_time") or conds.get("dwell_threshold") or dwell_limit)
+                            
+                            if time_inside > custom_dwell:
+                                trk_conf = 1.0
+                                for d in detections:
+                                    if d.get("track_id") == tid:
+                                        trk_conf = d.get("confidence", 1.0)
+                                        break
+                                class_match = not target_class or target_class == cls_name or target_class == category
+                                conf_match = trk_conf >= float(min_conf)
+                                
+                                if class_match and conf_match:
+                                    custom_loiter_triggered = True
+                                    loitering_count += 1
+                                    alert_msg = f"Rule '{rule.get('name')}': Loitering in '{z_name}' for {int(time_inside)}s"
+                                    for act in rule.get("actions", []):
+                                        if act.get("type") == "alert" and act.get("message"):
+                                            alert_msg = act.get("message")
+                                            break
+                                            
+                                    alert_key = f"custom_loitering_{rule.get('id')}_{tid}"
+                                    if now - self.alert_cooldowns.get(alert_key, 0) > 10.0:
+                                        alerts.append({
+                                            "type": "custom_rule",
+                                            "message": alert_msg,
+                                            "zone_id": z_id,
+                                            "rule_id": rule.get("id")
+                                        })
+                                        self.alert_cooldowns[alert_key] = now
+                                        
+                if not custom_loiter_triggered and time_inside > float(dwell_limit):
                     loitering_count += 1
                     alert_key = f"loitering_{z_id}_{tid}"
                     if now - self.alert_cooldowns.get(alert_key, 0) > 10.0:
@@ -806,28 +905,59 @@ class CameraAnalytics:
                     is_in = side_prev < 0 <= side_curr
                     is_out = side_prev > 0 >= side_curr
 
+                    custom_crossing_triggered = False
+                    if rules:
+                        for rule in rules:
+                            if not rule.get("is_enabled", True):
+                                continue
+                            if rule.get("trigger_type") == "line_crossing" and rule.get("trigger_source_id") == l_id:
+                                conds = rule.get("conditions", {})
+                                target_class = conds.get("class")
+                                min_conf = conds.get("min_confidence", 0.0)
+                                target_direction = conds.get("direction") # "in" or "out"
+                                
+                                dir_match = True
+                                if target_direction == "in" and not is_in:
+                                    dir_match = False
+                                elif target_direction == "out" and not is_out:
+                                    dir_match = False
+                                    
+                                trk_conf = 1.0
+                                for d in detections:
+                                    if d.get("track_id") == track_id:
+                                        trk_conf = d.get("confidence", 1.0)
+                                        break
+                                        
+                                class_match = not target_class or target_class == class_name or target_class == category
+                                conf_match = trk_conf >= float(min_conf)
+                                
+                                if class_match and conf_match and dir_match:
+                                    custom_crossing_triggered = True
+                                    alert_msg = f"Rule '{rule.get('name')}': Crossed line '{l_name}'"
+                                    for act in rule.get("actions", []):
+                                        if act.get("type") == "alert" and act.get("message"):
+                                            alert_msg = act.get("message")
+                                            break
+                                            
+                                    alert_key = f"custom_crossing_{rule.get('id')}_{track_id}"
+                                    if now - self.alert_cooldowns.get(alert_key, 0) > self.cooldown_period:
+                                        alerts.append({
+                                            "type": "custom_rule",
+                                            "message": alert_msg,
+                                            "line_id": l_id,
+                                            "rule_id": rule.get("id")
+                                        })
+                                        self.alert_cooldowns[alert_key] = now
+
+                    # Increment standard counters
                     if is_in:
                         self.line_counters[l_id]["in_count"] += 1
-                        # Items (bags, etc.) crossing a line are tallied in the
-                        # per-line total below but excluded from the global
-                        # people/vehicle in-out counters — they're neither.
                         if is_vehicle:
                             self.counter_in_vehicle += 1
                             self.counter_in += 1
-                    elif category == "person":
-                        self.counter_in_person += 1
-                        self.counter_in += 1
-                        
-                        # Raise Alert
-                        alert_key = f"crossing_{l_id}_{track_id}"
-                        if now - self.alert_cooldowns.get(alert_key, 0) > self.cooldown_period:
-                            alerts.append({
-                                "type": "crossing",
-                                "message": f"{class_name.capitalize()} crossed line '{l_name}' (Entry, ID: {track_id})",
-                                "line_id": l_id
-                            })
-                            self.alert_cooldowns[alert_key] = now
-                            
+                        elif category == "person":
+                            self.counter_in_person += 1
+                            self.counter_in += 1
                     elif is_out:
                         self.line_counters[l_id]["out_count"] += 1
                         if is_vehicle:
@@ -836,27 +966,36 @@ class CameraAnalytics:
                         elif category == "person":
                             self.counter_out_person += 1
                             self.counter_out += 1
-                        
-                        # Wrong Direction / Reverse checks
-                        if line_type in ["one_way", "wrong_direction"]:
-                            alert_key = f"wrong_dir_{l_id}_{track_id}"
-                            if now - self.alert_cooldowns.get(alert_key, 0) > self.cooldown_period:
-                                alerts.append({
-                                    "type": "wrong_direction",
-                                    "message": f"Wrong Direction Alarm: {class_name.capitalize()} (ID: {track_id}) crossed '{l_name}' backward!",
-                                    "line_id": l_id
-                                })
-                                self.alert_cooldowns[alert_key] = now
-                        else:
-                            # Standard Exit Alert
+
+                    if not custom_crossing_triggered:
+                        if is_in and category == "person":
                             alert_key = f"crossing_{l_id}_{track_id}"
                             if now - self.alert_cooldowns.get(alert_key, 0) > self.cooldown_period:
                                 alerts.append({
                                     "type": "crossing",
-                                    "message": f"{class_name.capitalize()} crossed line '{l_name}' (Exit, ID: {track_id})",
+                                    "message": f"{class_name.capitalize()} crossed line '{l_name}' (Entry, ID: {track_id})",
                                     "line_id": l_id
                                 })
                                 self.alert_cooldowns[alert_key] = now
+                        elif is_out:
+                            if line_type in ["one_way", "wrong_direction"]:
+                                alert_key = f"wrong_dir_{l_id}_{track_id}"
+                                if now - self.alert_cooldowns.get(alert_key, 0) > self.cooldown_period:
+                                    alerts.append({
+                                        "type": "wrong_direction",
+                                        "message": f"Wrong Direction Alarm: {class_name.capitalize()} (ID: {track_id}) crossed '{l_name}' backward!",
+                                        "line_id": l_id
+                                    })
+                                    self.alert_cooldowns[alert_key] = now
+                            elif category == "person":
+                                alert_key = f"crossing_{l_id}_{track_id}"
+                                if now - self.alert_cooldowns.get(alert_key, 0) > self.cooldown_period:
+                                    alerts.append({
+                                        "type": "crossing",
+                                        "message": f"{class_name.capitalize()} crossed line '{l_name}' (Exit, ID: {track_id})",
+                                        "line_id": l_id
+                                    })
+                                    self.alert_cooldowns[alert_key] = now
 
             line_stats[l_id] = {
                 "in_count": self.line_counters[l_id]["in_count"],
@@ -878,6 +1017,43 @@ class CameraAnalytics:
                 det["speed_calibrated"] = True
             else:
                 det["speed_calibrated"] = False
+
+        # Custom speed limit rules check
+        if rules:
+            for det in detections:
+                track_id = det.get("track_id")
+                if track_id is None:
+                    continue
+                class_name = self.track_classes.get(track_id, "person")
+                category = _object_category(class_name)
+                speed = det.get("speed", 0.0)
+                
+                for rule in rules:
+                    if not rule.get("is_enabled", True):
+                        continue
+                    if rule.get("trigger_type") == "speed_limit":
+                        conds = rule.get("conditions", {})
+                        speed_limit = float(conds.get("speed_limit") or conds.get("speed_threshold") or 50.0)
+                        
+                        if speed > speed_limit:
+                            target_class = conds.get("class")
+                            class_match = not target_class or target_class == class_name or target_class == category
+                            
+                            if class_match:
+                                alert_msg = f"Rule '{rule.get('name')}': Speed limit exceeded ({speed} km/h)"
+                                for act in rule.get("actions", []):
+                                    if act.get("type") == "alert" and act.get("message"):
+                                        alert_msg = act.get("message")
+                                        break
+                                        
+                                alert_key = f"custom_speed_{rule.get('id')}_{track_id}"
+                                if now - self.alert_cooldowns.get(alert_key, 0) > 10.0:
+                                    alerts.append({
+                                        "type": "custom_rule",
+                                        "message": alert_msg,
+                                        "rule_id": rule.get("id")
+                                    })
+                                    self.alert_cooldowns[alert_key] = now
 
         # Cleanup tracks that have been gone long enough to be presumed
         # permanently gone (not just occluded — see REID_GRACE_SECONDS /

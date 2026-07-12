@@ -25,6 +25,18 @@ export const statusTone: Record<string, string> = {
   expired: "danger", revoked: "danger", locked: "danger", disabled: "danger",
   error: "danger", removed: "danger", failed: "danger", urgent: "danger", high: "warn",
   normal: "default", low: "default", critical: "danger", warning: "warn", info: "default",
+  connecting: "accent", auth_failed: "danger", network_error: "danger",
+};
+
+// Human-readable labels for values that are snake_case in the database —
+// cameras.status in particular (online/offline/connecting/auth_failed/
+// network_error) needs to render as "Authentication Failed", not the raw enum.
+export const statusLabel: Record<string, string> = {
+  auth_failed: "Authentication Failed",
+  network_error: "Network Error",
+  connecting: "Connecting",
+  online: "Online",
+  offline: "Offline",
 };
 
 // ---------------------------------------------------------------- layout

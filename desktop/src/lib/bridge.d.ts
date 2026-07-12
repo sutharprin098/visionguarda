@@ -3,7 +3,7 @@ export interface CamaiBridge {
   getStoredSession(): Promise<{ ok: boolean; refresh_token?: string; device_id?: string }>;
   updateRefreshToken(token: string): Promise<{ ok: boolean }>;
   deactivate(): Promise<{ ok: boolean }>;
-  getConfig(): Promise<{ supabaseUrl: string; anonKey: string }>;
+  getConfig(): Promise<{ supabaseUrl: string; anonKey: string; appType: "desktop" | "admin" }>;
 }
 
 declare global {

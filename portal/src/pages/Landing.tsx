@@ -15,9 +15,7 @@ export default function Landing() {
     <div className="min-h-screen">
       <header className="mx-auto flex max-w-6xl items-center justify-between px-6 py-5">
         <div className="flex items-center gap-2.5">
-          <div className="flex h-8 w-8 items-center justify-center rounded-md bg-accent/20 text-accent">
-            <Cctv size={18} />
-          </div>
+          <img src="/favicon.svg" alt="CamAI" className="h-8 w-8 rounded-md" />
           <span className="text-sm font-semibold text-ink-1">CamAI</span>
         </div>
         <div className="flex gap-2">

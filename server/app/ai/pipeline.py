@@ -566,7 +566,7 @@ class PipelineCoordinator:
     """
 
     def __init__(self, camera_id: str, name: str, source_type: str, source: str,
-                 zones_json: str, lines_json: str, backend_model: EngineBackend):
+                 zones_json: str, lines_json: str, backend_model: EngineBackend, rules_json: str = "[]"):
 
         self.camera_id   = camera_id
         self.name        = name
@@ -576,6 +576,7 @@ class PipelineCoordinator:
 
         self.zones = json.loads(zones_json)
         self.lines = json.loads(lines_json)
+        self.rules = json.loads(rules_json)
 
         self.running        = False
         self.incoming_frame = None       # screenshare push target
@@ -692,6 +693,35 @@ class PipelineCoordinator:
         # to operators instead of silently retrying forever.
         self._cap_consecutive_failures = 0
 
+        # ── Reported connection health (see app.health_probe) ───────────────
+        # 'connecting' until the first successful frame or a classified
+        # failure; surfaced via /api/status and pushed to Supabase by the
+        # desktop app's health-report loop (report-camera-health function).
+        self._health_status = "connecting"
+        self._last_probe_ts = 0.0
+        self._last_resolution = ""
+
+    def _update_health_on_failure(self):
+        """Classifies a capture failure as connecting/offline/auth_failed/
+        network_error. Probing (a real socket round-trip) is rate-limited —
+        only re-run every few seconds, not on every fast retry tick."""
+        if self.source_type in ("usb", "webcam"):
+            self._health_status = "offline" if self._cap_consecutive_failures >= 3 else "connecting"
+            return
+        if self._cap_consecutive_failures == 0:
+            self._health_status = "connecting"
+            return
+        now = time.time()
+        if now - self._last_probe_ts < 8.0:
+            return
+        self._last_probe_ts = now
+        from app.health_probe import probe_connection
+        result = probe_connection(self.source)
+        if result in ("auth_failed", "network_error"):
+            self._health_status = result
+        else:
+            self._health_status = "offline" if self._cap_consecutive_failures >= 6 else "connecting"
+
     # -----------------------------------------------------------------------
     # Lifecycle
     # -----------------------------------------------------------------------
@@ -720,9 +750,10 @@ class PipelineCoordinator:
     def stop(self):
         self.running = False
 
-    def update_config(self, zones_json: str, lines_json: str):
+    def update_config(self, zones_json: str, lines_json: str, rules_json: str = "[]"):
         self.zones = json.loads(zones_json)
         self.lines = json.loads(lines_json)
+        self.rules = json.loads(rules_json)
         self.analytics.reset_counters()
 
     def update_display_config(self, max_width: int = None, quality: int = None):
@@ -804,6 +835,13 @@ class PipelineCoordinator:
                         if self.cap.isOpened():
                             self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
                             self.cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
+                        else:
+                            # Previously never counted, so backoff never escalated past
+                            # its 2s floor for a source that fails to open at all (wrong
+                            # IP, camera powered off) — now it climbs like every other
+                            # failure mode, and health classification (below) kicks in.
+                            self._cap_consecutive_failures += 1
+                            self._update_health_on_failure()
                         last_good_frame_ts = time.time()
                         continue
 
@@ -837,11 +875,15 @@ class PipelineCoordinator:
                                 self._cap_hw_accel = False
                                 print(f"[Cap-{self.camera_id}] Falling back to software decode "
                                       f"after repeated frameless reconnects.", flush=True)
+                            self._update_health_on_failure()
                         retry_sleep = min(2.0, 0.05 * (1.5 ** min(self._cap_consecutive_failures, 12)))
                         time.sleep(retry_sleep)
                         continue
                     last_good_frame_ts = time.time()
                     self._cap_consecutive_failures = 0
+                    self._health_status = "online"
+                    if frame is not None:
+                        self._last_resolution = f"{frame.shape[1]}x{frame.shape[0]}"
                 else:
                     frame = self.incoming_frame
                     self.incoming_frame = None
@@ -892,6 +934,15 @@ class PipelineCoordinator:
             try:
                 t0    = time.time()
                 frame = data["frame"]
+
+                # Apply privacy masks (solid black blackout) to raw frame before MJPEG encode or AI
+                h, w = frame.shape[:2]
+                for zone in self.zones:
+                    if zone.get("zoneType") == "privacy_mask":
+                        pts = zone.get("points", [])
+                        if len(pts) >= 2:
+                            pts_px = np.array([[p[0] * w, p[1] * h] for p in pts], dtype=np.int32)
+                            cv2.fillPoly(frame, [pts_px], (0, 0, 0))
 
                 # ── MJPEG stream: encode at full camera FPS, never blocked by AI ─
                 # Resize to display_max_width before encoding to reduce JPEG cost.
@@ -1202,7 +1253,7 @@ class PipelineCoordinator:
             # only adds det["speed"] and drives zone/line/dwell logic from it.
             # track_overlays: [{track_id, class, points: [[cx,cy]...]}] — normalized
             alerts, track_overlays, heatmap, zone_stats, line_stats, crowd_stats, parking_stats = self.analytics.update(
-                detections, self.zones, self.lines, orig_w, orig_h, frame=frame
+                detections, self.zones, self.lines, orig_w, orig_h, frame=frame, rules=self.rules
             )
 
             # ── Build normalized client_dets AFTER analytics has smoothed bbox─

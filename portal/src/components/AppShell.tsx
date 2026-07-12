@@ -1,5 +1,5 @@
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
-import { Cctv, LogOut, Moon, Search, Sun } from "lucide-react";
+import { LogOut, Moon, Search, Sun } from "lucide-react";
 import clsx from "clsx";
 import { useAuth } from "../contexts/AuthContext";
 import { useTheme } from "../contexts/ThemeContext";
@@ -16,9 +16,7 @@ export default function AppShell() {
     <div className="flex h-screen">
       <aside className="flex w-60 shrink-0 flex-col border-r border-line bg-surface-1">
         <div className="flex items-center gap-2.5 px-4 py-4">
-          <div className="flex h-8 w-8 items-center justify-center rounded-md bg-accent/20 text-accent">
-            <Cctv size={18} />
-          </div>
+          <img src="/favicon.svg" alt="CamAI" className="h-8 w-8 rounded-md" />
           <div className="min-w-0">
             <div className="text-sm font-semibold text-ink-1">CamAI</div>
             <div className="truncate text-xs text-ink-3">{org?.name}</div>

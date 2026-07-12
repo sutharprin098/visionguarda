@@ -11,6 +11,11 @@ export interface SyncBundle {
   cameras: any[];
   settings: { scope: string; key: string; value: any }[];
   notifications: any[];
+  ai_model_assignments: any[];
+  analytics_drawings: any[];
+  rule_engine_rules: any[];
+  custom_ai_modes: any[];
+  ai_model_packages: any[];
 }
 
 /** Thrown when the cloud says this device/activation is revoked — the app
@@ -38,7 +43,9 @@ export async function fetchBundle(): Promise<SyncBundle> {
 const WATCHED_TABLES = [
   "cameras", "camera_assignments", "settings", "user_roles",
   "role_permissions", "licenses", "license_activations", "devices",
-  "profiles", "notifications",
+  "profiles", "notifications", "ai_model_assignments",
+  "analytics_drawings", "rule_engine_rules", "custom_ai_modes",
+  "ai_model_packages", "config_versions",
 ];
 
 /** Re-fetches the bundle (debounced) whenever anything relevant changes.

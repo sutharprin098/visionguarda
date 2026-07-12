@@ -23,7 +23,8 @@ const DEFAULTS: Omit<OrgSettings, "org_id"> = {
 
 export default function SettingsPage() {
   const { org, can } = useAuth();
-  const [tab, setTab] = useState("Organization");
+  const hasOrgManage = can("org.manage");
+  const [tab, setTab] = useState("My Profile");
 
   const { data: settings, refetch } = useQuery({
     queryKey: ["org-settings"],
@@ -31,7 +32,7 @@ export default function SettingsPage() {
       const { data } = await supabase.from("organization_settings").select("*").maybeSingle();
       return (data ?? { org_id: org?.id, ...DEFAULTS }) as OrgSettings;
     },
-    enabled: !!org,
+    enabled: !!org && hasOrgManage,
   });
 
   async function save(patch: Partial<OrgSettings>, action: string) {
@@ -45,13 +46,16 @@ export default function SettingsPage() {
     return error;
   }
 
-  const tabs = ["Organization", "Branding", "AI Defaults", "SMTP", "Retention", "Webhook", "API Keys"];
+  const tabs = hasOrgManage
+    ? ["My Profile", "Organization", "Branding", "AI Defaults", "SMTP", "Retention", "Webhook", "API Keys", "About"]
+    : ["My Profile", "About"];
 
   return (
     <>
-      <PageHeader title="Settings" subtitle="Organization-wide configuration. Changes sync to desktops in realtime." />
+      <PageHeader title="Settings" subtitle="Manage your profile and organization settings." />
       <Tabs tabs={tabs} active={tab} onChange={setTab} />
       <div className="max-w-2xl">
+        {tab === "My Profile" && <ProfileTab />}
         {tab === "Organization" && settings && <OrgTab settings={settings} onSave={save} />}
         {tab === "Branding" && settings && <BrandingTab settings={settings} onSave={save} />}
         {tab === "AI Defaults" && <AiTab canConfigure={can("ai.configure")} />}
@@ -59,8 +63,99 @@ export default function SettingsPage() {
         {tab === "Retention" && settings && <RetentionTab settings={settings} onSave={save} />}
         {tab === "Webhook" && settings && <WebhookTab settings={settings} onSave={save} />}
         {tab === "API Keys" && <ApiKeysTab />}
+        {tab === "About" && <AboutTab />}
       </div>
     </>
+  );
+}
+
+// --------------------------------------------------------------- My Profile
+function ProfileTab() {
+  const { profile, signOut } = useAuth();
+  const [deleteConfirm, setDeleteConfirm] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function handleDelete() {
+    setBusy(true);
+    setError(null);
+    const { error: err } = await supabase.functions.invoke("delete-account");
+    setBusy(false);
+    if (err) {
+      const msg = err.message || "Failed to delete account.";
+      setError(msg);
+      return;
+    }
+    await signOut();
+    window.location.href = "/";
+  }
+
+  return (
+    <div className="space-y-6">
+      <div className="card p-5 space-y-4">
+        <h3 className="text-base font-semibold text-ink-1">Profile Details</h3>
+        <div className="grid grid-cols-2 gap-4 text-sm">
+          <Field label="Full Name">
+            <input className="input" value={profile?.full_name ?? ""} disabled />
+          </Field>
+          <Field label="Email Address">
+            <input className="input" value={profile?.email ?? ""} disabled />
+          </Field>
+        </div>
+        <div className="grid grid-cols-2 gap-4 text-sm">
+          <Field label="User Code">
+            <span className="keychip">{profile?.user_code ?? "—"}</span>
+          </Field>
+          <Field label="Status">
+            <Badge tone={profile?.status === "active" ? "ok" : "warn"}>
+              {profile?.status?.toUpperCase() ?? "UNKNOWN"}
+            </Badge>
+          </Field>
+        </div>
+      </div>
+
+      <div className="card p-5 border-danger/20 bg-danger/5 space-y-3">
+        <h3 className="text-sm font-semibold text-danger">Danger Zone</h3>
+        <p className="text-xs text-ink-3">
+          Once you delete your account, there is no going back. All of your personal configurations, assignments, and licenses will be permanently revoked.
+        </p>
+        <div>
+          <button className="btn-primary bg-danger hover:bg-danger/80 border-transparent text-white" onClick={() => setDeleteConfirm(true)}>
+            Delete Account
+          </button>
+        </div>
+      </div>
+
+      {error && <p className="text-sm text-danger">{error}</p>}
+
+      <ConfirmDialog
+        open={deleteConfirm}
+        onClose={() => setDeleteConfirm(false)}
+        onConfirm={handleDelete}
+        title="Delete Account"
+        body="Are you absolutely sure you want to delete your account? This action cannot be undone and your access will be immediately terminated."
+        danger
+      />
+    </div>
+  );
+}
+
+// --------------------------------------------------------------- About
+function AboutTab() {
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center gap-4">
+        <img src="/favicon.svg" alt="CamAI" className="h-14 w-14 rounded-xl" />
+        <div>
+          <div className="text-base font-semibold text-ink-1">CamAI</div>
+          <div className="text-sm text-ink-3">Enterprise AI CCTV Platform</div>
+        </div>
+      </div>
+      <div className="card space-y-2 p-4 text-sm text-ink-2">
+        <div className="flex justify-between"><span className="text-ink-3">Portal version</span><span>1.0.0</span></div>
+        <div className="flex justify-between"><span className="text-ink-3">Desktop client</span><span>1.0.0</span></div>
+      </div>
+    </div>
   );
 }
 

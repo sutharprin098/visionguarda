@@ -1,5 +1,5 @@
 import { FormEvent, useState } from "react";
-import { Cctv, KeyRound } from "lucide-react";
+import { KeyRound } from "lucide-react";
 import { activateWithKey } from "../lib/session";
 
 export default function Activation({ onActivated }: { onActivated: () => void }) {
@@ -27,9 +27,7 @@ export default function Activation({ onActivated }: { onActivated: () => void })
   return (
     <div className="flex h-screen items-center justify-center bg-[#0b0d10]">
       <div className="w-full max-w-sm px-6 text-center">
-        <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-xl bg-accent/15 text-accent">
-          <Cctv size={26} />
-        </div>
+        <img src="./favicon.svg" alt="CamAI" className="mx-auto h-14 w-14 rounded-xl" />
         <h1 className="mt-5 text-xl font-semibold text-zinc-100">Welcome</h1>
         <p className="mt-1.5 text-sm text-zinc-500">
           Enter your license key to activate this device.
@@ -51,7 +49,7 @@ export default function Activation({ onActivated }: { onActivated: () => void })
           {error && <p className="mt-3 text-sm text-danger">{error}</p>}
           <button
             className="btn-primary mt-4 w-full py-2.5"
-            disabled={busy || key.length < 19}
+            disabled={busy || key.length < 18}
           >
             {busy ? "Activating…" : "Activate"}
           </button>

@@ -16,7 +16,6 @@ import ActivationsPage from "./pages/app/Activations";
 import CamerasPage from "./pages/app/Cameras";
 import CameraGroupsPage from "./pages/app/CameraGroups";
 import SitesPage from "./pages/app/Sites";
-import AnalyticsPage from "./pages/app/Analytics";
 import AlertsPage from "./pages/app/Alerts";
 import IncidentsPage from "./pages/app/Incidents";
 import ReportsPage from "./pages/app/Reports";
@@ -54,7 +53,6 @@ export default function App() {
         <Route path="cameras" element={<CamerasPage />} />
         <Route path="camera-groups" element={<CameraGroupsPage />} />
         <Route path="sites" element={<SitesPage />} />
-        <Route path="analytics" element={<AnalyticsPage />} />
         <Route path="alerts" element={<AlertsPage />} />
         <Route path="incidents" element={<IncidentsPage />} />
         <Route path="reports" element={<ReportsPage />} />

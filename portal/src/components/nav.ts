@@ -48,7 +48,6 @@ export const NAV: { group: string; items: NavItem[] }[] = [
   {
     group: "Intelligence",
     items: [
-      { to: "/app/analytics", label: "AI Analytics", icon: BarChart3, perm: "reports.view" },
       { to: "/app/alerts", label: "Alerts", icon: BellRing, perm: "alerts.view" },
       { to: "/app/incidents", label: "Incidents", icon: Siren, perm: "alerts.view" },
       { to: "/app/reports", label: "Reports", icon: FileText, perm: "reports.view" },
@@ -61,7 +60,7 @@ export const NAV: { group: string; items: NavItem[] }[] = [
       { to: "/app/billing", label: "Billing", icon: CreditCard, perm: "org.manage" },
       { to: "/app/audit", label: "Audit Logs", icon: ScrollText, perm: "audit.view" },
       { to: "/app/notifications", label: "Notifications", icon: Bell },
-      { to: "/app/settings", label: "Settings", icon: Settings, perm: "org.manage" },
+      { to: "/app/settings", label: "Settings", icon: Settings },
       { to: "/app/support", label: "Support", icon: LifeBuoy },
     ],
   },

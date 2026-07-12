@@ -12,7 +12,9 @@
 //    devices-table realtime feedback loop self-limiting.
 import { adminClient, userClient, json, corsHeaders } from "../_shared/util.ts";
 
-Deno.serve(async (req) => {
+declare const Deno: any;
+
+Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
 
   const db = userClient(req);
@@ -53,14 +55,27 @@ Deno.serve(async (req) => {
     }
   }
 
-  const [profile, org, roles, cameras, settings, notifications] =
+  const [profile, org, roles, cameras, settings, notifications, aiModelAssignments, drawings, rules, customModes, modelPackages] =
     await Promise.all([
       db.from("profiles").select("*").eq("id", uid).maybeSingle(),
       db.from("organizations").select("*").maybeSingle(),
       db.from("user_roles").select("role_id, roles(name), role:roles(role_permissions(permission))").eq("user_id", uid),
-      db.from("cameras").select("*, camera_assignments!inner(user_id)").eq("camera_assignments.user_id", uid),
+      // is_enabled=false is dropped here (not just filtered client-side) so an
+      // admin disabling a camera makes it fall out of bundle.cameras — the
+      // desktop's syncCamerasToLocalEngine() diffs against exactly this list
+      // and stops the local engine registration the same way it does for a
+      // deleted camera.
+      db.from("cameras").select("*, camera_assignments!inner(user_id)").eq("camera_assignments.user_id", uid).eq("is_enabled", true),
       db.from("settings").select("scope, key, value"),
       db.from("notifications").select("*").is("read_at", null).order("created_at", { ascending: false }).limit(50),
+      // Per-camera AI model overrides (org-wide default has camera_id null);
+      // RLS already limits this to the caller's assigned cameras or org
+      // managers, same as the cameras query above.
+      db.from("ai_model_assignments").select("*, ai_models(name, task, runtime)").eq("is_active", true),
+      db.from("analytics_drawings").select("*").eq("is_draft", false),
+      db.from("rule_engine_rules").select("*").eq("is_draft", false).eq("is_enabled", true),
+      db.from("custom_ai_modes").select("*").eq("is_draft", false),
+      db.from("ai_model_packages").select("*"),
     ]);
 
   if (profile.error || !profile.data) return json({ error: "profile not found" }, 404);
@@ -82,5 +97,10 @@ Deno.serve(async (req) => {
     cameras: cameras.data ?? [],
     settings: settings.data ?? [],
     notifications: notifications.data ?? [],
+    ai_model_assignments: aiModelAssignments.data ?? [],
+    analytics_drawings: drawings.data ?? [],
+    rule_engine_rules: rules.data ?? [],
+    custom_ai_modes: customModes.data ?? [],
+    ai_model_packages: modelPackages.data ?? [],
   });
 });

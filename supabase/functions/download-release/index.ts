@@ -15,7 +15,7 @@ Deno.serve(async (req) => {
     const { data: auth } = await userClient(req).auth.getUser();
     if (!auth?.user) return json({ error: "unauthorized" }, 401);
 
-    if (!rateLimit(`download-release:${auth.user.id}`, 20, 60_000)) {
+    if (!(await rateLimit(`download-release:${auth.user.id}`, 20, 60_000))) {
       return json({ error: "too many requests, retry later" }, 429);
     }
 

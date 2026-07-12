@@ -5,7 +5,7 @@
 // never silently trust a changed credential without proving it connects.
 import {
   adminClient, userClient, json, corsHeaders, encryptSecret,
-  buildConnectionUri, verifyCameraConnection, CameraFields,
+  buildConnectionUri, verifyCameraConnection, CameraFields, rateLimit,
 } from "../_shared/util.ts";
 
 Deno.serve(async (req) => {
@@ -16,28 +16,42 @@ Deno.serve(async (req) => {
   const { data: auth } = await caller.auth.getUser();
   if (!auth?.user) return json({ error: "unauthorized" }, 401);
 
+  // Same outbound-probe surface as test-camera/add-camera — rate limited
+  // for the same reason (verifyCameraConnection dials whatever host the
+  // caller supplies).
+  if (!(await rateLimit(`update-camera:${auth.user.id}`, 20, 60_000))) {
+    return json({ error: "too many attempts, retry later" }, 429);
+  }
+
   const db = adminClient();
-  const { data: prof } = await db.from("profiles").select("org_id").eq("id", auth.user.id).maybeSingle();
+  const { data: prof } = await db.from("profiles").select("org_id, is_super_admin").eq("id", auth.user.id).maybeSingle();
   if (!prof) return json({ error: "profile missing" }, 403);
-  const { data: perms } = await db
-    .from("user_roles")
-    .select("roles(role_permissions(permission))")
-    .eq("user_id", auth.user.id);
-  const allowed = (perms ?? []).some((r: any) =>
-    (r.roles?.role_permissions ?? []).some((p: any) => p.permission === "cameras.manage"),
-  );
+  // See add-camera for why is_super_admin must be checked explicitly here —
+  // this hand-rolled check runs against the service-role client, so it
+  // doesn't get app.has_perm()'s built-in super-admin bypass for free.
+  let allowed = !!prof.is_super_admin;
+  if (!allowed) {
+    const { data: perms } = await db
+      .from("user_roles")
+      .select("roles(role_permissions(permission))")
+      .eq("user_id", auth.user.id);
+    allowed = (perms ?? []).some((r: any) =>
+      (r.roles?.role_permissions ?? []).some((p: any) => p.permission === "cameras.manage"),
+    );
+  }
   if (!allowed) return json({ error: "forbidden" }, 403);
 
   const body = (await req.json()) as CameraFields & { camera_id: string; name?: string; site_id?: string | null };
   const { camera_id, name, site_id, ...fields } = body;
   if (!camera_id) return json({ error: "camera_id required" }, 400);
 
-  const { data: existing } = await db
-    .from("cameras")
-    .select("id, org_id, name, source_type, site_id")
-    .eq("id", camera_id)
-    .eq("org_id", prof.org_id)
-    .maybeSingle();
+  // Super admin can edit a camera in ANY org, not just their own — the
+  // org filter below only applies to non-super-admins, mirroring the
+  // is_super_admin() bypass added to cameras_write in
+  // 0020_camera_management_fixes.sql.
+  let existingQuery = db.from("cameras").select("id, org_id, name, source_type, site_id").eq("id", camera_id);
+  if (!prof.is_super_admin) existingQuery = existingQuery.eq("org_id", prof.org_id);
+  const { data: existing } = await existingQuery.maybeSingle();
   if (!existing) return json({ error: "camera not found" }, 404);
 
   const patch: Record<string, unknown> = {};
@@ -59,7 +73,7 @@ Deno.serve(async (req) => {
       password: fields.password,
       path: fields.path,
     };
-    if (!["rtsp", "onvif", "usb", "ip", "nvr", "dvr"].includes(merged.source_type)) {
+    if (!["rtsp", "onvif", "usb", "ip", "nvr", "dvr", "screen_share"].includes(merged.source_type)) {
       return json({ error: "invalid source_type" }, 400);
     }
     const check = await verifyCameraConnection(merged);
@@ -82,7 +96,7 @@ Deno.serve(async (req) => {
   if (error || !cam) return json({ error: error?.message ?? "update failed" }, 400);
 
   await db.from("audit_logs").insert({
-    org_id: prof.org_id,
+    org_id: existing.org_id,
     actor_id: auth.user.id,
     actor_email: auth.user.email ?? "",
     action: "camera.update",

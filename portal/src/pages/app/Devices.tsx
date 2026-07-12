@@ -17,6 +17,7 @@ export default function DevicesPage() {
   const [renameFor, setRenameFor] = useState<DeviceRow | null>(null);
   const [transferFor, setTransferFor] = useState<DeviceRow | null>(null);
   const [confirm, setConfirm] = useState<{ title: string; body: string; danger?: boolean; run: () => Promise<void> } | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   const { data: devices } = useQuery({
     queryKey: ["devices"],
@@ -30,28 +31,34 @@ export default function DevicesPage() {
   const refresh = () => qc.invalidateQueries({ queryKey: ["devices"] });
 
   async function setStatus(d: DeviceRow, status: Device["status"]) {
-    await supabase.from("devices").update({ status, is_online: false }).eq("id", d.id);
+    setActionError(null);
+    const { error } = await supabase.from("devices").update({ status, is_online: false }).eq("id", d.id);
+    if (error) return setActionError(error.message);
     if (status !== "active") {
       // revoke any activation bound to this device (policy: 0005 activations_revoke)
-      await supabase.from("license_activations")
+      const { error: revokeErr } = await supabase.from("license_activations")
         .update({ revoked_at: new Date().toISOString() })
         .eq("device_id", d.id).is("revoked_at", null);
+      if (revokeErr) return setActionError(revokeErr.message);
     } else {
       // reactivating must also clear the revoke, or desktop-sync keeps
       // failing closed (it requires an unrevoked activation row) even
       // though the device now shows "active"
-      await supabase.from("license_activations")
+      const { error: clearErr } = await supabase.from("license_activations")
         .update({ revoked_at: null })
         .eq("device_id", d.id).not("revoked_at", "is", null);
+      if (clearErr) return setActionError(clearErr.message);
     }
     audit(`device.${status}`, "device", d.id, { module: "devices", old: { status: d.status }, new: { status } });
     refresh();
   }
 
   async function resetDevice(d: DeviceRow) {
-    await supabase.from("license_activations")
+    setActionError(null);
+    const { error } = await supabase.from("license_activations")
       .update({ revoked_at: new Date().toISOString() })
       .eq("device_id", d.id).is("revoked_at", null);
+    if (error) return setActionError(error.message);
     audit("device.reset", "device", d.id, { module: "devices" });
     refresh();
   }
@@ -148,6 +155,12 @@ export default function DevicesPage() {
         title="Devices"
         subtitle="Windows machines bound to licenses via encrypted hardware fingerprints (CPU · board · disk · TPM · MachineGuid)."
       />
+      {actionError && (
+        <div className="mb-4 flex items-center justify-between rounded-md border border-danger/40 bg-danger/10 px-3 py-2 text-sm text-danger">
+          <span>{actionError}</span>
+          <button className="text-xs underline" onClick={() => setActionError(null)}>Dismiss</button>
+        </div>
+      )}
       <DataTable
         rows={devices ?? []}
         columns={columns}
@@ -184,9 +197,15 @@ export default function DevicesPage() {
 function RenameForm({ device, onDone }: { device: DeviceRow; onDone: () => void }) {
   const [name, setName] = useState(device.name);
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
   async function submit() {
     setBusy(true);
-    await supabase.from("devices").update({ name }).eq("id", device.id);
+    setError("");
+    const { error: err } = await supabase.from("devices").update({ name }).eq("id", device.id);
+    if (err) {
+      setBusy(false);
+      return setError(err.message);
+    }
     audit("device.rename", "device", device.id, { module: "devices", old: { name: device.name }, new: { name } });
     setBusy(false);
     onDone();
@@ -196,6 +215,7 @@ function RenameForm({ device, onDone }: { device: DeviceRow; onDone: () => void 
       <Field label="Device name">
         <input className="input" value={name} onChange={(e) => setName(e.target.value)} />
       </Field>
+      {error && <p className="text-sm text-danger">{error}</p>}
       <button className="btn-primary w-full" onClick={submit} disabled={busy || !name.trim()}>
         {busy ? "Saving…" : "Save"}
       </button>
@@ -206,6 +226,7 @@ function RenameForm({ device, onDone }: { device: DeviceRow; onDone: () => void 
 function TransferForm({ device, onDone }: { device: DeviceRow; onDone: () => void }) {
   const [userId, setUserId] = useState("");
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
 
   const { data: users } = useQuery({
     queryKey: ["users-brief"],
@@ -214,11 +235,20 @@ function TransferForm({ device, onDone }: { device: DeviceRow; onDone: () => voi
 
   async function submit() {
     setBusy(true);
-    await supabase.from("devices").update({ user_id: userId }).eq("id", device.id);
+    setError("");
+    const { error: updErr } = await supabase.from("devices").update({ user_id: userId }).eq("id", device.id);
+    if (updErr) {
+      setBusy(false);
+      return setError(updErr.message);
+    }
     // old owner's activation no longer applies on this machine
-    await supabase.from("license_activations")
+    const { error: revokeErr } = await supabase.from("license_activations")
       .update({ revoked_at: new Date().toISOString() })
       .eq("device_id", device.id).is("revoked_at", null);
+    if (revokeErr) {
+      setBusy(false);
+      return setError(revokeErr.message);
+    }
     audit("device.transfer", "device", device.id, {
       module: "devices",
       old: { user_id: device.user_id },
@@ -240,6 +270,7 @@ function TransferForm({ device, onDone }: { device: DeviceRow; onDone: () => voi
       <p className="text-xs text-warn">
         The current activation is revoked; the new owner activates on this machine with their own license key.
       </p>
+      {error && <p className="text-sm text-danger">{error}</p>}
       <button className="btn-primary w-full" onClick={submit} disabled={busy || !userId}>
         {busy ? "Transferring…" : "Transfer Device"}
       </button>

@@ -5,7 +5,7 @@ import { supabase } from "../../lib/supabase";
 import { audit } from "../../lib/audit";
 import { Camera } from "../../lib/types";
 import { useAuth } from "../../contexts/AuthContext";
-import { PageHeader, Badge, statusTone, Modal, ConfirmDialog, Field, Toggle } from "../../components/ui";
+import { PageHeader, Badge, statusTone, statusLabel, Modal, ConfirmDialog, Field, Toggle } from "../../components/ui";
 import DataTable, { Column } from "../../components/DataTable";
 import { fmtAgo } from "../../lib/format";
 
@@ -22,30 +22,49 @@ export default function CamerasPage() {
   const [editFor, setEditFor] = useState<CameraRow | null>(null);
   const [assignFor, setAssignFor] = useState<CameraRow | null>(null);
   const [confirm, setConfirm] = useState<{ title: string; body: string; danger?: boolean; run: () => Promise<void> } | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
 
-  const { data: cameras } = useQuery({
+  // Throws on a PostgREST/RLS error instead of silently returning
+  // undefined — an unchecked `.data` here previously meant a query that
+  // errored (e.g. the RLS recursion fixed in 0021_fix_camera_rls_
+  // recursion.sql) rendered identically to "no cameras yet", with the
+  // underlying failure never surfacing anywhere.
+  const { data: cameras, error: camerasError } = useQuery({
     queryKey: ["cameras"],
-    queryFn: async () =>
-      (await supabase
+    queryFn: async () => {
+      const { data, error } = await supabase
         .from("cameras")
-        .select("*, sites(name), camera_assignments(user_id, profiles(full_name)), camera_health(fps, resolution, recording, is_online, checked_at)")
-        .order("created_at")).data as CameraRow[] | null,
+        // camera_assignments has two FKs into profiles (user_id and
+        // assigned_by) — PostgREST can't infer which one "profiles(...)"
+        // means and 400s with "more than one relationship was found"
+        // unless the FK is pinned explicitly via profiles!<constraint>.
+        .select("*, sites(name), camera_assignments(user_id, profiles!camera_assignments_user_id_fkey(full_name)), camera_health(fps, resolution, recording, is_online, checked_at)")
+        .order("created_at");
+      if (error) throw error;
+      return data as CameraRow[];
+    },
   });
 
   const refresh = () => qc.invalidateQueries({ queryKey: ["cameras"] });
 
-  // health rows are upserted by the AI engine — live-refresh status
+  // health rows are upserted by the AI engine, assignments by other admins —
+  // live-refresh so every open tab (portal or desktop) reflects both without
+  // a manual reload, per-viewer: a user's own camera_assignments rows are
+  // readable to them under RLS even without cameras.manage/assign.
   useEffect(() => {
     const ch = supabase
       .channel("cameras-live")
       .on("postgres_changes", { event: "*", schema: "public", table: "camera_health" }, refresh)
       .on("postgres_changes", { event: "*", schema: "public", table: "cameras" }, refresh)
+      .on("postgres_changes", { event: "*", schema: "public", table: "camera_assignments" }, refresh)
       .subscribe();
     return () => { supabase.removeChannel(ch); };
   }, []);
 
   async function toggleEnabled(c: CameraRow) {
-    await supabase.from("cameras").update({ is_enabled: !c.is_enabled }).eq("id", c.id);
+    setActionError(null);
+    const { error } = await supabase.from("cameras").update({ is_enabled: !c.is_enabled }).eq("id", c.id);
+    if (error) return setActionError(error.message);
     audit(c.is_enabled ? "camera.disable" : "camera.enable", "camera", c.id, { module: "cameras" });
     refresh();
   }
@@ -94,8 +113,8 @@ export default function CamerasPage() {
         : <Badge tone={c.is_enabled ? "ok" : "default"}>{c.is_enabled ? "yes" : "no"}</Badge>,
     },
     {
-      key: "status", header: "Status", filter: true, value: (c) => c.status,
-      render: (c) => <Badge tone={statusTone[c.status]}>{c.status}</Badge>,
+      key: "status", header: "Status", filter: true, value: (c) => statusLabel[c.status] ?? c.status,
+      render: (c) => <Badge tone={statusTone[c.status]}>{statusLabel[c.status] ?? c.status}</Badge>,
     },
     ...(can("cameras.manage") || can("cameras.assign")
       ? [{
@@ -114,7 +133,9 @@ export default function CamerasPage() {
                     body: `Delete ${c.name}? Its ROI, assignments and health history are removed. This cannot be undone.`,
                     danger: true,
                     run: async () => {
-                      await supabase.from("cameras").delete().eq("id", c.id);
+                      setActionError(null);
+                      const { error } = await supabase.from("cameras").delete().eq("id", c.id);
+                      if (error) return setActionError(error.message);
                       audit("camera.delete", "camera", c.id, { module: "cameras", old: { name: c.name } });
                       refresh();
                     },
@@ -139,6 +160,12 @@ export default function CamerasPage() {
           )
         }
       />
+      {(actionError || camerasError) && (
+        <div className="mb-4 flex items-center justify-between rounded-md border border-danger/40 bg-danger/10 px-3 py-2 text-sm text-danger">
+          <span>{actionError ?? (camerasError as any)?.message ?? "Failed to load cameras."}</span>
+          {actionError && <button className="text-xs underline" onClick={() => setActionError(null)}>Dismiss</button>}
+        </div>
+      )}
       <DataTable
         rows={cameras ?? []}
         columns={columns}
@@ -177,6 +204,7 @@ const SOURCE_TYPES = [
   { value: "ip", label: "IP Camera" },
   { value: "nvr", label: "NVR" },
   { value: "dvr", label: "DVR" },
+  { value: "screen_share", label: "Screen Share" },
 ] as const;
 
 const DEFAULT_PORTS: Record<string, string> = { rtsp: "554", nvr: "554", dvr: "554", onvif: "80", ip: "80" };
@@ -198,9 +226,17 @@ function AddCameraForm({ camera, onDone }: { camera?: CameraRow; onDone: () => v
     deviceInfo?: { manufacturer?: string; model?: string; firmware?: string };
   }>({ state: "idle" });
 
+  // Scoped to the caller's own org — add-camera always attaches the new
+  // camera to the caller's org (see supabase/functions/add-camera), so for a
+  // super admin (whose sites_read now spans every org, matching cameras_read
+  // — see 0020_camera_management_fixes.sql) an unscoped list would let them
+  // pick a site that belongs to a different org than the camera they're creating.
+  const { profile } = useAuth();
   const { data: sites } = useQuery({
-    queryKey: ["sites-brief"],
-    queryFn: async () => (await supabase.from("sites").select("id, name").order("name")).data ?? [],
+    queryKey: ["sites-brief", profile?.org_id],
+    queryFn: async () =>
+      (await supabase.from("sites").select("id, name").eq("org_id", profile!.org_id).order("name")).data ?? [],
+    enabled: !!profile?.org_id,
   });
 
   const isUsb = form.source_type === "usb";
@@ -251,7 +287,7 @@ function AddCameraForm({ camera, onDone }: { camera?: CameraRow; onDone: () => v
     onDone();
   }
 
-  const canSubmit = form.name.trim() && (isUsb ? true : !connectionTouched || form.host.trim());
+  const canSubmit = form.name.trim() && (isUsb || form.source_type === "screen_share" ? true : !connectionTouched || form.host.trim());
 
   return (
     <div className="space-y-3">
@@ -272,7 +308,7 @@ function AddCameraForm({ camera, onDone }: { camera?: CameraRow; onDone: () => v
         </Field>
       </div>
 
-      {isEdit && (
+      {isEdit && form.source_type !== "screen_share" && (
         <p className="text-xs text-ink-3">
           Connection fields are hidden for security — leave them blank to keep the current connection, or fill them in to replace it (re-verified before saving).
         </p>
@@ -283,6 +319,10 @@ function AddCameraForm({ camera, onDone }: { camera?: CameraRow; onDone: () => v
           <input className="input" placeholder={isEdit ? "unchanged" : "0"} value={form.host}
                  onChange={(e) => { setForm({ ...form, host: e.target.value }); setTestState({ state: "idle" }); }} />
         </Field>
+      ) : form.source_type === "screen_share" ? (
+        <div className="rounded-md border border-accent/20 bg-accent/5 p-3 text-xs text-ink-2">
+          This is a virtual camera. You will be able to capture and stream your screen or webcam directly from the desktop application workspace. No physical connection details are needed.
+        </div>
       ) : (
         <>
           <div className="grid grid-cols-3 gap-3">
@@ -314,19 +354,21 @@ function AddCameraForm({ camera, onDone }: { camera?: CameraRow; onDone: () => v
         </>
       )}
 
-      <div className="flex items-center gap-3">
-        <button type="button" className="btn-ghost text-xs" onClick={testConnection}
-                disabled={testState.state === "testing" || !canSubmit || (isEdit && !connectionTouched)}>
-          {testState.state === "testing" ? "Testing…" : "Test Connection"}
-        </button>
-        {testState.state === "ok" && (
-          <span className="flex items-center gap-1.5 text-xs text-ok"><CheckCircle2 size={13} /> {testState.message}</span>
-        )}
-        {testState.state === "fail" && (
-          <span className="flex items-center gap-1.5 text-xs text-danger"><XCircle size={13} /> {testState.message}</span>
-        )}
-        {testState.state === "testing" && <Loader2 size={13} className="animate-spin text-ink-3" />}
-      </div>
+      {form.source_type !== "screen_share" && (
+        <div className="flex items-center gap-3">
+          <button type="button" className="btn-ghost text-xs" onClick={testConnection}
+                  disabled={testState.state === "testing" || !canSubmit || (isEdit && !connectionTouched)}>
+            {testState.state === "testing" ? "Testing…" : "Test Connection"}
+          </button>
+          {testState.state === "ok" && (
+            <span className="flex items-center gap-1.5 text-xs text-ok"><CheckCircle2 size={13} /> {testState.message}</span>
+          )}
+          {testState.state === "fail" && (
+            <span className="flex items-center gap-1.5 text-xs text-danger"><XCircle size={13} /> {testState.message}</span>
+          )}
+          {testState.state === "testing" && <Loader2 size={13} className="animate-spin text-ink-3" />}
+        </div>
+      )}
 
       {!!testState.channels?.length && (
         <div className="rounded-md border border-line p-2.5">
@@ -370,9 +412,16 @@ function AddCameraForm({ camera, onDone }: { camera?: CameraRow; onDone: () => v
 
 function AssignForm({ camera, onDone }: { camera: CameraRow; onDone: () => void }) {
   const qc = useQueryClient();
+  const [error, setError] = useState("");
+  // Scoped to the camera's own org — profiles_read spans every org for a
+  // super admin, so an unscoped list here would offer users from other
+  // organizations as assignable to this camera (cam_assign_write's own
+  // with_check also cross-verifies the assignee's org against the
+  // camera's, per 0020/0021 — this scoping is UX, not the only guard).
   const { data: users } = useQuery({
-    queryKey: ["users-brief"],
-    queryFn: async () => (await supabase.from("profiles").select("id, full_name, email").order("full_name")).data ?? [],
+    queryKey: ["users-brief", camera.org_id],
+    queryFn: async () =>
+      (await supabase.from("profiles").select("id, full_name, email").eq("org_id", camera.org_id).order("full_name")).data ?? [],
   });
   const { data: assigned } = useQuery({
     queryKey: ["cam-assign", camera.id],
@@ -381,8 +430,11 @@ function AssignForm({ camera, onDone }: { camera: CameraRow; onDone: () => void 
   });
 
   async function toggle(userId: string, on: boolean) {
-    if (on) await supabase.from("camera_assignments").insert({ camera_id: camera.id, user_id: userId });
-    else await supabase.from("camera_assignments").delete().eq("camera_id", camera.id).eq("user_id", userId);
+    setError("");
+    const { error: err } = on
+      ? await supabase.from("camera_assignments").insert({ camera_id: camera.id, user_id: userId })
+      : await supabase.from("camera_assignments").delete().eq("camera_id", camera.id).eq("user_id", userId);
+    if (err) return setError(err.message);
     audit(on ? "camera.assign" : "camera.unassign", "camera", camera.id, { module: "cameras", detail: { user_id: userId } });
     qc.invalidateQueries({ queryKey: ["cam-assign", camera.id] });
     qc.invalidateQueries({ queryKey: ["cameras"] });
@@ -390,6 +442,7 @@ function AssignForm({ camera, onDone }: { camera: CameraRow; onDone: () => void 
 
   return (
     <div className="max-h-80 space-y-1.5 overflow-y-auto">
+      {error && <p className="text-sm text-danger">{error}</p>}
       {users?.map((u: any) => (
         <label key={u.id} className="flex cursor-pointer items-center justify-between rounded-md border border-line px-3 py-2 hover:bg-surface-2">
           <div>

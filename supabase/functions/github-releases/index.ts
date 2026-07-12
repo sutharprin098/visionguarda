@@ -58,7 +58,7 @@ Deno.serve(async (req) => {
   // reports a misleading "CORS error" instead of the real failure.
   try {
     const ip = req.headers.get("x-forwarded-for") ?? "unknown";
-    if (!rateLimit(`gh-releases:${ip}`, 30, 60_000)) {
+    if (!(await rateLimit(`gh-releases:${ip}`, 30, 60_000))) {
       return json({ error: "too many requests, retry later" }, 429);
     }
 

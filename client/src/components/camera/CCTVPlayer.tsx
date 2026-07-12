@@ -441,7 +441,6 @@ export function CCTVPlayer({ cameraId, cameraName, cameraType = 'webcam', initia
           canvas: offscreen
         }, [offscreen]);
         canvasTransferredRef.current = true;
-        console.log(`[CCTVPlayer ${cameraId}] Canvas transferred to Web Worker`);
       } catch (err) {
         console.error(`[CCTVPlayer ${cameraId}] Failed to transfer canvas to OffscreenCanvas:`, err);
       }

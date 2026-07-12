@@ -7,6 +7,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -p tsconfig.node.json && vite build && electron-builder --win && node scripts/checksum.js",
+    "build:admin": "tsc -p tsconfig.node.json && vite build && electron-builder --win --config electron-builder.admin.json",
     "start": "tsc -p tsconfig.node.json && vite build && electron ."
   },
   "dependencies": {
@@ -35,13 +36,17 @@
     "productName": "CamAI Desktop",
     "win": {
       "target": "nsis",
-      "artifactName": "CamAI-Desktop-Setup-${version}.exe"
+      "artifactName": "CamAI-Desktop-Setup-${version}.exe",
+      "icon": "build/icon.ico"
     },
     "nsis": {
       "oneClick": false,
-      "allowToChangeInstallationDirectory": true
+      "allowToChangeInstallationDirectory": true,
+      "installerIcon": "build/icon.ico",
+      "uninstallerIcon": "build/icon.ico",
+      "installerHeaderIcon": "build/icon.ico"
     },
-    "files": ["dist/**", "dist-electron/**"],
+    "files": ["dist/**", "dist-electron/**", "build/icon.ico"],
     "publish": null
   }
 }

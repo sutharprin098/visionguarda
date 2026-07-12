@@ -286,3 +286,64 @@ def test_speed_gate_ignores_unpaired_line():
     a.update([det(1, "car", x1, y1, x2, y2)], zones=[], lines=lines, frame_w=FW, frame_h=FH)
 
     assert 1 not in a.track_calibrated_speed, "unrelated lines must not produce a calibrated speed"
+
+
+def test_privacy_mask_and_exclusion_zone_filtering():
+    a = CameraAnalytics("cam_privacy")
+    pm = zone(z_id="pm1", zoneType="privacy_mask", points=[[0.0, 0.0], [0.2, 0.0], [0.2, 0.2], [0.0, 0.2]])
+    ez = zone(z_id="ez1", zoneType="exclusion_zone", points=[[0.8, 0.8], [1.0, 0.8], [1.0, 1.0], [0.8, 1.0]])
+    
+    # det1 inside privacy mask
+    det1 = det(1, "person", 5, 5, 15, 15)  # cx, cy ~= 0.015, 0.02
+    # det2 inside exclusion zone
+    det2 = det(2, "person", 580, 420, 600, 440) # cx, cy ~= 0.92, 0.90
+    # det3 outside
+    det3 = det(3, "person", 300, 300, 340, 340)
+    
+    dets = [det1, det2, det3]
+    _, _, _, zone_stats, _, _, _ = a.update(dets, zones=[pm, ez], lines=[], frame_w=FW, frame_h=FH)
+    
+    # Detections should have been filtered down to just det3!
+    assert 1 not in a.track_history
+    assert 2 not in a.track_history
+    assert 3 in a.track_history
+
+
+def test_custom_rule_engine_rules():
+    a = CameraAnalytics("cam_rules")
+    a.cooldown_period = 0.0 # disable cooldown
+    
+    # 1. Custom Intrusion Rule
+    r1 = {
+        "id": "rule_int_1",
+        "name": "Person Intrusion rule",
+        "trigger_type": "zone_intrusion",
+        "trigger_source_id": "z1",
+        "is_enabled": True,
+        "conditions": {"class": "person", "min_confidence": 0.5},
+        "actions": [{"type": "alert", "message": "Rule 1: Person Intruded!"}]
+    }
+    
+    z1 = zone(z_id="z1")
+    person = det(1, "person", 100, 100, 140, 200, conf=0.8)
+    alerts, *_ = a.update([person], zones=[z1], lines=[], frame_w=FW, frame_h=FH, rules=[r1])
+    
+    assert any(al["type"] == "custom_rule" and al["message"] == "Rule 1: Person Intruded!" for al in alerts)
+    
+    # 2. Custom Loitering Rule
+    r2 = {
+        "id": "rule_loit_1",
+        "name": "Car Loitering rule",
+        "trigger_type": "loitering",
+        "trigger_source_id": "z1",
+        "is_enabled": True,
+        "conditions": {"class": "car", "dwell_time": 2.0},
+        "actions": [{"type": "alert", "message": "Rule 2: Car Loitering!"}]
+    }
+    
+    car = det(2, "car", 100, 100, 140, 200, conf=0.8)
+    a.update([car], zones=[z1], lines=[], frame_w=FW, frame_h=FH, rules=[r2])
+    a.zone_active_tracks["z1"][2] = time.time() - 3.0 # simulate 3 seconds inside
+    
+    alerts, *_ = a.update([car], zones=[z1], lines=[], frame_w=FW, frame_h=FH, rules=[r2])
+    assert any(al["type"] == "custom_rule" and al["message"] == "Rule 2: Car Loitering!" for al in alerts)

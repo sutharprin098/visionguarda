@@ -14,15 +14,32 @@ if _env_file.exists():
             continue
         _key, _, _value = _line.partition("=")
         os.environ.setdefault(_key.strip(), _value.strip().strip('"').strip("'"))
-HISTORY_DIR = BASE_DIR / "history"
+# Support custom writable directory on the user's PC (e.g. AppData on Windows)
+history_env = os.getenv("CAMAI_HISTORY_DIR")
+if history_env:
+    HISTORY_DIR = Path(history_env)
+else:
+    appdata = os.getenv("APPDATA")
+    if appdata:
+        HISTORY_DIR = Path(appdata) / "CamAI" / "history"
+    else:
+        # Fallback to home directory or base dir
+        home = os.getenv("USERPROFILE") or os.getenv("HOME")
+        if home:
+            HISTORY_DIR = Path(home) / ".camai" / "history"
+        else:
+            HISTORY_DIR = BASE_DIR / "history"
+
 RECORDINGS_DIR = HISTORY_DIR / "recordings"
 DB_PATH = HISTORY_DIR / "db.sqlite"
-UPLOADS_DIR = BASE_DIR / "uploads"
+UPLOADS_DIR = HISTORY_DIR / "uploads"
+MODELS_DIR = HISTORY_DIR.parent / "models"
 
 # Ensure directories exist
 HISTORY_DIR.mkdir(parents=True, exist_ok=True)
 RECORDINGS_DIR.mkdir(parents=True, exist_ok=True)
 UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
+MODELS_DIR.mkdir(parents=True, exist_ok=True)
 
 # YOLO Settings
 YOLO_MODEL = "yolo11n-seg.pt"

@@ -204,8 +204,5 @@ placeholder or mock data.
 
 ## 8. Known operational notes
 
-- The seller's Replicate API token found early in git history was purged from
-  history and must still be revoked at replicate.com if that hasn't happened —
-  see `HANDOVER.md` §3.
 - YOLO11 weights are AGPL-licensed (Ultralytics) — see `LICENSING.md` §2 for the
   buyer's options.

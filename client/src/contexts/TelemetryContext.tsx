@@ -205,7 +205,6 @@ export function TelemetryProvider({ children }: { children: React.ReactNode }) {
     // For local dev server, Vite proxy handles /ws
     const wsUrl = `${protocol}//${host}/ws`;
 
-    console.log('[WebSocket Provider] Initializing worker with WS URL:', wsUrl);
     w.postMessage({ type: 'init_ws', wsUrl });
 
     w.onmessage = (event) => {
@@ -245,7 +244,6 @@ export function TelemetryProvider({ children }: { children: React.ReactNode }) {
     };
 
     return () => {
-      console.log('[WebSocket Provider] Terminating overlay worker');
       w.terminate();
       setWorker(null);
       if (pendingAggregateTimeoutRef.current !== null) {

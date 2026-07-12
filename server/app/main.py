@@ -10,7 +10,7 @@ from pydantic import BaseModel
 from typing import List, Dict, Optional
 import cv2
 
-from app.config import HOST, PORT, RECORDINGS_DIR, UPLOADS_DIR
+from app.config import HOST, PORT, RECORDINGS_DIR, UPLOADS_DIR, MODELS_DIR
 from app.storage import (
     init_db, get_all_cameras, get_camera, save_camera, delete_camera,
     get_recent_alerts, clear_all_alerts, get_history, clear_all_history,
@@ -212,6 +212,7 @@ class CameraConfigPayload(BaseModel):
 class CameraAnalyticsPayload(BaseModel):
     zones: str
     lines: str
+    rules: Optional[str] = "[]"
 
 class CameraDisplayPayload(BaseModel):
     max_width: Optional[int] = None
@@ -235,7 +236,10 @@ def get_system_status():
             "running": thread.running,
             "fps": thread.latest_telemetry.get("fps", 0),
             "latency": thread.latest_telemetry.get("latency", 0),
-            "counters": thread.latest_telemetry.get("counters", {"in": 0, "out": 0})
+            "counters": thread.latest_telemetry.get("counters", {"in": 0, "out": 0}),
+            "health_status": thread._health_status,
+            "resolution": thread._last_resolution,
+            "recording": thread.recorder.continuous_writer is not None,
         }
         
     # Recommendation logic:
@@ -280,13 +284,32 @@ def get_system_status():
 
 @app.post("/api/model/select")
 def select_model(payload: ModelSelectPayload):
-    valid_models = ["yolo11n-seg.pt", "yolo11s-seg.pt", "yolo11m-seg.pt"]
-    if payload.model_name not in valid_models:
-        raise HTTPException(status_code=400, detail="Invalid model name. Choose from: " + ", ".join(valid_models))
-    success = manager.hot_swap_model(payload.model_name)
+    target_path = None
+    model_name = payload.model_name
+    
+    # 1. Check if model exists in custom models directory
+    custom_path = MODELS_DIR / model_name
+    if custom_path.exists():
+        target_path = str(custom_path)
+    # 2. Check if model exists in base directory
+    elif model_name in ["yolo11n-seg.pt", "yolo11s-seg.pt", "yolo11m-seg.pt"]:
+        target_path = model_name
+    else:
+        # Check if the name is an absolute path that exists
+        from pathlib import Path
+        p = Path(model_name)
+        if p.exists() and p.is_file():
+            target_path = str(p)
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Model file '{model_name}' not found locally or in {MODELS_DIR}."
+            )
+            
+    success = manager.hot_swap_model(target_path)
     if not success:
-        raise HTTPException(status_code=500, detail="Failed to hot-swap to selected model.")
-    return {"success": True, "message": f"Successfully swapped active model to {payload.model_name}"}
+        raise HTTPException(status_code=500, detail=f"Failed to hot-swap to selected model '{model_name}'.")
+    return {"success": True, "message": f"Successfully swapped active model to {model_name}"}
 
 # Cameras
 @app.get("/api/cameras")
@@ -351,11 +374,12 @@ def update_camera_analytics(camera_id: str, payload: CameraAnalyticsPayload):
         cam["source"],
         cam["is_active"],
         payload.zones,
-        payload.lines
+        payload.lines,
+        payload.rules or "[]"
     )
     
     # Update live thread on-the-fly
-    manager.update_camera_analytics_config(camera_id, payload.zones, payload.lines)
+    manager.update_camera_analytics_config(camera_id, payload.zones, payload.lines, payload.rules or "[]")
     return {"success": True, "message": "Analytics config updated"}
 
 @app.post("/api/cameras/{camera_id}/display")

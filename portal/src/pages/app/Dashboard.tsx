@@ -4,7 +4,7 @@ import { Link } from "react-router-dom";
 import { UserPlus, Video, KeyRound, Download, AlertTriangle, RefreshCw } from "lucide-react";
 import { supabase } from "../../lib/supabase";
 import { useAuth } from "../../contexts/AuthContext";
-import { PageHeader, Kpi, Badge, statusTone, Empty } from "../../components/ui";
+import { PageHeader, Kpi, Badge, statusTone, statusLabel, Empty } from "../../components/ui";
 import { TimeSeries, Spark } from "../../components/charts";
 import { fmtAgo, fmtBytes } from "../../lib/format";
 
@@ -194,7 +194,7 @@ export default function Dashboard() {
               {recent.cameras.slice(0, 8).map((c: any) => (
                 <div key={c.id} className="flex items-center justify-between rounded-md border border-line px-3 py-2">
                   <span className="truncate text-sm text-ink-2">{c.name}</span>
-                  <Badge tone={statusTone[c.status]}>{c.status}</Badge>
+                  <Badge tone={statusTone[c.status]}>{statusLabel[c.status] ?? c.status}</Badge>
                 </div>
               ))}
             </div>

@@ -2,29 +2,47 @@
 // One-time delivery of generated credentials right after signup:
 // user code, org code, license key. Row is deleted after first fetch —
 // afterwards only the key hint remains visible anywhere.
-import { adminClient, userClient, json, corsHeaders } from "../_shared/util.ts";
+import { userClient, json, corsHeaders } from "../_shared/util.ts";
+import postgres from "npm:postgres@3";
+
+// Initialize Postgres connection
+const sql = postgres(Deno.env.get("SUPABASE_DB_URL")!);
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
 
-  const { data: auth } = await userClient(req).auth.getUser();
-  if (!auth?.user) return json({ error: "unauthorized" }, 401);
+  try {
+    const { data: auth } = await userClient(req).auth.getUser();
+    if (!auth?.user) return json({ error: "unauthorized" }, 401);
 
-  const db = adminClient();
-  const { data: row } = await db
-    .from("provision_results")
-    .select("user_code, org_code, license_key")
-    .eq("user_id", auth.user.id)
-    .maybeSingle()
-    .setHeader("Accept-Profile", "app"); // table lives in schema app
+    // Fetch the provision_results row using direct SQL (bypassing PostgREST and RLS)
+    const rows = await sql`
+      SELECT user_code, org_code, license_key 
+      FROM app.provision_results 
+      WHERE user_id = ${auth.user.id}
+      LIMIT 1
+    `;
 
-  if (!row) return json({ delivered: false }, 200);
+    if (rows.length === 0) {
+      return json({ delivered: false }, 200);
+    }
 
-  await db
-    .from("provision_results")
-    .delete()
-    .eq("user_id", auth.user.id)
-    .setHeader("Content-Profile", "app");
+    const row = rows[0];
 
-  return json({ delivered: true, ...row });
+    // Delete the row since it is a one-time fetch
+    await sql`
+      DELETE FROM app.provision_results 
+      WHERE user_id = ${auth.user.id}
+    `;
+
+    return json({
+      delivered: true,
+      user_code: row.user_code,
+      org_code: row.org_code,
+      license_key: row.license_key
+    });
+  } catch (e) {
+    console.error("my-keys failed", e);
+    return json({ error: e instanceof Error ? e.message : "unexpected error" }, 500);
+  }
 });

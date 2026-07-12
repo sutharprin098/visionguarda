@@ -3,76 +3,90 @@
 // Caller must hold users.manage. Provisioning trigger is bypassed by pre-creating
 // the profile row keyed to the admin's org (trigger only fires on auth.users insert,
 // so we pass org context via user metadata instead).
-import { adminClient, userClient, json, corsHeaders, sha256hex } from "../_shared/util.ts";
+import { adminClient, userClient, json, corsHeaders, sha256hex, rateLimit } from "../_shared/util.ts";
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   if (req.method !== "POST") return json({ error: "method not allowed" }, 405);
 
-  const caller = userClient(req);
-  const { data: auth } = await caller.auth.getUser();
-  if (!auth?.user) return json({ error: "unauthorized" }, 401);
+  // Every path below must return through json() (which always carries
+  // corsHeaders) — an uncaught throw would fall through to Deno's default
+  // error response, which has no CORS headers at all.
+  try {
+    const caller = userClient(req);
+    const { data: auth } = await caller.auth.getUser();
+    if (!auth?.user) return json({ error: "unauthorized" }, 401);
 
-  // permission gate: users.manage in the caller's org
-  const db = adminClient();
-  const { data: callerProf } = await db
-    .from("profiles").select("org_id, is_super_admin").eq("id", auth.user.id).maybeSingle();
-  if (!callerProf) return json({ error: "profile missing" }, 403);
-  const { data: perms } = await db
-    .from("user_roles")
-    .select("role_permissions:roles(role_permissions(permission))")
-    .eq("user_id", auth.user.id);
-  const allowed =
-    callerProf.is_super_admin ||
-    (perms ?? []).some((r: any) =>
-      (r.role_permissions?.role_permissions ?? []).some((p: any) => p.permission === "users.manage"),
-    );
-  if (!allowed) return json({ error: "forbidden" }, 403);
+    // Each call creates a real auth user + license + sends a recovery
+    // email — uncapped, this is spammable by anyone holding users.manage.
+    if (!(await rateLimit(`invite-user:${auth.user.id}`, 10, 60_000))) {
+      return json({ error: "too many invites, retry later" }, 429);
+    }
 
-  const { email, full_name, role_id } = await req.json();
-  if (!email || !full_name) return json({ error: "email and full_name required" }, 400);
+    // permission gate: users.manage in the caller's org
+    const db = adminClient();
+    const { data: callerProf } = await db
+      .from("profiles").select("org_id, is_super_admin").eq("id", auth.user.id).maybeSingle();
+    if (!callerProf) return json({ error: "profile missing" }, 403);
+    const { data: perms } = await db
+      .from("user_roles")
+      .select("role_permissions:roles(role_permissions(permission))")
+      .eq("user_id", auth.user.id);
+    const allowed =
+      callerProf.is_super_admin ||
+      (perms ?? []).some((r: any) =>
+        (r.role_permissions?.role_permissions ?? []).some((p: any) => p.permission === "users.manage"),
+      );
+    if (!allowed) return json({ error: "forbidden" }, 403);
 
-  // 1. create auth user with metadata marking it as an org member — the
-  //    handle_new_user trigger sees account_type 'member' and must not create a new org
-  const tempPassword = crypto.randomUUID() + "-Aa1";
-  const { data: created, error: createErr } = await db.auth.admin.createUser({
-    email,
-    password: tempPassword,
-    email_confirm: true,
-    user_metadata: { account_type: "member", full_name, member_org_id: callerProf.org_id },
-  });
-  if (createErr || !created.user) return json({ error: createErr?.message ?? "create failed" }, 400);
-  const uid = created.user.id;
+    const { email, full_name, role_id } = await req.json();
+    if (!email || !full_name) return json({ error: "email and full_name required" }, 400);
 
-  // 2. move the auto-provisioned profile into the admin's org and clean up the
-  //    placeholder org the trigger created
-  const { data: autoProf } = await db.from("profiles").select("org_id").eq("id", uid).maybeSingle();
-  await db.from("profiles").update({ org_id: callerProf.org_id }).eq("id", uid);
-  await db.from("licenses").update({ org_id: callerProf.org_id }).eq("user_id", uid);
-  await db.from("user_roles").delete().eq("user_id", uid); // drop owner role of placeholder org
-  if (autoProf && autoProf.org_id !== callerProf.org_id) {
-    await db.from("organizations").delete().eq("id", autoProf.org_id);
+    // 1. create auth user with metadata marking it as an org member — the
+    //    handle_new_user trigger sees account_type 'member' and must not create a new org
+    const tempPassword = crypto.randomUUID() + "-Aa1";
+    const { data: created, error: createErr } = await db.auth.admin.createUser({
+      email,
+      password: tempPassword,
+      email_confirm: true,
+      user_metadata: { account_type: "member", full_name, member_org_id: callerProf.org_id },
+    });
+    if (createErr || !created.user) return json({ error: createErr?.message ?? "create failed" }, 400);
+    const uid = created.user.id;
+
+    // 2. move the auto-provisioned profile into the admin's org and clean up the
+    //    placeholder org the trigger created
+    const { data: autoProf } = await db.from("profiles").select("org_id").eq("id", uid).maybeSingle();
+    await db.from("profiles").update({ org_id: callerProf.org_id }).eq("id", uid);
+    await db.from("licenses").update({ org_id: callerProf.org_id }).eq("user_id", uid);
+    await db.from("user_roles").delete().eq("user_id", uid); // drop owner role of placeholder org
+    if (autoProf && autoProf.org_id !== callerProf.org_id) {
+      await db.from("organizations").delete().eq("id", autoProf.org_id);
+    }
+    if (role_id) await db.from("user_roles").insert({ user_id: uid, role_id });
+
+    // 3. fetch one-time license key generated by the trigger, re-home it, and return it
+    const { data: keys } = await db
+      .from("provision_results").select("user_code, license_key").eq("user_id", uid)
+      .maybeSingle().setHeader("Accept-Profile", "app");
+    await db.from("provision_results").delete().eq("user_id", uid).setHeader("Content-Profile", "app");
+
+    // 4. send password reset so the user sets their own password
+    await db.auth.admin.generateLink({ type: "recovery", email });
+
+    await db.from("audit_logs").insert({
+      org_id: callerProf.org_id,
+      actor_id: auth.user.id,
+      actor_email: auth.user.email ?? "",
+      action: "user.create",
+      target_type: "user",
+      target_id: uid,
+      detail: { email },
+    });
+
+    return json({ user_id: uid, user_code: keys?.user_code, license_key: keys?.license_key });
+  } catch (e) {
+    console.error("invite-user failed", e);
+    return json({ error: e instanceof Error ? e.message : "unexpected error" }, 500);
   }
-  if (role_id) await db.from("user_roles").insert({ user_id: uid, role_id });
-
-  // 3. fetch one-time license key generated by the trigger, re-home it, and return it
-  const { data: keys } = await db
-    .from("provision_results").select("user_code, license_key").eq("user_id", uid)
-    .maybeSingle().setHeader("Accept-Profile", "app");
-  await db.from("provision_results").delete().eq("user_id", uid).setHeader("Content-Profile", "app");
-
-  // 4. send password reset so the user sets their own password
-  await db.auth.admin.generateLink({ type: "recovery", email });
-
-  await db.from("audit_logs").insert({
-    org_id: callerProf.org_id,
-    actor_id: auth.user.id,
-    actor_email: auth.user.email ?? "",
-    action: "user.create",
-    target_type: "user",
-    target_id: uid,
-    detail: { email },
-  });
-
-  return json({ user_id: uid, user_code: keys?.user_code, license_key: keys?.license_key });
 });

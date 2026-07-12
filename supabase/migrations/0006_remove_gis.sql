@@ -28,6 +28,7 @@ end $$;
 -- ------------------------------------------------------------
 -- Drop GIS-only tables (policies drop automatically with them)
 -- ------------------------------------------------------------
+drop policy if exists gis_read on public.gis_layers;
 drop table if exists public.speed_zones;
 drop table if exists public.line_roi;
 drop table if exists public.polygon_roi;

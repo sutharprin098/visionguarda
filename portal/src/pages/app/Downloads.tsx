@@ -33,7 +33,7 @@ function fmtSize(bytes: number) {
 }
 
 export default function DownloadsPage() {
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError } = useQuery({
     queryKey: ["github-releases"],
     queryFn: async () => {
       const { data, error } = await supabase.functions.invoke<{ releases: GithubRelease[]; error?: string }>(
@@ -73,9 +73,10 @@ export default function DownloadsPage() {
     <>
       <PageHeader title="Downloads" subtitle="CamAI Desktop for Windows. Activate with your license key." />
 
-      {data?.error && (
+      {(data?.error || isError) && (
         <div className="card mb-6 flex items-center gap-2 p-4 text-sm text-warn">
-          <ShieldAlert size={16} /> {data.error}
+          <ShieldAlert size={16} />
+          {data?.error ?? "Could not reach the release service right now. Please try again shortly."}
         </div>
       )}
 
@@ -105,6 +106,8 @@ export default function DownloadsPage() {
 
       {isLoading ? (
         <p className="text-sm text-ink-3">Fetching latest releases from GitHub…</p>
+      ) : isError && !releases.length ? (
+        <Empty text="Could not load releases right now. Please try again in a moment." />
       ) : !releases.length ? (
         <Empty text="No Windows builds published yet. Publish a GitHub Release with an .exe asset to show it here." />
       ) : (

@@ -285,6 +285,7 @@ function TicketDetail({ ticket, onChanged }: { ticket: TicketRow; onChanged: () 
   const { profile, can } = useAuth();
   const [reply, setReply] = useState("");
   const [busy, setBusy] = useState(false);
+  const [sendError, setSendError] = useState("");
   const manage = can("support.manage");
   const mine = ticket.user_id === profile?.id;
 
@@ -303,16 +304,18 @@ function TicketDetail({ ticket, onChanged }: { ticket: TicketRow; onChanged: () 
   async function send() {
     if (!reply.trim() || !profile) return;
     setBusy(true);
+    setSendError("");
     const entry: ThreadEntry = { by: profile.id, by_name: profile.full_name, at: new Date().toISOString(), text: reply.trim() };
-    await supabase.from("support_tickets")
+    const { error } = await supabase.from("support_tickets")
       .update({
         thread: [...(ticket.thread ?? []), entry],
         // a support answer moves the ticket to pending-on-requester; a requester reply reopens it
         status: ticket.status === "closed" ? "open" : manage && !mine ? "pending" : "open",
       })
       .eq("id", ticket.id);
-    setReply("");
     setBusy(false);
+    if (error) return setSendError(error.message);
+    setReply("");
     onChanged();
   }
 
@@ -365,6 +368,7 @@ function TicketDetail({ ticket, onChanged }: { ticket: TicketRow; onChanged: () 
         <div className="mt-4 space-y-2 border-t border-line pt-3">
           <textarea className="input min-h-[70px] w-full" placeholder="Write a reply…"
                     value={reply} onChange={(e) => setReply(e.target.value)} />
+          {sendError && <p className="text-sm text-danger">{sendError}</p>}
           <div className="flex gap-2">
             <button className="btn-primary flex-1" onClick={send} disabled={busy || !reply.trim()}>
               {busy ? "Sending…" : "Send Reply"}

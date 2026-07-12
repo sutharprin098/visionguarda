@@ -216,6 +216,7 @@ class CameraManager:
             source=cam["source"],
             zones_json=cam["zones"],
             lines_json=cam["lines"],
+            rules_json=cam.get("rules", "[]"),
             backend_model=self.yolo_backend
         )
         
@@ -256,10 +257,10 @@ class CameraManager:
         self.stop_all()
         self.start_cameras()
 
-    def update_camera_analytics_config(self, cam_id: str, zones_json: str, lines_json: str):
+    def update_camera_analytics_config(self, cam_id: str, zones_json: str, lines_json: str, rules_json: str = "[]"):
         """Update analytics configuration on the fly."""
         if cam_id in self.camera_threads:
-            self.camera_threads[cam_id].update_config(zones_json, lines_json)
+            self.camera_threads[cam_id].update_config(zones_json, lines_json, rules_json)
 
     def update_camera_display_config(self, cam_id: str, max_width: int = None, quality: int = None):
         """Update MJPEG preview resolution/quality on the fly (display only)."""

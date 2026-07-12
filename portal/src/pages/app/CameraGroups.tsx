@@ -4,6 +4,7 @@ import { Layers, Plus } from "lucide-react";
 import { supabase } from "../../lib/supabase";
 import { audit } from "../../lib/audit";
 import { PageHeader, Badge, Modal, ConfirmDialog, Field, Empty } from "../../components/ui";
+import { useAuth } from "../../contexts/AuthContext";
 
 interface GroupRow {
   id: string;
@@ -102,19 +103,25 @@ export default function CameraGroupsPage() {
 }
 
 function CreateForm({ onDone }: { onDone: () => void }) {
-  const { data: org } = useQuery({
-    queryKey: ["org-id"],
-    queryFn: async () => (await supabase.from("organizations").select("id").maybeSingle()).data,
-  });
+  // Not a fresh `organizations` query — that table grants a super admin every
+  // org row (see 0020_camera_management_fixes.sql), and an unfiltered
+  // `.maybeSingle()` there throws once more than one org exists. The caller's
+  // own org_id (from their profile, already loaded once at sign-in) is the
+  // only unambiguous answer to "which org does this new group belong to".
+  const { profile } = useAuth();
+  const orgId = profile?.org_id;
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
 
   async function submit() {
-    if (!org) return;
+    if (!orgId) return;
     setBusy(true);
-    const { data } = await supabase.from("camera_groups").insert({ org_id: org.id, name }).select("id").maybeSingle();
-    if (data) audit("camera_group.create", "camera_group", data.id, { module: "cameras", new: { name } });
+    setError("");
+    const { data, error } = await supabase.from("camera_groups").insert({ org_id: orgId, name }).select("id").maybeSingle();
     setBusy(false);
+    if (error || !data) return setError(error?.message ?? "create failed");
+    audit("camera_group.create", "camera_group", data.id, { module: "cameras", new: { name } });
     onDone();
   }
 
@@ -123,7 +130,8 @@ function CreateForm({ onDone }: { onDone: () => void }) {
       <Field label="Group name">
         <input className="input" placeholder="e.g. Perimeter — North" value={name} onChange={(e) => setName(e.target.value)} />
       </Field>
-      <button className="btn-primary w-full" onClick={submit} disabled={busy || !name.trim() || !org}>
+      {error && <p className="text-sm text-danger">{error}</p>}
+      <button className="btn-primary w-full" onClick={submit} disabled={busy || !name.trim() || !orgId}>
         {busy ? "Creating…" : "Create Group"}
       </button>
     </div>
@@ -133,6 +141,7 @@ function CreateForm({ onDone }: { onDone: () => void }) {
 function MembersForm({ group, onDone }: { group: GroupRow; onDone: () => void }) {
   const qc = useQueryClient();
   const [name, setName] = useState(group.name);
+  const [error, setError] = useState("");
 
   const { data: cameras } = useQuery({
     queryKey: ["cameras-brief"],
@@ -152,8 +161,10 @@ function MembersForm({ group, onDone }: { group: GroupRow; onDone: () => void })
   }
 
   async function rename() {
+    setError("");
     if (name.trim() && name !== group.name) {
-      await supabase.from("camera_groups").update({ name }).eq("id", group.id);
+      const { error } = await supabase.from("camera_groups").update({ name }).eq("id", group.id);
+      if (error) return setError(error.message);
       audit("camera_group.rename", "camera_group", group.id, { module: "cameras", old: { name: group.name }, new: { name } });
     }
     onDone();
@@ -175,6 +186,7 @@ function MembersForm({ group, onDone }: { group: GroupRow; onDone: () => void })
           </label>
         ))}
       </div>
+      {error && <p className="text-sm text-danger">{error}</p>}
       <button className="btn-primary w-full" onClick={rename}>Done</button>
     </div>
   );
