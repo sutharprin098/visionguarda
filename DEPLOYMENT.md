@@ -85,8 +85,25 @@ point the desktop app at a different Supabase project.
 toolkit (`winCodeSign`) that contains a few macOS symlink entries. Extracting them
 needs the "Create symbolic links" privilege. If the build fails with
 `Cannot create symbolic link : A required privilege is not held by the client`,
-either enable **Developer Mode** (Settings → Privacy & Security → For Developers)
-or run the build once from an elevated terminal.
+either enable **Developer Mode** (Settings → Privacy & Security → For Developers),
+run the build once from an elevated terminal, or — without touching Windows
+settings at all — point `7zip-bin` at a wrapper that extracts with `-snl-`
+(don't materialize real symlinks) instead of the bundled binary:
+
+```bash
+# one-time: compile the wrapper (desktop/scripts/wrap7za.cs) that calls the
+# real 7za.exe with -snl- appended, into its own tools dir
+mkdir -p /c/tools/sys7za
+csc /nologo /target:exe /out:C:\tools\sys7za\7za.exe desktop\scripts\wrap7za.cs
+touch desktop/7za   # builder-util unconditionally chmods path7za; satisfies that check
+# then, for the build only:
+PATH="/c/tools/sys7za:$PATH" USE_SYSTEM_7ZA=true CSC_IDENTITY_AUTO_DISCOVERY=false npm run build
+rm desktop/7za      # cleanup — not a real source file, just satisfies the chmod check above
+```
+
+`7zip-bin` resolves to the bare command `7za` (found via `PATH`) when
+`USE_SYSTEM_7ZA=true` instead of its bundled absolute path — the vendored
+binary in `node_modules` is never modified.
 
 **Publishing a release** (this is what the Downloads page reads from):
 1. Tag and create a GitHub Release on the repo set in `GITHUB_RELEASES_REPO`.
