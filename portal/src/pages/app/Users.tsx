@@ -178,15 +178,13 @@ function UserDetail({ user, onAction, onReveal, onChanged }: {
   const { data: assignments } = useQuery({
     queryKey: ["user-assign", user.id],
     queryFn: async () => {
-      const [cams, layers, projects, devices] = await Promise.all([
+      const [cams, projects, devices] = await Promise.all([
         supabase.from("camera_assignments").select("cameras(id, name, status)").eq("user_id", user.id),
-        supabase.from("gis_layer_assignments").select("gis_layers(id, name, kind)").eq("user_id", user.id),
         supabase.from("project_members").select("projects(id, name)").eq("user_id", user.id),
         supabase.from("devices").select("id, name, is_online, last_seen_at").eq("user_id", user.id),
       ]);
       return {
         cameras: (cams.data ?? []).map((r: any) => r.cameras).filter(Boolean),
-        layers: (layers.data ?? []).map((r: any) => r.gis_layers).filter(Boolean),
         projects: (projects.data ?? []).map((r: any) => r.projects).filter(Boolean),
         devices: devices.data ?? [],
       };
@@ -218,10 +216,9 @@ function UserDetail({ user, onAction, onReveal, onChanged }: {
       {tab === "Assignments" && (
         <div className="space-y-4">
           <AssignList title="Cameras" items={assignments?.cameras.map((c: any) => c.name) ?? []} />
-          <AssignList title="GIS Layers" items={assignments?.layers.map((l: any) => l.name) ?? []} />
           <AssignList title="Projects" items={assignments?.projects.map((p: any) => p.name) ?? []} />
           <AssignList title="Devices" items={assignments?.devices.map((d: any) => `${d.name}${d.is_online ? " · online" : ""}`) ?? []} />
-          <p className="text-xs text-ink-3">Assign cameras from the Cameras page and layers from GIS.</p>
+          <p className="text-xs text-ink-3">Assign cameras from the Cameras page.</p>
         </div>
       )}
 

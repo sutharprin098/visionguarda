@@ -9,7 +9,7 @@ Windows desktop app on Supabase).
 |---|---|---|
 | `server/` | Local AI engine — cameras in, telemetry out | FastAPI, OpenVINO/ONNX Runtime, YOLO11-seg, ByteTrack-style tracker |
 | `client/` | Local CCTV viewer (MJPEG video + WebSocket telemetry overlay) | React 18, Vite, Tailwind |
-| `portal/` | SaaS admin portal (orgs, users, roles, licenses, devices, cameras, GIS) | React, Supabase JS |
+| `portal/` | SaaS admin portal (orgs, users, roles, licenses, devices, cameras) | React, Supabase JS |
 | `desktop/` | Windows app with license activation + DPAPI vault | Electron, electron-builder |
 | `supabase/` | Multi-tenant backend: Postgres + RLS, Auth, Realtime, Edge Functions | Supabase |
 

@@ -11,14 +11,13 @@ interface OrgSettings {
   branding: { logo_path?: string; primary_color?: string; name_override?: string };
   theme: "dark" | "light" | "system";
   smtp: { host?: string; port?: number; username?: string; from?: string };
-  gis: { default_center?: [number, number]; default_zoom?: number; default_style?: string };
   camera_defaults: { fps?: number; recording?: boolean; retention_days?: number };
   retention: { recordings_days: number; alerts_days: number; audit_days: number };
   webhook: { url?: string; events?: string[] };
 }
 
 const DEFAULTS: Omit<OrgSettings, "org_id"> = {
-  branding: {}, theme: "system", smtp: {}, gis: {}, camera_defaults: {},
+  branding: {}, theme: "system", smtp: {}, camera_defaults: {},
   retention: { recordings_days: 30, alerts_days: 90, audit_days: 365 }, webhook: {},
 };
 

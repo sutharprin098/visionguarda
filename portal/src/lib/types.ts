@@ -138,15 +138,15 @@ export interface AuditLog {
   created_at: string;
 }
 
-export interface AppRelease {
-  id: string;
+export interface GithubRelease {
   version: string;
-  channel: string;
-  platform: string;
-  storage_path: string;
-  sha256: string;
-  size_bytes: number;
+  tag_name: string;
+  name: string;
   release_notes: string;
-  min_os: string;
   published_at: string;
+  prerelease: boolean;
+  asset_name: string | null;
+  size_bytes: number;
+  content_type: string;
+  download_url: string | null;
 }

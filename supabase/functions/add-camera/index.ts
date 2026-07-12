@@ -1,7 +1,12 @@
 // POST /functions/v1/add-camera
 // Camera connection strings can embed credentials (rtsp://user:pass@host/...),
 // so they are AES-256-GCM encrypted here before touching the database.
-import { adminClient, userClient, json, corsHeaders, encryptSecret } from "../_shared/util.ts";
+// The connection is verified reachable before the row is ever written —
+// see _shared/util.ts verifyCameraConnection.
+import {
+  adminClient, userClient, json, corsHeaders, encryptSecret,
+  buildConnectionUri, verifyCameraConnection, CameraFields,
+} from "../_shared/util.ts";
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
@@ -23,25 +28,25 @@ Deno.serve(async (req) => {
   );
   if (!allowed) return json({ error: "forbidden" }, 403);
 
-  const { name, source_type, connection, site_id, lat, lng } = await req.json();
+  const { name, site_id, ...fields } = (await req.json()) as CameraFields & { name: string; site_id?: string };
   if (!name) return json({ error: "name required" }, 400);
-  if (lat != null && (typeof lat !== "number" || lat < -90 || lat > 90)) {
-    return json({ error: "invalid latitude" }, 400);
+  if (!["rtsp", "onvif", "usb", "ip", "nvr", "dvr"].includes(fields.source_type)) {
+    return json({ error: "invalid source_type" }, 400);
   }
-  if (lng != null && (typeof lng !== "number" || lng < -180 || lng > 180)) {
-    return json({ error: "invalid longitude" }, 400);
-  }
+
+  const check = await verifyCameraConnection(fields);
+  if (!check.ok) return json({ error: check.message, stage: "verify" }, 422);
+
+  const connection = buildConnectionUri(fields);
 
   const { data: cam, error } = await db
     .from("cameras")
     .insert({
       org_id: prof.org_id,
       name,
-      source_type: source_type ?? "rtsp",
-      connection_encrypted: connection ? await encryptSecret(connection) : "",
+      source_type: fields.source_type,
+      connection_encrypted: await encryptSecret(connection),
       site_id: site_id ?? null,
-      lat: lat ?? null,
-      lng: lng ?? null,
     })
     .select("id, name, source_type, status")
     .single();
@@ -54,8 +59,8 @@ Deno.serve(async (req) => {
     action: "camera.create",
     target_type: "camera",
     target_id: cam.id,
-    detail: { name, source_type },
+    detail: { name, source_type: fields.source_type },
   });
 
-  return json(cam);
+  return json({ ...cam, verify_message: check.message });
 });

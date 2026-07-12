@@ -53,16 +53,12 @@ Deno.serve(async (req) => {
     }
   }
 
-  const [profile, org, roles, cameras, gisLayers, polyRoi, lineRoi, speedZones, settings, notifications] =
+  const [profile, org, roles, cameras, settings, notifications] =
     await Promise.all([
       db.from("profiles").select("*").eq("id", uid).single(),
       db.from("organizations").select("*").single(),
       db.from("user_roles").select("role_id, roles(name), role:roles(role_permissions(permission))").eq("user_id", uid),
       db.from("cameras").select("*, camera_assignments!inner(user_id)").eq("camera_assignments.user_id", uid),
-      db.from("gis_layers").select("*"),
-      db.from("polygon_roi").select("*"),
-      db.from("line_roi").select("*"),
-      db.from("speed_zones").select("*"),
       db.from("settings").select("scope, key, value"),
       db.from("notifications").select("*").is("read_at", null).order("created_at", { ascending: false }).limit(50),
     ]);
@@ -83,10 +79,6 @@ Deno.serve(async (req) => {
     organization: org.data,
     permissions,
     cameras: cameras.data ?? [],
-    gis_layers: gisLayers.data ?? [],
-    polygon_roi: polyRoi.data ?? [],
-    line_roi: lineRoi.data ?? [],
-    speed_zones: speedZones.data ?? [],
     settings: settings.data ?? [],
     notifications: notifications.data ?? [],
   });

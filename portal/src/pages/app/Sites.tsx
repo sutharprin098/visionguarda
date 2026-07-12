@@ -12,8 +12,6 @@ interface SiteRow {
   name: string;
   kind: "site" | "building" | "road" | "zone";
   address: string;
-  lat: number | null;
-  lng: number | null;
   project_id: string | null;
   projects: { name: string } | null;
   cameras: { count: number }[];
@@ -60,12 +58,6 @@ export default function SitesPage() {
       render: (s) => <span className="text-ink-2">{s.projects?.name ?? "—"}</span>,
     },
     {
-      key: "coords", header: "Coordinates", value: (s) => (s.lat != null && s.lng != null ? `${s.lat}, ${s.lng}` : ""),
-      render: (s) => s.lat != null && s.lng != null
-        ? <span className="font-mono text-xs text-ink-3">{s.lat.toFixed(5)}, {s.lng.toFixed(5)}</span>
-        : <span className="text-ink-3">—</span>,
-    },
-    {
       key: "cameras", header: "Cameras", sortable: true, value: (s) => s.cameras?.[0]?.count ?? 0,
       render: (s) => s.cameras?.[0]?.count ?? 0,
     },
@@ -83,7 +75,7 @@ export default function SitesPage() {
               body: `Delete "${s.name}"? Cameras keep existing but lose their site link.`,
               run: async () => {
                 await supabase.from("sites").delete().eq("id", s.id);
-                audit("site.delete", "site", s.id, { module: "gis", old: { name: s.name } });
+                audit("site.delete", "site", s.id, { module: "sites", old: { name: s.name } });
                 refresh();
               },
             })}>Delete</button>
@@ -96,7 +88,7 @@ export default function SitesPage() {
     <>
       <PageHeader
         title="Sites"
-        subtitle="Physical locations — sites, buildings, roads and zones — that anchor cameras and GIS layers."
+        subtitle="Physical locations — sites, buildings, roads and zones — that group and anchor cameras."
         actions={
           <button className="btn-primary" onClick={() => setFormFor({})}>
             <Plus size={15} /> Add Site
@@ -133,8 +125,6 @@ function SiteForm({ site, onDone }: { site: Partial<SiteRow>; onDone: () => void
     name: site.name ?? "",
     kind: site.kind ?? "site",
     address: site.address ?? "",
-    lat: site.lat != null ? String(site.lat) : "",
-    lng: site.lng != null ? String(site.lng) : "",
     project_id: site.project_id ?? "",
   });
   const [busy, setBusy] = useState(false);
@@ -153,24 +143,18 @@ function SiteForm({ site, onDone }: { site: Partial<SiteRow>; onDone: () => void
     if (!org) return;
     setBusy(true);
     setError("");
-    const lat = form.lat ? Number(form.lat) : null;
-    const lng = form.lng ? Number(form.lng) : null;
-    if ((lat != null && (isNaN(lat) || lat < -90 || lat > 90)) || (lng != null && (isNaN(lng) || lng < -180 || lng > 180))) {
-      setBusy(false);
-      return setError("Coordinates out of range.");
-    }
     const row = {
       name: form.name, kind: form.kind, address: form.address,
-      lat, lng, project_id: form.project_id || null,
+      project_id: form.project_id || null,
     };
     if (site.id) {
       const { error } = await supabase.from("sites").update(row).eq("id", site.id);
       if (error) { setBusy(false); return setError(error.message); }
-      audit("site.update", "site", site.id, { module: "gis", old: { name: site.name }, new: row });
+      audit("site.update", "site", site.id, { module: "sites", old: { name: site.name }, new: row });
     } else {
       const { data, error } = await supabase.from("sites").insert({ org_id: org.id, ...row }).select("id").single();
       if (error) { setBusy(false); return setError(error.message); }
-      audit("site.create", "site", data.id, { module: "gis", new: row });
+      audit("site.create", "site", data.id, { module: "sites", new: row });
     }
     setBusy(false);
     onDone();
@@ -197,16 +181,6 @@ function SiteForm({ site, onDone }: { site: Partial<SiteRow>; onDone: () => void
       <Field label="Address">
         <input className="input" value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} />
       </Field>
-      <div className="grid grid-cols-2 gap-3">
-        <Field label="Latitude">
-          <input className="input" type="number" step="any" value={form.lat}
-                 onChange={(e) => setForm({ ...form, lat: e.target.value })} />
-        </Field>
-        <Field label="Longitude">
-          <input className="input" type="number" step="any" value={form.lng}
-                 onChange={(e) => setForm({ ...form, lng: e.target.value })} />
-        </Field>
-      </div>
       {error && <p className="text-sm text-danger">{error}</p>}
       <button className="btn-primary w-full" onClick={submit} disabled={busy || !form.name.trim() || !org}>
         {busy ? "Saving…" : site.id ? "Save Changes" : "Create Site"}

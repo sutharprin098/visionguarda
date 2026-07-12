@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Plus, Video } from "lucide-react";
+import { Plus, Video, CheckCircle2, XCircle, Loader2 } from "lucide-react";
 import { supabase } from "../../lib/supabase";
 import { audit } from "../../lib/audit";
 import { Camera } from "../../lib/types";
@@ -10,8 +10,6 @@ import DataTable, { Column } from "../../components/DataTable";
 import { fmtAgo } from "../../lib/format";
 
 type CameraRow = Camera & {
-  lat: number | null;
-  lng: number | null;
   sites: { name: string } | null;
   camera_assignments: { user_id: string; profiles: { full_name: string } | null }[];
   camera_health: { fps: number; resolution: string; recording: boolean; is_online: boolean; checked_at: string } | null;
@@ -165,35 +163,72 @@ export default function CamerasPage() {
   );
 }
 
+const SOURCE_TYPES = [
+  { value: "rtsp", label: "RTSP" },
+  { value: "onvif", label: "ONVIF" },
+  { value: "usb", label: "USB Camera" },
+  { value: "ip", label: "IP Camera" },
+  { value: "nvr", label: "NVR" },
+  { value: "dvr", label: "DVR" },
+] as const;
+
+const DEFAULT_PORTS: Record<string, string> = { rtsp: "554", nvr: "554", dvr: "554", onvif: "80", ip: "80" };
+
 function AddCameraForm({ onDone }: { onDone: () => void }) {
-  const [form, setForm] = useState({ name: "", source_type: "rtsp", connection: "", site_id: "", lat: "", lng: "" });
+  const [form, setForm] = useState({
+    name: "", source_type: "rtsp", site_id: "",
+    host: "", port: DEFAULT_PORTS.rtsp, username: "", password: "", path: "",
+  });
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [testState, setTestState] = useState<{ state: "idle" | "testing" | "ok" | "fail"; message?: string }>({ state: "idle" });
 
   const { data: sites } = useQuery({
     queryKey: ["sites-brief"],
     queryFn: async () => (await supabase.from("sites").select("id, name").order("name")).data ?? [],
   });
 
+  const isUsb = form.source_type === "usb";
+
+  function setSourceType(source_type: string) {
+    setForm({ ...form, source_type, port: DEFAULT_PORTS[source_type] ?? "" });
+    setTestState({ state: "idle" });
+  }
+
+  function fields() {
+    return {
+      source_type: form.source_type,
+      host: isUsb ? undefined : form.host.trim(),
+      port: isUsb ? undefined : Number(form.port) || undefined,
+      username: isUsb ? undefined : form.username.trim() || undefined,
+      password: isUsb ? undefined : form.password || undefined,
+      path: isUsb ? (form.host.trim() || "0") : (form.path.trim() || undefined),
+    };
+  }
+
+  async function testConnection() {
+    setTestState({ state: "testing" });
+    const { data, error } = await supabase.functions.invoke("test-camera", { body: fields() });
+    if (error || !data) return setTestState({ state: "fail", message: "Test request failed." });
+    setTestState({ state: data.ok ? "ok" : "fail", message: data.message });
+  }
+
   async function submit() {
     setBusy(true);
     setError("");
-    // credentials in the URL are encrypted server-side (AES-256-GCM) by the edge function
     const { data, error } = await supabase.functions.invoke("add-camera", {
-      body: {
-        name: form.name,
-        source_type: form.source_type,
-        connection: form.connection,
-        site_id: form.site_id || null,
-        lat: form.lat ? Number(form.lat) : null,
-        lng: form.lng ? Number(form.lng) : null,
-      },
+      body: { name: form.name, site_id: form.site_id || null, ...fields() },
     });
     setBusy(false);
-    if (error) return setError("Failed to add camera — check the connection string and try again.");
-    audit("camera.create", "camera", data?.camera_id ?? form.name, { module: "cameras", new: { name: form.name, source_type: form.source_type } });
+    if (error) {
+      const detail = (error as any)?.context?.body?.error ?? (error as any)?.message;
+      return setError(detail || "Failed to add camera — check the connection details and try again.");
+    }
+    audit("camera.create", "camera", data?.id ?? form.name, { module: "cameras", new: { name: form.name, source_type: form.source_type } });
     onDone();
   }
+
+  const canSubmit = form.name.trim() && (isUsb ? true : form.host.trim());
 
   return (
     <div className="space-y-3">
@@ -202,8 +237,8 @@ function AddCameraForm({ onDone }: { onDone: () => void }) {
       </Field>
       <div className="grid grid-cols-2 gap-3">
         <Field label="Source type">
-          <select className="input" value={form.source_type} onChange={(e) => setForm({ ...form, source_type: e.target.value })}>
-            {["rtsp", "onvif", "usb", "ip", "nvr", "dvr"].map((t) => <option key={t} value={t}>{t.toUpperCase()}</option>)}
+          <select className="input" value={form.source_type} onChange={(e) => setSourceType(e.target.value)}>
+            {SOURCE_TYPES.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
           </select>
         </Field>
         <Field label="Site">
@@ -213,24 +248,64 @@ function AddCameraForm({ onDone }: { onDone: () => void }) {
           </select>
         </Field>
       </div>
-      <Field label="Connection" hint="Credentials are AES-256 encrypted before storage; only ciphertext lands in the database.">
-        <input className="input" placeholder="rtsp://user:pass@host:554/stream — or USB index like 0"
-               value={form.connection} onChange={(e) => setForm({ ...form, connection: e.target.value })} />
-      </Field>
-      <div className="grid grid-cols-2 gap-3">
-        <Field label="Latitude">
-          <input className="input" type="number" step="any" value={form.lat}
-                 onChange={(e) => setForm({ ...form, lat: e.target.value })} />
+
+      {isUsb ? (
+        <Field label="USB device index" hint="Usually 0 for the first attached camera.">
+          <input className="input" placeholder="0" value={form.host}
+                 onChange={(e) => { setForm({ ...form, host: e.target.value }); setTestState({ state: "idle" }); }} />
         </Field>
-        <Field label="Longitude">
-          <input className="input" type="number" step="any" value={form.lng}
-                 onChange={(e) => setForm({ ...form, lng: e.target.value })} />
-        </Field>
+      ) : (
+        <>
+          <div className="grid grid-cols-3 gap-3">
+            <div className="col-span-2">
+              <Field label="Camera IP">
+                <input className="input" placeholder="192.168.1.64" value={form.host}
+                       onChange={(e) => { setForm({ ...form, host: e.target.value }); setTestState({ state: "idle" }); }} />
+              </Field>
+            </div>
+            <Field label="Port">
+              <input className="input" type="number" value={form.port}
+                     onChange={(e) => { setForm({ ...form, port: e.target.value }); setTestState({ state: "idle" }); }} />
+            </Field>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Username">
+              <input className="input" value={form.username}
+                     onChange={(e) => { setForm({ ...form, username: e.target.value }); setTestState({ state: "idle" }); }} />
+            </Field>
+            <Field label="Password">
+              <input className="input" type="password" value={form.password}
+                     onChange={(e) => { setForm({ ...form, password: e.target.value }); setTestState({ state: "idle" }); }} />
+            </Field>
+          </div>
+          <Field label="RTSP path" hint="Stream path on the device, e.g. /Streaming/Channels/101. Leave empty if unsure.">
+            <input className="input" placeholder="/Streaming/Channels/101" value={form.path}
+                   onChange={(e) => { setForm({ ...form, path: e.target.value }); setTestState({ state: "idle" }); }} />
+          </Field>
+        </>
+      )}
+
+      <div className="flex items-center gap-3">
+        <button type="button" className="btn-ghost text-xs" onClick={testConnection}
+                disabled={testState.state === "testing" || !canSubmit}>
+          {testState.state === "testing" ? "Testing…" : "Test Connection"}
+        </button>
+        {testState.state === "ok" && (
+          <span className="flex items-center gap-1.5 text-xs text-ok"><CheckCircle2 size={13} /> {testState.message}</span>
+        )}
+        {testState.state === "fail" && (
+          <span className="flex items-center gap-1.5 text-xs text-danger"><XCircle size={13} /> {testState.message}</span>
+        )}
+        {testState.state === "testing" && <Loader2 size={13} className="animate-spin text-ink-3" />}
       </div>
+
       {error && <p className="text-sm text-danger">{error}</p>}
-      <button className="btn-primary w-full" onClick={submit} disabled={busy || !form.name || !form.connection}>
-        {busy ? "Adding…" : "Add Camera"}
+      <button className="btn-primary w-full" onClick={submit} disabled={busy || !canSubmit}>
+        {busy ? "Verifying & adding…" : "Add Camera"}
       </button>
+      <p className="text-xs text-ink-3">
+        The connection is verified reachable before the camera is saved. Credentials are AES-256 encrypted; only ciphertext lands in the database.
+      </p>
     </div>
   );
 }

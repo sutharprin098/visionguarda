@@ -9,10 +9,6 @@ export interface SyncBundle {
   organization: any;
   permissions: string[];
   cameras: any[];
-  gis_layers: any[];
-  polygon_roi: any[];
-  line_roi: any[];
-  speed_zones: any[];
   settings: { scope: string; key: string; value: any }[];
   notifications: any[];
 }
@@ -40,8 +36,7 @@ export async function fetchBundle(): Promise<SyncBundle> {
 }
 
 const WATCHED_TABLES = [
-  "cameras", "camera_assignments", "gis_layers", "gis_layer_assignments",
-  "polygon_roi", "line_roi", "speed_zones", "settings", "user_roles",
+  "cameras", "camera_assignments", "settings", "user_roles",
   "role_permissions", "licenses", "license_activations", "devices",
   "profiles", "notifications",
 ];

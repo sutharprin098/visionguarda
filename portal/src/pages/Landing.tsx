@@ -1,11 +1,11 @@
 import { Link } from "react-router-dom";
-import { Cctv, ShieldCheck, Map, Cpu, KeyRound, RadioTower, ArrowRight } from "lucide-react";
+import { Cctv, ShieldCheck, Siren, Cpu, KeyRound, RadioTower, ArrowRight } from "lucide-react";
 
 const FEATURES = [
   { icon: Cpu, title: "Live AI Analytics", text: "YOLO11 + ByteTrack detection, tracking, counting and speed — on your own hardware." },
   { icon: KeyRound, title: "One-Key Activation", text: "Enter a license key once. Cameras, permissions and settings sync automatically." },
   { icon: ShieldCheck, title: "Enterprise Security", text: "Row-level isolation per organization, AES-256 secrets, full audit trail." },
-  { icon: Map, title: "GIS Command View", text: "Sites, zones, ROI and speed limits on a live MapLibre map." },
+  { icon: Siren, title: "Alerts & Incidents", text: "AI events escalate into a full incident workflow with assignment and resolution tracking." },
   { icon: RadioTower, title: "Realtime Sync", text: "Admin changes reach every desktop instantly. No restarts, no re-logins." },
   { icon: Cctv, title: "Any Camera", text: "RTSP, ONVIF, USB, IP, NVR and DVR sources with per-user assignment." },
 ];
@@ -36,7 +36,7 @@ export default function Landing() {
           <span className="text-accent">activated with a single key.</span>
         </h1>
         <p className="mx-auto mt-5 max-w-xl text-ink-2">
-          Manage organizations, users, licenses, cameras and GIS zones from one portal.
+          Manage organizations, users, licenses and cameras from one portal.
           Your desktop apps activate with a license key and stay in sync — automatically.
         </p>
         <div className="mt-8 flex justify-center gap-3">

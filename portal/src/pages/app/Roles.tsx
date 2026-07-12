@@ -9,7 +9,7 @@ import { PageHeader, Modal, Badge, ConfirmDialog, Field } from "../../components
 
 const MODULE_LABELS: Record<string, string> = {
   org: "Organization", users: "Users", roles: "Roles", licenses: "Licenses",
-  devices: "Devices", cameras: "Cameras", gis: "GIS", ai: "AI",
+  devices: "Devices", cameras: "Cameras", ai: "AI",
   alerts: "Alerts", incidents: "Incidents", reports: "Reports",
   audit: "Audit", projects: "Projects", support: "Support",
 };

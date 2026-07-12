@@ -57,9 +57,11 @@ Two products, one backend:
 cd supabase
 npx supabase init            # if linking fresh
 npx supabase link --project-ref <your-ref>
-npx supabase db push         # applies migrations 0001–0005
-npx supabase functions deploy activate-license my-keys desktop-sync invite-user add-camera
+npx supabase db push         # applies migrations 0001–0007
+npx supabase functions deploy activate-license my-keys desktop-sync invite-user add-camera github-releases
 npx supabase secrets set CAMAI_AES_KEY=$(openssl rand -hex 32)
+npx supabase secrets set GITHUB_RELEASES_REPO=<owner>/<repo>   # powers the Downloads page
+npx supabase secrets set GITHUB_TOKEN=<pat-with-public-repo-read>  # optional, raises the GitHub API rate limit
 ```
 
 Notes:
@@ -89,9 +91,10 @@ npm run start                # dev
 npm run build                # produces CamAI-Desktop-Setup-<version>.exe (NSIS)
 ```
 
-Publish a release: upload the EXE to the `releases` storage bucket, then insert a row
-into `app_releases` (version, storage_path, sha256, release_notes). It appears on the
-portal Downloads page with a signed, audited download link.
+Publish a release: create a GitHub Release on `GITHUB_RELEASES_REPO` (tag = version,
+body = release notes) and attach the built `.exe` as a release asset. The Downloads
+page polls the GitHub Releases API live via the `github-releases` edge function —
+nothing to upload or register in Supabase, and there is never a hardcoded link.
 
 ### 4. Wire the local AI engine
 
@@ -134,7 +137,7 @@ Dashboard · Organizations (super-admin) · Users · Roles & Permissions · Lice
 (generate/transfer/suspend/revoke, one-time reveal) · Devices (hardware inventory,
 transfer, deactivate) · Desktop Activations (revoke = fail-closed) · Cameras
 (health telemetry, assignment, AES-encrypted connection) · Camera Groups · Sites ·
-GIS · AI Analytics (live aggregation over alerts/usage) · Alerts (realtime, ack,
+AI Analytics (live aggregation over alerts/usage) · Alerts (realtime, ack,
 snapshots) · Incidents (workflow + notes thread) · Reports (CSV archived to
 storage + PDF, history) · Downloads · Billing (subscription, invoices, metered
 usage) · Audit (old/new diffs, client context) · Notifications (realtime, mark

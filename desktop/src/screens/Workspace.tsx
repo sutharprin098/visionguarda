@@ -1,11 +1,11 @@
 import { useEffect, useState } from "react";
-import { Cctv, Video, Map, Bell, Settings2, LogOut, Wifi, WifiOff } from "lucide-react";
+import { Cctv, Video, Bell, Settings2, LogOut, Wifi, WifiOff } from "lucide-react";
 import clsx from "clsx";
 import { startRealtimeSync, DeactivatedError, SyncBundle } from "../lib/sync";
 
 export default function Workspace({ onDeactivated }: { onDeactivated: () => void }) {
   const [bundle, setBundle] = useState<SyncBundle | null>(null);
-  const [tab, setTab] = useState<"cameras" | "gis" | "alerts" | "settings">("cameras");
+  const [tab, setTab] = useState<"cameras" | "alerts" | "settings">("cameras");
   const [syncError, setSyncError] = useState(false);
 
   async function deactivate() {
@@ -58,7 +58,6 @@ export default function Workspace({ onDeactivated }: { onDeactivated: () => void
           {(
             [
               { id: "cameras", label: `Cameras (${bundle.cameras.length})`, icon: Video },
-              { id: "gis", label: "GIS Map", icon: Map },
               { id: "alerts", label: `Alerts (${bundle.notifications.length})`, icon: Bell },
               { id: "settings", label: "AI Settings", icon: Settings2 },
             ] as const
@@ -94,13 +93,6 @@ export default function Workspace({ onDeactivated }: { onDeactivated: () => void
 
       <main className="flex-1 overflow-y-auto p-6">
         {tab === "cameras" && <CamerasView cameras={bundle.cameras} />}
-        {tab === "gis" && (
-          <Panel title="GIS Map">
-            {bundle.gis_layers.length
-              ? `${bundle.gis_layers.length} layer(s) assigned — MapLibre view renders here (see portal GIS module).`
-              : "No GIS layers assigned to you yet."}
-          </Panel>
-        )}
         {tab === "alerts" && (
           <div className="space-y-2">
             {!bundle.notifications.length && <Panel title="Alerts">No unread alerts.</Panel>}
