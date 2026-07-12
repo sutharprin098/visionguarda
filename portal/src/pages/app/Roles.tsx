@@ -56,8 +56,9 @@ export default function RolesPage() {
   }
 
   async function createRole() {
-    const { data: org } = await supabase.from("organizations").select("id").single();
-    const { data } = await supabase.from("roles").insert({ name: newName.trim(), org_id: org!.id }).select().single();
+    const { data: org } = await supabase.from("organizations").select("id").maybeSingle();
+    if (!org) return;
+    const { data } = await supabase.from("roles").insert({ name: newName.trim(), org_id: org.id }).select().maybeSingle();
     if (data) audit("role.create", "role", data.id, { module: "roles", new: { name: newName } });
     setCreateOpen(false);
     setNewName("");

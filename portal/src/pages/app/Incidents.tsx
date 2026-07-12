@@ -210,7 +210,7 @@ function CreateForm({ onDone }: { onDone: () => void }) {
 
   const { data: org } = useQuery({
     queryKey: ["org-id"],
-    queryFn: async () => (await supabase.from("organizations").select("id").single()).data,
+    queryFn: async () => (await supabase.from("organizations").select("id").maybeSingle()).data,
   });
   const { data: cameras } = useQuery({
     queryKey: ["cameras-brief"],
@@ -233,9 +233,9 @@ function CreateForm({ onDone }: { onDone: () => void }) {
       camera_id: form.camera_id || null,
       assigned_to: form.assigned_to || null,
       created_by: profile?.id,
-    }).select("id").single();
+    }).select("id").maybeSingle();
     setBusy(false);
-    if (error) return setError(error.message);
+    if (error || !data) return setError(error?.message ?? "create failed");
     audit("incident.create", "incident", data.id, { module: "incidents", new: { title: form.title, severity: form.severity } });
     onDone();
   }

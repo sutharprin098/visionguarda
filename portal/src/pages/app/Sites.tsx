@@ -132,7 +132,7 @@ function SiteForm({ site, onDone }: { site: Partial<SiteRow>; onDone: () => void
 
   const { data: org } = useQuery({
     queryKey: ["org-id"],
-    queryFn: async () => (await supabase.from("organizations").select("id").single()).data,
+    queryFn: async () => (await supabase.from("organizations").select("id").maybeSingle()).data,
   });
   const { data: projects } = useQuery({
     queryKey: ["projects-brief"],
@@ -152,8 +152,8 @@ function SiteForm({ site, onDone }: { site: Partial<SiteRow>; onDone: () => void
       if (error) { setBusy(false); return setError(error.message); }
       audit("site.update", "site", site.id, { module: "sites", old: { name: site.name }, new: row });
     } else {
-      const { data, error } = await supabase.from("sites").insert({ org_id: org.id, ...row }).select("id").single();
-      if (error) { setBusy(false); return setError(error.message); }
+      const { data, error } = await supabase.from("sites").insert({ org_id: org.id, ...row }).select("id").maybeSingle();
+      if (error || !data) { setBusy(false); return setError(error?.message ?? "create failed"); }
       audit("site.create", "site", data.id, { module: "sites", new: row });
     }
     setBusy(false);

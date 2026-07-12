@@ -75,7 +75,7 @@ Deno.serve(async (req) => {
       { onConflict: "org_id,fingerprint_hash" },
     )
     .select("id, status")
-    .single();
+    .maybeSingle();
   if (devErr || !device) return json({ error: "device registration failed" }, 500);
   if (device.status !== "active") return json({ error: "device is deactivated by admin" }, 403);
 
@@ -99,7 +99,7 @@ Deno.serve(async (req) => {
     .from("profiles")
     .select("email, status")
     .eq("id", lic.user_id)
-    .single();
+    .maybeSingle();
   if (!prof || prof.status !== "active") return json({ error: "user account is not active" }, 403);
 
   const { data: link, error: linkErr } = await db.auth.admin.generateLink({

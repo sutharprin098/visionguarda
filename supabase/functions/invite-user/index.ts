@@ -16,7 +16,7 @@ Deno.serve(async (req) => {
   // permission gate: users.manage in the caller's org
   const db = adminClient();
   const { data: callerProf } = await db
-    .from("profiles").select("org_id, is_super_admin").eq("id", auth.user.id).single();
+    .from("profiles").select("org_id, is_super_admin").eq("id", auth.user.id).maybeSingle();
   if (!callerProf) return json({ error: "profile missing" }, 403);
   const { data: perms } = await db
     .from("user_roles")
@@ -46,7 +46,7 @@ Deno.serve(async (req) => {
 
   // 2. move the auto-provisioned profile into the admin's org and clean up the
   //    placeholder org the trigger created
-  const { data: autoProf } = await db.from("profiles").select("org_id").eq("id", uid).single();
+  const { data: autoProf } = await db.from("profiles").select("org_id").eq("id", uid).maybeSingle();
   await db.from("profiles").update({ org_id: callerProf.org_id }).eq("id", uid);
   await db.from("licenses").update({ org_id: callerProf.org_id }).eq("user_id", uid);
   await db.from("user_roles").delete().eq("user_id", uid); // drop owner role of placeholder org

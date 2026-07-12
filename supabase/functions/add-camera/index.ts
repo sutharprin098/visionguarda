@@ -17,7 +17,7 @@ Deno.serve(async (req) => {
   if (!auth?.user) return json({ error: "unauthorized" }, 401);
 
   const db = adminClient();
-  const { data: prof } = await db.from("profiles").select("org_id").eq("id", auth.user.id).single();
+  const { data: prof } = await db.from("profiles").select("org_id").eq("id", auth.user.id).maybeSingle();
   if (!prof) return json({ error: "profile missing" }, 403);
   const { data: perms } = await db
     .from("user_roles")
@@ -49,8 +49,8 @@ Deno.serve(async (req) => {
       site_id: site_id ?? null,
     })
     .select("id, name, source_type, status")
-    .single();
-  if (error) return json({ error: error.message }, 400);
+    .maybeSingle();
+  if (error || !cam) return json({ error: error?.message ?? "insert failed" }, 400);
 
   await db.from("audit_logs").insert({
     org_id: prof.org_id,

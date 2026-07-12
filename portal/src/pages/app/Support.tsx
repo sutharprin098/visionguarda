@@ -400,9 +400,9 @@ function CreateForm({ category, onDone }: { category: SupportTicket["category"];
       priority: form.priority,
       category,
       thread: [entry],
-    }).select("id").single();
+    }).select("id").maybeSingle();
     setBusy(false);
-    if (error) return setError(error.message);
+    if (error || !data) return setError(error?.message ?? "create failed");
     audit("ticket.create", "ticket", data.id, { module: "support", new: { subject: form.subject, priority: form.priority, category } });
     onDone();
   }

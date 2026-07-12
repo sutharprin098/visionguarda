@@ -104,7 +104,7 @@ export default function CameraGroupsPage() {
 function CreateForm({ onDone }: { onDone: () => void }) {
   const { data: org } = useQuery({
     queryKey: ["org-id"],
-    queryFn: async () => (await supabase.from("organizations").select("id").single()).data,
+    queryFn: async () => (await supabase.from("organizations").select("id").maybeSingle()).data,
   });
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
@@ -112,7 +112,7 @@ function CreateForm({ onDone }: { onDone: () => void }) {
   async function submit() {
     if (!org) return;
     setBusy(true);
-    const { data } = await supabase.from("camera_groups").insert({ org_id: org.id, name }).select("id").single();
+    const { data } = await supabase.from("camera_groups").insert({ org_id: org.id, name }).select("id").maybeSingle();
     if (data) audit("camera_group.create", "camera_group", data.id, { module: "cameras", new: { name } });
     setBusy(false);
     onDone();

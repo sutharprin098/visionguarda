@@ -13,7 +13,7 @@ Deno.serve(async (req) => {
 
   const db = adminClient();
   const { data: caller } = await db
-    .from("profiles").select("org_id, is_super_admin, email").eq("id", auth.user.id).single();
+    .from("profiles").select("org_id, is_super_admin, email").eq("id", auth.user.id).maybeSingle();
   if (!caller) return json({ error: "profile missing" }, 403);
 
   const { data: perms } = await db
@@ -29,7 +29,7 @@ Deno.serve(async (req) => {
   if (!action || !user_id) return json({ error: "action and user_id required" }, 400);
 
   const { data: target } = await db
-    .from("profiles").select("org_id, email").eq("id", user_id).single();
+    .from("profiles").select("org_id, email").eq("id", user_id).maybeSingle();
   if (!target || (!caller.is_super_admin && target.org_id !== caller.org_id)) {
     return json({ error: "user not in your organization" }, 404);
   }
@@ -54,7 +54,7 @@ Deno.serve(async (req) => {
       if (!["active", "suspended", "locked", "disabled"].includes(status)) {
         return json({ error: "invalid status" }, 400);
       }
-      const { data: old } = await db.from("profiles").select("status").eq("id", user_id).single();
+      const { data: old } = await db.from("profiles").select("status").eq("id", user_id).maybeSingle();
       await db.from("profiles").update({ status }).eq("id", user_id);
       if (status !== "active") {
         await db.auth.admin.signOut(user_id).catch(() => {}); // kill live sessions

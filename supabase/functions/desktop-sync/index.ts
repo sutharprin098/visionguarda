@@ -55,15 +55,16 @@ Deno.serve(async (req) => {
 
   const [profile, org, roles, cameras, settings, notifications] =
     await Promise.all([
-      db.from("profiles").select("*").eq("id", uid).single(),
-      db.from("organizations").select("*").single(),
+      db.from("profiles").select("*").eq("id", uid).maybeSingle(),
+      db.from("organizations").select("*").maybeSingle(),
       db.from("user_roles").select("role_id, roles(name), role:roles(role_permissions(permission))").eq("user_id", uid),
       db.from("cameras").select("*, camera_assignments!inner(user_id)").eq("camera_assignments.user_id", uid),
       db.from("settings").select("scope, key, value"),
       db.from("notifications").select("*").is("read_at", null).order("created_at", { ascending: false }).limit(50),
     ]);
 
-  if (profile.error) return json({ error: "profile not found" }, 404);
+  if (profile.error || !profile.data) return json({ error: "profile not found" }, 404);
+  if (org.error || !org.data) return json({ error: "organization not found" }, 404);
 
   const permissions = [
     ...new Set(

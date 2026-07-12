@@ -31,29 +31,43 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setPermissions([]);
       return;
     }
-    const [{ data: prof }, { data: orgRow }, { data: perms }] = await Promise.all([
-      supabase.from("profiles").select("*").eq("id", s.user.id).single(),
-      supabase.from("organizations").select("*").single(),
-      supabase
-        .from("user_roles")
-        .select("roles(role_permissions(permission))")
-        .eq("user_id", s.user.id),
-    ]);
-    setProfile(prof ?? null);
-    setOrg(orgRow ?? null);
-    setPermissions([
-      ...new Set(
-        (perms ?? []).flatMap((r: any) =>
-          (r.roles?.role_permissions ?? []).map((p: any) => p.permission),
+    try {
+      // .maybeSingle(): a missing profile/org row (mid-provisioning, or a
+      // profile an admin removed) must not throw — it should just render
+      // as "no identity yet" instead of wedging the whole app on a
+      // rejected Promise.all with loading stuck true forever.
+      const [{ data: prof }, { data: orgRow }, { data: perms }] = await Promise.all([
+        supabase.from("profiles").select("*").eq("id", s.user.id).maybeSingle(),
+        supabase.from("organizations").select("*").maybeSingle(),
+        supabase
+          .from("user_roles")
+          .select("roles(role_permissions(permission))")
+          .eq("user_id", s.user.id),
+      ]);
+      setProfile(prof ?? null);
+      setOrg(orgRow ?? null);
+      setPermissions([
+        ...new Set(
+          (perms ?? []).flatMap((r: any) =>
+            (r.roles?.role_permissions ?? []).map((p: any) => p.permission),
+          ),
         ),
-      ),
-    ]);
+      ]);
+    } catch (e) {
+      console.error("Failed to load identity", e);
+      setProfile(null);
+      setOrg(null);
+      setPermissions([]);
+    }
   }
 
   useEffect(() => {
     supabase.auth.getSession().then(async ({ data }) => {
       setSession(data.session);
       await loadIdentity(data.session);
+      setLoading(false);
+    }).catch((e) => {
+      console.error("Failed to restore session", e);
       setLoading(false);
     });
     const { data: sub } = supabase.auth.onAuthStateChange(async (_evt, s) => {
@@ -95,7 +109,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         can: (perm) => profile?.is_super_admin || permissions.includes(perm),
         refresh: () => loadIdentity(session),
         signOut: async () => {
-          await supabase.auth.signOut();
+          try {
+            await supabase.auth.signOut();
+          } catch (e) {
+            // An already-expired/invalid token 403s the server-side revoke —
+            // that's not a reason to leave the UI stuck "logged in". Force
+            // local state clear either way; onAuthStateChange handles the
+            // clean-signOut path, this is the fallback for the throw path.
+            console.error("signOut request failed, clearing local session anyway", e);
+            setSession(null);
+            setProfile(null);
+            setOrg(null);
+            setPermissions([]);
+          }
         },
       }}
     >
