@@ -14,4 +14,7 @@ alter table if exists public.downloads drop constraint if exists downloads_relea
 drop policy if exists releases_read on public.app_releases;
 drop table if exists public.app_releases;
 
-delete from storage.buckets where id = 'releases';
+-- The 'releases' storage bucket is now unused too, but Supabase blocks
+-- direct SQL deletes on storage.buckets (storage.protect_delete()) — remove
+-- it manually via Dashboard > Storage or the Storage API if desired; an
+-- unused empty bucket left in place is harmless.
