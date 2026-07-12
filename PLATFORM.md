@@ -57,12 +57,30 @@ Two products, one backend:
 cd supabase
 npx supabase init            # if linking fresh
 npx supabase link --project-ref <your-ref>
-npx supabase db push         # applies migrations 0001–0007
-npx supabase functions deploy activate-license my-keys desktop-sync invite-user add-camera github-releases
+npx supabase db push         # applies migrations 0001–0012
+npx supabase functions deploy activate-license my-keys desktop-sync invite-user add-camera github-releases download-release test-camera send-email decrypt-camera
 npx supabase secrets set CAMAI_AES_KEY=$(openssl rand -hex 32)
 npx supabase secrets set GITHUB_RELEASES_REPO=<owner>/<repo>   # powers the Downloads page
 npx supabase secrets set GITHUB_TOKEN=<pat-with-public-repo-read>  # optional, raises the GitHub API rate limit
+npx supabase secrets set CAMAI_SMTP_PASSWORD=<smtp-relay-password>  # powers outbound email (host/port/username/from are per-org, set on Settings → SMTP)
 ```
+
+Then, once (per deployment — this is not run by a migration because it needs the
+project's own edge-function URL and service-role key, not something a SQL file
+can know in advance):
+
+```sql
+select app.configure_email_dispatch(
+  'https://<project-ref>.functions.supabase.co',
+  '<service-role-key>'   -- Project Settings → API → service_role key
+);
+```
+
+This lets `app.dispatch_pending_emails()` (run every minute by pg_cron) call the
+`send-email` function for license-expiry, license-status, security, and
+offline-camera notifications, using each org's own SMTP settings. Orgs that
+haven't filled in Settings → SMTP simply don't get email — everything still
+lands in the in-app notification center either way.
 
 Notes:
 - `activate-license` has `verify_jwt = false` (it runs before a session exists) and is
@@ -92,9 +110,13 @@ npm run build                # produces CamAI-Desktop-Setup-<version>.exe (NSIS)
 ```
 
 Publish a release: create a GitHub Release on `GITHUB_RELEASES_REPO` (tag = version,
-body = release notes) and attach the built `.exe` as a release asset. The Downloads
-page polls the GitHub Releases API live via the `github-releases` edge function —
-nothing to upload or register in Supabase, and there is never a hardcoded link.
+body = release notes) and attach both the built `.exe` **and** the `.exe.sha256`
+that `npm run build` emits next to it (via `desktop/scripts/checksum.js`) as release
+assets. The Downloads page polls the GitHub Releases API live via the
+`github-releases` edge function — nothing to upload or register in Supabase, there
+is never a hardcoded link, and the checksum shown on the page is read from that
+`.sha256` companion asset (a few dozen bytes) rather than ever hashing the
+multi-hundred-MB installer inside an edge function.
 
 ### 4. Wire the local AI engine
 
@@ -156,9 +178,55 @@ API keys) · Support (ticket threads, realtime).
 - `org_stats().devices_online` only counts devices seen in the last 3 minutes,
   so crashed desktops don't show as online forever.
 
+## Live camera preview (desktop)
+
+`desktop/src/lib/localEngine.ts` bridges Supabase-assigned cameras to the
+local AI engine (`server/`, FastAPI on `127.0.0.1:8000`): after every sync it
+diffs `bundle.cameras` against what the engine is currently running, pulls
+the decrypted connection string per camera from the new `decrypt-camera`
+edge function (the AES key never leaves edge-function secrets — this is the
+only place a plaintext connection string is ever produced, and only for a
+camera the signed-in user is actually assigned to), and `POST /api/cameras`
+registers/starts it. `Workspace.tsx`'s `CameraTile` then points an `<img>` at
+`/api/cameras/{id}/stream` (the engine's MJPEG endpoint) with a graceful
+"local engine isn't running" state if `server/` isn't up on that machine —
+it's a separate process this doesn't spawn or manage.
+
+## Camera connection verification
+
+`verifyCameraConnection` (`supabase/functions/_shared/util.ts`) now does more
+than reachability: ONVIF cameras get a real SOAP `GetDeviceInformation` probe
+(manufacturer/model/firmware), and NVR/DVR sources get channel enumeration —
+RTSP `DESCRIBE` against the Hikvision/Dahua/generic URL conventions for
+channels 1–8, surfaced in the Add Camera form so an admin can click a
+discovered channel instead of guessing the path. This only works for
+devices reachable from the internet (port-forwarded), same as the base
+reachability check — true local WS-Discovery is UDP multicast on the
+camera's own LAN, which only something running on that LAN (the desktop
+app, not a cloud edge function) could ever do; that remains a future
+milestone if it's needed; enumeration + SOAP probing cover the common case
+today.
+
+## Email delivery
+
+`app.dispatch_pending_emails()` (migration 0012, run every minute by
+pg_cron) finds unsent license-expiry/license-status/security/camera-offline
+notifications and calls the `send-email` edge function via `pg_net`, using
+each org's own Settings → SMTP host/port/username/from plus the deployment's
+single `CAMAI_SMTP_PASSWORD` secret. One-time setup per deployment:
+`select app.configure_email_dispatch(<edge-base-url>, <service-role-key>)`
+(see Setup above). Orgs that haven't filled in SMTP settings simply don't
+get email — everything still lands in the in-app notification center.
+
 ## Current gaps (next milestones)
 
-- Email + browser push notification delivery (tables + SMTP settings exist;
-  needs a provider hook in an edge function).
+- Real browser push (Service Worker + Web Push/VAPID) — today "browser
+  push" is only an in-tab `Notification()` fired off the live realtime
+  subscription (`NotificationsBell.tsx`), so it doesn't fire if the tab or
+  browser is closed. The DB/channel plumbing (`notifications.channel`) is
+  already there; the gap is a push subscription table + a `web-push` edge
+  function + a service worker.
 - Auto-update feed for the desktop (electron-builder `publish` + `app_releases`).
-- ONVIF discovery and NVR channel enumeration in `add-camera`.
+- The desktop doesn't spawn/manage the local AI engine process — `server/`
+  has to already be running on the machine for live preview to appear (the
+  UI degrades honestly with an "engine isn't running" banner if it isn't).

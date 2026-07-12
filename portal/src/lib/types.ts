@@ -32,7 +32,7 @@ export interface License {
   user_id: string | null;
   key_hint: string;
   kind: "user" | "admin";
-  license_type: "personal" | "enterprise" | "trial" | "lifetime" | "subscription";
+  license_type: "trial" | "monthly" | "yearly" | "lifetime" | "enterprise";
   status: "active" | "inactive" | "expired" | "suspended" | "revoked" | "pending";
   max_devices: number;
   expires_at: string | null;
@@ -96,6 +96,7 @@ export interface SupportTicket {
   id: string;
   org_id: string;
   user_id: string | null;
+  assigned_to: string | null;
   subject: string;
   priority: "low" | "normal" | "high" | "urgent";
   status: "open" | "pending" | "closed";
@@ -151,5 +152,6 @@ export interface GithubRelease {
   asset_name: string | null;
   size_bytes: number;
   content_type: string;
+  checksum_sha256: string | null;
   download_url: string | null;
 }

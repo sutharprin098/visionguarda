@@ -100,7 +100,7 @@ export function buildConnectionUri(f: CameraFields): string {
 }
 
 async function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
-  let timer: number;
+  let timer: ReturnType<typeof setTimeout>;
   const timeout = new Promise<never>((_, reject) => {
     timer = setTimeout(() => reject(new Error("timed out")), ms);
   });
@@ -111,9 +111,94 @@ async function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
   }
 }
 
-export async function verifyCameraConnection(
-  f: CameraFields,
-): Promise<{ ok: boolean; message: string }> {
+export interface CameraChannel { path: string; ok: boolean; note: string }
+export interface CameraVerifyResult {
+  ok: boolean;
+  message: string;
+  device_info?: { manufacturer?: string; model?: string; firmware?: string };
+  channels?: CameraChannel[];
+}
+
+// Sends one RTSP request and returns the raw response text (or "" on no reply).
+async function rtspRoundtrip(host: string, port: number, method: string, path: string, cseq: number): Promise<string> {
+  const conn = await withTimeout(Deno.connect({ hostname: host, port }), 3000);
+  try {
+    const req = `${method} rtsp://${host}:${port}${path} RTSP/1.0\r\nCSeq: ${cseq}\r\nAccept: application/sdp\r\n\r\n`;
+    await withTimeout(conn.write(new TextEncoder().encode(req)), 2500);
+    const buf = new Uint8Array(512);
+    const n = await withTimeout(conn.read(buf), 2500);
+    return n ? new TextDecoder().decode(buf.subarray(0, n)) : "";
+  } finally {
+    try { conn.close(); } catch { /* already closed */ }
+  }
+}
+
+// NVR/DVR "channel enumeration": a cloud function can't do local ONVIF
+// WS-Discovery (that's UDP multicast on the camera's own LAN — only
+// something running on that LAN, i.e. the desktop app, could ever do it).
+// What it *can* do for a port-forwarded NVR is probe the handful of URL
+// conventions the major vendors actually use and report which channels are
+// live, via RTSP DESCRIBE (which — unlike OPTIONS — makes the server
+// resolve the specific stream path, so a bad channel number reliably 404s).
+const CHANNEL_TEMPLATES = [
+  (n: number) => `/Streaming/Channels/${n}01`,               // Hikvision / clones
+  (n: number) => `/cam/realmonitor?channel=${n}&subtype=0`,  // Dahua / clones
+  (n: number) => `/ch${String(n).padStart(2, "0")}/0`,       // generic
+];
+
+async function probeNvrChannels(host: string, port: number, maxChannels = 8): Promise<CameraChannel[]> {
+  const probes: Promise<CameraChannel>[] = [];
+  let cseq = 1;
+  for (let ch = 1; ch <= maxChannels; ch++) {
+    for (const tmpl of CHANNEL_TEMPLATES) {
+      const path = tmpl(ch);
+      const seq = cseq++;
+      probes.push(
+        (async (): Promise<CameraChannel> => {
+          try {
+            const text = await rtspRoundtrip(host, port, "DESCRIBE", path, seq);
+            const status = text.match(/^RTSP\/\d\.\d (\d{3})/)?.[1];
+            if (status === "200") return { path, ok: true, note: "channel live" };
+            if (status === "401") return { path, ok: true, note: "channel exists (needs credentials)" };
+            return { path, ok: false, note: status ? `RTSP ${status}` : "no response" };
+          } catch {
+            return { path, ok: false, note: "no response" };
+          }
+        })(),
+      );
+    }
+  }
+  const results = await Promise.all(probes);
+  return results.filter((r) => r.ok);
+}
+
+// ONVIF device probe: a real SOAP GetDeviceInformation call against the
+// well-known device service path, not just "the port answered HTTP".
+async function probeOnvifDevice(host: string, port: number): Promise<{ manufacturer?: string; model?: string; firmware?: string } | null> {
+  const envelope =
+    '<?xml version="1.0" encoding="UTF-8"?>' +
+    '<soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope">' +
+    '<soap:Body><GetDeviceInformation xmlns="http://www.onvif.org/ver10/device/wsdl"/></soap:Body></soap:Envelope>';
+  try {
+    const res = await withTimeout(
+      fetch(`http://${host}:${port}/onvif/device_service`, {
+        method: "POST",
+        headers: { "Content-Type": "application/soap+xml; charset=utf-8" },
+        body: envelope,
+      }),
+      4000,
+    );
+    const text = await res.text();
+    const tag = (name: string) => text.match(new RegExp(`<(?:\\w+:)?${name}>([^<]*)</(?:\\w+:)?${name}>`))?.[1];
+    const manufacturer = tag("Manufacturer");
+    if (!manufacturer && !tag("Model")) return null; // not actually an ONVIF device
+    return { manufacturer, model: tag("Model"), firmware: tag("FirmwareVersion") };
+  } catch {
+    return null;
+  }
+}
+
+export async function verifyCameraConnection(f: CameraFields): Promise<CameraVerifyResult> {
   if (f.source_type === "usb") {
     return { ok: true, message: "USB devices are opened and verified locally by the desktop app." };
   }
@@ -126,27 +211,52 @@ export async function verifyCameraConnection(
   } catch {
     return { ok: false, message: `Could not reach ${f.host}:${port} — check the IP, port, and that it is reachable from the internet (firewall/port-forwarding).` };
   }
+  try { conn.close(); } catch { /* already closed */ }
 
-  try {
-    if (f.source_type === "rtsp" || f.source_type === "nvr" || f.source_type === "dvr") {
-      const path = f.path ? (f.path.startsWith("/") ? f.path : `/${f.path}`) : "/";
-      const req = `OPTIONS rtsp://${f.host}:${port}${path} RTSP/1.0\r\nCSeq: 1\r\n\r\n`;
-      await withTimeout(conn.write(new TextEncoder().encode(req)), 3000);
-      const buf = new Uint8Array(256);
-      const n = await withTimeout(conn.read(buf), 3000);
-      const text = n ? new TextDecoder().decode(buf.subarray(0, n)) : "";
-      if (/^RTSP\/\d/.test(text)) {
-        return { ok: true, message: "RTSP endpoint responded — connection verified." };
+  if (f.source_type === "rtsp" || f.source_type === "nvr" || f.source_type === "dvr") {
+    const path = f.path ? (f.path.startsWith("/") ? f.path : `/${f.path}`) : "/";
+    let handshake = "";
+    try {
+      handshake = await rtspRoundtrip(f.host, port, "OPTIONS", path, 1);
+    } catch { /* handled below */ }
+
+    if (f.source_type === "nvr" || f.source_type === "dvr") {
+      const channels = await probeNvrChannels(f.host, port);
+      if (channels.length) {
+        return {
+          ok: true,
+          message: `Reachable — found ${channels.length} live channel${channels.length === 1 ? "" : "s"} across the common Hikvision/Dahua/generic URL patterns.`,
+          channels,
+        };
       }
-      return { ok: true, message: "Port is open and reachable; response was not a standard RTSP handshake." };
+      return {
+        ok: true,
+        message: "Port is open, but no channel matched the common Hikvision/Dahua/generic URL patterns — enter the exact channel path manually.",
+      };
     }
-    // onvif / ip: reachability is the check — full ONVIF profile negotiation happens on activation
-    return { ok: true, message: `${f.host}:${port} is reachable.` };
-  } catch {
-    return { ok: true, message: "Port is open, but the device did not respond before the timeout." };
-  } finally {
-    try { conn.close(); } catch { /* already closed */ }
+    if (/^RTSP\/\d/.test(handshake)) {
+      return { ok: true, message: "RTSP endpoint responded — connection verified." };
+    }
+    return { ok: true, message: "Port is open and reachable; response was not a standard RTSP handshake." };
   }
+
+  if (f.source_type === "onvif") {
+    const info = await probeOnvifDevice(f.host, port);
+    if (info) {
+      return {
+        ok: true,
+        message: `ONVIF device confirmed — ${info.manufacturer ?? "unknown manufacturer"} ${info.model ?? ""}`.trim(),
+        device_info: info,
+      };
+    }
+    return {
+      ok: true,
+      message: `${f.host}:${port} is reachable, but did not answer ONVIF GetDeviceInformation at /onvif/device_service — full profile negotiation happens on activation.`,
+    };
+  }
+
+  // ip: reachability is the check
+  return { ok: true, message: `${f.host}:${port} is reachable.` };
 }
 
 // ---- naive in-memory rate limiter (per edge instance) ----

@@ -1,23 +1,149 @@
 -- ============================================================
--- CamAI Enterprise Platform — Migration 0007
--- Downloads now sources release metadata live from the GitHub
--- Releases API (see supabase/functions/github-releases) instead of
--- a manually-maintained table — drop the now-unused registry.
+-- CamAI Enterprise Platform
+-- Migration 0007
+-- Safe Removal of app_releases
+-- Idempotent Version
 -- ============================================================
 
--- A pre-existing `downloads` table (download click-through log, not part of
--- any migration in this repo — schema drift from earlier manual setup) has a
--- FK into app_releases. Drop just that constraint so app_releases can go
--- without CASCADE, which would silently delete the downloads table's rows.
-alter table if exists public.downloads drop constraint if exists downloads_release_id_fkey;
+BEGIN;
 
--- DROP TABLE already takes its policies with it — no separate DROP POLICY
--- needed (and "DROP POLICY ... ON app_releases" would itself error with
--- "relation does not exist" if this migration is ever re-run after the
--- table is already gone, since IF EXISTS there only guards the policy name).
-drop table if exists public.app_releases;
+-- ============================================================
+-- Remove foreign key from downloads (if it exists)
+-- ============================================================
 
--- The 'releases' storage bucket is now unused too, but Supabase blocks
--- direct SQL deletes on storage.buckets (storage.protect_delete()) — remove
--- it manually via Dashboard > Storage or the Storage API if desired; an
--- unused empty bucket left in place is harmless.
+ALTER TABLE IF EXISTS public.downloads
+DROP CONSTRAINT IF EXISTS downloads_release_id_fkey;
+
+-- ============================================================
+-- Only run cleanup if app_releases exists
+-- ============================================================
+
+DO $$
+BEGIN
+
+    IF EXISTS (
+        SELECT 1
+        FROM information_schema.tables
+        WHERE table_schema = 'public'
+        AND table_name = 'app_releases'
+    ) THEN
+
+        -- Disable RLS
+        EXECUTE 'ALTER TABLE public.app_releases DISABLE ROW LEVEL SECURITY';
+
+        -- Drop Policies
+        EXECUTE 'DROP POLICY IF EXISTS "Users can view releases" ON public.app_releases';
+        EXECUTE 'DROP POLICY IF EXISTS "Admins can manage releases" ON public.app_releases';
+        EXECUTE 'DROP POLICY IF EXISTS "Authenticated read releases" ON public.app_releases';
+
+        -- Drop Trigger
+        EXECUTE 'DROP TRIGGER IF EXISTS app_releases_updated_at_trigger ON public.app_releases';
+
+        -- Drop Table
+        EXECUTE 'DROP TABLE public.app_releases';
+
+    ELSE
+
+        RAISE NOTICE 'Table public.app_releases already removed.';
+
+    END IF;
+
+END
+$$;
+
+-- ============================================================
+-- Drop indexes if they still exist
+-- ============================================================
+
+DROP INDEX IF EXISTS public.idx_app_releases_version;
+DROP INDEX IF EXISTS public.idx_app_releases_created_at;
+
+-- ============================================================
+-- Drop update function if it exists
+-- ============================================================
+
+DROP FUNCTION IF EXISTS public.update_app_releases_updated_at();
+
+-- ============================================================
+-- Keep downloads table
+-- ============================================================
+
+DO $$
+BEGIN
+
+    IF EXISTS (
+        SELECT 1
+        FROM information_schema.tables
+        WHERE table_schema='public'
+        AND table_name='downloads'
+    ) THEN
+
+        COMMENT ON TABLE public.downloads IS
+        'Download analytics. Application releases are fetched dynamically from the GitHub Releases API.';
+
+    END IF;
+
+END
+$$;
+
+-- ============================================================
+-- Verification
+-- ============================================================
+
+DO $$
+BEGIN
+
+    IF EXISTS (
+        SELECT 1
+        FROM information_schema.tables
+        WHERE table_schema='public'
+        AND table_name='app_releases'
+    ) THEN
+
+        RAISE WARNING 'app_releases still exists.';
+
+    ELSE
+
+        RAISE NOTICE 'Migration completed successfully.';
+        RAISE NOTICE 'Downloads now use GitHub Releases API.';
+        RAISE NOTICE 'Download analytics table preserved.';
+
+    END IF;
+
+END
+$$;
+
+COMMIT;
+
+-- ============================================================
+-- After Migration
+-- ============================================================
+--
+-- Downloads page should fetch release metadata from:
+--
+-- /functions/v1/github-releases/latest
+--
+-- or
+--
+-- https://api.github.com/repos/<OWNER>/<REPO>/releases/latest
+--
+-- Display:
+--
+-- • Latest Version
+-- • Release Notes
+-- • Published Date
+-- • File Size
+-- • Download URL
+-- • Checksum (optional)
+--
+-- Keep the downloads table for:
+--
+-- • Download Analytics
+-- • User Analytics
+-- • Organization Analytics
+-- • Audit Logs
+--
+-- app_releases should never be recreated.
+--
+-- GitHub Releases is now the single source of truth.
+-- ============================================================

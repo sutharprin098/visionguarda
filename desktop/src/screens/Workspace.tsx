@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Cctv, Video, Bell, Settings2, LogOut, Wifi, WifiOff } from "lucide-react";
 import clsx from "clsx";
 import { startRealtimeSync, DeactivatedError, SyncBundle } from "../lib/sync";
+import { syncCamerasToLocalEngine, isEngineOnline, mjpegStreamUrl } from "../lib/localEngine";
 
 export default function Workspace({ onDeactivated }: { onDeactivated: () => void }) {
   const [bundle, setBundle] = useState<SyncBundle | null>(null);
@@ -21,6 +22,11 @@ export default function Workspace({ onDeactivated }: { onDeactivated: () => void
       .catch((e) => (e instanceof DeactivatedError ? deactivate() : setSyncError(true)));
     return () => stop?.();
   }, []);
+
+  // keep the local AI engine's running cameras in step with what's assigned
+  useEffect(() => {
+    if (bundle) void syncCamerasToLocalEngine(bundle.cameras);
+  }, [bundle?.cameras]);
 
   if (syncError) {
     return (
@@ -120,30 +126,63 @@ export default function Workspace({ onDeactivated }: { onDeactivated: () => void
 }
 
 function CamerasView({ cameras }: { cameras: any[] }) {
+  const [engineOnline, setEngineOnline] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    const check = () => isEngineOnline().then((ok) => !cancelled && setEngineOnline(ok));
+    check();
+    const id = setInterval(check, 10_000);
+    return () => { cancelled = true; clearInterval(id); };
+  }, []);
+
   if (!cameras.length) {
     return <Panel title="Cameras">No cameras assigned to you. Ask your administrator.</Panel>;
   }
   return (
-    <div className="grid grid-cols-2 gap-4 xl:grid-cols-3">
-      {cameras.map((c) => (
-        <div key={c.id} className="card overflow-hidden">
-          <div className="flex aspect-video items-center justify-center bg-surface-0 text-zinc-600">
-            {/* live MJPEG/WebRTC feed from the local AI pipeline mounts here */}
-            <Video size={28} />
-          </div>
-          <div className="flex items-center justify-between px-3 py-2">
-            <span className="text-sm text-zinc-200">{c.name}</span>
-            <span
-              className={clsx(
-                "rounded-full px-2 py-0.5 text-[10px] font-medium",
-                c.status === "online" ? "bg-ok/15 text-ok" : "bg-surface-3 text-zinc-500",
-              )}
-            >
-              {c.status}
-            </span>
-          </div>
+    <div className="space-y-3">
+      {engineOnline === false && (
+        <div className="flex items-center gap-2 rounded-md border border-warn/40 bg-warn/10 px-3 py-2 text-xs text-warn">
+          <WifiOff size={13} /> Local AI engine isn't running on this machine — start it to see live previews.
         </div>
-      ))}
+      )}
+      <div className="grid grid-cols-2 gap-4 xl:grid-cols-3">
+        {cameras.map((c) => (
+          <CameraTile key={c.id} camera={c} engineOnline={engineOnline} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function CameraTile({ camera: c, engineOnline }: { camera: any; engineOnline: boolean | null }) {
+  const [streamFailed, setStreamFailed] = useState(false);
+  const showStream = engineOnline && !streamFailed;
+  return (
+    <div className="card overflow-hidden">
+      <div className="flex aspect-video items-center justify-center bg-surface-0 text-zinc-600">
+        {showStream ? (
+          <img
+            src={mjpegStreamUrl(c.id)}
+            alt={c.name}
+            className="h-full w-full object-cover"
+            onError={() => setStreamFailed(true)}
+          />
+        ) : (
+          <Video size={28} />
+        )}
+      </div>
+      <div className="flex items-center justify-between px-3 py-2">
+        <span className="text-sm text-zinc-200">{c.name}</span>
+        <span
+          className={clsx(
+            "rounded-full px-2 py-0.5 text-[10px] font-medium",
+            c.status === "online" ? "bg-ok/15 text-ok" : "bg-surface-3 text-zinc-500",
+          )}
+        >
+          {c.status}
+        </span>
+      </div>
     </div>
   );
 }

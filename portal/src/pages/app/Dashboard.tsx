@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
-import { UserPlus, Video, KeyRound, Download } from "lucide-react";
+import { UserPlus, Video, KeyRound, Download, AlertTriangle, RefreshCw } from "lucide-react";
 import { supabase } from "../../lib/supabase";
 import { useAuth } from "../../contexts/AuthContext";
 import { PageHeader, Kpi, Badge, statusTone, Empty } from "../../components/ui";
@@ -12,12 +12,16 @@ export default function Dashboard() {
   const { org, profile, can } = useAuth();
   const qc = useQueryClient();
 
-  const { data: stats } = useQuery({
+  const { data: stats, isLoading: statsLoading, isError: statsError, error: statsErr, refetch: refetchStats } = useQuery({
     queryKey: ["org-stats"],
-    queryFn: async () => (await supabase.rpc("org_stats")).data as Record<string, any> | null,
+    queryFn: async () => {
+      const { data, error } = await supabase.rpc("org_stats");
+      if (error) throw error;
+      return data as Record<string, any> | null;
+    },
   });
 
-  const { data: recent } = useQuery({
+  const { data: recent, isLoading: recentLoading, isError: recentError, error: recentErr, refetch: refetchRecent } = useQuery({
     queryKey: ["dash-recent"],
     queryFn: async () => {
       const [alerts, users, activations, cameras, telemetry] = await Promise.all([
@@ -77,6 +81,21 @@ export default function Dashboard() {
         subtitle={`${org?.name} · ${org?.org_code} · ${org?.plan} plan`}
       />
 
+      {(statsError || recentError) && (
+        <div className="mb-6 flex items-center justify-between gap-3 rounded-md border border-danger/40 bg-danger/10 p-4 text-sm text-danger">
+          <div className="flex items-center gap-2">
+            <AlertTriangle size={16} className="shrink-0" />
+            <span>Couldn't load part of the dashboard: {(statsErr as any)?.message ?? (recentErr as any)?.message ?? "unknown error"}.</span>
+          </div>
+          <button
+            className="btn-ghost shrink-0 gap-1.5 px-2 py-1 text-xs text-danger"
+            onClick={() => { if (statsError) refetchStats(); if (recentError) refetchRecent(); }}
+          >
+            <RefreshCw size={12} /> Retry
+          </button>
+        </div>
+      )}
+
       {/* quick actions */}
       <div className="mb-6 flex flex-wrap gap-2">
         {can("users.manage") && (
@@ -92,29 +111,42 @@ export default function Dashboard() {
       </div>
 
       {/* KPI row */}
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <Kpi label="Users" value={stats?.users ?? "—"} />
-        <Kpi label="Cameras" value={stats?.cameras ?? "—"}
-             hint={<span><span className="text-ok">{stats?.cameras_online ?? 0} online</span> · {Math.max((stats?.cameras ?? 0) - (stats?.cameras_online ?? 0), 0)} offline</span>} />
-        <Kpi label="Devices" value={stats?.devices ?? "—"} hint={`${stats?.devices_online ?? 0} online now`} />
-        <Kpi label="Active Licenses" value={stats?.licenses_active ?? "—"} />
-        <Kpi label="AI Events (24h)" value={stats?.alerts_today ?? "—"}
-             spark={events7d.length ? <Spark data={events7d} dataKey="count" /> : undefined} />
-        <Kpi label="Open Incidents" value={stats?.incidents_open ?? "—"} />
-        <Kpi label="Storage Used" value={stats ? fmtBytes(Number(stats.storage_mb)) : "—"} />
-        <Kpi
-          label="System Load"
-          value={hasTelemetry ? `${Math.round(t.cpu_pct ?? 0)}%` : "no data"}
-          hint={hasTelemetry
-            ? `CPU ${Math.round(t.cpu_pct ?? 0)}% · GPU ${Math.round(t.gpu_pct ?? 0)}% · MEM ${Math.round(t.mem_pct ?? 0)}%`
-            : "AI engine telemetry appears once a desktop is online"}
-        />
-      </div>
+      {statsLoading && !stats ? (
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          {Array.from({ length: 8 }).map((_, i) => (
+            <div key={i} className="card h-[74px] animate-pulse p-4">
+              <div className="h-3 w-16 rounded bg-surface-3" />
+              <div className="mt-3 h-6 w-10 rounded bg-surface-3" />
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <Kpi label="Users" value={stats?.users ?? "—"} />
+          <Kpi label="Cameras" value={stats?.cameras ?? "—"}
+               hint={<span><span className="text-ok">{stats?.cameras_online ?? 0} online</span> · {Math.max((stats?.cameras ?? 0) - (stats?.cameras_online ?? 0), 0)} offline</span>} />
+          <Kpi label="Devices" value={stats?.devices ?? "—"} hint={`${stats?.devices_online ?? 0} online now`} />
+          <Kpi label="Active Licenses" value={stats?.licenses_active ?? "—"} />
+          <Kpi label="AI Events (24h)" value={stats?.alerts_today ?? "—"}
+               spark={events7d.length ? <Spark data={events7d} dataKey="count" /> : undefined} />
+          <Kpi label="Open Incidents" value={stats?.incidents_open ?? "—"} />
+          <Kpi label="Storage Used" value={stats ? fmtBytes(Number(stats.storage_mb)) : "—"} />
+          <Kpi
+            label="System Load"
+            value={hasTelemetry ? `${Math.round(t.cpu_pct ?? 0)}%` : "no data"}
+            hint={hasTelemetry
+              ? `CPU ${Math.round(t.cpu_pct ?? 0)}% · GPU ${Math.round(t.gpu_pct ?? 0)}% · MEM ${Math.round(t.mem_pct ?? 0)}%`
+              : "AI engine telemetry appears once a desktop is online"}
+          />
+        </div>
+      )}
 
       {/* events chart */}
       <div className="card mt-6 p-5">
         <h2 className="mb-3 text-sm font-semibold text-ink-1">AI events — last 7 days</h2>
-        {events7d.length ? (
+        {statsLoading && !stats ? (
+          <p className="py-10 text-center text-sm text-ink-3">Loading…</p>
+        ) : events7d.length ? (
           <TimeSeries data={events7d} xKey="day" series={[{ key: "count", name: "Events" }]} kind="bar" height={200} />
         ) : (
           <p className="py-10 text-center text-sm text-ink-3">No events recorded yet.</p>
@@ -128,7 +160,9 @@ export default function Dashboard() {
             <h2 className="text-sm font-semibold text-ink-1">Recent alerts</h2>
             <Link to="/app/alerts" className="link-action">View all</Link>
           </div>
-          {!recent?.alerts.length ? (
+          {recentLoading && !recent ? (
+            <p className="py-6 text-center text-sm text-ink-3">Loading…</p>
+          ) : !recent?.alerts.length ? (
             <p className="py-6 text-center text-sm text-ink-3">No alerts yet.</p>
           ) : (
             <div className="divide-y divide-line">
@@ -151,7 +185,9 @@ export default function Dashboard() {
             <h2 className="text-sm font-semibold text-ink-1">Live camera status</h2>
             <Link to="/app/cameras" className="link-action">Manage</Link>
           </div>
-          {!recent?.cameras.length ? (
+          {recentLoading && !recent ? (
+            <p className="py-6 text-center text-sm text-ink-3">Loading…</p>
+          ) : !recent?.cameras.length ? (
             <p className="py-6 text-center text-sm text-ink-3">No cameras yet.</p>
           ) : (
             <div className="grid grid-cols-2 gap-2">
@@ -171,17 +207,23 @@ export default function Dashboard() {
             <h2 className="text-sm font-semibold text-ink-1">Recent users</h2>
             <Link to="/app/users" className="link-action">All users</Link>
           </div>
-          <div className="divide-y divide-line">
-            {recent?.users.map((u: any) => (
-              <div key={u.id} className="flex items-center justify-between py-2.5">
-                <div className="min-w-0">
-                  <div className="truncate text-sm text-ink-1">{u.full_name}</div>
-                  <div className="truncate text-xs text-ink-3">{u.email}</div>
+          {recentLoading && !recent ? (
+            <p className="py-6 text-center text-sm text-ink-3">Loading…</p>
+          ) : !recent?.users.length ? (
+            <p className="py-6 text-center text-sm text-ink-3">No users yet.</p>
+          ) : (
+            <div className="divide-y divide-line">
+              {recent.users.map((u: any) => (
+                <div key={u.id} className="flex items-center justify-between py-2.5">
+                  <div className="min-w-0">
+                    <div className="truncate text-sm text-ink-1">{u.full_name}</div>
+                    <div className="truncate text-xs text-ink-3">{u.email}</div>
+                  </div>
+                  <span className="shrink-0 text-xs text-ink-3">{fmtAgo(u.created_at)}</span>
                 </div>
-                <span className="shrink-0 text-xs text-ink-3">{fmtAgo(u.created_at)}</span>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          )}
         </div>
 
         {/* recent activations */}
@@ -190,7 +232,9 @@ export default function Dashboard() {
             <h2 className="text-sm font-semibold text-ink-1">Recent desktop activations</h2>
             <Link to="/app/activations" className="link-action">All activations</Link>
           </div>
-          {!recent?.activations.length ? (
+          {recentLoading && !recent ? (
+            <p className="py-6 text-center text-sm text-ink-3">Loading…</p>
+          ) : !recent?.activations.length ? (
             <p className="py-6 text-center text-sm text-ink-3">No desktop activations yet.</p>
           ) : (
             <div className="divide-y divide-line">

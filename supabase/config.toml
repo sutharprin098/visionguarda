@@ -45,3 +45,9 @@ verify_jwt = true
 
 [functions.admin-users]
 verify_jwt = true
+
+[functions.send-email]
+verify_jwt = false   # called only by Postgres (pg_net) with the service-role key; checked by hand in the function
+
+[functions.decrypt-camera]
+verify_jwt = true

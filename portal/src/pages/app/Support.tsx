@@ -13,7 +13,10 @@ import { PageHeader, Badge, statusTone, Modal, Drawer, Field, Tabs, Kpi } from "
 import DataTable, { Column } from "../../components/DataTable";
 import { fmtAgo, fmtDateTime } from "../../lib/format";
 
-type TicketRow = SupportTicket & { profiles: { full_name: string; email: string } | null };
+type TicketRow = SupportTicket & {
+  profiles: { full_name: string; email: string } | null;
+  assignee: { id: string; full_name: string } | null;
+};
 
 const CATEGORY_LABEL: Record<string, string> = { general: "General", bug: "Bug Report", feature_request: "Feature Request" };
 const PAGE_TABS = ["Help Center", "Tickets", "System Status"];
@@ -107,9 +110,10 @@ function Tickets() {
     queryFn: async () =>
       (await supabase
         .from("support_tickets")
-        .select("*, profiles(full_name, email)")
+        .select("*, profiles!support_tickets_user_id_fkey(full_name, email), assignee:profiles!support_tickets_assigned_to_fkey(id, full_name)")
         .order("updated_at", { ascending: false })).data as TicketRow[] | null,
   });
+
 
   const refresh = () => qc.invalidateQueries({ queryKey: ["tickets"] });
 
@@ -150,6 +154,10 @@ function Tickets() {
       render: (t) => <Badge tone={statusTone[t.status]}>{t.status}</Badge>,
     },
     {
+      key: "assignee", header: "Assigned To", filter: true, value: (t) => t.assignee?.full_name ?? "Unassigned",
+      render: (t) => <span className="text-ink-2">{t.assignee?.full_name ?? "Unassigned"}</span>,
+    },
+    {
       key: "messages", header: "Messages", value: (t) => t.thread?.length ?? 0,
       render: (t) => <span className="text-ink-3">{t.thread?.length ?? 0}</span>,
     },
@@ -183,7 +191,7 @@ function Tickets() {
         rows={tickets ?? []}
         columns={columns}
         rowKey={(t) => t.id}
-        searchText={(t) => `${t.subject} ${t.status} ${t.priority} ${t.category} ${t.profiles?.full_name ?? ""}`}
+        searchText={(t) => `${t.subject} ${t.status} ${t.priority} ${t.category} ${t.profiles?.full_name ?? ""} ${t.assignee?.full_name ?? ""}`}
         exportName="tickets"
         onRowClick={(t) => setViewingId(t.id)}
         emptyText="No tickets. If something's wrong, open one — we track it here end to end."
@@ -280,6 +288,18 @@ function TicketDetail({ ticket, onChanged }: { ticket: TicketRow; onChanged: () 
   const manage = can("support.manage");
   const mine = ticket.user_id === profile?.id;
 
+  const { data: users } = useQuery({
+    queryKey: ["users-brief"],
+    queryFn: async () => (await supabase.from("profiles").select("id, full_name, email").order("full_name")).data ?? [],
+    enabled: manage,
+  });
+
+  async function assign(userId: string) {
+    await supabase.from("support_tickets").update({ assigned_to: userId || null }).eq("id", ticket.id);
+    audit("ticket.assign", "ticket", ticket.id, { module: "support", old: { assigned_to: ticket.assigned_to }, new: { assigned_to: userId || null } });
+    onChanged();
+  }
+
   async function send() {
     if (!reply.trim() || !profile) return;
     setBusy(true);
@@ -311,6 +331,20 @@ function TicketDetail({ ticket, onChanged }: { ticket: TicketRow; onChanged: () 
           {ticket.profiles?.full_name} · opened {fmtDateTime(ticket.created_at)}
         </span>
       </div>
+
+      {manage && (
+        <div className="mb-3">
+          <Field label="Assigned to">
+            <select className="input" value={ticket.assigned_to ?? ""} onChange={(e) => assign(e.target.value)}>
+              <option value="">Unassigned</option>
+              {users?.map((u: any) => <option key={u.id} value={u.id}>{u.full_name}</option>)}
+            </select>
+          </Field>
+        </div>
+      )}
+      {!manage && ticket.assignee && (
+        <p className="mb-3 text-xs text-ink-3">Assigned to {ticket.assignee.full_name}</p>
+      )}
 
       <div className="min-h-0 flex-1 space-y-2 overflow-y-auto">
         {ticket.thread?.map((m, i) => {

@@ -6,7 +6,7 @@
   "main": "dist-electron/main.js",
   "scripts": {
     "dev": "vite",
-    "build": "tsc -p tsconfig.node.json && vite build && electron-builder --win",
+    "build": "tsc -p tsconfig.node.json && vite build && electron-builder --win && node scripts/checksum.js",
     "start": "tsc -p tsconfig.node.json && vite build && electron ."
   },
   "dependencies": {

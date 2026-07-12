@@ -181,7 +181,11 @@ function AddCameraForm({ onDone }: { onDone: () => void }) {
   });
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
-  const [testState, setTestState] = useState<{ state: "idle" | "testing" | "ok" | "fail"; message?: string }>({ state: "idle" });
+  const [testState, setTestState] = useState<{
+    state: "idle" | "testing" | "ok" | "fail"; message?: string;
+    channels?: { path: string; ok: boolean; note: string }[];
+    deviceInfo?: { manufacturer?: string; model?: string; firmware?: string };
+  }>({ state: "idle" });
 
   const { data: sites } = useQuery({
     queryKey: ["sites-brief"],
@@ -210,7 +214,7 @@ function AddCameraForm({ onDone }: { onDone: () => void }) {
     setTestState({ state: "testing" });
     const { data, error } = await supabase.functions.invoke("test-camera", { body: fields() });
     if (error || !data) return setTestState({ state: "fail", message: "Test request failed." });
-    setTestState({ state: data.ok ? "ok" : "fail", message: data.message });
+    setTestState({ state: data.ok ? "ok" : "fail", message: data.message, channels: data.channels, deviceInfo: data.device_info });
   }
 
   async function submit() {
@@ -298,6 +302,33 @@ function AddCameraForm({ onDone }: { onDone: () => void }) {
         )}
         {testState.state === "testing" && <Loader2 size={13} className="animate-spin text-ink-3" />}
       </div>
+
+      {!!testState.channels?.length && (
+        <div className="rounded-md border border-line p-2.5">
+          <p className="mb-1.5 text-xs font-medium text-ink-2">
+            {testState.channels.length} channel{testState.channels.length === 1 ? "" : "s"} found — click one to use it
+          </p>
+          <div className="flex flex-wrap gap-1.5">
+            {testState.channels.map((c) => (
+              <button
+                key={c.path}
+                type="button"
+                title={c.note}
+                className="rounded-md border border-line bg-surface-2 px-2 py-1 font-mono text-xs text-ink-2 hover:border-accent hover:text-accent"
+                onClick={() => setForm({ ...form, path: c.path })}
+              >
+                {c.path}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+      {testState.deviceInfo && (testState.deviceInfo.manufacturer || testState.deviceInfo.model) && (
+        <p className="text-xs text-ink-3">
+          Identified as {testState.deviceInfo.manufacturer} {testState.deviceInfo.model}
+          {testState.deviceInfo.firmware ? ` (fw ${testState.deviceInfo.firmware})` : ""}
+        </p>
+      )}
 
       {error && <p className="text-sm text-danger">{error}</p>}
       <button className="btn-primary w-full" onClick={submit} disabled={busy || !canSubmit}>

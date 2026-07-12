@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { KeyRound } from "lucide-react";
+import { KeyRound, History } from "lucide-react";
 import { supabase } from "../../lib/supabase";
 import { audit } from "../../lib/audit";
 import { License } from "../../lib/types";
@@ -11,9 +11,14 @@ import {
 import DataTable, { Column } from "../../components/DataTable";
 import { fmtDate, fmtDateTime } from "../../lib/format";
 
+export const LICENSE_TYPES = ["trial", "monthly", "yearly", "lifetime", "enterprise"] as const;
+
 type LicenseRow = License & {
   profiles: { id: string; full_name: string; email: string } | null;
-  license_activations: { device_id: string; revoked_at: string | null }[];
+  license_activations: {
+    id: string; device_id: string; activated_at: string; revoked_at: string | null;
+    devices: { name: string } | null;
+  }[];
 };
 
 export default function LicensesPage() {
@@ -21,6 +26,9 @@ export default function LicensesPage() {
   const { can } = useAuth();
   const [genOpen, setGenOpen] = useState(false);
   const [transferFor, setTransferFor] = useState<LicenseRow | null>(null);
+  const [editFor, setEditFor] = useState<LicenseRow | null>(null);
+  const [renewFor, setRenewFor] = useState<LicenseRow | null>(null);
+  const [historyFor, setHistoryFor] = useState<LicenseRow | null>(null);
   const [revealed, setRevealed] = useState<string | null>(null);
   const [confirm, setConfirm] = useState<{ title: string; body: string; danger?: boolean; run: () => Promise<void> } | null>(null);
 
@@ -29,7 +37,7 @@ export default function LicensesPage() {
     queryFn: async () =>
       (await supabase
         .from("licenses")
-        .select("*, profiles(id, full_name, email), license_activations(device_id, revoked_at)")
+        .select("*, profiles(id, full_name, email), license_activations(id, device_id, activated_at, revoked_at, devices(name))")
         .order("created_at", { ascending: false })).data as LicenseRow[] | null,
   });
 
@@ -44,6 +52,19 @@ export default function LicensesPage() {
         .eq("license_id", l.id).is("revoked_at", null);
     }
     audit(`license.${status}`, "license", l.id, { module: "licenses", old: { status: l.status }, new: { status } });
+    refresh();
+  }
+
+  async function resetLicense(l: LicenseRow) {
+    const { data, error } = await supabase.rpc("reset_license", { p_license_id: l.id });
+    if (error) return;
+    refresh();
+    setRevealed(data as string);
+  }
+
+  async function deleteLicense(l: LicenseRow) {
+    const { error } = await supabase.rpc("delete_license", { p_license_id: l.id });
+    if (error) return;
     refresh();
   }
 
@@ -64,12 +85,21 @@ export default function LicensesPage() {
     },
     {
       key: "type", header: "Type", filter: true, value: (l) => l.license_type,
-      render: (l) => <span className="text-ink-2">{l.license_type}</span>,
+      render: (l) => <span className="capitalize text-ink-2">{l.license_type}</span>,
     },
     {
       key: "devices", header: "Devices", sortable: true,
       value: (l) => l.license_activations?.filter((a) => !a.revoked_at).length ?? 0,
-      render: (l) => `${l.license_activations?.filter((a) => !a.revoked_at).length ?? 0} / ${l.max_devices}`,
+      render: (l) => (
+        <button
+          className="inline-flex items-center gap-1 text-ink-2 hover:text-accent hover:underline"
+          onClick={(e) => { e.stopPropagation(); setHistoryFor(l); }}
+          title="View activation history"
+        >
+          <History size={12} />
+          {l.license_activations?.filter((a) => !a.revoked_at).length ?? 0} / {l.max_devices}
+        </button>
+      ),
     },
     {
       key: "status", header: "Status", filter: true, value: (l) => l.status,
@@ -109,6 +139,22 @@ export default function LicensesPage() {
               {(l.status === "suspended" || l.status === "inactive" || l.status === "pending") && (
                 <button className="text-xs text-ok hover:underline" onClick={() => setStatus(l, "active")}>Activate</button>
               )}
+              <button className="text-xs text-ink-2 hover:underline" onClick={() => setEditFor(l)}>Edit</button>
+              <button className="text-xs text-ink-2 hover:underline" onClick={() => setRenewFor(l)}>Renew</button>
+              <button className="text-xs text-warn hover:underline" onClick={() =>
+                setConfirm({
+                  title: "Reset license",
+                  body: `Revoke ${l.key_hint} and issue a fresh key for the same user? Every device currently activated on it is unbound; the new key must be entered manually.`,
+                  danger: true,
+                  run: () => resetLicense(l),
+                })}>Reset</button>
+              <button className="text-xs text-danger hover:underline" onClick={() =>
+                setConfirm({
+                  title: "Delete license",
+                  body: `Permanently delete ${l.key_hint}? This removes the record entirely (not just revokes it) and cannot be undone.`,
+                  danger: true,
+                  run: () => deleteLicense(l),
+                })}>Delete</button>
             </div>
           ),
         } as Column<LicenseRow>]
@@ -147,7 +193,23 @@ export default function LicensesPage() {
         )}
       </Modal>
 
-      <Modal open={!!revealed} onClose={() => setRevealed(null)} title="License generated">
+      <Modal open={!!editFor} onClose={() => setEditFor(null)} title={`Edit ${editFor?.key_hint}`}>
+        {editFor && (
+          <EditForm license={editFor} onDone={() => { setEditFor(null); refresh(); }} />
+        )}
+      </Modal>
+
+      <Modal open={!!renewFor} onClose={() => setRenewFor(null)} title={`Renew ${renewFor?.key_hint}`}>
+        {renewFor && (
+          <RenewForm license={renewFor} onDone={() => { setRenewFor(null); refresh(); }} />
+        )}
+      </Modal>
+
+      <Modal open={!!historyFor} onClose={() => setHistoryFor(null)} title={`Activation history — ${historyFor?.key_hint}`} wide>
+        {historyFor && <ActivationHistory license={historyFor} />}
+      </Modal>
+
+      <Modal open={!!revealed} onClose={() => setRevealed(null)} title="License key">
         {revealed && (
           <>
             <SecretReveal label="License key" secret={revealed} />
@@ -169,7 +231,7 @@ export default function LicensesPage() {
 }
 
 function GenerateForm({ onDone }: { onDone: (key?: string) => void }) {
-  const [form, setForm] = useState({ user_id: "", license_type: "personal", expires_at: "", max_devices: 1 });
+  const [form, setForm] = useState({ user_id: "", license_type: "trial", expires_at: "", max_devices: 1 });
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -203,8 +265,8 @@ function GenerateForm({ onDone }: { onDone: (key?: string) => void }) {
       <div className="grid grid-cols-2 gap-3">
         <Field label="Type">
           <select className="input" value={form.license_type} onChange={(e) => setForm({ ...form, license_type: e.target.value })}>
-            {["personal", "enterprise", "trial", "lifetime", "subscription"].map((t) => (
-              <option key={t} value={t}>{t}</option>
+            {LICENSE_TYPES.map((t) => (
+              <option key={t} value={t} className="capitalize">{t}</option>
             ))}
           </select>
         </Field>
@@ -265,6 +327,109 @@ function TransferForm({ license, onDone }: { license: LicenseRow; onDone: () => 
       <button className="btn-primary w-full" onClick={submit} disabled={busy || !userId}>
         {busy ? "Transferring…" : "Transfer License"}
       </button>
+    </div>
+  );
+}
+
+function EditForm({ license, onDone }: { license: LicenseRow; onDone: () => void }) {
+  const [licenseType, setLicenseType] = useState(license.license_type);
+  const [maxDevices, setMaxDevices] = useState(license.max_devices);
+  const [expiresAt, setExpiresAt] = useState(license.expires_at ? license.expires_at.slice(0, 10) : "");
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  async function submit() {
+    setBusy(true);
+    setError("");
+    const { error } = await supabase.rpc("edit_license", {
+      p_license_id: license.id,
+      p_license_type: licenseType,
+      p_max_devices: maxDevices,
+      p_expires_at: expiresAt ? new Date(expiresAt).toISOString() : null,
+      p_clear_expiry: !expiresAt,
+    });
+    setBusy(false);
+    if (error) return setError(error.message);
+    onDone();
+  }
+
+  return (
+    <div className="space-y-3">
+      <div className="grid grid-cols-2 gap-3">
+        <Field label="Type">
+          <select className="input" value={licenseType} onChange={(e) => setLicenseType(e.target.value as typeof licenseType)}>
+            {LICENSE_TYPES.map((t) => <option key={t} value={t} className="capitalize">{t}</option>)}
+          </select>
+        </Field>
+        <Field label="Max devices">
+          <input className="input" type="number" min={1} value={maxDevices}
+                 onChange={(e) => setMaxDevices(Math.max(1, Number(e.target.value)))} />
+        </Field>
+      </div>
+      <Field label="Expires" hint="Leave empty for a perpetual key.">
+        <input className="input" type="date" value={expiresAt} onChange={(e) => setExpiresAt(e.target.value)} />
+      </Field>
+      {error && <p className="text-sm text-danger">{error}</p>}
+      <button className="btn-primary w-full" onClick={submit} disabled={busy}>
+        {busy ? "Saving…" : "Save Changes"}
+      </button>
+    </div>
+  );
+}
+
+function RenewForm({ license, onDone }: { license: LicenseRow; onDone: () => void }) {
+  const defaultNext = new Date();
+  defaultNext.setMonth(defaultNext.getMonth() + (license.license_type === "yearly" ? 12 : 1));
+  const [expiresAt, setExpiresAt] = useState(defaultNext.toISOString().slice(0, 10));
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  async function submit() {
+    setBusy(true);
+    setError("");
+    const { error } = await supabase.rpc("renew_license", {
+      p_license_id: license.id,
+      p_new_expires_at: new Date(expiresAt).toISOString(),
+    });
+    setBusy(false);
+    if (error) return setError(error.message);
+    onDone();
+  }
+
+  return (
+    <div className="space-y-3">
+      <p className="text-sm text-ink-2">
+        Currently expires {license.expires_at ? fmtDate(license.expires_at) : "never"}.
+      </p>
+      <Field label="New expiry date">
+        <input className="input" type="date" value={expiresAt} onChange={(e) => setExpiresAt(e.target.value)} />
+      </Field>
+      {error && <p className="text-sm text-danger">{error}</p>}
+      <button className="btn-primary w-full" onClick={submit} disabled={busy}>
+        {busy ? "Renewing…" : "Renew License"}
+      </button>
+    </div>
+  );
+}
+
+function ActivationHistory({ license }: { license: LicenseRow }) {
+  const rows = [...(license.license_activations ?? [])].sort(
+    (a, b) => new Date(b.activated_at).getTime() - new Date(a.activated_at).getTime(),
+  );
+  if (!rows.length) return <p className="text-sm text-ink-3">No devices have ever activated this license.</p>;
+  return (
+    <div className="space-y-2">
+      {rows.map((a) => (
+        <div key={a.id} className="flex items-center justify-between rounded-md border border-line px-3 py-2">
+          <div className="min-w-0">
+            <div className="truncate text-sm text-ink-1">{a.devices?.name ?? "Unknown device"}</div>
+            <div className="text-xs text-ink-3">Activated {fmtDateTime(a.activated_at)}</div>
+          </div>
+          {a.revoked_at
+            ? <Badge tone="danger">revoked {fmtDate(a.revoked_at)}</Badge>
+            : <Badge tone="ok">active</Badge>}
+        </div>
+      ))}
     </div>
   );
 }

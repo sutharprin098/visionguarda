@@ -62,5 +62,5 @@ Deno.serve(async (req) => {
     detail: { name, source_type: fields.source_type },
   });
 
-  return json({ ...cam, verify_message: check.message });
+  return json({ ...cam, verify_message: check.message, device_info: check.device_info, channels: check.channels });
 });

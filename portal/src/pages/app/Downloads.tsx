@@ -1,10 +1,32 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { format } from "date-fns";
-import { Download, MonitorDown, ShieldAlert, Tag, Loader2 } from "lucide-react";
+import { Download, MonitorDown, ShieldAlert, Tag, Loader2, ShieldCheck, Copy, Check } from "lucide-react";
 import { supabase } from "../../lib/supabase";
 import { GithubRelease } from "../../lib/types";
 import { PageHeader, Badge, Empty } from "../../components/ui";
+
+function ChecksumRow({ sha256 }: { sha256: string | null }) {
+  const [copied, setCopied] = useState(false);
+  if (!sha256) {
+    return <p className="mt-2 text-xs text-ink-3">No published checksum for this release.</p>;
+  }
+  return (
+    <button
+      className="mt-2 flex items-center gap-1.5 text-xs text-ink-3 hover:text-ink-1"
+      title="Copy SHA-256 checksum"
+      onClick={async () => {
+        await navigator.clipboard.writeText(sha256);
+        setCopied(true);
+        setTimeout(() => setCopied(false), 1500);
+      }}
+    >
+      <ShieldCheck size={12} className="text-ok" />
+      <span className="font-mono">SHA-256: {sha256.slice(0, 16)}…{sha256.slice(-8)}</span>
+      {copied ? <Check size={12} className="text-ok" /> : <Copy size={12} />}
+    </button>
+  );
+}
 
 function fmtSize(bytes: number) {
   return bytes ? `${(bytes / 1024 / 1024).toFixed(1)} MB` : "—";
@@ -71,6 +93,7 @@ export default function DownloadsPage() {
               <p className="mt-0.5 text-sm text-zinc-500">
                 {fmtSize(latest.size_bytes)} · Released {format(new Date(latest.published_at), "dd MMM yyyy")}
               </p>
+              <ChecksumRow sha256={latest.checksum_sha256} />
             </div>
           </div>
           <button className="btn-primary" onClick={() => download(latest)} disabled={downloadingId != null && downloadingId === latest.asset_id}>
@@ -104,6 +127,7 @@ export default function DownloadsPage() {
                 <span>{fmtSize(r.size_bytes)}</span>
                 {r.asset_name && <span className="font-mono">{r.asset_name}</span>}
               </div>
+              <ChecksumRow sha256={r.checksum_sha256} />
             </div>
           ))}
         </div>

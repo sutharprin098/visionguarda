@@ -31,6 +31,24 @@ interface GhRelease {
 let cache: { at: number; repo: string; data: unknown } | null = null;
 const CACHE_MS = 60_000;
 
+// Fetches a tiny <installer>.sha256 companion asset's text content via the
+// authenticated asset API (same pattern as download-release), never the
+// multi-hundred-MB installer itself.
+async function fetchChecksum(repo: string, asset: GhAsset, apiHeaders: Record<string, string>): Promise<string | null> {
+  if (asset.size > 4096) return null; // sanity guard — a real .sha256 is a one-liner
+  try {
+    const res = await fetch(`https://api.github.com/repos/${repo}/releases/assets/${asset.id}`, {
+      headers: { ...apiHeaders, Accept: "application/octet-stream" },
+    });
+    if (!res.ok) return null;
+    const text = await res.text();
+    const hex = text.trim().split(/\s+/)[0];
+    return /^[0-9a-f]{64}$/i.test(hex) ? hex.toLowerCase() : null;
+  } catch {
+    return null;
+  }
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
 
@@ -60,32 +78,41 @@ Deno.serve(async (req) => {
   }
   const raw = (await res.json()) as GhRelease[];
 
-  const releases = raw
-    .filter((r) => !r.draft)
-    .map((r) => {
-      const asset =
-        r.assets.find((a) => a.name.toLowerCase().endsWith(".exe")) ??
-        r.assets.find((a) => a.name.toLowerCase().endsWith(".msi")) ??
-        r.assets.find((a) => a.name.toLowerCase().endsWith(".zip")) ??
-        null;
-      return {
-        version: r.tag_name.replace(/^v/i, ""),
-        tag_name: r.tag_name,
-        name: r.name || r.tag_name,
-        release_notes: r.body ?? "",
-        published_at: r.published_at,
-        prerelease: r.prerelease,
-        asset_id: asset?.id ?? null,
-        asset_name: asset?.name ?? null,
-        size_bytes: asset?.size ?? 0,
-        content_type: asset?.content_type ?? "",
-        // Only actually usable unauthenticated for a public repo — for a
-        // private repo the portal must resolve via download-release instead.
-        download_url: asset?.browser_download_url ?? null,
-      };
-    })
-    // only surface releases that actually shipped a Windows build
-    .filter((r) => r.asset_id != null);
+  const releases = await Promise.all(
+    raw
+      .filter((r) => !r.draft)
+      .map(async (r) => {
+        const asset =
+          r.assets.find((a) => a.name.toLowerCase().endsWith(".exe")) ??
+          r.assets.find((a) => a.name.toLowerCase().endsWith(".msi")) ??
+          r.assets.find((a) => a.name.toLowerCase().endsWith(".zip")) ??
+          null;
+        // The desktop build emits a tiny <installer>.sha256 text file
+        // alongside the installer (see desktop/scripts/checksum.js) —
+        // fetch that (a few dozen bytes) rather than ever hashing the
+        // multi-hundred-MB installer inside this function.
+        const checksumAsset = asset
+          ? r.assets.find((a) => a.name.toLowerCase() === `${asset.name.toLowerCase()}.sha256`)
+          : null;
+        const checksum_sha256 = checksumAsset ? await fetchChecksum(repo, checksumAsset, headers) : null;
+        return {
+          version: r.tag_name.replace(/^v/i, ""),
+          tag_name: r.tag_name,
+          name: r.name || r.tag_name,
+          release_notes: r.body ?? "",
+          published_at: r.published_at,
+          prerelease: r.prerelease,
+          asset_id: asset?.id ?? null,
+          asset_name: asset?.name ?? null,
+          size_bytes: asset?.size ?? 0,
+          content_type: asset?.content_type ?? "",
+          checksum_sha256,
+          // Only actually usable unauthenticated for a public repo — for a
+          // private repo the portal must resolve via download-release instead.
+          download_url: asset?.browser_download_url ?? null,
+        };
+      }),
+  ).then((all) => all.filter((r) => r.asset_id != null)); // only surface releases that actually shipped a Windows build
 
   // Announce a new release to every organization the first time it's seen.
   // The watermark lives in the internal `app` schema (service-role only).

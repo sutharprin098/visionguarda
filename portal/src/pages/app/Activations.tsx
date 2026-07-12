@@ -49,6 +49,11 @@ export default function ActivationsPage() {
     if (status !== "active") {
       await supabase.from("license_activations")
         .update({ revoked_at: new Date().toISOString() }).eq("device_id", a.device_id).is("revoked_at", null);
+    } else {
+      // clear the revoke too, or desktop-sync keeps failing closed even
+      // though the device row now reads "active"
+      await supabase.from("license_activations")
+        .update({ revoked_at: null }).eq("id", a.id);
     }
     audit(`device.${status}`, "device", a.device_id, { module: "licenses" });
     refresh();
