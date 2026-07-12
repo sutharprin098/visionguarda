@@ -6,6 +6,26 @@
 -- ============================================================
 
 -- ------------------------------------------------------------
+-- Realtime publication: must drop table references BEFORE the tables
+-- themselves — ALTER PUBLICATION ... DROP TABLE needs the relation to
+-- still exist to resolve it; dropping the table first would make this
+-- fail with "relation does not exist". Wrapped defensively in case this
+-- project's publication state has drifted from a fresh 0001 apply.
+-- ------------------------------------------------------------
+do $$
+begin
+  alter publication supabase_realtime drop table public.gis_layers;
+exception when others then
+  raise notice 'gis_layers not in supabase_realtime publication — skipping';
+end $$;
+do $$
+begin
+  alter publication supabase_realtime drop table public.gis_layer_assignments;
+exception when others then
+  raise notice 'gis_layer_assignments not in supabase_realtime publication — skipping';
+end $$;
+
+-- ------------------------------------------------------------
 -- Drop GIS-only tables (policies drop automatically with them)
 -- ------------------------------------------------------------
 drop table if exists public.speed_zones;
@@ -13,12 +33,6 @@ drop table if exists public.line_roi;
 drop table if exists public.polygon_roi;
 drop table if exists public.gis_layer_assignments;
 drop table if exists public.gis_layers;
-
--- ------------------------------------------------------------
--- Realtime publication: drop references to removed tables
--- ------------------------------------------------------------
-alter publication supabase_realtime drop table public.gis_layers;
-alter publication supabase_realtime drop table public.gis_layer_assignments;
 
 -- ------------------------------------------------------------
 -- Geometry / map columns on cameras and sites
