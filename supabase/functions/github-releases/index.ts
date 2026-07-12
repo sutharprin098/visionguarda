@@ -3,7 +3,7 @@
 // hardcodes a download link. Configure via edge-function secrets:
 //   GITHUB_RELEASES_REPO = "owner/repo"   (required)
 //   GITHUB_TOKEN         = a PAT with public_repo read (optional, raises rate limit)
-import { json, corsHeaders, rateLimit } from "../_shared/util.ts";
+import { json, corsHeaders, rateLimit, adminClient } from "../_shared/util.ts";
 
 interface GhAsset {
   name: string;
@@ -77,6 +77,18 @@ Deno.serve(async (req) => {
     })
     // only surface releases that actually shipped a Windows installer asset
     .filter((r) => r.download_url);
+
+  // Announce a new release to every organization the first time it's seen.
+  // The watermark lives in the internal `app` schema (service-role only).
+  if (releases.length) {
+    const latest = releases[0];
+    const db = adminClient();
+    const { data: mark } = await db.from("release_watermark").select("last_tag").eq("id", true).maybeSingle();
+    if (mark?.last_tag !== latest.tag_name) {
+      await db.from("release_watermark").upsert({ id: true, last_tag: latest.tag_name });
+      await db.rpc("notify_new_release", { p_tag: latest.tag_name, p_title: latest.name });
+    }
+  }
 
   const data = { releases };
   cache = { at: Date.now(), repo, data };

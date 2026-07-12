@@ -45,6 +45,7 @@ export interface Device {
   user_id: string | null;
   name: string;
   status: "active" | "deactivated" | "removed";
+  fingerprint_hash: string;
   os_info: Record<string, unknown>;
   hardware: { cpu?: string; ram_gb?: number; gpu?: string; machine_id?: string };
   is_online: boolean;
@@ -98,6 +99,7 @@ export interface SupportTicket {
   subject: string;
   priority: "low" | "normal" | "high" | "urgent";
   status: "open" | "pending" | "closed";
+  category: "general" | "bug" | "feature_request";
   thread: ThreadEntry[];
   created_at: string;
   updated_at: string;

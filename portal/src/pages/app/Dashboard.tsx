@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
+import { UserPlus, Video, KeyRound, Download } from "lucide-react";
 import { supabase } from "../../lib/supabase";
 import { useAuth } from "../../contexts/AuthContext";
 import { PageHeader, Kpi, Badge, statusTone, Empty } from "../../components/ui";
@@ -8,7 +9,7 @@ import { TimeSeries, Spark } from "../../components/charts";
 import { fmtAgo, fmtBytes } from "../../lib/format";
 
 export default function Dashboard() {
-  const { org, profile } = useAuth();
+  const { org, profile, can } = useAuth();
   const qc = useQueryClient();
 
   const { data: stats } = useQuery({
@@ -75,6 +76,20 @@ export default function Dashboard() {
         title={`Welcome, ${profile?.full_name?.split(" ")[0] ?? ""}`}
         subtitle={`${org?.name} · ${org?.org_code} · ${org?.plan} plan`}
       />
+
+      {/* quick actions */}
+      <div className="mb-6 flex flex-wrap gap-2">
+        {can("users.manage") && (
+          <Link to="/app/users" className="btn-ghost text-xs"><UserPlus size={14} /> Add User</Link>
+        )}
+        {can("cameras.manage") && (
+          <Link to="/app/cameras" className="btn-ghost text-xs"><Video size={14} /> Add Camera</Link>
+        )}
+        {can("licenses.manage") && (
+          <Link to="/app/licenses" className="btn-ghost text-xs"><KeyRound size={14} /> Generate License</Link>
+        )}
+        <Link to="/app/downloads" className="btn-ghost text-xs"><Download size={14} /> Download Desktop App</Link>
+      </div>
 
       {/* KPI row */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">

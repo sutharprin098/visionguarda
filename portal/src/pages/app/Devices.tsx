@@ -41,6 +41,14 @@ export default function DevicesPage() {
     refresh();
   }
 
+  async function resetDevice(d: DeviceRow) {
+    await supabase.from("license_activations")
+      .update({ revoked_at: new Date().toISOString() })
+      .eq("device_id", d.id).is("revoked_at", null);
+    audit("device.reset", "device", d.id, { module: "devices" });
+    refresh();
+  }
+
   const columns: Column<DeviceRow>[] = [
     {
       key: "device", header: "Device", sortable: true, value: (d) => d.name,
@@ -75,6 +83,10 @@ export default function DevicesPage() {
       render: (d) => <span className="font-mono text-xs text-ink-3">{d.last_ip ?? "—"}</span>,
     },
     {
+      key: "fingerprint", header: "Fingerprint", value: (d) => d.fingerprint_hash,
+      render: (d) => <span className="keychip font-mono text-[11px]" title={d.fingerprint_hash}>{d.fingerprint_hash.slice(0, 12)}…</span>,
+    },
+    {
       key: "online", header: "Connection", filter: true, value: (d) => (d.is_online ? "online" : "offline"),
       render: (d) => d.is_online
         ? <Badge tone="ok">online</Badge>
@@ -90,6 +102,13 @@ export default function DevicesPage() {
             <div className="space-x-2 whitespace-nowrap text-right" onClick={(e) => e.stopPropagation()}>
               <button className="text-xs text-ink-2 hover:underline" onClick={() => setRenameFor(d)}>Rename</button>
               <button className="text-xs text-accent hover:underline" onClick={() => setTransferFor(d)}>Transfer</button>
+              <button className="text-xs text-warn hover:underline" onClick={() =>
+                setConfirm({
+                  title: "Reset device",
+                  body: `Reset ${d.name}? Its current license activation is revoked; the user must enter a license key again on next launch. The device itself stays enabled.`,
+                  danger: true,
+                  run: () => resetDevice(d),
+                })}>Reset</button>
               {d.status === "active" ? (
                 <button className="text-xs text-warn hover:underline" onClick={() =>
                   setConfirm({
