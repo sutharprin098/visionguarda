@@ -19,6 +19,7 @@ export default function CamerasPage() {
   const qc = useQueryClient();
   const { can } = useAuth();
   const [addOpen, setAddOpen] = useState(false);
+  const [editFor, setEditFor] = useState<CameraRow | null>(null);
   const [assignFor, setAssignFor] = useState<CameraRow | null>(null);
   const [confirm, setConfirm] = useState<{ title: string; body: string; danger?: boolean; run: () => Promise<void> } | null>(null);
 
@@ -104,6 +105,9 @@ export default function CamerasPage() {
                 <button className="text-xs text-accent hover:underline" onClick={() => setAssignFor(c)}>Assign</button>
               )}
               {can("cameras.manage") && (
+                <button className="text-xs text-ink-2 hover:underline" onClick={() => setEditFor(c)}>Edit</button>
+              )}
+              {can("cameras.manage") && (
                 <button className="text-xs text-danger hover:underline" onClick={() =>
                   setConfirm({
                     title: "Delete camera",
@@ -147,6 +151,9 @@ export default function CamerasPage() {
       <Modal open={addOpen} onClose={() => setAddOpen(false)} title="Add camera">
         <AddCameraForm onDone={() => { setAddOpen(false); refresh(); }} />
       </Modal>
+      <Modal open={!!editFor} onClose={() => setEditFor(null)} title={`Edit — ${editFor?.name}`}>
+        {editFor && <AddCameraForm camera={editFor} onDone={() => { setEditFor(null); refresh(); }} />}
+      </Modal>
       <Modal open={!!assignFor} onClose={() => setAssignFor(null)} title={`Assign — ${assignFor?.name}`}>
         {assignFor && <AssignForm camera={assignFor} onDone={() => { setAssignFor(null); refresh(); }} />}
       </Modal>
@@ -174,10 +181,14 @@ const SOURCE_TYPES = [
 
 const DEFAULT_PORTS: Record<string, string> = { rtsp: "554", nvr: "554", dvr: "554", onvif: "80", ip: "80" };
 
-function AddCameraForm({ onDone }: { onDone: () => void }) {
+function AddCameraForm({ camera, onDone }: { camera?: CameraRow; onDone: () => void }) {
+  const isEdit = !!camera;
   const [form, setForm] = useState({
-    name: "", source_type: "rtsp", site_id: "",
-    host: "", port: DEFAULT_PORTS.rtsp, username: "", password: "", path: "",
+    name: camera?.name ?? "", source_type: (camera?.source_type ?? "rtsp") as string, site_id: camera?.site_id ?? "",
+    // Connection fields are never sent back from the server (only ciphertext
+    // is stored) — editing starts blank; leaving them blank on save keeps
+    // the existing encrypted connection untouched.
+    host: "", port: DEFAULT_PORTS[camera?.source_type ?? "rtsp"] ?? "554", username: "", password: "", path: "",
   });
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -198,6 +209,12 @@ function AddCameraForm({ onDone }: { onDone: () => void }) {
     setForm({ ...form, source_type, port: DEFAULT_PORTS[source_type] ?? "" });
     setTestState({ state: "idle" });
   }
+
+  // In edit mode, connection fields start blank (the server never sends
+  // ciphertext back) — only treat the connection as "changed" if the user
+  // actually typed something or switched source type, so a plain rename
+  // doesn't force re-verification against an empty host.
+  const connectionTouched = !isEdit || form.host.trim() !== "" || form.source_type !== camera?.source_type;
 
   function fields() {
     return {
@@ -220,19 +237,21 @@ function AddCameraForm({ onDone }: { onDone: () => void }) {
   async function submit() {
     setBusy(true);
     setError("");
-    const { data, error } = await supabase.functions.invoke("add-camera", {
-      body: { name: form.name, site_id: form.site_id || null, ...fields() },
+    const { data, error } = await supabase.functions.invoke(isEdit ? "update-camera" : "add-camera", {
+      body: isEdit
+        ? { camera_id: camera!.id, name: form.name, site_id: form.site_id || null, ...(connectionTouched ? fields() : {}) }
+        : { name: form.name, site_id: form.site_id || null, ...fields() },
     });
     setBusy(false);
     if (error) {
       const detail = (error as any)?.context?.body?.error ?? (error as any)?.message;
-      return setError(detail || "Failed to add camera — check the connection details and try again.");
+      return setError(detail || `Failed to ${isEdit ? "update" : "add"} camera — check the connection details and try again.`);
     }
-    audit("camera.create", "camera", data?.id ?? form.name, { module: "cameras", new: { name: form.name, source_type: form.source_type } });
+    audit(isEdit ? "camera.update" : "camera.create", "camera", data?.id ?? form.name, { module: "cameras", new: { name: form.name, source_type: form.source_type } });
     onDone();
   }
 
-  const canSubmit = form.name.trim() && (isUsb ? true : form.host.trim());
+  const canSubmit = form.name.trim() && (isUsb ? true : !connectionTouched || form.host.trim());
 
   return (
     <div className="space-y-3">
@@ -253,9 +272,15 @@ function AddCameraForm({ onDone }: { onDone: () => void }) {
         </Field>
       </div>
 
+      {isEdit && (
+        <p className="text-xs text-ink-3">
+          Connection fields are hidden for security — leave them blank to keep the current connection, or fill them in to replace it (re-verified before saving).
+        </p>
+      )}
+
       {isUsb ? (
         <Field label="USB device index" hint="Usually 0 for the first attached camera.">
-          <input className="input" placeholder="0" value={form.host}
+          <input className="input" placeholder={isEdit ? "unchanged" : "0"} value={form.host}
                  onChange={(e) => { setForm({ ...form, host: e.target.value }); setTestState({ state: "idle" }); }} />
         </Field>
       ) : (
@@ -263,7 +288,7 @@ function AddCameraForm({ onDone }: { onDone: () => void }) {
           <div className="grid grid-cols-3 gap-3">
             <div className="col-span-2">
               <Field label="Camera IP">
-                <input className="input" placeholder="192.168.1.64" value={form.host}
+                <input className="input" placeholder={isEdit ? "unchanged" : "192.168.1.64"} value={form.host}
                        onChange={(e) => { setForm({ ...form, host: e.target.value }); setTestState({ state: "idle" }); }} />
               </Field>
             </div>
@@ -291,7 +316,7 @@ function AddCameraForm({ onDone }: { onDone: () => void }) {
 
       <div className="flex items-center gap-3">
         <button type="button" className="btn-ghost text-xs" onClick={testConnection}
-                disabled={testState.state === "testing" || !canSubmit}>
+                disabled={testState.state === "testing" || !canSubmit || (isEdit && !connectionTouched)}>
           {testState.state === "testing" ? "Testing…" : "Test Connection"}
         </button>
         {testState.state === "ok" && (
@@ -332,10 +357,12 @@ function AddCameraForm({ onDone }: { onDone: () => void }) {
 
       {error && <p className="text-sm text-danger">{error}</p>}
       <button className="btn-primary w-full" onClick={submit} disabled={busy || !canSubmit}>
-        {busy ? "Verifying & adding…" : "Add Camera"}
+        {busy ? (isEdit ? "Verifying & saving…" : "Verifying & adding…") : (isEdit ? "Save Changes" : "Add Camera")}
       </button>
       <p className="text-xs text-ink-3">
-        The connection is verified reachable before the camera is saved. Credentials are AES-256 encrypted; only ciphertext lands in the database.
+        {isEdit && !connectionTouched
+          ? "Only the name/site are changing — the existing connection is left untouched."
+          : "The connection is verified reachable before the camera is saved. Credentials are AES-256 encrypted; only ciphertext lands in the database."}
       </p>
     </div>
   );
