@@ -131,13 +131,13 @@ end $$;
 -- > Database > Extensions, or `create extension pg_cron` with sufficient
 -- privileges). Wrapped so this migration doesn't hard-fail on projects where
 -- it isn't enabled yet — schedule it manually afterwards in that case.
-do $$
+do $outer$
 begin
   create extension if not exists pg_cron;
-  perform cron.schedule('check-expiring-licenses', '0 8 * * *', $$select app.check_expiring_licenses()$$);
+  perform cron.schedule('check-expiring-licenses', '0 8 * * *', $cron$select app.check_expiring_licenses()$cron$);
 exception when others then
   raise notice 'pg_cron not available — schedule app.check_expiring_licenses() manually (see PLATFORM.md)';
-end $$;
+end $outer$;
 
 -- ------------------------------------------------------------
 -- Security-sensitive audit actions -> org admins (org.manage)
