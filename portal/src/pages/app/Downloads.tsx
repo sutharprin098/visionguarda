@@ -1,8 +1,8 @@
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { format } from "date-fns";
-import { Download, MonitorDown, ShieldAlert, Tag } from "lucide-react";
+import { Download, MonitorDown, ShieldAlert, Tag, Loader2 } from "lucide-react";
 import { supabase } from "../../lib/supabase";
-import { audit } from "../../lib/audit";
 import { GithubRelease } from "../../lib/types";
 import { PageHeader, Badge, Empty } from "../../components/ui";
 
@@ -27,11 +27,24 @@ export default function DownloadsPage() {
 
   const releases = data?.releases ?? [];
   const latest = releases[0];
+  const [downloadingId, setDownloadingId] = useState<number | null>(null);
 
-  function download(r: GithubRelease) {
-    if (!r.download_url) return;
-    window.open(r.download_url, "_blank");
-    audit("app.download", "release", r.tag_name, { module: "downloads", detail: { version: r.version } });
+  // The releases repo is typically private, so GitHub's plain
+  // browser_download_url doesn't work unauthenticated — resolve a
+  // short-lived presigned URL server-side (download-release audits the
+  // download itself, so no separate client-side audit call is needed).
+  async function download(r: GithubRelease) {
+    if (!r.asset_id) return;
+    setDownloadingId(r.asset_id);
+    try {
+      const { data, error } = await supabase.functions.invoke<{ url?: string; error?: string }>(
+        "download-release", { body: { asset_id: r.asset_id } },
+      );
+      if (error || !data?.url) return;
+      window.open(data.url, "_blank");
+    } finally {
+      setDownloadingId(null);
+    }
   }
 
   return (
@@ -60,8 +73,9 @@ export default function DownloadsPage() {
               </p>
             </div>
           </div>
-          <button className="btn-primary" onClick={() => download(latest)}>
-            <Download size={15} /> Download EXE
+          <button className="btn-primary" onClick={() => download(latest)} disabled={downloadingId != null && downloadingId === latest.asset_id}>
+            {downloadingId === latest.asset_id ? <Loader2 size={15} className="animate-spin" /> : <Download size={15} />}
+            {downloadingId === latest.asset_id ? "Preparing…" : "Download EXE"}
           </button>
         </div>
       )}
@@ -80,8 +94,8 @@ export default function DownloadsPage() {
                   <span className="text-sm font-medium text-zinc-100">{r.name}</span>
                   {r.prerelease && <Badge tone="warn">pre-release</Badge>}
                 </div>
-                <button className="btn-ghost text-xs" onClick={() => download(r)} disabled={!r.download_url}>
-                  Download
+                <button className="btn-ghost text-xs" onClick={() => download(r)} disabled={downloadingId === r.asset_id}>
+                  {downloadingId === r.asset_id ? "Preparing…" : "Download"}
                 </button>
               </div>
               {r.release_notes && <p className="mt-2 whitespace-pre-line text-sm text-zinc-400">{r.release_notes}</p>}

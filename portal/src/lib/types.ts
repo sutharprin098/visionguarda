@@ -147,6 +147,7 @@ export interface GithubRelease {
   release_notes: string;
   published_at: string;
   prerelease: boolean;
+  asset_id: number | null;
   asset_name: string | null;
   size_bytes: number;
   content_type: string;

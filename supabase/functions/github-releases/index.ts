@@ -2,10 +2,15 @@
 // Live proxy over the GitHub Releases API — the portal never stores or
 // hardcodes a download link. Configure via edge-function secrets:
 //   GITHUB_RELEASES_REPO = "owner/repo"   (required)
-//   GITHUB_TOKEN         = a PAT with public_repo read (optional, raises rate limit)
+//   GITHUB_TOKEN         = a PAT with (at least) read access to Releases.
+//                          Required if the repo is private — GitHub's plain
+//                          browser_download_url only works unauthenticated
+//                          for public repos. See download-release for the
+//                          authenticated resolver the portal actually uses.
 import { json, corsHeaders, rateLimit, adminClient } from "../_shared/util.ts";
 
 interface GhAsset {
+  id: number;
   name: string;
   size: number;
   browser_download_url: string;
@@ -61,6 +66,7 @@ Deno.serve(async (req) => {
       const asset =
         r.assets.find((a) => a.name.toLowerCase().endsWith(".exe")) ??
         r.assets.find((a) => a.name.toLowerCase().endsWith(".msi")) ??
+        r.assets.find((a) => a.name.toLowerCase().endsWith(".zip")) ??
         null;
       return {
         version: r.tag_name.replace(/^v/i, ""),
@@ -69,14 +75,17 @@ Deno.serve(async (req) => {
         release_notes: r.body ?? "",
         published_at: r.published_at,
         prerelease: r.prerelease,
+        asset_id: asset?.id ?? null,
         asset_name: asset?.name ?? null,
         size_bytes: asset?.size ?? 0,
         content_type: asset?.content_type ?? "",
+        // Only actually usable unauthenticated for a public repo — for a
+        // private repo the portal must resolve via download-release instead.
         download_url: asset?.browser_download_url ?? null,
       };
     })
-    // only surface releases that actually shipped a Windows installer asset
-    .filter((r) => r.download_url);
+    // only surface releases that actually shipped a Windows build
+    .filter((r) => r.asset_id != null);
 
   // Announce a new release to every organization the first time it's seen.
   // The watermark lives in the internal `app` schema (service-role only).

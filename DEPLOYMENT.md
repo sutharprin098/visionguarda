@@ -52,11 +52,11 @@ npx supabase login                              # one-time, opens a browser
 npx supabase link --project-ref mxymrxzhsogfkvkhtwjl
 npx supabase db push                            # applies migrations 0001–0009
 npx supabase functions deploy activate-license my-keys desktop-sync invite-user \
-  add-camera test-camera github-releases
+  add-camera test-camera github-releases download-release
 
 npx supabase secrets set CAMAI_AES_KEY=$(openssl rand -hex 32)          # camera credential encryption
 npx supabase secrets set GITHUB_RELEASES_REPO=<owner>/<repo>            # powers Downloads
-npx supabase secrets set GITHUB_TOKEN=<pat-with-public-repo-read>       # optional, raises GitHub API rate limit
+npx supabase secrets set GITHUB_TOKEN=<pat-with-repo-read>              # required if that repo is private (it is, by default)
 ```
 
 Post-migration manual step: migration `0008` schedules a daily `pg_cron` job
@@ -148,8 +148,12 @@ placeholder or mock data.
   `alerts`/`usage_logs`, realtime ack, incident workflow with a notes thread,
   CSV/PDF report generation archived to storage.
 - **Downloads** — live GitHub Releases API proxy (`github-releases` function,
-  never a hardcoded link); shows version, notes, date, size, and a direct
-  download button for the newest non-draft release with a Windows asset.
+  never a hardcoded link); shows version, notes, date, size, and a download
+  button for the newest non-draft release with a Windows asset (.exe/.msi/.zip).
+  Since the releases repo is private, the actual click resolves a short-lived
+  presigned URL through the authenticated `download-release` function rather
+  than GitHub's public `browser_download_url` (which 404s unauthenticated on
+  a private repo) — `GITHUB_TOKEN` is required for this to work.
 - **Billing / Audit** — subscription + invoices + metered usage; append-only
   audit log with actor/IP/device/old-new diffs.
 - **Notifications** — full center: all/unread/archived tabs, per-kind filter,
