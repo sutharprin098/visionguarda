@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Cctv, Video, Bell, Settings2, LogOut, Wifi, WifiOff } from "lucide-react";
 import clsx from "clsx";
 import { startRealtimeSync, DeactivatedError, SyncBundle } from "../lib/sync";
-import { syncCamerasToLocalEngine, isEngineOnline, mjpegStreamUrl } from "../lib/localEngine";
+import { syncCamerasToLocalEngine, isEngineOnline, mjpegStreamUrl, resetLocalEngineState } from "../lib/localEngine";
 
 export default function Workspace({ onDeactivated }: { onDeactivated: () => void }) {
   const [bundle, setBundle] = useState<SyncBundle | null>(null);
@@ -10,6 +10,10 @@ export default function Workspace({ onDeactivated }: { onDeactivated: () => void
   const [syncError, setSyncError] = useState(false);
 
   async function deactivate() {
+    // Otherwise a different user activating on this same machine afterward
+    // (without an app restart) would inherit this session's "already
+    // registered" camera-id set and the local engine could go stale/wrong.
+    resetLocalEngineState();
     await window.camai.deactivate();
     onDeactivated();
   }
