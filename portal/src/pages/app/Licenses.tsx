@@ -119,7 +119,9 @@ export default function LicensesPage() {
             <div className="space-x-2 whitespace-nowrap text-right" onClick={(e) => e.stopPropagation()}>
               {l.status === "active" && (
                 <>
-                  <button className="text-xs text-accent hover:underline" onClick={() => setTransferFor(l)}>Transfer</button>
+                  <button className="text-xs text-accent hover:underline" onClick={() => setTransferFor(l)}>
+                    {l.user_id ? "Transfer" : "Assign"}
+                  </button>
                   <button className="text-xs text-warn hover:underline" onClick={() =>
                     setConfirm({
                       title: "Suspend license",
@@ -187,7 +189,8 @@ export default function LicensesPage() {
         <GenerateForm onDone={(key) => { setGenOpen(false); if (key) setRevealed(key); refresh(); }} />
       </Modal>
 
-      <Modal open={!!transferFor} onClose={() => setTransferFor(null)} title={`Transfer ${transferFor?.key_hint}`}>
+      <Modal open={!!transferFor} onClose={() => setTransferFor(null)}
+             title={`${transferFor?.user_id ? "Transfer" : "Assign"} ${transferFor?.key_hint}`}>
         {transferFor && (
           <TransferForm license={transferFor} onDone={() => { setTransferFor(null); refresh(); }} />
         )}
