@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Plus, Video, CheckCircle2, XCircle, Loader2 } from "lucide-react";
-import { supabase } from "../../lib/supabase";
+import { supabase, getErrorMessage } from "../../lib/supabase";
 import { audit } from "../../lib/audit";
 import { Camera } from "../../lib/types";
 import { useAuth } from "../../contexts/AuthContext";
@@ -266,7 +266,10 @@ function AddCameraForm({ camera, onDone }: { camera?: CameraRow; onDone: () => v
   async function testConnection() {
     setTestState({ state: "testing" });
     const { data, error } = await supabase.functions.invoke("test-camera", { body: fields() });
-    if (error || !data) return setTestState({ state: "fail", message: "Test request failed." });
+    if (error || !data) {
+      const msg = await getErrorMessage(error) || "Test request failed.";
+      return setTestState({ state: "fail", message: msg });
+    }
     setTestState({ state: data.ok ? "ok" : "fail", message: data.message, channels: data.channels, deviceInfo: data.device_info });
   }
 
@@ -280,7 +283,7 @@ function AddCameraForm({ camera, onDone }: { camera?: CameraRow; onDone: () => v
     });
     setBusy(false);
     if (error) {
-      const detail = (error as any)?.context?.body?.error ?? (error as any)?.message;
+      const detail = await getErrorMessage(error);
       return setError(detail || `Failed to ${isEdit ? "update" : "add"} camera — check the connection details and try again.`);
     }
     audit(isEdit ? "camera.update" : "camera.create", "camera", data?.id ?? form.name, { module: "cameras", new: { name: form.name, source_type: form.source_type } });

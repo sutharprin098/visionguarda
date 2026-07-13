@@ -1,11 +1,17 @@
 import { useEffect, useState, useRef } from "react";
-import { Video, Bell, Settings2, LogOut, Wifi, WifiOff } from "lucide-react";
+import { Video, Bell, Settings2, LogOut, Wifi, WifiOff, Sliders } from "lucide-react";
 import clsx from "clsx";
 import { startRealtimeSync, DeactivatedError, SyncBundle } from "../lib/sync";
 import { syncCamerasToLocalEngine, syncAiModelToLocalEngine, isEngineOnline, mjpegStreamUrl, resetLocalEngineState, reportCameraHealth } from "../lib/localEngine";
 import ModelManagerUI from "../components/ModelManagerUI";
 
-export default function Workspace({ onDeactivated }: { onDeactivated: () => void }) {
+export default function Workspace({
+  onDeactivated,
+  onOpenAdminStudio,
+}: {
+  onDeactivated: () => void;
+  onOpenAdminStudio: () => void;
+}) {
   const [bundle, setBundle] = useState<SyncBundle | null>(null);
   const [tab, setTab] = useState<"cameras" | "alerts" | "settings">("cameras");
   const [syncError, setSyncError] = useState(false);
@@ -126,6 +132,14 @@ export default function Workspace({ onDeactivated }: { onDeactivated: () => void
               <n.icon size={15} /> {n.label}
             </button>
           ))}
+          {hasPermission("cameras.manage") && (
+            <button
+              onClick={onOpenAdminStudio}
+              className="mt-4 flex w-full items-center gap-2.5 rounded-md border border-accent/20 bg-accent/5 px-2.5 py-1.5 text-sm font-medium text-accent transition hover:bg-accent/10"
+            >
+              <Sliders size={15} /> Configure Canvas
+            </button>
+          )}
         </nav>
         <div className="border-t border-line p-3">
           <div className="flex items-center justify-between">

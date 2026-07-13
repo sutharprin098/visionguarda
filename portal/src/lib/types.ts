@@ -123,7 +123,7 @@ export interface Camera {
   id: string;
   org_id: string;
   name: string;
-  source_type: "rtsp" | "usb" | "onvif" | "ip" | "nvr" | "dvr";
+  source_type: "rtsp" | "usb" | "onvif" | "ip" | "nvr" | "dvr" | "screen_share";
   status: "online" | "offline" | "error";
   is_enabled: boolean;
   site_id: string | null;

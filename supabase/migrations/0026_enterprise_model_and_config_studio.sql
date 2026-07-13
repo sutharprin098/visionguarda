@@ -8,6 +8,12 @@ alter table public.cameras add column if not exists zones text default '[]';
 alter table public.cameras add column if not exists lines text default '[]';
 
 -- 2. Create public.ai_model_packages table
+-- Helper function to check if model package is public
+create or replace function public.is_public_model(org_id uuid)
+returns boolean language sql security definer as $$
+  select org_id is null;
+$$;
+
 create table public.ai_model_packages (
   id                uuid primary key default gen_random_uuid(),
   org_id            uuid references public.organizations(id) on delete cascade, -- null = public system models
@@ -42,11 +48,6 @@ create policy ai_model_packages_write on public.ai_model_packages for all
   using (app.is_super_admin() or (org_id = app.current_org_id() and app.has_perm('models.manage')))
   with check (app.is_super_admin() or (org_id = app.current_org_id() and app.has_perm('models.manage')));
 
--- Helper function to check if model package is public
-create or replace function public.is_public_model(org_id uuid)
-returns boolean language sql security definer as $$
-  select org_id is null;
-$$;
 
 
 -- 3. Create public.analytics_drawings table

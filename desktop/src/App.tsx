@@ -9,6 +9,7 @@ type Phase = "booting" | "needs-activation" | "ready";
 export default function App() {
   const [phase, setPhase] = useState<Phase>("booting");
   const [appType, setAppType] = useState<"desktop" | "admin" | null>(null);
+  const [currentScreen, setCurrentScreen] = useState<"workspace" | "admin-studio">("workspace");
 
   useEffect(() => {
     // No login screen, ever: try encrypted-vault auto-login; only fall back
@@ -29,8 +30,25 @@ export default function App() {
   if (phase === "needs-activation") {
     return <Activation onActivated={() => setPhase("ready")} />;
   }
-  if (appType === "admin") {
-    return <AdminStudio onDeactivated={() => setPhase("needs-activation")} />;
+  
+  if (appType === "admin" || currentScreen === "admin-studio") {
+    return (
+      <AdminStudio
+        onDeactivated={() => {
+          if (appType === "admin") {
+            setPhase("needs-activation");
+          } else {
+            setCurrentScreen("workspace");
+          }
+        }}
+      />
+    );
   }
-  return <Workspace onDeactivated={() => setPhase("needs-activation")} />;
+  
+  return (
+    <Workspace
+      onDeactivated={() => setPhase("needs-activation")}
+      onOpenAdminStudio={() => setCurrentScreen("admin-studio")}
+    />
+  );
 }

@@ -18,15 +18,7 @@ function machineGuid(): string {
 }
 
 function tpmPresent(): string {
-  try {
-    const out = execSync(
-      "powershell -NoProfile -Command \"(Get-CimInstance -Namespace 'root/cimv2/Security/MicrosoftTpm' -ClassName Win32_Tpm -ErrorAction SilentlyContinue) -ne $null\"",
-      { encoding: "utf8", windowsHide: true, timeout: 10_000 },
-    );
-    return out.trim();
-  } catch {
-    return "unknown";
-  }
+  return "unknown";
 }
 
 export interface FingerprintResult {

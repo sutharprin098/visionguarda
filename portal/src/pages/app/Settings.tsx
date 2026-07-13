@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { supabase } from "../../lib/supabase";
+import { supabase, getErrorMessage } from "../../lib/supabase";
 import { audit } from "../../lib/audit";
 import { useAuth } from "../../contexts/AuthContext";
 import { PageHeader, Tabs, Field, Badge, SecretReveal, ConfirmDialog } from "../../components/ui";
@@ -82,7 +82,7 @@ function ProfileTab() {
     const { error: err } = await supabase.functions.invoke("delete-account");
     setBusy(false);
     if (err) {
-      const msg = err.message || "Failed to delete account.";
+      const msg = await getErrorMessage(err);
       setError(msg);
       return;
     }

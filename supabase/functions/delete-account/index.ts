@@ -47,7 +47,9 @@ Deno.serve(async (req: Request) => {
     // Delete the user from authentication (which cascades and deletes the profile row in public.profiles)
     const { error: deleteError } = await db.auth.admin.deleteUser(uid);
     if (deleteError) {
-      return json({ error: deleteError.message }, 400);
+      console.error("deleteUser failed:", deleteError);
+      const errMsg = deleteError.message || (typeof deleteError === "string" ? deleteError : JSON.stringify(deleteError)) || "Delete user failed";
+      return json({ error: errMsg }, 400);
     }
 
     // Audit log the self-deletion
