@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain } from "electron";
+import { app, BrowserWindow, ipcMain, session, desktopCapturer } from "electron";
 import { join } from "node:path";
 import { existsSync } from "node:fs";
 import { computeFingerprint } from "./fingerprint";
@@ -110,5 +110,21 @@ ipcMain.handle("get-config", () => {
 
 setupDownloadHandlers(ipcMain, () => win);
 
-app.whenReady().then(createWindow);
+app.whenReady().then(() => {
+  createWindow();
+
+  session.defaultSession.setDisplayMediaRequestHandler(async (request, callback) => {
+    try {
+      const sources = await desktopCapturer.getSources({ types: ["screen", "window"] });
+      if (sources.length > 0) {
+        callback({ video: sources[0] });
+      } else {
+        callback({ video: undefined });
+      }
+    } catch (err) {
+      console.error("Failed to get screen sources:", err);
+      callback({ video: undefined });
+    }
+  });
+});
 app.on("window-all-closed", () => app.quit());
