@@ -31,6 +31,7 @@ function createWindow() {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: false,
+      webSecurity: false,
     },
   });
   if (process.env.VITE_DEV_SERVER_URL) {

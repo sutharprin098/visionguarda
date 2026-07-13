@@ -18,6 +18,11 @@ export default function Workspace({
   const [bundle, setBundle] = useState<SyncBundle | null>(null);
   const [tab, setTab] = useState<"cameras" | "alerts" | "settings" | "engine">("cameras");
   const [syncError, setSyncError] = useState(false);
+  const [isPackaged, setIsPackaged] = useState(true);
+
+  useEffect(() => {
+    window.camai.getConfig().then((cfg) => setIsPackaged(cfg.isPackaged));
+  }, []);
 
   async function deactivate() {
     // Otherwise a different user activating on this same machine afterward
@@ -223,7 +228,7 @@ export default function Workspace({
       </aside>
 
       <main className="flex-1 overflow-y-auto p-6">
-        {tab === "cameras" && <CamerasView cameras={bundle.cameras} />}
+        {tab === "cameras" && <CamerasView cameras={bundle.cameras} isPackaged={isPackaged} />}
         {tab === "alerts" && (
           <div className="space-y-2">
             {!bundle.notifications.length && <Panel title="Alerts">No unread alerts.</Panel>}
@@ -312,10 +317,12 @@ function EngineDiagnosticPanel({
   healthInfo,
   procStatus,
   logs,
+  isPackaged,
 }: {
   healthInfo: EngineHealthInfo | null;
   procStatus: any;
   logs: string[];
+  isPackaged: boolean;
 }) {
   const [recovering, setRecovering] = useState(false);
 
@@ -329,13 +336,27 @@ function EngineDiagnosticPanel({
   const pid = procStatus?.pid;
 
   // Try to find exact reason or exception in the last 15 logs if not returned in health/proc status
-  let errorReason = procStatus?.lastError || healthInfo?.engine_error || "";
-  if (!errorReason && logs.length > 0) {
-    const errorLogs = logs.filter(l => l.includes("ERROR") || l.includes("Error") || l.includes("Traceback") || l.includes("Exception") || l.includes("failed"));
-    if (errorLogs.length > 0) {
-      errorReason = errorLogs.slice(-3).join("\n");
-    } else {
-      errorReason = logs.slice(-3).join("\n");
+  let errorReason = "";
+  if (!isPackaged) {
+    errorReason = procStatus?.lastError || healthInfo?.engine_error || "";
+    if (!errorReason && logs.length > 0) {
+      const errorLogs = logs.filter(l => l.includes("ERROR") || l.includes("Error") || l.includes("Traceback") || l.includes("Exception") || l.includes("failed"));
+      if (errorLogs.length > 0) {
+        errorReason = errorLogs.slice(-3).join("\n");
+      } else {
+        errorReason = logs.slice(-3).join("\n");
+      }
+    }
+  } else {
+    // Packaged production app: show clean business diagnostics only
+    if (procStatus?.state === "starting") {
+      errorReason = "Local AI engine is starting up. Preparing environment...";
+    } else if (healthInfo && !healthInfo.ready && healthInfo.engine_status === "loading") {
+      errorReason = "Local AI Engine is loading model package. This may take a moment...";
+    } else if (procStatus?.state === "crash_looping") {
+      errorReason = "Local AI Engine failed to initialize. Please contact support.";
+    } else if (!healthInfo?.online) {
+      errorReason = "Waiting for local engine service to respond...";
     }
   }
 
@@ -417,7 +438,7 @@ function EngineDiagnosticPanel({
   );
 }
 
-function CamerasView({ cameras }: { cameras: any[] }) {
+function CamerasView({ cameras, isPackaged }: { cameras: any[]; isPackaged: boolean }) {
   const [healthInfo, setHealthInfo] = useState<EngineHealthInfo | null>(null);
   const [procStatus, setProcStatus] = useState<any>(null);
   const [logs, setLogs] = useState<string[]>([]);
@@ -496,7 +517,7 @@ function CamerasView({ cameras }: { cameras: any[] }) {
   return (
     <div className="space-y-4">
       {isEngineOffline && (
-        <EngineDiagnosticPanel healthInfo={healthInfo} procStatus={procStatus} logs={logs} />
+        <EngineDiagnosticPanel healthInfo={healthInfo} procStatus={procStatus} logs={logs} isPackaged={isPackaged} />
       )}
       <div className="grid grid-cols-2 gap-4 xl:grid-cols-3">
         {cameras.map((c) => (

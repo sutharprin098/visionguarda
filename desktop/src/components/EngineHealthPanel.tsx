@@ -30,7 +30,7 @@ export default function EngineHealthPanel() {
   const [pythonPath, setPythonPath] = useState("");
   const [engineDir, setEngineDir] = useState("");
   const [saveError, setSaveError] = useState<string | null>(null);
-  const [isPackaged, setIsPackaged] = useState(false);
+  const [isPackaged, setIsPackaged] = useState(true);
   const logBoxRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
