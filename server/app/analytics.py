@@ -220,6 +220,76 @@ class _SpeedKalman1D:
         return self.value
 
 
+def _detect_ppe_hsv(frame, bbox, frame_w, frame_h):
+    """
+    HSV color segmentation on person crops to check for hard-hats and high-vis vests.
+    - Head area: top 18% of person bounding box.
+    - Torso area: 18% to 55% of person bounding box.
+    """
+    x1 = max(0, int(bbox["x1"]))
+    y1 = max(0, int(bbox["y1"]))
+    x2 = min(frame_w - 1, int(bbox["x2"]))
+    y2 = min(frame_h - 1, int(bbox["y2"]))
+    
+    h = y2 - y1
+    w = x2 - x1
+    if h <= 10 or w <= 10:
+        return False, False
+        
+    person_crop = frame[y1:y2, x1:x2]
+    if person_crop.size == 0:
+        return False, False
+        
+    hsv = cv2.cvtColor(person_crop, cv2.COLOR_BGR2HSV)
+    
+    # 1. Helmet check (top 18% of crop)
+    head_h = int(h * 0.18)
+    has_helmet = False
+    if head_h > 0:
+        head_crop = hsv[0:head_h, :]
+        if head_crop.size > 0:
+            total_head = head_crop.shape[0] * head_crop.shape[1]
+            
+            # Common helmet colors
+            mask_yellow = cv2.inRange(head_crop, np.array([15, 80, 100]), np.array([35, 255, 255]))
+            mask_blue = cv2.inRange(head_crop, np.array([90, 70, 80]), np.array([130, 255, 255]))
+            mask_red1 = cv2.inRange(head_crop, np.array([0, 80, 80]), np.array([10, 255, 255]))
+            mask_red2 = cv2.inRange(head_crop, np.array([170, 80, 80]), np.array([180, 255, 255]))
+            mask_white = cv2.inRange(head_crop, np.array([0, 0, 190]), np.array([180, 50, 255]))
+            
+            helmet_pixels = (
+                cv2.countNonZero(mask_yellow) +
+                cv2.countNonZero(mask_blue) +
+                cv2.countNonZero(mask_red1) +
+                cv2.countNonZero(mask_red2) +
+                cv2.countNonZero(mask_white)
+            )
+            has_helmet = (helmet_pixels / total_head) > 0.12
+            
+    # 2. Vest check (18% to 55% of crop)
+    torso_start = head_h
+    torso_end = int(h * 0.55)
+    has_vest = False
+    if torso_end > torso_start:
+        torso_crop = hsv[torso_start:torso_end, :]
+        if torso_crop.size > 0:
+            total_torso = torso_crop.shape[0] * torso_crop.shape[1]
+            
+            # Neon green / high-vis orange
+            mask_neon = cv2.inRange(torso_crop, np.array([30, 60, 80]), np.array([85, 255, 255]))
+            mask_orange1 = cv2.inRange(torso_crop, np.array([0, 80, 100]), np.array([25, 255, 255]))
+            mask_orange2 = cv2.inRange(torso_crop, np.array([155, 80, 100]), np.array([180, 255, 255]))
+            
+            vest_pixels = (
+                cv2.countNonZero(mask_neon) +
+                cv2.countNonZero(mask_orange1) +
+                cv2.countNonZero(mask_orange2)
+            )
+            has_vest = (vest_pixels / total_torso) > 0.15
+            
+    return has_helmet, has_vest
+
+
 # --- Analytics Engines ---
 
 class CameraAnalytics:
@@ -322,7 +392,139 @@ class CameraAnalytics:
         self.CROWD_GRID = 4  # 4x4 cells
         self.CROWD_THRESHOLDS = {"moderate": 3, "high": 6, "critical": 10}  # people per cell
 
-    def update(self, detections, zones, lines, frame_w: int = 640, frame_h: int = 480, frame=None, rules=None):
+    def update(self, detections, zones, lines, frame_w: int = 640, frame_h: int = 480, frame=None, rules=None, zone_profile=None, profile_features=None):
+        features = json.loads(profile_features) if isinstance(profile_features, str) else (profile_features or {})
+        
+        # 1. Schedule Gating
+        schedule_active = True
+        sched = features.get("schedule", {})
+        if sched.get("enabled"):
+            params = sched.get("params", {})
+            mode = params.get("mode", "always")
+            if mode != "always":
+                import datetime
+                now_dt = datetime.datetime.now()
+                weekday = now_dt.weekday() # 0 = Monday, 6 = Sunday
+                current_time = now_dt.strftime("%H:%M")
+                if mode == "business":
+                    schedule_active = (0 <= weekday <= 4) and ("08:00" <= current_time <= "18:00")
+                elif mode == "night":
+                    schedule_active = (current_time >= "18:00") or (current_time <= "06:00")
+                elif mode == "custom":
+                    start_t = params.get("start", "08:00")
+                    end_t = params.get("end", "18:00")
+                    if start_t <= end_t:
+                        schedule_active = start_t <= current_time <= end_t
+                    else:
+                        schedule_active = (current_time >= start_t) or (current_time <= end_t)
+
+        # 2. Dynamic Class Filtering per Profile (applied to incoming YOLO detections)
+        if zone_profile == "traffic":
+            detections = [d for d in detections if d["class"] in VEHICLE_CLASSES]
+        elif zone_profile == "security":
+            sec_classes = {"person", "backpack", "handbag", "suitcase", "fire", "smoke", "face", "dog", "cat", "bear"}
+            detections = [d for d in detections if d["class"] in sec_classes]
+        elif zone_profile == "factory":
+            fac_classes = {"person", "helmet", "vest", "gloves", "shoes", "no_helmet", "no_vest"}
+            detections = [d for d in detections if d["class"] in fac_classes]
+
+        # 3. Enhance detections with Face and PPE heuristics
+        enhanced_detections = []
+        for det in detections:
+            enhanced_detections.append(det)
+            
+            # Face Detection Heuristic (Security Profile)
+            if zone_profile == "security" and features.get("face_detection", {}).get("enabled"):
+                if det["class"] == "person":
+                    bbox = det["bbox"]
+                    x1, y1, x2, y2 = bbox["x1"], bbox["y1"], bbox["x2"], bbox["y2"]
+                    h = y2 - y1
+                    face_y2 = y1 + int(h * 0.18)
+                    enhanced_detections.append({
+                        "class": "face",
+                        "confidence": det.get("confidence", 0.9),
+                        "bbox": {"x1": x1, "y1": y1, "x2": x2, "y2": face_y2}
+                    })
+                    
+            # PPE Detection Heuristic (Factory Profile)
+            if zone_profile == "factory" and features.get("ppe_detection", {}).get("enabled") and frame is not None:
+                if det["class"] == "person":
+                    bbox = det["bbox"]
+                    has_helmet, has_vest = _detect_ppe_hsv(frame, bbox, frame_w, frame_h)
+                    
+                    x1, y1, x2, y2 = bbox["x1"], bbox["y1"], bbox["x2"], bbox["y2"]
+                    h = y2 - y1
+                    
+                    # Helmet region
+                    helmet_y2 = y1 + int(h * 0.18)
+                    if has_helmet:
+                        enhanced_detections.append({
+                            "class": "helmet",
+                            "confidence": 0.95,
+                            "bbox": {"x1": x1, "y1": y1, "x2": x2, "y2": helmet_y2}
+                        })
+                    else:
+                        enhanced_detections.append({
+                            "class": "no_helmet",
+                            "confidence": 0.95,
+                            "bbox": {"x1": x1, "y1": y1, "x2": x2, "y2": helmet_y2}
+                        })
+                        
+                    # Vest region
+                    vest_y1 = y1 + int(h * 0.18)
+                    vest_y2 = y1 + int(h * 0.55)
+                    if has_vest:
+                        enhanced_detections.append({
+                            "class": "vest",
+                            "confidence": 0.95,
+                            "bbox": {"x1": x1, "y1": vest_y1, "x2": x2, "y2": vest_y2}
+                        })
+                    else:
+                        enhanced_detections.append({
+                            "class": "no_vest",
+                            "confidence": 0.95,
+                            "bbox": {"x1": x1, "y1": vest_y1, "x2": x2, "y2": vest_y2}
+                        })
+                        
+        detections = enhanced_detections
+
+        # 4. Fire & Smoke detection (Security / Factory)
+        if frame is not None and zone_profile in ("security", "factory"):
+            hsv_fire = False
+            hsv_smoke = False
+            
+            small_frame = cv2.resize(frame, (160, 120))
+            hsv_img = cv2.cvtColor(small_frame, cv2.COLOR_BGR2HSV)
+            
+            if features.get("fire_detection", {}).get("enabled"):
+                mask1 = cv2.inRange(hsv_img, np.array([0, 100, 180]), np.array([20, 255, 255]))
+                mask2 = cv2.inRange(hsv_img, np.array([160, 100, 180]), np.array([180, 255, 255]))
+                fire_pixels = cv2.countNonZero(mask1) + cv2.countNonZero(mask2)
+                if fire_pixels > int(0.005 * 160 * 120):
+                    hsv_fire = True
+                    
+            if features.get("smoke_detection", {}).get("enabled"):
+                mask_smoke = cv2.inRange(hsv_img, np.array([0, 0, 120]), np.array([180, 50, 220]))
+                smoke_pixels = cv2.countNonZero(mask_smoke)
+                if smoke_pixels > int(0.02 * 160 * 120):
+                    hsv_smoke = True
+                    
+            if hsv_fire:
+                detections.append({
+                    "class": "fire",
+                    "confidence": 0.9,
+                    "bbox": {"x1": 10, "y1": 10, "x2": frame_w - 10, "y2": frame_h - 10}
+                })
+            if hsv_smoke:
+                detections.append({
+                    "class": "smoke",
+                    "confidence": 0.85,
+                    "bbox": {"x1": 10, "y1": 10, "x2": frame_w - 10, "y2": frame_h - 10}
+                })
+
+        # Save schedule state for later gating of standard alerts
+        self._schedule_active = schedule_active
+
         active_track_ids = set()
         alerts = []
         now = time.time()
@@ -656,7 +858,7 @@ class CameraAnalytics:
                     
                     # Custom rule check for zone_intrusion
                     custom_triggered = False
-                    if rules:
+                    if rules and (zone_profile is None or zone_profile == "custom"):
                         for rule in rules:
                             if not rule.get("is_enabled", True):
                                 continue
@@ -694,7 +896,7 @@ class CameraAnalytics:
                     
                     if not custom_triggered:
                         alert_key = f"{alert_type}_{z_id}_{tid}"
-                        if now - self.alert_cooldowns.get(alert_key, 0) > self.cooldown_period:
+                        if zone_profile is None and now - self.alert_cooldowns.get(alert_key, 0) > self.cooldown_period:
                             alerts.append({
                                 "type": alert_type,
                                 "message": f"{class_name.capitalize()} (ID: {tid}) entered {zone_type} Zone '{z_name}'",
@@ -732,7 +934,7 @@ class CameraAnalytics:
                 time_inside = now - enter_t
                 
                 custom_loiter_triggered = False
-                if rules:
+                if rules and (zone_profile is None or zone_profile == "custom"):
                     for rule in rules:
                         if not rule.get("is_enabled", True):
                             continue
@@ -770,7 +972,7 @@ class CameraAnalytics:
                                         })
                                         self.alert_cooldowns[alert_key] = now
                                         
-                if not custom_loiter_triggered and time_inside > float(dwell_limit):
+                if zone_profile is None and not custom_loiter_triggered and time_inside > float(dwell_limit):
                     loitering_count += 1
                     alert_key = f"loitering_{z_id}_{tid}"
                     if now - self.alert_cooldowns.get(alert_key, 0) > 10.0:
@@ -789,7 +991,7 @@ class CameraAnalytics:
             self.zone_max_occupancy[z_id] = max(self.zone_max_occupancy[z_id], occupancy)
             
             # Overcrowding Warning
-            if occupancy > int(max_occupancy):
+            if zone_profile is None and occupancy > int(max_occupancy):
                 alert_key = f"overcrowding_{z_id}"
                 if now - self.alert_cooldowns.get(alert_key, 0) > 10.0:
                     alerts.append({
@@ -800,7 +1002,7 @@ class CameraAnalytics:
                     self.alert_cooldowns[alert_key] = now
                     
             # Zone Empty/Full transition alerts
-            if occupancy == 0 and len(exited_tids) > 0:
+            if zone_profile is None and occupancy == 0 and len(exited_tids) > 0:
                 alert_key = f"zone_empty_{z_id}"
                 if now - self.alert_cooldowns.get(alert_key, 0) > 5.0:
                     alerts.append({
@@ -809,7 +1011,7 @@ class CameraAnalytics:
                         "zone_id": z_id
                     })
                     self.alert_cooldowns[alert_key] = now
-            elif occupancy >= int(max_occupancy) and occupancy > 0:
+            elif zone_profile is None and occupancy >= int(max_occupancy) and occupancy > 0:
                 alert_key = f"zone_full_{z_id}"
                 if now - self.alert_cooldowns.get(alert_key, 0) > 10.0:
                     alerts.append({
@@ -906,7 +1108,7 @@ class CameraAnalytics:
                     is_out = side_prev > 0 >= side_curr
 
                     custom_crossing_triggered = False
-                    if rules:
+                    if rules and (zone_profile is None or zone_profile == "custom"):
                         for rule in rules:
                             if not rule.get("is_enabled", True):
                                 continue
@@ -968,7 +1170,7 @@ class CameraAnalytics:
                             self.counter_out += 1
 
                     if not custom_crossing_triggered:
-                        if is_in and category == "person":
+                        if zone_profile is None and is_in and category == "person":
                             alert_key = f"crossing_{l_id}_{track_id}"
                             if now - self.alert_cooldowns.get(alert_key, 0) > self.cooldown_period:
                                 alerts.append({
@@ -978,7 +1180,7 @@ class CameraAnalytics:
                                 })
                                 self.alert_cooldowns[alert_key] = now
                         elif is_out:
-                            if line_type in ["one_way", "wrong_direction"]:
+                            if zone_profile is None and line_type in ["one_way", "wrong_direction"]:
                                 alert_key = f"wrong_dir_{l_id}_{track_id}"
                                 if now - self.alert_cooldowns.get(alert_key, 0) > self.cooldown_period:
                                     alerts.append({
@@ -987,7 +1189,7 @@ class CameraAnalytics:
                                         "line_id": l_id
                                     })
                                     self.alert_cooldowns[alert_key] = now
-                            elif category == "person":
+                            elif zone_profile is None and category == "person":
                                 alert_key = f"crossing_{l_id}_{track_id}"
                                 if now - self.alert_cooldowns.get(alert_key, 0) > self.cooldown_period:
                                     alerts.append({
@@ -1019,7 +1221,7 @@ class CameraAnalytics:
                 det["speed_calibrated"] = False
 
         # Custom speed limit rules check
-        if rules:
+        if rules and (zone_profile is None or zone_profile == "custom"):
             for det in detections:
                 track_id = det.get("track_id")
                 if track_id is None:
@@ -1054,6 +1256,196 @@ class CameraAnalytics:
                                         "rule_id": rule.get("id")
                                     })
                                     self.alert_cooldowns[alert_key] = now
+
+        # 5. Profile-specific alerts (Traffic, Security, Factory, Custom)
+        if schedule_active:
+            if zone_profile == "traffic":
+                wrong_way_cfg = features.get("wrong_way_detection", {})
+                if wrong_way_cfg.get("enabled"):
+                    allowed_heading = float(wrong_way_cfg.get("allowed_heading", 0.0))
+                    for det in detections:
+                        track_id = det.get("track_id")
+                        if track_id is None:
+                            continue
+                        cls_name = self.track_classes.get(track_id, "person")
+                        if _object_category(cls_name) != "vehicle":
+                            continue
+                        hist = self.track_history.get(track_id, [])
+                        if len(hist) >= 3:
+                            p_start = hist[-3]
+                            p_end = hist[-1]
+                            dx = p_end[0] - p_start[0]
+                            dy = p_end[1] - p_start[1]
+                            import math
+                            angle_rad = math.atan2(dx, -dy)
+                            heading = (math.degrees(angle_rad) + 360.0) % 360.0
+                            
+                            diff = abs(heading - allowed_heading)
+                            diff = min(diff, 360.0 - diff)
+                            if diff > 120.0:
+                                alert_key = f"traffic_wrong_way_{track_id}"
+                                if now - self.alert_cooldowns.get(alert_key, 0) > 15.0:
+                                    alerts.append({
+                                        "type": "wrong_direction",
+                                        "message": f"Wrong-Way Alert: Vehicle (ID: {track_id}) moving opposite to permitted direction ({int(heading)}° vs allowed {int(allowed_heading)}°)",
+                                        "track_id": track_id
+                                    })
+                                    self.alert_cooldowns[alert_key] = now
+
+                speed_limit_cfg = features.get("speed_limit", {})
+                if speed_limit_cfg.get("enabled"):
+                    limit_val = float(speed_limit_cfg.get("limit", 50.0))
+                    for det in detections:
+                        track_id = det.get("track_id")
+                        if track_id is not None:
+                            cls_name = self.track_classes.get(track_id, "person")
+                            if _object_category(cls_name) == "vehicle":
+                                speed = det.get("speed", 0.0)
+                                if speed > limit_val:
+                                    alert_key = f"traffic_speed_violation_{track_id}"
+                                    if now - self.alert_cooldowns.get(alert_key, 0) > 15.0:
+                                        alerts.append({
+                                            "type": "speed_limit",
+                                            "message": f"Speed Violation: Vehicle (ID: {track_id}) detected at {int(speed)} km/h (Limit: {int(limit_val)} km/h)",
+                                            "track_id": track_id
+                                        })
+                                        self.alert_cooldowns[alert_key] = now
+
+            elif zone_profile == "security":
+                restricted_cfg = features.get("restricted_area", {})
+                if restricted_cfg.get("enabled"):
+                    for zone in zones:
+                        z_type = zone.get("zoneType")
+                        if z_type in ("privacy_mask", "exclusion_zone"):
+                            continue
+                        z_id = zone.get("id")
+                        z_name = zone.get("name", "Restricted Area")
+                        current_active = self.zone_active_tracks.get(z_id, {})
+                        for tid in current_active:
+                            cls_name = self.track_classes.get(tid, "person")
+                            if cls_name in ("person", "car", "truck", "dog", "cat", "bear"):
+                                alert_key = f"security_restricted_{z_id}_{tid}"
+                                if now - self.alert_cooldowns.get(alert_key, 0) > 15.0:
+                                    alerts.append({
+                                        "type": "human_entry" if cls_name == "person" else "object_entry",
+                                        "message": f"Restricted Area Intrusion: {cls_name.capitalize()} (ID: {tid}) detected inside '{z_name}'",
+                                        "zone_id": z_id
+                                    })
+                                    self.alert_cooldowns[alert_key] = now
+
+                loitering_cfg = features.get("loitering", {})
+                if loitering_cfg.get("enabled"):
+                    dwell_thresh = float(loitering_cfg.get("dwell_time", 15.0))
+                    for zone in zones:
+                        z_type = zone.get("zoneType")
+                        if z_type in ("privacy_mask", "exclusion_zone"):
+                            continue
+                        z_id = zone.get("id")
+                        z_name = zone.get("name", "Zone")
+                        current_active = self.zone_active_tracks.get(z_id, {})
+                        for tid in current_active:
+                            enter_t = current_active.get(tid, now)
+                            time_inside = now - enter_t
+                            if time_inside > dwell_thresh:
+                                cls_name = self.track_classes.get(tid, "person")
+                                if cls_name == "person":
+                                    alert_key = f"security_loitering_{z_id}_{tid}"
+                                    if now - self.alert_cooldowns.get(alert_key, 0) > 15.0:
+                                        alerts.append({
+                                            "type": "loitering",
+                                            "message": f"Security Loitering: Person (ID: {tid}) loitering in '{z_name}' for {int(time_inside)}s",
+                                            "zone_id": z_id
+                                        })
+                                        self.alert_cooldowns[alert_key] = now
+
+                face_cfg = features.get("face_detection", {})
+                if face_cfg.get("enabled"):
+                    for det in detections:
+                        if det["class"] == "face":
+                            if now - self.alert_cooldowns.get("security_face_detected_time", 0) > 10.0:
+                                alerts.append({
+                                    "type": "face_detection",
+                                    "message": "Face Detected: Human facial features recognized"
+                                })
+                                self.alert_cooldowns["security_face_detected_time"] = now
+
+                fire_cfg = features.get("fire_detection", {})
+                if fire_cfg.get("enabled"):
+                    for det in detections:
+                        if det["class"] == "fire":
+                            alert_key = "security_fire_detected"
+                            if now - self.alert_cooldowns.get(alert_key, 0) > 15.0:
+                                alerts.append({
+                                    "type": "fire_alert",
+                                    "message": "CRITICAL FIRE WARNING: Fire/Flame signature detected!"
+                                })
+                                self.alert_cooldowns[alert_key] = now
+                                
+                smoke_cfg = features.get("smoke_detection", {})
+                if smoke_cfg.get("enabled"):
+                    for det in detections:
+                        if det["class"] == "smoke":
+                            alert_key = "security_smoke_detected"
+                            if now - self.alert_cooldowns.get(alert_key, 0) > 20.0:
+                                alerts.append({
+                                    "type": "smoke_alert",
+                                    "message": "Smoke Alarm: Smoke plume detected in the environment"
+                                })
+                                self.alert_cooldowns[alert_key] = now
+
+                fall_cfg = features.get("fall_detection", {})
+                if fall_cfg.get("enabled"):
+                    for det in detections:
+                        if det["class"] == "person":
+                            bbox = det["bbox"]
+                            w_px = bbox["x2"] - bbox["x1"]
+                            h_px = bbox["y2"] - bbox["y1"]
+                            if h_px > 0 and (w_px / h_px) > 1.25:
+                                track_id = det.get("track_id")
+                                alert_key = f"security_fall_{track_id or now}"
+                                if now - self.alert_cooldowns.get(alert_key, 0) > 20.0:
+                                    alerts.append({
+                                        "type": "fall_alert",
+                                        "message": f"FALL DETECTION WARNING: Person fell down! (ID: {track_id or 'unknown'})"
+                                    })
+                                    self.alert_cooldowns[alert_key] = now
+
+            elif zone_profile == "factory":
+                hazard_cfg = features.get("hazard_zone", {})
+                if hazard_cfg.get("enabled"):
+                    for zone in zones:
+                        z_type = zone.get("zoneType")
+                        if z_type in ("privacy_mask", "exclusion_zone"):
+                            continue
+                        z_id = zone.get("id")
+                        z_name = zone.get("name", "Hazard Zone")
+                        current_active = self.zone_active_tracks.get(z_id, {})
+                        for tid in current_active:
+                            cls_name = self.track_classes.get(tid, "person")
+                            if cls_name == "person":
+                                alert_key = f"factory_hazard_{z_id}_{tid}"
+                                if now - self.alert_cooldowns.get(alert_key, 0) > 15.0:
+                                    alerts.append({
+                                        "type": "human_entry",
+                                        "message": f"Hazard Zone Entry: Worker (ID: {tid}) entered restricted hazard area '{z_name}'",
+                                        "zone_id": z_id
+                                    })
+                                    self.alert_cooldowns[alert_key] = now
+
+                ppe_cfg = features.get("ppe_detection", {})
+                if ppe_cfg.get("enabled"):
+                    for det in detections:
+                        if det["class"] in ("no_helmet", "no_vest"):
+                            track_id = det.get("track_id")
+                            violation_type = "No Helmet" if det["class"] == "no_helmet" else "No Vest"
+                            alert_key = f"factory_ppe_{violation_type}_{track_id or now}"
+                            if now - self.alert_cooldowns.get(alert_key, 0) > 25.0:
+                                alerts.append({
+                                    "type": "ppe_violation",
+                                    "message": f"PPE Violation: worker (ID: {track_id or 'unknown'}) is missing required {violation_type.split()[-1].lower()}!",
+                                    "track_id": track_id
+                                })
+                                self.alert_cooldowns[alert_key] = now
 
         # Cleanup tracks that have been gone long enough to be presumed
         # permanently gone (not just occluded — see REID_GRACE_SECONDS /

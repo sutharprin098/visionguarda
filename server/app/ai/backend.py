@@ -195,28 +195,82 @@ class EngineBackend:
         return 0
 
     def _initialize_backend(self):
-        base_name = os.path.splitext(self.model_name)[0]
-        ov_xml_path = os.path.join(os.path.dirname(self.model_name) or ".", f"{base_name}_openvino_model", f"{base_name}.xml")
-        onnx_path = os.path.join(os.path.dirname(self.model_name) or ".", f"{base_name}.onnx")
-        pt_path = self.model_name
+        from app.config import MODELS_DIR, BASE_DIR
+        import sys
+
+        # Determine candidate search paths
+        search_dirs = [
+            os.getcwd(),
+            str(MODELS_DIR),
+            str(BASE_DIR),
+        ]
+        
+        # If frozen PyInstaller, search near executable
+        if getattr(sys, "frozen", False):
+            search_dirs.append(os.path.dirname(sys.executable))
+            if hasattr(sys, "_MEIPASS"):
+                search_dirs.append(sys._MEIPASS)
+                
+        # Also try parent directory of BASE_DIR (e.g. server base folder relative to build)
+        search_dirs.append(os.path.dirname(str(BASE_DIR)))
+
+        resolved_pt = None
+        resolved_onnx = None
+        resolved_ov_xml = None
+
+        base_name = os.path.splitext(os.path.basename(self.model_name))[0]
+
+        # 1. If self.model_name is an absolute path that exists, use it
+        if os.path.isabs(self.model_name) and os.path.exists(self.model_name):
+            resolved_pt = self.model_name
+            dir_name = os.path.dirname(self.model_name)
+            xml = os.path.join(dir_name, f"{base_name}_openvino_model", f"{base_name}.xml")
+            onnx = os.path.join(dir_name, f"{base_name}.onnx")
+            if os.path.exists(xml):
+                resolved_ov_xml = xml
+            if os.path.exists(onnx):
+                resolved_onnx = onnx
+        else:
+            # 2. Search for the files in candidate directories
+            for d in search_dirs:
+                if not d:
+                    continue
+                pt = os.path.join(d, self.model_name)
+                xml = os.path.join(d, f"{base_name}_openvino_model", f"{base_name}.xml")
+                onnx = os.path.join(d, f"{base_name}.onnx")
+                
+                if os.path.exists(pt) and not resolved_pt:
+                    resolved_pt = pt
+                if os.path.exists(xml) and not resolved_ov_xml:
+                    resolved_ov_xml = xml
+                if os.path.exists(onnx) and not resolved_onnx:
+                    resolved_onnx = onnx
+
+            # Fallback to defaults/as-is if not found
+            if not resolved_pt:
+                resolved_pt = self.model_name
+            if not resolved_ov_xml:
+                resolved_ov_xml = os.path.join(".", f"{base_name}_openvino_model", f"{base_name}.xml")
+            if not resolved_onnx:
+                resolved_onnx = os.path.join(".", f"{base_name}.onnx")
 
         candidates = []
         if "openvino" in self.preferred_backends and HAS_OPENVINO:
-            if os.path.exists(ov_xml_path):
-                candidates.append(("openvino", ov_xml_path))
-            elif os.path.exists(onnx_path):
-                candidates.append(("openvino", onnx_path))
+            if os.path.exists(resolved_ov_xml):
+                candidates.append(("openvino", resolved_ov_xml))
+            elif os.path.exists(resolved_onnx):
+                candidates.append(("openvino", resolved_onnx))
 
-        if "onnx" in self.preferred_backends and HAS_ONNXRUNTIME and os.path.exists(onnx_path):
-            candidates.append(("onnx", onnx_path))
+        if "onnx" in self.preferred_backends and HAS_ONNXRUNTIME and os.path.exists(resolved_onnx):
+            candidates.append(("onnx", resolved_onnx))
 
-        if "pytorch" in self.preferred_backends and HAS_ULTRALYTICS and os.path.exists(pt_path):
-            candidates.append(("pytorch", pt_path))
+        if "pytorch" in self.preferred_backends and HAS_ULTRALYTICS and os.path.exists(resolved_pt):
+            candidates.append(("pytorch", resolved_pt))
 
         if not candidates:
             raise RuntimeError(
                 f"No supported backend source found for {self.model_name}. "
-                f"OpenVINO model path: {ov_xml_path}, ONNX path: {onnx_path}, PT path: {pt_path}"
+                f"OpenVINO model path: {resolved_ov_xml}, ONNX path: {resolved_onnx}, PT path: {resolved_pt}"
             )
 
         # Stable sort: ties (e.g. two CPU-only options) keep preferred_backends order.

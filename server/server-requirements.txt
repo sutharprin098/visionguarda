@@ -20,3 +20,4 @@ scipy==1.13.1
 # silently falls back to a browser-unplayable codec (mp4v) instead of
 # raising. imageio-ffmpeg bundles a portable ffmpeg binary with libx264.
 imageio-ffmpeg==0.6.0
+psutil==5.9.8

@@ -2,6 +2,7 @@ import {
   LayoutDashboard, Building2, Users, ShieldCheck, KeyRound, MonitorSmartphone,
   MonitorCheck, Video, Layers, MapPin, BarChart3, BellRing, Siren,
   FileText, Download, CreditCard, ScrollText, Bell, Settings, LifeBuoy,
+  BrainCircuit,
   type LucideIcon,
 } from "lucide-react";
 
@@ -43,6 +44,7 @@ export const NAV: { group: string; items: NavItem[] }[] = [
       { to: "/app/cameras", label: "Cameras", icon: Video },
       { to: "/app/camera-groups", label: "Camera Groups", icon: Layers, perm: "cameras.manage" },
       { to: "/app/sites", label: "Sites", icon: MapPin, perm: "cameras.manage" },
+      { to: "/app/models", label: "AI Model Library", icon: BrainCircuit, superOnly: true },
     ],
   },
   {

@@ -16,5 +16,29 @@ contextBridge.exposeInMainWorld("camai", {
     return () => {
       ipcRenderer.removeListener(channel, listener);
     };
-  }
+  },
+  engine: {
+    start: () => ipcRenderer.invoke("engine-start"),
+    stop: () => ipcRenderer.invoke("engine-stop"),
+    restart: () => ipcRenderer.invoke("engine-restart"),
+    getStatus: () => ipcRenderer.invoke("engine-get-status"),
+    getLogs: () => ipcRenderer.invoke("engine-get-logs"),
+    getPath: () => ipcRenderer.invoke("engine-get-path"),
+    setPath: (args: { pythonPath: string; engineDir: string }) => ipcRenderer.invoke("engine-set-path", args),
+    onLog: (cb: (line: string) => void) => {
+      const listener = (_evt: any, line: string) => cb(line);
+      ipcRenderer.on("engine:log", listener);
+      return () => ipcRenderer.removeListener("engine:log", listener);
+    },
+    onStatus: (cb: (status: any) => void) => {
+      const listener = (_evt: any, status: any) => cb(status);
+      ipcRenderer.on("engine:status", listener);
+      return () => ipcRenderer.removeListener("engine:status", listener);
+    },
+  },
+  onPowerEvent: (cb: (evt: "suspend" | "resume" | "lock-screen" | "unlock-screen") => void) => {
+    const listener = (_evt: any, name: any) => cb(name);
+    ipcRenderer.on("power-event", listener);
+    return () => ipcRenderer.removeListener("power-event", listener);
+  },
 });

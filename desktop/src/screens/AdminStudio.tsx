@@ -1,40 +1,47 @@
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef, useCallback } from "react";
 import {
   Video,
-  Play,
   RotateCcw,
   CheckCircle2,
   Trash2,
+  Trash,
   Plus,
-  Compass,
-  ArrowRight,
-  Settings,
-  Activity,
-  Layers,
-  Palette,
-  AlertCircle,
-  HelpCircle,
-  ArrowLeftRight,
-  Sparkles,
-  ChevronRight,
-  History,
   Send,
-  Sliders,
-  Eye,
-  EyeOff,
-  User,
+  ChevronDown,
+  ChevronRight,
+  PenTool,
+  Square,
+  Circle as CircleIcon,
+  Minus,
+  MousePointer2,
+  Car,
   Shield,
-  Trash
+  Factory,
+  Boxes,
+  Pencil,
+  AlertCircle,
 } from "lucide-react";
 import clsx from "clsx";
 import { getSupabase } from "../lib/session";
 import { isEngineOnline, mjpegStreamUrl } from "../lib/localEngine";
+import {
+  ZONE_PROFILES,
+  PROFILE_ORDER,
+  buildDefaultFeatures,
+  reconcileFeatures,
+  type ZoneProfileKey,
+  type ProfileFeatures,
+  type FeatureDef,
+  type FeatureParam,
+  type FeatureGroup,
+} from "../lib/zoneProfiles";
 
 interface Camera {
   id: string;
   name: string;
   source_type: string;
   status: string;
+  zone_profile?: ZoneProfileKey | null;
   zones?: string;
   lines?: string;
 }
@@ -44,9 +51,11 @@ interface Drawing {
   org_id: string;
   camera_id: string;
   name: string;
-  type: 'polygon' | 'rectangle' | 'circle' | 'free_draw' | 'polyline' | 'line' | 'arrow' | 'measurement';
+  type: "polygon" | "rectangle" | "circle" | "line";
   purpose: string;
-  points: number[][]; // normalized 0..1
+  profile?: string | null;
+  feature_key?: string | null;
+  points: number[][];
   properties: Record<string, any>;
   is_draft: boolean;
 }
@@ -54,7 +63,6 @@ interface Drawing {
 interface Rule {
   id: string;
   name: string;
-  description?: string;
   camera_id?: string;
   trigger_type: string;
   trigger_source_id: string;
@@ -69,32 +77,31 @@ interface ConfigVersion {
   version: number;
   comment?: string;
   published_at: string;
-  status: 'active' | 'rolled_back';
+  status: "active" | "rolled_back";
 }
 
-const ZONE_PURPOSES = [
-  { value: "intrusion_zone", label: "Intrusion Zone" },
-  { value: "restricted_zone", label: "Restricted Area" },
-  { value: "parking_slot", label: "Parking Slot" },
-  { value: "lane", label: "Traffic Lane" },
-  { value: "counting_line", label: "Counting Line" },
-  { value: "privacy_mask", label: "Privacy Mask" },
-  { value: "exclusion_zone", label: "Exclusion Zone" },
-  { value: "dwell_area", label: "Dwell Area" },
-  { value: "crowd_area", label: "Crowd Density Zone" },
-  { value: "fire_zone", label: "Fire & Smoke Zone" },
-];
+type DrawMode = "view" | "polygon" | "rectangle" | "circle" | "line";
 
-const RULE_TRIGGERS = [
-  { value: "zone_intrusion", label: "Intrusion Detection" },
-  { value: "line_crossing", label: "Line Crossing" },
-  { value: "loitering", label: "Loitering / Dwell Time" },
-  { value: "speed_limit", label: "Speed Calibration Limit" },
-  { value: "parking_occupancy", label: "Parking Space Occupancy" },
-  { value: "fire_smoke", label: "Fire/Smoke Detection" },
-];
+interface DrawBinding {
+  featureKey: string | null;
+  featureLabel: string;
+  purpose: string;
+}
 
-const COCO_CLASSES = ["person", "bicycle", "car", "motorcycle", "bus", "truck", "backpack", "suitcase"];
+const PROFILE_ICON: Record<ZoneProfileKey, typeof Car> = {
+  traffic: Car,
+  security: Shield,
+  factory: Factory,
+  custom: Boxes,
+};
+
+// Tailwind accent → concrete classes (kept explicit so the compiler keeps them).
+const ACCENT: Record<string, { text: string; bg: string; border: string; ring: string }> = {
+  sky: { text: "text-sky-400", bg: "bg-sky-500/15", border: "border-sky-500/60", ring: "ring-sky-500/40" },
+  rose: { text: "text-rose-400", bg: "bg-rose-500/15", border: "border-rose-500/60", ring: "ring-rose-500/40" },
+  amber: { text: "text-amber-400", bg: "bg-amber-500/15", border: "border-amber-500/60", ring: "ring-amber-500/40" },
+  violet: { text: "text-violet-400", bg: "bg-violet-500/15", border: "border-violet-500/60", ring: "ring-violet-500/40" },
+};
 
 export default function AdminStudio({ onDeactivated }: { onDeactivated: () => void }) {
   const [cameras, setCameras] = useState<Camera[]>([]);
@@ -102,390 +109,651 @@ export default function AdminStudio({ onDeactivated }: { onDeactivated: () => vo
   const [drawings, setDrawings] = useState<Drawing[]>([]);
   const [rules, setRules] = useState<Rule[]>([]);
   const [versions, setVersions] = useState<ConfigVersion[]>([]);
-  
-  const [drawMode, setDrawMode] = useState<"view" | "polygon" | "rectangle" | "circle" | "line">("view");
-  const [activePurpose, setActivePurpose] = useState<string>("intrusion_zone");
+  const [orgId, setOrgId] = useState<string | null>(null);
+
+  const [activeProfile, setActiveProfile] = useState<ZoneProfileKey | null>(null);
+  const [features, setFeatures] = useState<ProfileFeatures>({});
+  const [configId, setConfigId] = useState<string | null>(null);
+  const [savingConfig, setSavingConfig] = useState(false);
+
+  const [drawMode, setDrawMode] = useState<DrawMode>("view");
+  const [drawBinding, setDrawBinding] = useState<DrawBinding | null>(null);
   const [activePoints, setActivePoints] = useState<number[][]>([]);
   const [editingDrawingId, setEditingDrawingId] = useState<string | null>(null);
-  
-  // Rule builder form state
+
+  const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
+
+  // Alert rule builder
   const [ruleName, setRuleName] = useState("");
   const [ruleTrigger, setRuleTrigger] = useState("zone_intrusion");
   const [ruleSourceId, setRuleSourceId] = useState("");
-  const [ruleClass, setRuleClass] = useState("person");
   const [ruleAction, setRuleAction] = useState("alert");
 
-  // Publishing comment
   const [publishComment, setPublishComment] = useState("");
   const [publishing, setPublishing] = useState(false);
   const [engineOnline, setEngineOnline] = useState<boolean | null>(null);
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const containerRef = useRef<HTMLDivElement>(null);
+  const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Load initial organizational data
+  // ---- initial load ----------------------------------------
   useEffect(() => {
     async function loadData() {
       const sb = await getSupabase();
-      
-      // Load cameras
+      const { data: profile } = await sb.from("profiles").select("org_id").single();
+      if (profile?.org_id) setOrgId(profile.org_id);
+
       const { data: cams } = await sb.from("cameras").select("*");
       if (cams) {
         setCameras(cams);
         if (cams.length > 0) setSelectedCam(cams[0]);
       }
-
-      // Load config versions
       const { data: vers } = await sb.from("config_versions").select("*").order("version", { ascending: false });
       if (vers) setVersions(vers);
     }
     loadData();
 
-    // Check engine status
     isEngineOnline().then(setEngineOnline);
-    const interval = setInterval(() => {
-      isEngineOnline().then(setEngineOnline);
-    }, 10_000);
+    const interval = setInterval(() => isEngineOnline().then(setEngineOnline), 10_000);
     return () => clearInterval(interval);
   }, []);
 
-  // Load drawings and rules for the selected camera
+  // ---- per-camera load: drawings, rules, profile config ----
+  const loadProfileConfig = useCallback(async (cam: Camera, profileKey: ZoneProfileKey) => {
+    const sb = await getSupabase();
+    const { data: cfg } = await sb
+      .from("zone_profile_configs")
+      .select("*")
+      .eq("camera_id", cam.id)
+      .eq("profile", profileKey)
+      .is("deleted_at", null)
+      .maybeSingle();
+
+    if (cfg) {
+      setConfigId(cfg.id);
+      setFeatures(reconcileFeatures(profileKey, cfg.features));
+    } else {
+      // Create a fresh draft config from catalog defaults.
+      const defaults = buildDefaultFeatures(profileKey);
+      const { data: created } = await sb
+        .from("zone_profile_configs")
+        .insert([{ org_id: orgId, camera_id: cam.id, profile: profileKey, features: defaults, is_draft: true }])
+        .select()
+        .single();
+      setConfigId(created?.id ?? null);
+      setFeatures(defaults);
+    }
+  }, [orgId]);
+
   useEffect(() => {
     if (!selectedCam) return;
     const cam = selectedCam;
     async function loadCamData() {
       const sb = await getSupabase();
       const { data: draws } = await sb.from("analytics_drawings").select("*").eq("camera_id", cam.id).is("deleted_at", null);
-      if (draws) setDrawings(draws);
-
+      setDrawings(draws ?? []);
       const { data: ruleList } = await sb.from("rule_engine_rules").select("*").eq("camera_id", cam.id).is("deleted_at", null);
-      if (ruleList) setRules(ruleList);
+      setRules(ruleList ?? []);
+
+      const prof = (cam.zone_profile as ZoneProfileKey) || null;
+      setActiveProfile(prof);
+      if (prof) await loadProfileConfig(cam, prof);
+      else { setFeatures({}); setConfigId(null); }
     }
     loadCamData();
     setActivePoints([]);
     setDrawMode("view");
-  }, [selectedCam]);
+    setDrawBinding(null);
+    setEditingDrawingId(null);
+  }, [selectedCam, loadProfileConfig]);
 
-  // Render drawings on canvas
+  // ---- profile selection -----------------------------------
+  async function selectProfile(profileKey: ZoneProfileKey) {
+    if (!selectedCam) return;
+    setActiveProfile(profileKey);
+    setActivePoints([]);
+    setDrawMode("view");
+    setDrawBinding(null);
+
+    const sb = await getSupabase();
+    await sb.from("cameras").update({ zone_profile: profileKey }).eq("id", selectedCam.id);
+    setCameras((prev) => prev.map((c) => (c.id === selectedCam.id ? { ...c, zone_profile: profileKey } : c)));
+    setSelectedCam((prev) => (prev ? { ...prev, zone_profile: profileKey } : prev));
+    await loadProfileConfig(selectedCam, profileKey);
+  }
+
+  // ---- feature config persistence (debounced) --------------
+  const persistFeatures = useCallback((next: ProfileFeatures) => {
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+    setSavingConfig(true);
+    saveTimer.current = setTimeout(async () => {
+      try {
+        const sb = await getSupabase();
+        if (configId) {
+          await sb.from("zone_profile_configs").update({ features: next, is_draft: true }).eq("id", configId);
+        } else if (selectedCam && activeProfile) {
+          const { data } = await sb
+            .from("zone_profile_configs")
+            .upsert(
+              { org_id: orgId, camera_id: selectedCam.id, profile: activeProfile, features: next, is_draft: true },
+              { onConflict: "camera_id,profile" },
+            )
+            .select()
+            .single();
+          if (data?.id) setConfigId(data.id);
+        }
+      } catch (e) {
+        console.error("Failed to persist feature config:", e);
+      } finally {
+        setSavingConfig(false);
+      }
+    }, 600);
+  }, [configId, selectedCam, activeProfile, orgId]);
+
+  function updateFeature(featureKey: string, updater: (v: ProfileFeatures[string]) => ProfileFeatures[string]) {
+    setFeatures((prev) => {
+      const current = prev[featureKey] ?? { enabled: false, params: {} };
+      const next = { ...prev, [featureKey]: updater(current) };
+      persistFeatures(next);
+      return next;
+    });
+  }
+
+  const toggleFeature = (key: string) => updateFeature(key, (v) => ({ ...v, enabled: !v.enabled }));
+  const setParam = (key: string, paramKey: string, value: unknown) =>
+    updateFeature(key, (v) => ({ ...v, params: { ...v.params, [paramKey]: value } }));
+
+  // ---- canvas rendering ------------------------------------
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
-
-    // Set canvas dimensions based on display size
     const rect = canvas.getBoundingClientRect();
     canvas.width = rect.width;
     canvas.height = rect.height;
-
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-    // Draw active drawing helper
+    const accent = activeProfile ? ACCENT[ZONE_PROFILES[activeProfile].accent] : ACCENT.sky;
+    const hex = accent === ACCENT.sky ? "#38bdf8" : accent === ACCENT.rose ? "#fb7185" : accent === ACCENT.amber ? "#fbbf24" : "#a78bfa";
+
+    // in-progress geometry
     if (activePoints.length > 0) {
-      ctx.beginPath();
-      ctx.strokeStyle = "#38bdf8"; // bright blue sky
-      ctx.fillStyle = "rgba(56, 189, 248, 0.15)";
+      ctx.strokeStyle = hex;
+      ctx.fillStyle = hex + "26";
       ctx.lineWidth = 2.5;
-
-      activePoints.forEach(([nx, ny], idx) => {
-        const x = nx * canvas.width;
-        const y = ny * canvas.height;
-        if (idx === 0) ctx.moveTo(x, y);
-        else ctx.lineTo(x, y);
-
-        // draw handles
-        ctx.fillStyle = "#38bdf8";
+      if (drawMode === "circle" && activePoints.length >= 1) {
+        const [cx, cy] = activePoints[0];
+        const edge = activePoints[1] ?? activePoints[0];
+        const r = Math.hypot((edge[0] - cx) * canvas.width, (edge[1] - cy) * canvas.height);
         ctx.beginPath();
-        ctx.arc(x, y, 5, 0, Math.PI * 2);
+        ctx.arc(cx * canvas.width, cy * canvas.height, r, 0, Math.PI * 2);
         ctx.fill();
-      });
-
-      if (drawMode !== "line" && activePoints.length > 2) {
-        ctx.closePath();
-        ctx.fill();
+        ctx.stroke();
+      } else {
+        ctx.beginPath();
+        activePoints.forEach(([nx, ny], idx) => {
+          const x = nx * canvas.width, y = ny * canvas.height;
+          idx === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+        });
+        if (drawMode !== "line" && activePoints.length > 2) { ctx.closePath(); ctx.fill(); }
+        ctx.stroke();
+        activePoints.forEach(([nx, ny]) => {
+          ctx.fillStyle = hex;
+          ctx.beginPath();
+          ctx.arc(nx * canvas.width, ny * canvas.height, 4, 0, Math.PI * 2);
+          ctx.fill();
+        });
       }
-      ctx.stroke();
     }
 
-    // Draw saved drawings
+    // saved geometries
     drawings.forEach((d) => {
-      if (d.points.length === 0) return;
-      const isEditing = editingDrawingId === d.id;
-      
-      ctx.beginPath();
-      ctx.strokeStyle = isEditing ? "#a855f7" : (d.properties?.color || "#f43f5e");
-      ctx.fillStyle = isEditing ? "rgba(168, 85, 247, 0.2)" : (d.properties?.fillColor || "rgba(244, 63, 94, 0.1)");
-      ctx.lineWidth = isEditing ? 3 : 2;
+      if (!d.points?.length) return;
+      const editing = editingDrawingId === d.id;
+      ctx.strokeStyle = editing ? "#a855f7" : d.properties?.color || "#f43f5e";
+      ctx.fillStyle = editing ? "rgba(168,85,247,0.2)" : d.properties?.fillColor || "rgba(244,63,94,0.12)";
+      ctx.lineWidth = editing ? 3 : 2;
 
-      d.points.forEach(([nx, ny], idx) => {
-        const x = nx * canvas.width;
-        const y = ny * canvas.height;
-        if (idx === 0) ctx.moveTo(x, y);
-        else ctx.lineTo(x, y);
-
-        if (isEditing) {
-          ctx.fillStyle = "#a855f7";
-          ctx.beginPath();
-          ctx.arc(x, y, 6, 0, Math.PI * 2);
-          ctx.fill();
-        }
-      });
-
-      if (d.type !== "line" && d.type !== "arrow") {
-        ctx.closePath();
+      if (d.type === "circle" && d.points.length >= 2) {
+        const [cx, cy] = d.points[0];
+        const r = Math.hypot((d.points[1][0] - cx) * canvas.width, (d.points[1][1] - cy) * canvas.height);
+        ctx.beginPath();
+        ctx.arc(cx * canvas.width, cy * canvas.height, r, 0, Math.PI * 2);
         ctx.fill();
+        ctx.stroke();
+      } else {
+        ctx.beginPath();
+        d.points.forEach(([nx, ny], idx) => {
+          const x = nx * canvas.width, y = ny * canvas.height;
+          idx === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+        });
+        if (d.type !== "line") { ctx.closePath(); ctx.fill(); }
+        ctx.stroke();
       }
-      ctx.stroke();
 
-      // Draw text tag
-      const firstPt = d.points[0];
-      if (firstPt) {
-        ctx.font = "bold 10px Inter, sans-serif";
-        ctx.fillStyle = isEditing ? "#a855f7" : (d.properties?.color || "#f43f5e");
-        ctx.fillText(
-          `${d.name} (${ZONE_PURPOSES.find((p) => p.value === d.purpose)?.label || d.purpose})`,
-          firstPt[0] * canvas.width,
-          firstPt[1] * canvas.height - 8
-        );
-      }
+      const first = d.points[0];
+      ctx.font = "bold 10px Inter, sans-serif";
+      ctx.fillStyle = editing ? "#a855f7" : d.properties?.color || "#f43f5e";
+      ctx.fillText(d.name, first[0] * canvas.width, first[1] * canvas.height - 8);
     });
-  }, [drawings, activePoints, drawMode, editingDrawingId]);
+  }, [drawings, activePoints, drawMode, editingDrawingId, activeProfile]);
 
-  // Click on canvas (drawing math)
+  // ---- drawing interaction ---------------------------------
+  function beginDraw(mode: DrawMode, binding: DrawBinding) {
+    setDrawMode(mode);
+    setDrawBinding(binding);
+    setActivePoints([]);
+  }
+
   const handleCanvasClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
     if (drawMode === "view") return;
-
     const canvas = canvasRef.current;
     if (!canvas) return;
     const rect = canvas.getBoundingClientRect();
-    const nx = (e.clientX - rect.left) / rect.width;
-    const ny = (e.clientY - rect.top) / rect.height;
-
-    // Normalizing coordinates safely
-    const point = [Number(nx.toFixed(4)), Number(ny.toFixed(4))];
+    const point = [
+      Number(((e.clientX - rect.left) / rect.width).toFixed(4)),
+      Number(((e.clientY - rect.top) / rect.height).toFixed(4)),
+    ];
 
     if (drawMode === "line") {
-      if (activePoints.length === 0) {
-        setActivePoints([point]);
-      } else {
-        saveDrawing([...activePoints, point]);
-      }
+      activePoints.length === 0 ? setActivePoints([point]) : saveDrawing([...activePoints, point]);
+    } else if (drawMode === "circle") {
+      activePoints.length === 0 ? setActivePoints([point]) : saveDrawing([activePoints[0], point]);
     } else if (drawMode === "rectangle") {
-      if (activePoints.length === 0) {
-        setActivePoints([point]);
-      } else {
-        const [start] = activePoints;
-        const pts = [
-          [start[0], start[1]],
-          [point[0], start[1]],
-          [point[0], point[1]],
-          [start[0], point[1]],
-        ];
-        saveDrawing(pts);
+      if (activePoints.length === 0) setActivePoints([point]);
+      else {
+        const [s] = activePoints;
+        saveDrawing([[s[0], s[1]], [point[0], s[1]], [point[0], point[1]], [s[0], point[1]]]);
       }
     } else if (drawMode === "polygon") {
-      // Double click / select closes polygon. For simplicity, clicking near the start closes it.
       if (activePoints.length >= 3) {
-        const [start] = activePoints;
-        const dist = Math.hypot(start[0] - point[0], start[1] - point[1]);
-        if (dist < 0.04) {
-          saveDrawing(activePoints);
-          return;
-        }
+        const [s] = activePoints;
+        if (Math.hypot(s[0] - point[0], s[1] - point[1]) < 0.04) { saveDrawing(activePoints); return; }
       }
       setActivePoints([...activePoints, point]);
     }
   };
 
   const saveDrawing = async (pts: number[][]) => {
-    if (!selectedCam) return;
+    if (!selectedCam || !orgId) return;
     const sb = await getSupabase();
-    
+    const type: Drawing["type"] = drawMode === "line" ? "line" : drawMode === "rectangle" ? "rectangle" : drawMode === "circle" ? "circle" : "polygon";
+    const binding = drawBinding ?? { featureKey: null, featureLabel: "Zone", purpose: "custom_zone" };
+    const accentHex = activeProfile ? { sky: "#38bdf8", rose: "#fb7185", amber: "#fbbf24", violet: "#a78bfa" }[ZONE_PROFILES[activeProfile].accent] : "#10b981";
+
     const newDrawing = {
-      org_id: selectedCam.zones ? JSON.parse(selectedCam.zones)[0]?.org_id || "7eb517df-1a2f-4e08-9dfc-2792e34ff6a6" : "7eb517df-1a2f-4e08-9dfc-2792e34ff6a6",
+      org_id: orgId,
       camera_id: selectedCam.id,
-      name: `${ZONE_PURPOSES.find((p) => p.value === activePurpose)?.label} ${drawings.length + 1}`,
-      type: drawMode === "line" ? "line" : drawMode === "rectangle" ? "rectangle" : "polygon",
-      purpose: activePurpose,
+      name: `${binding.featureLabel} ${drawings.filter((d) => d.feature_key === binding.featureKey).length + 1}`,
+      type,
+      purpose: binding.purpose,
+      profile: activeProfile,
+      feature_key: binding.featureKey,
       points: pts,
-      properties: {
-        color: activePurpose === "privacy_mask" ? "#27272a" : activePurpose === "restricted_zone" ? "#ef4444" : "#10b981",
-        fillColor: activePurpose === "privacy_mask" ? "rgba(39, 39, 42, 0.9)" : "rgba(16, 185, 129, 0.15)"
-      },
+      properties: { color: accentHex, fillColor: accentHex + "1f" },
       is_draft: true,
     };
-
-    // Auto-resolve organization id
-    const { data: profile } = await sb.from("profiles").select("org_id").single();
-    if (profile?.org_id) {
-      newDrawing.org_id = profile.org_id;
-    }
 
     try {
       const { data, error } = await sb.from("analytics_drawings").insert([newDrawing]).select();
       if (error) throw error;
-      if (data) {
-        setDrawings([...drawings, data[0] as Drawing]);
-      }
+      if (data) setDrawings((prev) => [...prev, data[0] as Drawing]);
     } catch (e) {
       console.error("Failed to insert drawing:", e);
     }
-
     setActivePoints([]);
     setDrawMode("view");
+    setDrawBinding(null);
   };
 
   const deleteDrawing = async (id: string) => {
     const sb = await getSupabase();
     try {
       await sb.from("analytics_drawings").update({ deleted_at: new Date().toISOString() }).eq("id", id);
-      setDrawings(drawings.filter((d) => d.id !== id));
-      // Delete rules referencing it
+      setDrawings((prev) => prev.filter((d) => d.id !== id));
       await sb.from("rule_engine_rules").update({ deleted_at: new Date().toISOString() }).eq("trigger_source_id", id);
-      setRules(rules.filter((r) => r.trigger_source_id !== id));
-    } catch (e) {
-      console.error(e);
-    }
+      setRules((prev) => prev.filter((r) => r.trigger_source_id !== id));
+    } catch (e) { console.error(e); }
   };
 
-  // Rule configuration
+  // ---- alert rules -----------------------------------------
   const handleAddRule = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedCam || !ruleName.trim() || !ruleSourceId) return;
-
+    if (!selectedCam || !orgId || !ruleName.trim() || !ruleSourceId) return;
     const sb = await getSupabase();
-    const { data: profile } = await sb.from("profiles").select("org_id").single();
-    const org_id = profile?.org_id || "7eb517df-1a2f-4e08-9dfc-2792e34ff6a6";
-
     const newRule = {
-      org_id,
+      org_id: orgId,
       camera_id: selectedCam.id,
       name: ruleName,
       trigger_type: ruleTrigger,
       trigger_source_id: ruleSourceId,
-      conditions: { class: ruleClass, confidence: 0.35 },
+      conditions: { profile: activeProfile },
       actions: [ruleAction],
       is_draft: true,
-      is_enabled: true
+      is_enabled: true,
     };
-
     try {
       const { data, error } = await sb.from("rule_engine_rules").insert([newRule]).select();
       if (error) throw error;
-      if (data) {
-        setRules([...rules, data[0] as Rule]);
-        setRuleName("");
-        setRuleSourceId("");
-      }
-    } catch (e) {
-      console.error(e);
-    }
+      if (data) { setRules((prev) => [...prev, data[0] as Rule]); setRuleName(""); setRuleSourceId(""); }
+    } catch (e) { console.error(e); }
   };
 
   const deleteRule = async (id: string) => {
     const sb = await getSupabase();
     try {
       await sb.from("rule_engine_rules").update({ deleted_at: new Date().toISOString() }).eq("id", id);
-      setRules(rules.filter((r) => r.id !== id));
-    } catch (e) {
-      console.error(e);
-    }
+      setRules((prev) => prev.filter((r) => r.id !== id));
+    } catch (e) { console.error(e); }
   };
 
-  // Publish active draft configuration
+  // ---- publish / rollback ----------------------------------
   const publishConfig = async () => {
     setPublishing(true);
     try {
       const sb = await getSupabase();
-      const { data, error } = await sb.functions.invoke("publish-config", {
-        body: { comment: publishComment || "Standard Configuration Update" }
-      });
+      const { error } = await sb.functions.invoke("publish-config", { body: { comment: publishComment || "Configuration update" } });
       if (error) throw error;
-
-      // Reload config versions
       const { data: vers } = await sb.from("config_versions").select("*").order("version", { ascending: false });
       if (vers) setVersions(vers);
-      
-      // Update drawings & rules flags locally
-      setDrawings(drawings.map((d) => ({ ...d, is_draft: false })));
-      setRules(rules.map((r) => ({ ...r, is_draft: false })));
+      setDrawings((prev) => prev.map((d) => ({ ...d, is_draft: false })));
+      setRules((prev) => prev.map((r) => ({ ...r, is_draft: false })));
       setPublishComment("");
-      alert("Configuration published successfully! Cameras are hot-swapping live.");
+      alert("Configuration published. Cameras are hot-swapping live.");
     } catch (e: any) {
       alert(`Publishing failed: ${e.message}`);
-    } finally {
-      setPublishing(false);
-    }
+    } finally { setPublishing(false); }
   };
 
-  // Rollback configuration to version
   const rollbackConfig = async (version: number) => {
-    if (!confirm(`Are you sure you want to rollback to version ${version}? This will overwrite drafts.`)) return;
+    if (!confirm(`Roll back to version ${version}? This overwrites current drafts.`)) return;
     setPublishing(true);
     try {
       const sb = await getSupabase();
-      const { data, error } = await sb.functions.invoke("rollback-config", {
-        body: { version }
-      });
+      const { error } = await sb.functions.invoke("rollback-config", { body: { version } });
       if (error) throw error;
-
-      // Reload all
       const { data: vers } = await sb.from("config_versions").select("*").order("version", { ascending: false });
       if (vers) setVersions(vers);
-
       if (selectedCam) {
-        const { data: draws } = await sb.from("analytics_drawings").select("*").eq("camera_id", selectedCam.id).is("deleted_at", null);
-        if (draws) setDrawings(draws);
-        const { data: ruleList } = await sb.from("rule_engine_rules").select("*").eq("camera_id", selectedCam.id).is("deleted_at", null);
-        if (ruleList) setRules(ruleList);
+        const cam = selectedCam;
+        const { data: draws } = await sb.from("analytics_drawings").select("*").eq("camera_id", cam.id).is("deleted_at", null);
+        setDrawings(draws ?? []);
+        const { data: ruleList } = await sb.from("rule_engine_rules").select("*").eq("camera_id", cam.id).is("deleted_at", null);
+        setRules(ruleList ?? []);
+        const prof = (cam.zone_profile as ZoneProfileKey) || null;
+        if (prof) await loadProfileConfig(cam, prof);
       }
-      alert(`Successfully rolled back to version ${version}.`);
+      alert(`Rolled back to version ${version}.`);
     } catch (e: any) {
       alert(`Rollback failed: ${e.message}`);
-    } finally {
-      setPublishing(false);
-    }
+    } finally { setPublishing(false); }
   };
+
+  // ---- param editor ----------------------------------------
+  function renderParam(featureKey: string, p: FeatureParam, value: unknown) {
+    if (p.type === "toggle") {
+      return (
+        <label className="flex items-center gap-2 cursor-pointer">
+          <input type="checkbox" checked={!!value} onChange={(e) => setParam(featureKey, p.key, e.target.checked)} />
+          <span className="text-[11px] text-zinc-300">{p.label}</span>
+        </label>
+      );
+    }
+    if (p.type === "slider") {
+      const v = typeof value === "number" ? value : (p.default as number);
+      return (
+        <div className="space-y-1">
+          <div className="flex justify-between text-[10px] text-zinc-400">
+            <span>{p.label}</span>
+            <span className="font-mono text-zinc-300">{v}{p.unit ? ` ${p.unit}` : ""}</span>
+          </div>
+          <input type="range" min={p.min} max={p.max} step={p.step} value={v}
+            onChange={(e) => setParam(featureKey, p.key, Number(e.target.value))} className="w-full accent-current" />
+        </div>
+      );
+    }
+    if (p.type === "number") {
+      const v = typeof value === "number" ? value : (p.default as number);
+      return (
+        <label className="flex items-center justify-between gap-2">
+          <span className="text-[10px] text-zinc-400">{p.label}</span>
+          <div className="flex items-center gap-1">
+            <input type="number" min={p.min} max={p.max} step={p.step} value={v}
+              onChange={(e) => setParam(featureKey, p.key, Number(e.target.value))}
+              className="w-20 text-xs bg-surface-2 border border-line rounded px-2 py-1 text-zinc-200 focus:outline-none focus:border-accent" />
+            {p.unit && <span className="text-[10px] text-zinc-500">{p.unit}</span>}
+          </div>
+        </label>
+      );
+    }
+    if (p.type === "schedule") {
+      return (
+        <label className="flex items-center justify-between gap-2">
+          <span className="text-[10px] text-zinc-400">{p.label}</span>
+          <input type="time" value={String(value ?? p.default)}
+            onChange={(e) => setParam(featureKey, p.key, e.target.value)}
+            className="text-xs bg-surface-2 border border-line rounded px-2 py-1 text-zinc-200 focus:outline-none focus:border-accent" />
+        </label>
+      );
+    }
+    if (p.type === "select") {
+      return (
+        <label className="flex items-center justify-between gap-2">
+          <span className="text-[10px] text-zinc-400">{p.label}</span>
+          <select value={String(value ?? p.default)} onChange={(e) => setParam(featureKey, p.key, e.target.value)}
+            className="text-xs bg-surface-2 border border-line rounded px-2 py-1 text-zinc-200 focus:outline-none focus:border-accent max-w-[60%]">
+            {p.options?.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+          </select>
+        </label>
+      );
+    }
+    if (p.type === "classes") {
+      const sel: string[] = Array.isArray(value) ? (value as string[]) : (p.default as string[]);
+      return (
+        <div className="space-y-1">
+          <span className="text-[10px] text-zinc-400">{p.label}</span>
+          <div className="flex flex-wrap gap-1">
+            {p.classOptions?.map((c) => {
+              const on = sel.includes(c);
+              return (
+                <button key={c} type="button"
+                  onClick={() => setParam(featureKey, p.key, on ? sel.filter((x) => x !== c) : [...sel, c])}
+                  className={clsx("text-[10px] px-1.5 py-0.5 rounded border font-mono transition",
+                    on ? "bg-accent/20 border-accent/50 text-accent" : "bg-surface-2 border-line text-zinc-500 hover:text-zinc-300")}>
+                  {c}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      );
+    }
+    return null;
+  }
+
+  // ---- feature card ----------------------------------------
+  function drawBindingFor(f: FeatureDef): DrawBinding | null {
+    if (!f.requiresGeometry) return null;
+    const purpose = f.requiresGeometry === "line" ? "counting_line" : f.requiresGeometry === "direction" ? "direction" : f.key;
+    return { featureKey: f.key, featureLabel: f.label, purpose };
+  }
+  function drawModeFor(f: FeatureDef): DrawMode {
+    if (f.requiresGeometry === "line" || f.requiresGeometry === "direction") return "line";
+    return "polygon";
+  }
+
+  function renderFeatureCard(f: FeatureDef) {
+    const cfg = features[f.key] ?? { enabled: false, params: {} };
+    const bound = drawings.filter((d) => d.feature_key === f.key);
+
+    return (
+      <div key={f.key} className={clsx("rounded border p-2.5 transition", cfg.enabled ? "border-line bg-surface-0" : "border-line/60 bg-surface-0/40")}>
+        <div className="flex items-start justify-between gap-2">
+          <div className="min-w-0">
+            <div className="text-xs font-semibold text-zinc-200">{f.label}</div>
+            <p className="text-[10px] text-zinc-500 leading-snug mt-0.5">{f.description}</p>
+          </div>
+          <button type="button" onClick={() => toggleFeature(f.key)}
+            className={clsx("relative h-5 w-9 rounded-full transition shrink-0", cfg.enabled ? "bg-accent" : "bg-surface-3")}>
+            <span className={clsx("absolute top-0.5 h-4 w-4 rounded-full bg-white transition-all", cfg.enabled ? "left-[18px]" : "left-0.5")} />
+          </button>
+        </div>
+
+        {cfg.enabled && (
+          <div className="mt-2.5 space-y-2 pt-2 border-t border-line">
+            {f.params.map((p) => <div key={p.key}>{renderParam(f.key, p, cfg.params[p.key])}</div>)}
+
+            {f.requiresGeometry && (
+              <div className="flex items-center justify-between pt-1">
+                <span className={clsx("text-[10px]", bound.length ? "text-ok" : "text-warn")}>
+                  {bound.length ? `${bound.length} ${f.requiresGeometry}(s) drawn` : `Needs a ${f.requiresGeometry}`}
+                </span>
+                <button type="button"
+                  onClick={() => { const b = drawBindingFor(f); if (b) beginDraw(drawModeFor(f), b); }}
+                  className="text-[10px] flex items-center gap-1 text-accent hover:underline">
+                  <Pencil size={11} /> Draw {f.requiresGeometry}
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // ---- special panels --------------------------------------
+  function renderRoiPanel() {
+    return (
+      <div className="space-y-2">
+        <p className="text-[10px] text-zinc-500">
+          Draw geometries with the toolbar above, or the <b>Draw</b> button on any feature. Drawn shapes bind to features and compile into the camera on publish.
+        </p>
+        <div className="text-[10px] uppercase font-bold tracking-wider text-zinc-500">Geometries ({drawings.length})</div>
+        {drawings.length === 0 ? (
+          <div className="text-xs text-zinc-500 italic">No shapes yet.</div>
+        ) : drawings.map((d) => (
+          <div key={d.id} onClick={() => setEditingDrawingId(editingDrawingId === d.id ? null : d.id)}
+            className={clsx("p-2 rounded border text-xs flex justify-between items-center cursor-pointer",
+              editingDrawingId === d.id ? "bg-accent/10 border-accent" : "bg-surface-0 border-line hover:border-zinc-700")}>
+            <div className="min-w-0">
+              <div className="font-semibold text-zinc-200 truncate">{d.name}</div>
+              <div className="text-[9px] text-zinc-500 font-mono capitalize">{d.type} • {d.feature_key || d.purpose}</div>
+            </div>
+            <button onClick={(e) => { e.stopPropagation(); deleteDrawing(d.id); }} className="text-zinc-500 hover:text-danger p-1">
+              <Trash2 size={13} />
+            </button>
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  function renderAlertsPanel() {
+    return (
+      <div className="space-y-3">
+        <form onSubmit={handleAddRule} className="space-y-2.5 p-2.5 rounded border border-line bg-surface-0">
+          <input type="text" placeholder="Rule name (e.g. Intruder alert)" value={ruleName} onChange={(e) => setRuleName(e.target.value)}
+            className="w-full text-xs bg-surface-2 border border-line rounded px-2 py-1.5 text-zinc-200 focus:outline-none focus:border-accent" required />
+          <div className="grid grid-cols-2 gap-2">
+            <select value={ruleTrigger} onChange={(e) => setRuleTrigger(e.target.value)}
+              className="text-xs bg-surface-2 border border-line rounded px-2 py-1.5 text-zinc-200 focus:outline-none">
+              <option value="zone_intrusion">Zone entered</option>
+              <option value="line_crossing">Line crossed</option>
+              <option value="loitering">Loitering</option>
+              <option value="speed_limit">Over speed limit</option>
+              <option value="ppe_violation">PPE violation</option>
+              <option value="fire_smoke">Fire / smoke</option>
+              <option value="custom">Custom event</option>
+            </select>
+            <select value={ruleSourceId} onChange={(e) => setRuleSourceId(e.target.value)}
+              className="text-xs bg-surface-2 border border-line rounded px-2 py-1.5 text-zinc-200 focus:outline-none" required>
+              <option value="">-- Source shape --</option>
+              {drawings.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
+            </select>
+          </div>
+          <div className="grid grid-cols-2 gap-2 items-center">
+            <select value={ruleAction} onChange={(e) => setRuleAction(e.target.value)}
+              className="text-xs bg-surface-2 border border-line rounded px-2 py-1.5 text-zinc-200 focus:outline-none">
+              <option value="alert">Send alert</option>
+              <option value="record">Record clip</option>
+              <option value="webhook">Webhook</option>
+            </select>
+            <button type="submit" className="btn-accent py-1.5 text-xs flex items-center justify-center gap-1">
+              <Plus size={12} /> Add rule
+            </button>
+          </div>
+        </form>
+        <div className="space-y-1.5">
+          {rules.length === 0 && <div className="text-xs text-zinc-500 italic">No alert rules yet.</div>}
+          {rules.map((r) => (
+            <div key={r.id} className="p-2 rounded bg-surface-0 border border-line text-xs flex justify-between items-start">
+              <div className="min-w-0">
+                <div className="font-semibold text-zinc-200">{r.name}</div>
+                <p className="text-[9px] text-zinc-500">
+                  {r.trigger_type} on {drawings.find((d) => d.id === r.trigger_source_id)?.name || "shape"} → {r.actions.join(", ")}
+                </p>
+              </div>
+              <button onClick={() => deleteRule(r.id)} className="text-zinc-500 hover:text-danger p-1 shrink-0"><Trash size={12} /></button>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  // ---- grouped feature rendering ---------------------------
+  const profileDef = activeProfile ? ZONE_PROFILES[activeProfile] : null;
+  const accent = profileDef ? ACCENT[profileDef.accent] : ACCENT.sky;
+
+  function groupsForProfile(): FeatureGroup[] {
+    if (!profileDef) return [];
+    const present = new Set(profileDef.features.map((f) => f.group));
+    return profileDef.groupOrder.filter((g) => present.has(g));
+  }
+
+  const drawTools: { mode: DrawMode; icon: typeof PenTool; label: string }[] = [
+    { mode: "view", icon: MousePointer2, label: "Select" },
+    { mode: "polygon", icon: PenTool, label: "Polygon" },
+    { mode: "rectangle", icon: Square, label: "Rectangle" },
+    { mode: "circle", icon: CircleIcon, label: "Circle" },
+    { mode: "line", icon: Minus, label: "Line" },
+  ];
 
   return (
     <div className="flex h-screen bg-surface-0 overflow-hidden font-sans">
-      {/* Sidebar 1: Cameras and Publish/Rollback */}
+      {/* Sidebar 1: cameras + publish timeline */}
       <aside className="w-64 border-r border-line bg-surface-1 flex flex-col justify-between shrink-0">
         <div className="flex flex-col flex-1 overflow-y-auto">
           <div className="flex items-center gap-2.5 px-4 py-4 border-b border-line">
             <img src="./favicon.svg" alt="CamAI" className="h-7 w-7 rounded-md" />
             <div>
-              <div className="text-sm font-semibold text-zinc-100">CamAI Admin Studio</div>
-              <div className="text-[10px] text-accent font-medium uppercase tracking-wider">Config Canvas</div>
+              <div className="text-sm font-semibold text-zinc-100">CamAI Zone Studio</div>
+              <div className="text-[10px] text-accent font-medium uppercase tracking-wider">Enterprise Profiles</div>
             </div>
           </div>
-
           <div className="px-3 py-3">
             <div className="flex justify-between items-center text-[10px] uppercase font-bold tracking-wider text-zinc-500 mb-2">
               <span>Cameras</span>
               <span className={`h-2 w-2 rounded-full ${engineOnline ? "bg-ok" : "bg-danger"}`} title={engineOnline ? "Engine Online" : "Engine Offline"} />
             </div>
             <div className="space-y-1">
-              {cameras.map((c) => (
-                <button
-                  key={c.id}
-                  onClick={() => setSelectedCam(c)}
-                  className={clsx(
-                    "flex w-full items-center gap-2.5 rounded-md px-2.5 py-1.5 text-xs transition text-left",
-                    selectedCam?.id === c.id
-                      ? "bg-accent/15 font-medium text-accent border-l-2 border-accent"
-                      : "text-zinc-400 hover:bg-surface-2 hover:text-zinc-200"
-                  )}
-                >
-                  <Video size={13} className="shrink-0" />
-                  <span className="truncate">{c.name}</span>
-                </button>
-              ))}
+              {cameras.map((c) => {
+                const Icon = c.zone_profile ? PROFILE_ICON[c.zone_profile] : Video;
+                return (
+                  <button key={c.id} onClick={() => setSelectedCam(c)}
+                    className={clsx("flex w-full items-center gap-2.5 rounded-md px-2.5 py-1.5 text-xs transition text-left",
+                      selectedCam?.id === c.id ? "bg-accent/15 font-medium text-accent border-l-2 border-accent" : "text-zinc-400 hover:bg-surface-2 hover:text-zinc-200")}>
+                    <Icon size={13} className="shrink-0" />
+                    <span className="truncate">{c.name}</span>
+                    {c.zone_profile && <span className="ml-auto text-[9px] uppercase text-zinc-500">{c.zone_profile}</span>}
+                  </button>
+                );
+              })}
             </div>
           </div>
         </div>
 
-        {/* Sync/Publish Timeline */}
         <div className="border-t border-line p-3 bg-surface-2/30 space-y-3">
           <div className="text-[10px] uppercase font-bold tracking-wider text-zinc-500">Publish Timeline</div>
           <div className="max-h-40 overflow-y-auto pr-1 space-y-1.5 custom-scrollbar">
@@ -493,293 +761,163 @@ export default function AdminStudio({ onDeactivated }: { onDeactivated: () => vo
               <div key={v.id} className="p-2 rounded bg-surface-0 border border-line text-[10px] space-y-1">
                 <div className="flex justify-between font-mono font-semibold">
                   <span className="text-zinc-300">v{v.version}</span>
-                  <span className={clsx("capitalize", v.status === "active" ? "text-ok" : "text-zinc-500")}>
-                    {v.status}
-                  </span>
+                  <span className={clsx("capitalize", v.status === "active" ? "text-ok" : "text-zinc-500")}>{v.status}</span>
                 </div>
                 {v.comment && <p className="text-zinc-400 truncate italic">"{v.comment}"</p>}
                 {v.status === "active" && versions[0]?.version === v.version ? (
                   <span className="text-zinc-500 text-[9px] block">Currently Active</span>
                 ) : (
-                  <button
-                    onClick={() => rollbackConfig(v.version)}
-                    className="text-accent hover:underline text-[9px] font-medium flex items-center gap-0.5"
-                  >
+                  <button onClick={() => rollbackConfig(v.version)} className="text-accent hover:underline text-[9px] font-medium flex items-center gap-0.5">
                     <RotateCcw size={9} /> Rollback here
                   </button>
                 )}
               </div>
             ))}
           </div>
-
           <div className="space-y-1.5">
-            <input
-              type="text"
-              placeholder="Publish notes..."
-              value={publishComment}
-              onChange={(e) => setPublishComment(e.target.value)}
-              className="w-full text-xs bg-surface-0 border border-line rounded px-2.5 py-1.5 text-zinc-200 focus:outline-none focus:border-accent"
-            />
-            <button
-              onClick={publishConfig}
-              disabled={publishing}
-              className="w-full btn-accent flex items-center justify-center gap-1.5 py-1.5 text-xs"
-            >
-              <Send size={12} />
-              {publishing ? "Publishing..." : "Publish Configs"}
+            <input type="text" placeholder="Publish notes..." value={publishComment} onChange={(e) => setPublishComment(e.target.value)}
+              className="w-full text-xs bg-surface-0 border border-line rounded px-2.5 py-1.5 text-zinc-200 focus:outline-none focus:border-accent" />
+            <button onClick={publishConfig} disabled={publishing} className="w-full btn-accent flex items-center justify-center gap-1.5 py-1.5 text-xs">
+              <Send size={12} />{publishing ? "Publishing..." : "Publish Configs"}
             </button>
           </div>
-
-          <button
-            onClick={onDeactivated}
-            className="w-full text-center text-xs text-zinc-500 hover:text-zinc-300 pt-1"
-          >
-            Exit Studio
-          </button>
+          <button onClick={onDeactivated} className="w-full text-center text-xs text-zinc-500 hover:text-zinc-300 pt-1">Exit Studio</button>
         </div>
       </aside>
 
-      {/* Main Canvas Area */}
+      {/* Main canvas */}
       <main className="flex-1 flex flex-col bg-surface-0 overflow-hidden relative">
-        {/* Drawing Toolbar */}
-        <div className="h-14 border-b border-line bg-surface-1 px-4 flex items-center justify-between shrink-0">
+        {/* Profile selector */}
+        <div className="border-b border-line bg-surface-1 px-4 py-2.5 shrink-0">
           <div className="flex items-center gap-2">
-            <span className="text-xs font-semibold text-zinc-200">Drawing Tool:</span>
+            <span className="text-[10px] uppercase font-bold tracking-wider text-zinc-500 mr-1">Zone Profile</span>
+            {PROFILE_ORDER.map((key) => {
+              const def = ZONE_PROFILES[key];
+              const Icon = PROFILE_ICON[key];
+              const on = activeProfile === key;
+              const a = ACCENT[def.accent];
+              return (
+                <button key={key} onClick={() => selectProfile(key)} disabled={!selectedCam}
+                  className={clsx("flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium border transition",
+                    on ? `${a.bg} ${a.text} ${a.border}` : "bg-surface-2 border-line text-zinc-400 hover:text-zinc-200",
+                    !selectedCam && "opacity-40 cursor-not-allowed")}
+                  title={def.description}>
+                  <Icon size={14} /> {def.label}
+                </button>
+              );
+            })}
+            {savingConfig && <span className="ml-2 text-[10px] text-zinc-500">Saving…</span>}
+          </div>
+        </div>
+
+        {/* Draw toolbar */}
+        <div className="h-12 border-b border-line bg-surface-1 px-4 flex items-center justify-between shrink-0">
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-semibold text-zinc-200">Draw:</span>
             <div className="flex rounded-md bg-surface-2 p-0.5 border border-line">
-              {(["view", "polygon", "rectangle", "line"] as const).map((m) => (
-                <button
-                  key={m}
+              {drawTools.map(({ mode, icon: Icon, label }) => (
+                <button key={mode}
                   onClick={() => {
-                    setDrawMode(m);
                     setActivePoints([]);
+                    setDrawMode(mode);
+                    setDrawBinding(mode === "view" ? null : { featureKey: null, featureLabel: activeProfile === "custom" ? "Custom Zone" : "Zone", purpose: mode === "line" ? "counting_line" : "custom_zone" });
                   }}
-                  className={clsx(
-                    "text-xs px-2.5 py-1 rounded capitalize transition",
-                    drawMode === m ? "bg-surface-0 text-accent font-medium" : "text-zinc-400 hover:text-zinc-200"
-                  )}
-                >
-                  {m}
+                  className={clsx("text-xs px-2.5 py-1 rounded flex items-center gap-1 transition",
+                    drawMode === mode ? "bg-surface-0 text-accent font-medium" : "text-zinc-400 hover:text-zinc-200")}>
+                  <Icon size={12} /> {label}
                 </button>
               ))}
             </div>
           </div>
-
-          <div className="flex items-center gap-3">
-            <div className="flex items-center gap-2">
-              <span className="text-xs font-semibold text-zinc-200">Zone Type:</span>
-              <select
-                value={activePurpose}
-                onChange={(e) => setActivePurpose(e.target.value)}
-                className="bg-surface-2 border border-line text-xs rounded px-2 py-1 text-zinc-200 focus:outline-none focus:border-accent"
-              >
-                {ZONE_PURPOSES.map((zp) => (
-                  <option key={zp.value} value={zp.value}>
-                    {zp.label}
-                  </option>
-                ))}
-              </select>
-            </div>
-            {activePoints.length > 0 && (
-              <button
-                onClick={() => saveDrawing(activePoints)}
-                className="btn-accent text-xs px-3 py-1 flex items-center gap-1"
-              >
-                <CheckCircle2 size={12} /> Save Shape
+          <div className="flex items-center gap-2">
+            {drawBinding && drawMode !== "view" && (
+              <span className="text-[10px] text-zinc-400">Binding to: <b className="text-zinc-200">{drawBinding.featureLabel}</b></span>
+            )}
+            {activePoints.length > 0 && (drawMode === "polygon") && (
+              <button onClick={() => saveDrawing(activePoints)} className="btn-accent text-xs px-3 py-1 flex items-center gap-1">
+                <CheckCircle2 size={12} /> Close Shape
               </button>
             )}
           </div>
         </div>
 
-        {/* Viewport Frame */}
-        <div ref={containerRef} className="flex-1 relative bg-surface-0 flex items-center justify-center p-4">
+        {/* Viewport */}
+        <div className="flex-1 relative bg-surface-0 flex items-center justify-center p-4">
           {selectedCam ? (
-            <div className="relative aspect-video max-h-full max-w-full rounded border border-line overflow-hidden shadow-2xl bg-zinc-950">
-              {engineOnline ? (
-                <img
-                  src={mjpegStreamUrl(selectedCam.id)}
-                  alt="Live Studio Stream"
-                  className="h-full w-full object-contain pointer-events-none"
-                />
-              ) : (
-                <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-zinc-900/90 text-zinc-500">
-                  <Video size={36} />
-                  <span className="text-xs">Live stream disconnected (Engine Offline)</span>
-                  <span className="text-[10px] text-zinc-600">Drawing functions operate normally on coordinate grid</span>
-                </div>
-              )}
-
-              <canvas
-                ref={canvasRef}
-                onClick={handleCanvasClick}
-                className={clsx(
-                  "absolute inset-0 w-full h-full cursor-crosshair z-10",
-                  drawMode === "view" ? "cursor-default" : "cursor-crosshair"
+            !activeProfile ? (
+              <div className="text-center max-w-sm">
+                <Boxes size={40} className="mx-auto text-zinc-600 mb-3" />
+                <div className="text-sm font-semibold text-zinc-300 mb-1">Choose a Zone Profile</div>
+                <p className="text-xs text-zinc-500">Pick Traffic, Security, Factory or Custom above to load its AI features for <b>{selectedCam.name}</b>.</p>
+              </div>
+            ) : (
+              <div className="relative aspect-video max-h-full max-w-full rounded border border-line overflow-hidden shadow-2xl bg-zinc-950">
+                {engineOnline ? (
+                  <img src={mjpegStreamUrl(selectedCam.id)} alt="Live" className="h-full w-full object-contain pointer-events-none" />
+                ) : (
+                  <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-zinc-900/90 text-zinc-500">
+                    <Video size={36} />
+                    <span className="text-xs">Live stream offline — drawing still works on the grid</span>
+                  </div>
                 )}
-              />
-            </div>
+                <canvas ref={canvasRef} onClick={handleCanvasClick}
+                  className={clsx("absolute inset-0 w-full h-full z-10", drawMode === "view" ? "cursor-default" : "cursor-crosshair")} />
+              </div>
+            )
           ) : (
             <div className="text-xs text-zinc-500">Select a camera to configure.</div>
           )}
         </div>
       </main>
 
-      {/* Sidebar 2: Shapes & Rules Config */}
-      <aside className="w-80 border-l border-line bg-surface-1 flex flex-col shrink-0 overflow-y-auto">
-        <div className="p-4 border-b border-line">
-          <h3 className="text-xs font-bold uppercase tracking-wider text-zinc-400">Camera Analytics Drawings</h3>
-          <p className="text-[10px] text-zinc-500 mt-0.5">Define trigger geometries on canvas.</p>
-        </div>
+      {/* Sidebar 2: dynamic feature config */}
+      <aside className="w-96 border-l border-line bg-surface-1 flex flex-col shrink-0 overflow-y-auto">
+        {profileDef ? (
+          <>
+            <div className={clsx("p-4 border-b border-line", accent.bg)}>
+              <div className={clsx("flex items-center gap-2 font-semibold", accent.text)}>
+                {(() => { const Icon = PROFILE_ICON[profileDef.key]; return <Icon size={16} />; })()}
+                {profileDef.label} Profile
+              </div>
+              <p className="text-[11px] text-zinc-400 mt-1">{profileDef.description}</p>
+            </div>
 
-        {/* Shapes List */}
-        <div className="p-4 flex-1 border-b border-line max-h-64 overflow-y-auto">
-          <div className="flex justify-between items-center text-[10px] uppercase font-bold tracking-wider text-zinc-500 mb-2">
-            <span>Geometries ({drawings.length})</span>
-          </div>
-
-          <div className="space-y-1.5">
-            {drawings.length === 0 ? (
-              <div className="text-xs text-zinc-500 italic">No shapes drawn. Select a tool to begin drawing.</div>
-            ) : (
-              drawings.map((d) => (
-                <div
-                  key={d.id}
-                  onClick={() => setEditingDrawingId(editingDrawingId === d.id ? null : d.id)}
-                  className={clsx(
-                    "p-2 rounded border transition text-xs flex justify-between items-center cursor-pointer",
-                    editingDrawingId === d.id ? "bg-accent/10 border-accent" : "bg-surface-0 border-line hover:border-zinc-700"
-                  )}
-                >
-                  <div className="min-w-0">
-                    <div className="font-semibold text-zinc-200 truncate">{d.name}</div>
-                    <div className="text-[9px] text-zinc-500 font-mono capitalize">
-                      {d.type} • {ZONE_PURPOSES.find((p) => p.value === d.purpose)?.label || d.purpose}
-                    </div>
+            <div className="p-3 space-y-2">
+              {groupsForProfile().map((group) => {
+                const groupFeatures = profileDef.features.filter((f) => f.group === group);
+                const isCollapsed = collapsed[`${profileDef.key}:${group}`];
+                return (
+                  <div key={group} className="rounded-lg border border-line bg-surface-2/40 overflow-hidden">
+                    <button onClick={() => setCollapsed((c) => ({ ...c, [`${profileDef.key}:${group}`]: !isCollapsed }))}
+                      className="w-full flex items-center justify-between px-3 py-2 text-[11px] font-bold uppercase tracking-wider text-zinc-300 hover:bg-surface-2">
+                      <span>{group}</span>
+                      <div className="flex items-center gap-2">
+                        <span className="text-[9px] text-zinc-500 font-normal normal-case">
+                          {groupFeatures.filter((f) => features[f.key]?.enabled).length}/{groupFeatures.length}
+                        </span>
+                        {isCollapsed ? <ChevronRight size={13} /> : <ChevronDown size={13} />}
+                      </div>
+                    </button>
+                    {!isCollapsed && (
+                      <div className="p-2.5 space-y-2 border-t border-line">
+                        {groupFeatures.map((f) =>
+                          f.kind === "roi_editor" ? <div key={f.key}>{renderRoiPanel()}</div>
+                          : f.kind === "alerts" ? <div key={f.key}>{renderAlertsPanel()}</div>
+                          : renderFeatureCard(f),
+                        )}
+                      </div>
+                    )}
                   </div>
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      deleteDrawing(d.id);
-                    }}
-                    className="text-zinc-500 hover:text-danger p-1"
-                  >
-                    <Trash2 size={13} />
-                  </button>
-                </div>
-              ))
-            )}
-          </div>
-        </div>
-
-        {/* Rule Builder Panel */}
-        <div className="p-4 flex-1 flex flex-col">
-          <div className="mb-3">
-            <h3 className="text-xs font-bold uppercase tracking-wider text-zinc-400">Rule Logic Builder</h3>
-            <p className="text-[10px] text-zinc-500 mt-0.5">Map drawn shapes to automated event notifications.</p>
-          </div>
-
-          <form onSubmit={handleAddRule} className="space-y-3 p-3 rounded border border-line bg-surface-0 mb-4">
-            <div className="space-y-1">
-              <label className="text-[10px] font-semibold text-zinc-400 uppercase">Rule Name</label>
-              <input
-                type="text"
-                placeholder="Alert Intruder..."
-                value={ruleName}
-                onChange={(e) => setRuleName(e.target.value)}
-                className="w-full text-xs bg-surface-2 border border-line rounded px-2 py-1.5 text-zinc-200 focus:outline-none focus:border-accent"
-                required
-              />
+                );
+              })}
             </div>
-
-            <div className="grid grid-cols-2 gap-2">
-              <div className="space-y-1">
-                <label className="text-[10px] font-semibold text-zinc-400 uppercase">Trigger Event</label>
-                <select
-                  value={ruleTrigger}
-                  onChange={(e) => setRuleTrigger(e.target.value)}
-                  className="w-full text-xs bg-surface-2 border border-line rounded px-2 py-1.5 text-zinc-200 focus:outline-none"
-                >
-                  {RULE_TRIGGERS.map((rt) => (
-                    <option key={rt.value} value={rt.value}>
-                      {rt.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div className="space-y-1">
-                <label className="text-[10px] font-semibold text-zinc-400 uppercase">Source Shape</label>
-                <select
-                  value={ruleSourceId}
-                  onChange={(e) => setRuleSourceId(e.target.value)}
-                  className="w-full text-xs bg-surface-2 border border-line rounded px-2 py-1.5 text-zinc-200 focus:outline-none"
-                  required
-                >
-                  <option value="">-- Choose --</option>
-                  {drawings.map((d) => (
-                    <option key={d.id} value={d.id}>
-                      {d.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-2">
-              <div className="space-y-1">
-                <label className="text-[10px] font-semibold text-zinc-400 uppercase">Detect Class</label>
-                <select
-                  value={ruleClass}
-                  onChange={(e) => setRuleClass(e.target.value)}
-                  className="w-full text-xs bg-surface-2 border border-line rounded px-2 py-1.5 text-zinc-200 focus:outline-none"
-                >
-                  {COCO_CLASSES.map((cls) => (
-                    <option key={cls} value={cls}>
-                      {cls}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div className="space-y-1">
-                <label className="text-[10px] font-semibold text-zinc-400 uppercase">Action</label>
-                <select
-                  value={ruleAction}
-                  onChange={(e) => setRuleAction(e.target.value)}
-                  className="w-full text-xs bg-surface-2 border border-line rounded px-2 py-1.5 text-zinc-200 focus:outline-none"
-                >
-                  <option value="alert">Send Alert</option>
-                  <option value="record">Record Clip</option>
-                  <option value="custom">WebHook Trigger</option>
-                </select>
-              </div>
-            </div>
-
-            <button type="submit" className="w-full btn-accent py-1.5 text-xs flex items-center justify-center gap-1 mt-1">
-              <Plus size={12} /> Save Logic Rule
-            </button>
-          </form>
-
-          {/* Active Rules List */}
-          <div className="space-y-2 flex-1 overflow-y-auto pr-1">
-            <div className="text-[10px] uppercase font-bold tracking-wider text-zinc-500 mb-1.5">Active Logical Rules ({rules.length})</div>
-            {rules.map((r) => (
-              <div key={r.id} className="p-2 rounded bg-surface-0 border border-line text-xs flex justify-between items-start">
-                <div className="min-w-0">
-                  <div className="font-semibold text-zinc-200">{r.name}</div>
-                  <p className="text-[9px] text-zinc-500 leading-normal">
-                    IF <span className="font-mono text-zinc-400 font-bold">{r.conditions?.class || "any"}</span> triggers <span className="font-mono text-zinc-400">{RULE_TRIGGERS.find((rt) => rt.value === r.trigger_type)?.label}</span> on <span className="font-mono text-zinc-400">{drawings.find((d) => d.id === r.trigger_source_id)?.name || "Shape"}</span> THEN <span className="font-mono text-zinc-400">{r.actions.join(", ")}</span>.
-                  </p>
-                </div>
-                <button
-                  onClick={() => deleteRule(r.id)}
-                  className="text-zinc-500 hover:text-danger p-1 shrink-0"
-                >
-                  <Trash size={12} />
-                </button>
-              </div>
-            ))}
+          </>
+        ) : (
+          <div className="p-6 text-center text-xs text-zinc-500 flex-1 flex flex-col items-center justify-center gap-2">
+            <AlertCircle size={20} className="text-zinc-600" />
+            {selectedCam ? "Select a Zone Profile to configure this camera." : "Select a camera to begin."}
           </div>
-        </div>
+        )}
       </aside>
     </div>
   );

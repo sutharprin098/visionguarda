@@ -566,7 +566,8 @@ class PipelineCoordinator:
     """
 
     def __init__(self, camera_id: str, name: str, source_type: str, source: str,
-                 zones_json: str, lines_json: str, backend_model: EngineBackend, rules_json: str = "[]"):
+                 zones_json: str, lines_json: str, backend_model: EngineBackend, rules_json: str = "[]",
+                 zone_profile: str = None, profile_features: str = "{}"):
 
         self.camera_id   = camera_id
         self.name        = name
@@ -577,9 +578,12 @@ class PipelineCoordinator:
         self.zones = json.loads(zones_json)
         self.lines = json.loads(lines_json)
         self.rules = json.loads(rules_json)
+        self.zone_profile = zone_profile
+        self.profile_features = json.loads(profile_features) if isinstance(profile_features, str) else (profile_features or {})
 
         self.running        = False
         self.incoming_frame = None       # screenshare push target
+        self._last_push_ts  = 0.0        # last time push_frame() delivered a frame (screenshare staleness)
         self.telemetry_callback = None
 
         # ── Size-1 pipeline slots (one per stage boundary) ──────────────────
@@ -729,6 +733,7 @@ class PipelineCoordinator:
     def push_frame(self, frame):
         """Receive a frame from the screenshare WebSocket handler."""
         self.incoming_frame = frame
+        self._last_push_ts = time.time()
 
     def start(self):
         self.running = True
@@ -750,10 +755,12 @@ class PipelineCoordinator:
     def stop(self):
         self.running = False
 
-    def update_config(self, zones_json: str, lines_json: str, rules_json: str = "[]"):
+    def update_config(self, zones_json: str, lines_json: str, rules_json: str = "[]", zone_profile: str = None, profile_features: str = "{}"):
         self.zones = json.loads(zones_json)
         self.lines = json.loads(lines_json)
         self.rules = json.loads(rules_json)
+        self.zone_profile = zone_profile
+        self.profile_features = json.loads(profile_features) if isinstance(profile_features, str) else (profile_features or {})
         self.analytics.reset_counters()
 
     def update_display_config(self, max_width: int = None, quality: int = None):
@@ -888,8 +895,19 @@ class PipelineCoordinator:
                     frame = self.incoming_frame
                     self.incoming_frame = None
                     if frame is None:
+                        # The desktop's WebSocket pusher (see localEngine/mediaShare on the
+                        # client) can drop silently — sleep, network blip, permission
+                        # revoke — with nothing here to notice unless we actively track
+                        # staleness. Without this, _health_status just freezes at whatever
+                        # it last was (typically "online") forever, so the portal/desktop
+                        # UI would never show a dead screenshare as disconnected.
+                        if self._last_push_ts and (time.time() - self._last_push_ts) > 6.0:
+                            self._health_status = "offline"
                         time.sleep(0.005)
                         continue
+                    last_good_frame_ts = time.time()
+                    self._health_status = "online"
+                    self._last_resolution = f"{frame.shape[1]}x{frame.shape[0]}"
 
                 t_cap = time.time()
                 cap_lat = (t_cap - t0) * 1000
@@ -1253,7 +1271,8 @@ class PipelineCoordinator:
             # only adds det["speed"] and drives zone/line/dwell logic from it.
             # track_overlays: [{track_id, class, points: [[cx,cy]...]}] — normalized
             alerts, track_overlays, heatmap, zone_stats, line_stats, crowd_stats, parking_stats = self.analytics.update(
-                detections, self.zones, self.lines, orig_w, orig_h, frame=frame, rules=self.rules
+                detections, self.zones, self.lines, orig_w, orig_h, frame=frame, rules=self.rules,
+                zone_profile=self.zone_profile, profile_features=self.profile_features
             )
 
             # ── Build normalized client_dets AFTER analytics has smoothed bbox─

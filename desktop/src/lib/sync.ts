@@ -16,6 +16,7 @@ export interface SyncBundle {
   rule_engine_rules: any[];
   custom_ai_modes: any[];
   ai_model_packages: any[];
+  zone_profile_configs: any[];
 }
 
 /** Thrown when the cloud says this device/activation is revoked — the app
@@ -45,7 +46,7 @@ const WATCHED_TABLES = [
   "role_permissions", "licenses", "license_activations", "devices",
   "profiles", "notifications", "ai_model_assignments",
   "analytics_drawings", "rule_engine_rules", "custom_ai_modes",
-  "ai_model_packages", "config_versions",
+  "ai_model_packages", "config_versions", "zone_profile_configs"
 ];
 
 /** Re-fetches the bundle (debounced) whenever anything relevant changes.

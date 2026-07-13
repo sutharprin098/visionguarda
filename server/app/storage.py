@@ -21,13 +21,25 @@ def init_db():
                 is_active INTEGER DEFAULT 1,
                 zones TEXT DEFAULT '[]', -- JSON string of restricted zone polygons
                 lines TEXT DEFAULT '[]',   -- JSON string of crossing lines
-                rules TEXT DEFAULT '[]' -- JSON string of rule engine rules
+                rules TEXT DEFAULT '[]', -- JSON string of rule engine rules
+                zone_profile TEXT DEFAULT NULL,
+                profile_features TEXT DEFAULT '{}'
             )
         """)
         
-        # Alter table if rules column is missing on upgrade
+        # Alter table if columns are missing on upgrade
         try:
             conn.execute("ALTER TABLE cameras ADD COLUMN rules TEXT DEFAULT '[]'")
+        except sqlite3.OperationalError:
+            pass
+
+        try:
+            conn.execute("ALTER TABLE cameras ADD COLUMN zone_profile TEXT DEFAULT NULL")
+        except sqlite3.OperationalError:
+            pass
+
+        try:
+            conn.execute("ALTER TABLE cameras ADD COLUMN profile_features TEXT DEFAULT '{}'")
         except sqlite3.OperationalError:
             pass
 
@@ -72,57 +84,19 @@ def init_db():
             )
         """)
 
-        # Seed default camera if empty
-        cursor = conn.cursor()
-        cursor.execute("SELECT COUNT(*) FROM cameras")
-        if cursor.fetchone()[0] == 0:
-            conn.execute("""
-                INSERT INTO cameras (id, name, type, source, is_active, zones, lines, rules)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            """, (
-                "cam_default",
-                "Default Webcam",
-                "webcam",
-                "0",
-                1,
-                "[]",
-                "[]",
-                "[]"
-            ))
-        
-        # Seed live_webcam if it doesn't exist
-        cursor.execute("SELECT COUNT(*) FROM cameras WHERE id = ?", ("live_webcam",))
-        if cursor.fetchone()[0] == 0:
-            conn.execute("""
-                INSERT INTO cameras (id, name, type, source, is_active, zones, lines, rules)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            """, (
-                "live_webcam",
-                "Live Webcam Share",
-                "screenshare",
-                "client",
-                1,
-                "[]",
-                "[]",
-                "[]"
-            ))
-
-        # Seed live_screenshare if it doesn't exist
-        cursor.execute("SELECT COUNT(*) FROM cameras WHERE id = ?", ("live_screenshare",))
-        if cursor.fetchone()[0] == 0:
-            conn.execute("""
-                INSERT INTO cameras (id, name, type, source, is_active, zones, lines, rules)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            """, (
-                "live_screenshare",
-                "Live Screen Share",
-                "screenshare",
-                "client",
-                1,
-                "[]",
-                "[]",
-                "[]"
-            ))
+        # No default/placeholder cameras are seeded here. The desktop app is
+        # the sole source of truth for which cameras exist — it registers
+        # (POST /api/cameras) exactly what the cloud assigns to this device
+        # (see desktop/src/lib/localEngine.ts syncCamerasToLocalEngine) and
+        # nothing else. Seeding fake rows ("cam_default"/"live_webcam"/
+        # "live_screenshare") here used to make this table diverge from the
+        # cloud's camera list on every fresh install — the engine would
+        # report 3+ "active" cameras nothing in the UI ever referenced,
+        # while the one real cloud-assigned camera raced its own
+        # registration. One-time migration below removes any of these rows
+        # left over from that seeding on existing installs.
+        for legacy_id in ("cam_default", "live_webcam", "live_screenshare"):
+            conn.execute("DELETE FROM cameras WHERE id = ?", (legacy_id,))
         conn.commit()
 
 # --- Database APIs ---
@@ -138,12 +112,12 @@ def get_camera(camera_id: str):
         row = conn.execute("SELECT * FROM cameras WHERE id = ?", (camera_id,)).fetchone()
         return dict(row) if row else None
 
-def save_camera(camera_id: str, name: str, type_: str, source: str, is_active: int, zones: str = "[]", lines: str = "[]", rules: str = "[]"):
+def save_camera(camera_id: str, name: str, type_: str, source: str, is_active: int, zones: str = "[]", lines: str = "[]", rules: str = "[]", zone_profile: str = None, profile_features: str = "{}"):
     with get_db() as conn:
         conn.execute("""
-            INSERT OR REPLACE INTO cameras (id, name, type, source, is_active, zones, lines, rules)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        """, (camera_id, name, type_, source, is_active, zones, lines, rules))
+            INSERT OR REPLACE INTO cameras (id, name, type, source, is_active, zones, lines, rules, zone_profile, profile_features)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (camera_id, name, type_, source, is_active, zones, lines, rules, zone_profile, profile_features))
         conn.commit()
 
 def delete_camera(camera_id: str):

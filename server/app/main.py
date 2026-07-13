@@ -17,8 +17,26 @@ from app.storage import (
     get_all_recordings
 )
 from app.camera_manager import manager
+from app.gpu_monitor import get_gpu_usage
 
 app = FastAPI(title="CamAI CCTV Analytics Platform")
+
+# Structured health/introspection endpoints (/health, /models, /cameras,
+# /system, /performance) polled by the desktop engine supervisor.
+from app.health import router as health_router
+app.include_router(health_router)
+
+# Primed once at import time — psutil's cpu_percent() reports 0.0 on its
+# first call for a given Process object (it needs a prior sample to diff
+# against) and /api/status is polled on an interval, so a module-level
+# instance naturally gets a real reading from the second poll onward
+# instead of every caller re-priming (and always seeing 0.0) on each request.
+try:
+    import psutil
+    _proc = psutil.Process()
+    _proc.cpu_percent(interval=None)
+except ImportError:
+    _proc = None
 
 # CORS Setup
 app.add_middleware(
@@ -156,13 +174,29 @@ class ConnectionManager:
 
 ws_manager = ConnectionManager()
 
+# A well-behaved client (see desktop/src/lib/mediaShare.ts) pings on a
+# cadence well inside this window; a connection that's gone idle past it is
+# almost always a half-open socket the OS hasn't torn down yet (sleep,
+# network-adapter swap, dead peer with no FIN/RST ever seen) rather than a
+# legitimately quiet client — closing it lets the client's own reconnect
+# logic take over immediately instead of pushing frames into a socket that
+# looks open but is actually dead.
+WS_IDLE_TIMEOUT_SECS = 30.0
+
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     await ws_manager.connect(websocket)
     try:
         while True:
-            # Keep socket alive and listen for client inputs (like manual triggers or subscriptions)
-            data = await websocket.receive_text()
+            try:
+                data = await asyncio.wait_for(websocket.receive_text(), timeout=WS_IDLE_TIMEOUT_SECS)
+            except asyncio.TimeoutError:
+                print(f"[WS] Client idle > {WS_IDLE_TIMEOUT_SECS}s, closing.", flush=True)
+                try:
+                    await websocket.close()
+                except Exception:
+                    pass
+                break
             try:
                 import json
                 import base64
@@ -177,6 +211,8 @@ async def websocket_endpoint(websocket: WebSocket):
                     cam_id = payload.get("camera_id")
                     if cam_id:
                         ws_manager.remove_subscription(websocket, cam_id)
+                elif msg_type == "ping":
+                    await websocket.send_json({"type": "pong", "ts": payload.get("ts")})
                 elif msg_type == "screen_frame":
                     cam_id = payload.get("camera_id")
                     frame_base64 = payload.get("frame")
@@ -193,9 +229,10 @@ async def websocket_endpoint(websocket: WebSocket):
             except Exception:
                 pass
     except WebSocketDisconnect:
-        ws_manager.disconnect(websocket)
+        pass
     except Exception as e:
         print(f"[WS] Exception: {e}")
+    finally:
         ws_manager.disconnect(websocket)
 
 # --- Pydantic Schemas ---
@@ -208,11 +245,16 @@ class CameraConfigPayload(BaseModel):
     is_active: bool
     zones: Optional[str] = "[]"
     lines: Optional[str] = "[]"
+    rules: Optional[str] = "[]"
+    zone_profile: Optional[str] = None
+    profile_features: Optional[str] = "{}"
 
 class CameraAnalyticsPayload(BaseModel):
     zones: str
     lines: str
     rules: Optional[str] = "[]"
+    zone_profile: Optional[str] = None
+    profile_features: Optional[str] = "{}"
 
 class CameraDisplayPayload(BaseModel):
     max_width: Optional[int] = None
@@ -244,8 +286,11 @@ def get_system_status():
         
     # Recommendation logic:
     # If active model is yolo11m-seg.pt or yolo11s-seg.pt, and we're on CPU, recommend a lighter model
-    import torch
-    device = "cuda" if torch.cuda.is_available() else "cpu"
+    try:
+        import torch
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+    except ImportError:
+        device = "cpu"
     
     recommendation = {
         "should_switch": False,
@@ -271,6 +316,19 @@ def get_system_status():
                     "suggested_model": "yolo11n-seg.pt"
                 }
         
+    running_states = [c for c in camera_states.values() if c["running"]]
+    avg_fps = sum(c["fps"] for c in running_states) / len(running_states) if running_states else 0.0
+    avg_latency = sum(c["latency"] for c in running_states) / len(running_states) if running_states else 0.0
+
+    if _proc is not None:
+        try:
+            cpu_percent = _proc.cpu_percent(interval=None)
+            memory_mb = _proc.memory_info().rss / (1024 * 1024)
+        except Exception:
+            cpu_percent, memory_mb = 0.0, 0.0
+    else:
+        cpu_percent, memory_mb = 0.0, 0.0
+
     return {
         "server": "online",
         "uptime": round(time.time() - startup_time),
@@ -279,7 +337,19 @@ def get_system_status():
         "cameras": camera_states,
         "selectedModel": manager.selected_model_name,
         "benchmark": manager.benchmark_results,
-        "recommendation": recommendation
+        "recommendation": recommendation,
+        "engine": {
+            "status": manager.startup_status,
+            "error": manager.startup_error,
+            "elapsed_secs": round(time.time() - manager.startup_started_at, 1),
+            "cpu_percent": round(cpu_percent, 1),
+            "memory_mb": round(memory_mb, 1),
+            "gpu_percent": get_gpu_usage(),
+            "device": device,
+            "avg_fps": round(avg_fps, 1),
+            "avg_latency_ms": round(avg_latency, 1),
+            "active_cameras": len(running_states),
+        },
     }
 
 @app.post("/api/model/select")
@@ -341,7 +411,10 @@ def add_or_update_camera(payload: CameraConfigPayload):
         payload.source,
         1 if payload.is_active else 0,
         payload.zones,
-        payload.lines
+        payload.lines,
+        payload.rules or "[]",
+        payload.zone_profile,
+        payload.profile_features or "{}"
     )
     # Restart or start the camera thread
     if payload.is_active:
@@ -375,11 +448,20 @@ def update_camera_analytics(camera_id: str, payload: CameraAnalyticsPayload):
         cam["is_active"],
         payload.zones,
         payload.lines,
-        payload.rules or "[]"
+        payload.rules or "[]",
+        payload.zone_profile,
+        payload.profile_features or "{}"
     )
     
     # Update live thread on-the-fly
-    manager.update_camera_analytics_config(camera_id, payload.zones, payload.lines, payload.rules or "[]")
+    manager.update_camera_analytics_config(
+        camera_id, 
+        payload.zones, 
+        payload.lines, 
+        payload.rules or "[]", 
+        payload.zone_profile, 
+        payload.profile_features or "{}"
+    )
     return {"success": True, "message": "Analytics config updated"}
 
 @app.post("/api/cameras/{camera_id}/display")
@@ -492,8 +574,14 @@ def clear_api_logs():
     return {"success": True}
 
 if __name__ == "__main__":
+    import os
     import uvicorn
-    import sys
     from app.config import HOST, PORT
-    uvicorn.run("app.main:app", host=HOST, port=PORT, reload=True)
+
+    # reload=True spawns an extra file-watcher process and restarts on any
+    # file change under this directory (including files the engine itself
+    # writes, like recordings/db) — a dev convenience that fights a process
+    # supervisor's own restart/health-tracking in production. Opt-in only.
+    dev_reload = os.getenv("CAMAI_DEV_RELOAD", "").strip().lower() in ("1", "true", "yes")
+    uvicorn.run("app.main:app", host=HOST, port=PORT, reload=dev_reload)
 

@@ -1,11 +1,18 @@
-import { app, BrowserWindow, ipcMain, session, desktopCapturer } from "electron";
+import { app, BrowserWindow, ipcMain, session, desktopCapturer, powerMonitor } from "electron";
 import { join } from "node:path";
 import { existsSync } from "node:fs";
 import { computeFingerprint } from "./fingerprint";
 import { saveCredentials, loadCredentials, clearCredentials } from "./secureStore";
+import {
+  startEngine, stopEngine, restartEngine, shutdownEngine,
+  getStatus as getEngineStatus, getLogs as getEngineLogs,
+  setEnginePath, getEnginePath,
+} from "./engineSupervisor";
 
 const SUPABASE_URL = process.env.CAMAI_SUPABASE_URL ?? "https://kuqyhceykvisqfyghiot.supabase.co";
 const ANON_KEY = process.env.CAMAI_SUPABASE_ANON_KEY ?? "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imt1cXloY2V5a3Zpc3FmeWdoaW90Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM4Mzc1MjksImV4cCI6MjA5OTQxMzUyOX0.EvmBR-6sjtUO8UWBm9A0Sv9Ms5GMSs7BDsvw8fVZ8LI";
+
+if (process.env.CAMAI_REMOTE_DEBUG) app.commandLine.appendSwitch("remote-debugging-port", process.env.CAMAI_REMOTE_DEBUG);
 
 let win: BrowserWindow | null = null;
 
@@ -31,6 +38,7 @@ function createWindow() {
   } else {
     win.loadFile(join(__dirname, "../dist/index.html"));
   }
+  if (process.env.CAMAI_OPEN_DEVTOOLS) win.webContents.openDevTools({ mode: "bottom" });
 }
 
 // ---------- IPC: activation & session ----------
@@ -104,11 +112,23 @@ ipcMain.handle("get-config", () => {
   return {
     supabaseUrl: SUPABASE_URL,
     anonKey: ANON_KEY,
-    appType: isAdmin ? "admin" : "desktop"
+    appType: isAdmin ? "admin" : "desktop",
+    isPackaged: app.isPackaged
   };
 });
 
 setupDownloadHandlers(ipcMain, () => win);
+
+// ---------- IPC: Local AI Engine supervisor ----------
+
+ipcMain.handle("engine-start", () => { startEngine(() => win); return { ok: true }; });
+ipcMain.handle("engine-stop", () => { stopEngine(); return { ok: true }; });
+ipcMain.handle("engine-restart", () => { restartEngine(); return { ok: true }; });
+ipcMain.handle("engine-get-status", () => getEngineStatus());
+ipcMain.handle("engine-get-logs", () => getEngineLogs());
+ipcMain.handle("engine-get-path", () => getEnginePath());
+ipcMain.handle("engine-set-path", (_evt, { pythonPath, engineDir }: { pythonPath: string; engineDir: string }) =>
+  setEnginePath(pythonPath, engineDir));
 
 app.whenReady().then(() => {
   createWindow();
@@ -126,5 +146,31 @@ app.whenReady().then(() => {
       callback({ video: undefined });
     }
   });
+
+  // Webcam sharing (getUserMedia) would otherwise sit on Chromium's default
+  // permission prompt, which this frameless kiosk-style window never shows —
+  // silently denying the request instead. Screen capture already bypasses
+  // the picker above; auto-granting camera/mic here keeps behavior
+  // consistent and lets the auto-reconnect logic in mediaShare.ts silently
+  // re-acquire a webcam stream after e.g. a sleep/resume cycle without
+  // getting stuck on a permission dialog nobody can see.
+  session.defaultSession.setPermissionRequestHandler((_wc, permission, callback) => {
+    callback(permission === "media" || (permission as string) === "display-capture");
+  });
+  session.defaultSession.setPermissionCheckHandler((_wc, permission) =>
+    permission === "media" || (permission as string) === "display-capture");
+
+  // Forward OS power-state transitions to the renderer so its stream
+  // managers know to actively re-check/re-acquire media on resume rather
+  // than waiting for the next heartbeat timeout to notice.
+  powerMonitor.on("suspend", () => win?.webContents.send("power-event", "suspend"));
+  powerMonitor.on("resume", () => win?.webContents.send("power-event", "resume"));
+  powerMonitor.on("lock-screen", () => win?.webContents.send("power-event", "lock-screen"));
+  powerMonitor.on("unlock-screen", () => win?.webContents.send("power-event", "unlock-screen"));
+
+  // Local AI engine: launch on app start, keep it alive for the life of
+  // the app (see engineSupervisor.ts for restart/crash-loop handling).
+  startEngine(() => win);
 });
 app.on("window-all-closed", () => app.quit());
+app.on("before-quit", () => shutdownEngine());

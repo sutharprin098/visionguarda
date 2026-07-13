@@ -1,9 +1,12 @@
 import { useEffect, useState, useRef } from "react";
-import { Video, Bell, Settings2, LogOut, Wifi, WifiOff, Sliders } from "lucide-react";
+import { Video, Bell, Settings2, LogOut, Wifi, WifiOff, Sliders, Activity, AlertTriangle, RotateCw } from "lucide-react";
 import clsx from "clsx";
 import { startRealtimeSync, DeactivatedError, SyncBundle } from "../lib/sync";
 import { syncCamerasToLocalEngine, syncAiModelToLocalEngine, isEngineOnline, mjpegStreamUrl, resetLocalEngineState, reportCameraHealth } from "../lib/localEngine";
+import { MediaShareSession, ShareStatus } from "../lib/mediaShare";
+import type { EngineProcessState } from "../lib/bridge";
 import ModelManagerUI from "../components/ModelManagerUI";
+import EngineHealthPanel from "../components/EngineHealthPanel";
 
 export default function Workspace({
   onDeactivated,
@@ -13,7 +16,7 @@ export default function Workspace({
   onOpenAdminStudio: () => void;
 }) {
   const [bundle, setBundle] = useState<SyncBundle | null>(null);
-  const [tab, setTab] = useState<"cameras" | "alerts" | "settings">("cameras");
+  const [tab, setTab] = useState<"cameras" | "alerts" | "settings" | "engine">("cameras");
   const [syncError, setSyncError] = useState(false);
 
   async function deactivate() {
@@ -34,10 +37,21 @@ export default function Workspace({
     return () => stop?.();
   }, []);
 
-  // keep the local AI engine's running cameras in step with what's assigned
+  // Keep the local AI engine's running cameras in step with what's assigned.
+  // Runs on an interval, not just on bundle change — the engine can still be
+  // starting up (model load can take tens of seconds to minutes) when this
+  // first fires, and a sync attempt that no-ops because the engine wasn't
+  // reachable yet would otherwise never be retried until something
+  // unrelated happened to refetch the bundle. This is what caused a
+  // registered cloud camera to never actually reach the local engine,
+  // showing "Cameras (1)" in the sidebar while Engine Health stayed at 0.
   useEffect(() => {
-    if (bundle) void syncCamerasToLocalEngine(bundle.cameras, bundle.rule_engine_rules || []);
-  }, [bundle?.cameras, bundle?.rule_engine_rules]);
+    if (!bundle) return;
+    const sync = () => void syncCamerasToLocalEngine(bundle.cameras, bundle.rule_engine_rules || [], bundle.zone_profile_configs || []);
+    sync();
+    const id = setInterval(sync, 8_000);
+    return () => clearInterval(id);
+  }, [bundle?.cameras, bundle?.rule_engine_rules, bundle?.zone_profile_configs]);
 
   // push each assigned camera's live connection state (online/offline/
   // connecting/auth_failed/network_error) to Supabase so the portal's
@@ -53,9 +67,57 @@ export default function Workspace({
 
   // hot-swap the engine's active model when the org's ai.model setting changes
   const orgModel = bundle?.settings.find((s) => s.scope === "org" && s.key === "ai.model")?.value;
+  // Automatically sync/download the selected orgModel in the background:
   useEffect(() => {
-    if (typeof orgModel === "string") void syncAiModelToLocalEngine(orgModel);
-  }, [orgModel]);
+    if (!bundle || !orgModel || typeof orgModel !== "string") return;
+
+    let active = true;
+    const pkg = bundle.ai_model_packages?.find((p: any) => p.name === orgModel);
+    
+    async function checkAndDownload() {
+      if (!pkg) {
+        // If not a dynamic package, sync directly
+        void syncAiModelToLocalEngine(orgModel);
+        return;
+      }
+
+      try {
+        const statusRes = await (window as any).camai.getDownloadStatus({ modelName: pkg.name });
+        if (statusRes.ok) {
+          if (statusRes.status === "complete") {
+            // Already downloaded, trigger select
+            void syncAiModelToLocalEngine(orgModel);
+          } else if (statusRes.status !== "downloading") {
+            // Not downloading, trigger download in the background
+            console.log(`[Background Sync] Starting auto-download for model: ${pkg.name}`);
+            await (window as any).camai.downloadModel({
+              url: pkg.download_url,
+              modelName: pkg.name,
+              expectedChecksum: pkg.checksum,
+              signature: pkg.signature,
+            });
+          }
+        }
+      } catch (err) {
+        console.error("[Background Sync] Failed to sync model:", err);
+      }
+    }
+
+    void checkAndDownload();
+
+    // Listen to download progress to swap when complete
+    const unsub = (window as any).camai.onDownloadProgress(orgModel, (progress: any) => {
+      if (active && progress.status === "complete") {
+        console.log(`[Background Sync] Download complete for ${orgModel}, hot-swapping...`);
+        void syncAiModelToLocalEngine(orgModel);
+      }
+    });
+
+    return () => {
+      active = false;
+      unsub();
+    };
+  }, [orgModel, bundle?.ai_model_packages]);
 
   // Check if user has permission or is super admin
   const hasPermission = (perm: string): boolean => {
@@ -64,13 +126,16 @@ export default function Workspace({
     return Array.isArray(bundle.permissions) && bundle.permissions.includes(perm);
   };
 
-  // Dynamically select allowed tabs
+  // Dynamically select allowed tabs. "engine" (local AI engine health) is
+  // diagnostic info about this machine only — never org/camera data — so
+  // it's shown to every signed-in desktop user regardless of permissions.
   const allowedTabs = bundle
     ? ([
         (hasPermission("cameras.manage") || hasPermission("cameras.assign")) && "cameras",
         hasPermission("alerts.view") && "alerts",
         hasPermission("ai.configure") && "settings",
-      ].filter(Boolean) as ("cameras" | "alerts" | "settings")[])
+        "engine",
+      ].filter(Boolean) as ("cameras" | "alerts" | "settings" | "engine")[])
     : [];
 
   // Auto-switch to first available authorized tab if active tab is unauthorized
@@ -105,6 +170,7 @@ export default function Workspace({
     { id: "cameras", label: `Cameras (${bundle.cameras.length})`, icon: Video },
     { id: "alerts", label: `Alerts (${bundle.notifications.length})`, icon: Bell },
     { id: "settings", label: "AI Settings", icon: Settings2 },
+    { id: "engine", label: "Engine Health", icon: Activity },
   ] as const).filter((item) => allowedTabs.includes(item.id));
 
   return (
@@ -171,52 +237,270 @@ export default function Workspace({
         )}
         {tab === "settings" && (
           <div className="space-y-6">
-            <Panel title="AI Settings (managed by your organization)">
-              <pre className="mt-2 overflow-x-auto rounded-md bg-surface-0 p-3 font-mono text-xs text-zinc-400">
-                {JSON.stringify(aiSettings, null, 2)}
-              </pre>
-              <p className="mt-2 text-xs text-zinc-500">
-                Confidence threshold and class filters are shown for reference. Model selection applies live to the local AI engine when downloaded and deployed.
-              </p>
-            </Panel>
+            <Panel title="AI Profile & Rules">
+              <div className="rounded-lg bg-surface-1 border border-line p-5">
+                <div className="flex items-center gap-3">
+                  <div className="h-10 w-10 rounded bg-accent/15 flex items-center justify-center text-accent text-lg font-semibold uppercase">
+                    {String(aiSettings["ai.profile"] || "Traffic").charAt(0)}
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-semibold text-zinc-200 capitalize">
+                      Active Profile: {aiSettings["ai.profile"] || "Traffic"}
+                    </h3>
+                    <div className="text-xs text-zinc-500 mt-0.5">
+                      Configured via CamAI cloud and synchronized to this client.
+                    </div>
+                  </div>
+                </div>
 
-            <ModelManagerUI
-              modelPackages={bundle.ai_model_packages || []}
-              activeModelName={aiSettings["ai.model"]}
-              orgId={bundle.organization?.id}
-              canConfigure={hasPermission("ai.configure")}
-            />
+                <div className="mt-6 space-y-4 border-t border-line/60 pt-4">
+                  <div>
+                    <div className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider">Detection Classes</div>
+                    <div className="flex flex-wrap gap-1.5 mt-2">
+                      {Array.isArray(aiSettings["ai.classes"]) ? (
+                        (aiSettings["ai.classes"] as string[]).map((c) => (
+                          <span key={c} className="text-xs bg-surface-2 px-2.5 py-1 rounded text-zinc-400 capitalize">
+                            {c}
+                          </span>
+                        ))
+                      ) : (
+                        <span className="text-xs text-zinc-500">No classes active.</span>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-4 pt-2">
+                    <div>
+                      <div className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider">Engine Synchronization</div>
+                      <div className="mt-1 text-xs text-ok flex items-center gap-1.5 font-medium">
+                        <span className="relative flex h-2 w-2">
+                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-ok opacity-75"></span>
+                          <span className="relative inline-flex rounded-full h-2 w-2 bg-ok"></span>
+                        </span>
+                        Active & Running
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider">Active Configuration Rules</div>
+                      <div className="mt-1 text-xs text-zinc-400 font-mono">
+                        {Array.isArray(aiSettings["ai.classes"]) ? `${(aiSettings["ai.classes"] as string[]).length} rules loaded` : "Default rules"}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </Panel>
           </div>
         )}
+        {tab === "engine" && <EngineHealthPanel />}
       </main>
     </div>
   );
 }
 
+interface EngineHealthInfo {
+  online: boolean;
+  status: string;
+  ready: boolean;
+  engine_status: string;
+  engine_error: string | null;
+  model_loaded: boolean;
+  active_cameras: number;
+}
+
+function EngineDiagnosticPanel({
+  healthInfo,
+  procStatus,
+  logs,
+}: {
+  healthInfo: EngineHealthInfo | null;
+  procStatus: any;
+  logs: string[];
+}) {
+  const [recovering, setRecovering] = useState(false);
+
+  const handleRestart = async () => {
+    setRecovering(true);
+    await window.camai.engine.restart();
+    setTimeout(() => setRecovering(false), 2000);
+  };
+
+  const isProcessRunning = procStatus && (procStatus.state === "running" || procStatus.state === "starting" || procStatus.state === "restarting");
+  const pid = procStatus?.pid;
+
+  // Try to find exact reason or exception in the last 15 logs if not returned in health/proc status
+  let errorReason = procStatus?.lastError || healthInfo?.engine_error || "";
+  if (!errorReason && logs.length > 0) {
+    const errorLogs = logs.filter(l => l.includes("ERROR") || l.includes("Error") || l.includes("Traceback") || l.includes("Exception") || l.includes("failed"));
+    if (errorLogs.length > 0) {
+      errorReason = errorLogs.slice(-3).join("\n");
+    } else {
+      errorReason = logs.slice(-3).join("\n");
+    }
+  }
+
+  return (
+    <div className="rounded-lg border border-danger/35 bg-surface-1 p-5 shadow-lg space-y-4">
+      <div className="flex items-center justify-between border-b border-line pb-4">
+        <div className="flex items-center gap-3">
+          <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-danger/10 text-danger animate-pulse">
+            <AlertTriangle size={20} />
+          </div>
+          <div>
+            <h3 className="text-sm font-semibold text-zinc-100">Local AI Engine Status</h3>
+            <p className="text-xs text-zinc-500">
+              {!healthInfo?.online
+                ? "The engine service is currently offline or unreachable."
+                : !healthInfo.ready
+                ? "The engine has started but the AI model is still loading or compiling."
+                : "Engine is starting up."}
+            </p>
+          </div>
+        </div>
+        <button
+          onClick={handleRestart}
+          disabled={recovering}
+          className="flex items-center gap-1.5 rounded bg-accent/20 px-3 py-1.5 text-xs font-semibold text-accent hover:bg-accent/30 transition disabled:opacity-50"
+        >
+          <RotateCw size={12} className={clsx(recovering && "animate-spin")} />
+          {recovering ? "Recovering…" : "Recovery Button"}
+        </button>
+      </div>
+
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <div className="rounded bg-surface-0 px-3 py-2">
+          <div className="text-[10px] uppercase tracking-wide text-zinc-500">Engine Status</div>
+          <div className="mt-0.5 text-xs font-semibold text-zinc-200 capitalize">
+            {procStatus?.state || "Unknown"}
+          </div>
+        </div>
+        <div className="rounded bg-surface-0 px-3 py-2">
+          <div className="text-[10px] uppercase tracking-wide text-zinc-500">Process Running</div>
+          <div className="mt-0.5 text-xs font-semibold text-zinc-200">
+            {isProcessRunning ? `Yes (PID: ${pid || "Active"})` : "No"}
+          </div>
+        </div>
+        <div className="rounded bg-surface-0 px-3 py-2">
+          <div className="text-[10px] uppercase tracking-wide text-zinc-500">Health Status</div>
+          <div className="mt-0.5 text-xs font-semibold text-zinc-200">
+            {healthInfo?.online ? (healthInfo.ready ? "Ready" : "Loading Model") : "Unreachable"}
+          </div>
+        </div>
+        <div className="rounded bg-surface-0 px-3 py-2">
+          <div className="text-[10px] uppercase tracking-wide text-zinc-500">Port</div>
+          <div className="mt-0.5 text-xs font-semibold text-zinc-200">8000</div>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <div className="rounded bg-surface-0 px-3 py-2 col-span-2">
+          <div className="text-[10px] uppercase tracking-wide text-zinc-500">Active AI Processor</div>
+          <div className="mt-0.5 text-xs font-semibold text-zinc-200">Advanced Detection Processor</div>
+        </div>
+        <div className="rounded bg-surface-0 px-3 py-2 col-span-2">
+          <div className="text-[10px] uppercase tracking-wide text-zinc-500">Camera Status</div>
+          <div className="mt-0.5 text-xs font-semibold text-zinc-200">
+            {healthInfo?.active_cameras ?? 0} active cameras
+          </div>
+        </div>
+      </div>
+
+      {errorReason && (
+        <div className="rounded border border-line bg-black/55 p-3">
+          <div className="text-[10px] uppercase tracking-wide text-zinc-500 mb-1">Error Details</div>
+          <pre className="whitespace-pre-wrap font-mono text-[10px] text-danger/90 leading-relaxed max-h-36 overflow-y-auto">
+            {errorReason}
+          </pre>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function CamerasView({ cameras }: { cameras: any[] }) {
-  const [engineOnline, setEngineOnline] = useState<boolean | null>(null);
+  const [healthInfo, setHealthInfo] = useState<EngineHealthInfo | null>(null);
+  const [procStatus, setProcStatus] = useState<any>(null);
+  const [logs, setLogs] = useState<string[]>([]);
+  const [consecutiveMisses, setConsecutiveMisses] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
-    const check = () => isEngineOnline().then((ok) => !cancelled && setEngineOnline(ok));
-    check();
-    const id = setInterval(check, 10_000);
-    return () => { cancelled = true; clearInterval(id); };
+
+    // Fetch supervisor logs in real-time
+    window.camai.engine.getLogs().then((l) => !cancelled && setLogs(l.slice(-100)));
+    const offLog = window.camai.engine.onLog((line) => {
+      if (!cancelled) setLogs((prev) => [...prev.slice(-99), line]);
+    });
+
+    const checkHealth = async () => {
+      try {
+        const res = await fetch("http://127.0.0.1:8000/health", { signal: AbortSignal.timeout(800) });
+        if (res.ok) {
+          const data = await res.json();
+          if (!cancelled) {
+            setHealthInfo({
+              online: true,
+              status: data.status || "ok",
+              ready: data.ready ?? false,
+              engine_status: data.engine_status || "unknown",
+              engine_error: data.engine_error || null,
+              model_loaded: data.model_loaded ?? false,
+              active_cameras: data.active_cameras ?? 0,
+            });
+            setConsecutiveMisses(0);
+          }
+        } else {
+          throw new Error("unhealthy");
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setConsecutiveMisses((m) => {
+            const next = m + 1;
+            if (next >= 2) {
+              setHealthInfo((h) => ({
+                online: false,
+                status: "unreachable",
+                ready: false,
+                engine_status: "failed",
+                engine_error: "Connection to port 8000 refused",
+                model_loaded: false,
+                active_cameras: 0,
+              }));
+            }
+            return next;
+          });
+        }
+      }
+
+      // Update supervisor status
+      const s = await window.camai.engine.getStatus();
+      if (!cancelled) setProcStatus(s);
+    };
+
+    checkHealth();
+    const id = setInterval(checkHealth, 1000); // Poll /health every second
+
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+      offLog();
+    };
   }, []);
 
   if (!cameras.length) {
     return <Panel title="Cameras">No cameras assigned to you. Ask your administrator.</Panel>;
   }
+
+  const isEngineOffline = !healthInfo || !healthInfo.online || !healthInfo.ready;
+
   return (
-    <div className="space-y-3">
-      {engineOnline === false && (
-        <div className="flex items-center gap-2 rounded-md border border-warn/40 bg-warn/10 px-3 py-2 text-xs text-warn">
-          <WifiOff size={13} /> Local AI engine isn't running on this machine — start it to see live previews.
-        </div>
+    <div className="space-y-4">
+      {isEngineOffline && (
+        <EngineDiagnosticPanel healthInfo={healthInfo} procStatus={procStatus} logs={logs} />
       )}
       <div className="grid grid-cols-2 gap-4 xl:grid-cols-3">
         {cameras.map((c) => (
-          <CameraTile key={c.id} camera={c} engineOnline={engineOnline} />
+          <CameraTile key={c.id} camera={c} engineOnline={healthInfo?.online && healthInfo?.ready} />
         ))}
       </div>
     </div>
@@ -236,107 +520,55 @@ const STATUS_TONES: Record<string, string> = {
   error: "bg-danger/15 text-danger",
 };
 
+const SHARE_STATUS_LABELS: Record<ShareStatus, string> = {
+  idle: "", acquiring: "Starting…", connecting: "Connecting…",
+  live: "Live", reconnecting: "Reconnecting…", error: "Error",
+};
+const SHARE_STATUS_TONES: Record<ShareStatus, string> = {
+  idle: "", acquiring: "bg-warn/20 text-warn animate-pulse",
+  connecting: "bg-warn/20 text-warn animate-pulse",
+  live: "bg-red-500/20 text-red-400 animate-pulse",
+  reconnecting: "bg-warn/20 text-warn animate-pulse",
+  error: "bg-danger/20 text-danger",
+};
+
 function CameraTile({ camera: c, engineOnline }: { camera: any; engineOnline: boolean | null }) {
   const [streamFailed, setStreamFailed] = useState(false);
   const [sharingType, setSharingType] = useState<"screen" | "webcam" | null>(null);
+  const [shareStatus, setShareStatus] = useState<ShareStatus>("idle");
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
-  const wsRef = useRef<WebSocket | null>(null);
-  const timerRef = useRef<any>(null);
+  const sessionRef = useRef<MediaShareSession | null>(null);
 
   const isScreenShareCam = c.source_type === "screen_share";
   const showStream = engineOnline && !streamFailed && (!isScreenShareCam || sharingType === null);
 
   useEffect(() => {
-    if (localStream && videoRef.current) {
-      videoRef.current.srcObject = localStream;
-    }
+    if (videoRef.current) videoRef.current.srcObject = localStream;
   }, [localStream]);
 
-  useEffect(() => {
-    return () => {
-      stopSharing();
-    };
-  }, []);
+  // Persistent across transient disconnects — only torn down on unmount or
+  // an explicit "Stop Share" click, never on a dropped socket or a paused
+  // display (see lib/mediaShare.ts for the reconnect/re-acquire logic).
+  useEffect(() => () => { sessionRef.current?.stop(); sessionRef.current = null; }, []);
 
-  async function startSharing(type: "screen" | "webcam") {
-    try {
-      let stream: MediaStream;
-      if (type === "screen") {
-        stream = await navigator.mediaDevices.getDisplayMedia({
-          video: { width: 960, height: 540, frameRate: 10 },
-        });
-      } else {
-        stream = await navigator.mediaDevices.getUserMedia({
-          video: { width: 960, height: 540, frameRate: 10 },
-        });
-      }
-
-      setSharingType(type);
-      setLocalStream(stream);
-
-      const ws = new WebSocket("ws://localhost:8000/ws");
-      wsRef.current = ws;
-
-      const canvas = document.createElement("canvas");
-      canvas.width = 960;
-      canvas.height = 540;
-      const ctx = canvas.getContext("2d");
-
-      const video = document.createElement("video");
-      video.srcObject = stream;
-      video.muted = true;
-      video.play().catch(() => {});
-
-      ws.onopen = () => {
-        timerRef.current = setInterval(() => {
-          if (ws.readyState !== WebSocket.OPEN) return;
-          if (video.readyState >= video.HAVE_CURRENT_DATA && ctx) {
-            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-            const frame = canvas.toDataURL("image/jpeg", 0.6);
-            ws.send(JSON.stringify({
-              type: "screen_frame",
-              camera_id: c.id,
-              frame: frame,
-            }));
-          }
-        }, 100);
-      };
-
-      ws.onerror = (err) => {
-        console.error("WebSocket error", err);
-      };
-
-      ws.onclose = () => {
-        stopSharing();
-      };
-
-      stream.getVideoTracks()[0].onended = () => {
-        stopSharing();
-      };
-
-    } catch (err) {
-      console.error("Failed to start media share:", err);
-      stopSharing();
-    }
+  function startSharing(type: "screen" | "webcam") {
+    sessionRef.current?.stop();
+    const session = new MediaShareSession(c.id, type, {
+      onStatus: setShareStatus,
+      onStream: setLocalStream,
+    });
+    sessionRef.current = session;
+    setSharingType(type);
+    void session.start();
   }
 
   function stopSharing() {
-    if (timerRef.current) {
-      clearInterval(timerRef.current);
-      timerRef.current = null;
-    }
-    if (wsRef.current) {
-      if (wsRef.current.readyState === WebSocket.OPEN) {
-        wsRef.current.close();
-      }
-      wsRef.current = null;
-    }
-    if (localStream) {
-      localStream.getTracks().forEach((track) => track.stop());
-      setLocalStream(null);
-    }
+    sessionRef.current?.stop();
+    sessionRef.current = null;
     setSharingType(null);
+    setShareStatus("idle");
+    setLocalStream(null);
   }
 
   return (
@@ -400,11 +632,11 @@ function CameraTile({ camera: c, engineOnline }: { camera: any; engineOnline: bo
             className={clsx(
               "rounded-full px-2 py-0.5 text-[10px] font-medium",
               sharingType !== null
-                ? "bg-red-500/20 text-red-400 animate-pulse"
+                ? SHARE_STATUS_TONES[shareStatus]
                 : STATUS_TONES[c.status] ?? "bg-surface-3 text-zinc-500",
             )}
           >
-            {sharingType !== null ? "Streaming" : STATUS_LABELS[c.status] ?? c.status}
+            {sharingType !== null ? SHARE_STATUS_LABELS[shareStatus] : STATUS_LABELS[c.status] ?? c.status}
           </span>
         </div>
       </div>

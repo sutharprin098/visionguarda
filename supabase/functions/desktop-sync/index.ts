@@ -55,7 +55,7 @@ Deno.serve(async (req: Request) => {
     }
   }
 
-  const [profile, org, roles, cameras, settings, notifications, aiModelAssignments, drawings, rules, customModes, modelPackages] =
+  const [profile, org, roles, cameras, settings, notifications, aiModelAssignments, drawings, rules, customModes, modelPackages, zoneProfileConfigs] =
     await Promise.all([
       db.from("profiles").select("*").eq("id", uid).maybeSingle(),
       db.from("organizations").select("*").maybeSingle(),
@@ -76,6 +76,7 @@ Deno.serve(async (req: Request) => {
       db.from("rule_engine_rules").select("*").eq("is_draft", false).eq("is_enabled", true),
       db.from("custom_ai_modes").select("*").eq("is_draft", false),
       db.from("ai_model_packages").select("*"),
+      db.from("zone_profile_configs").select("*").eq("is_draft", false),
     ]);
 
   if (profile.error || !profile.data) return json({ error: "profile not found" }, 404);
@@ -102,5 +103,6 @@ Deno.serve(async (req: Request) => {
     rule_engine_rules: rules.data ?? [],
     custom_ai_modes: customModes.data ?? [],
     ai_model_packages: modelPackages.data ?? [],
+    zone_profile_configs: zoneProfileConfigs.data ?? [],
   });
 });

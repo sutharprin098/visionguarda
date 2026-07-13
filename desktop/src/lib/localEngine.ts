@@ -17,10 +17,58 @@ export function mjpegStreamUrl(cameraId: string): string {
 
 export async function isEngineOnline(): Promise<boolean> {
   try {
-    const res = await fetch(`${ENGINE_BASE}/api/status`, { signal: AbortSignal.timeout(2000) });
+    // 2s was measured too tight — under active AI/pipeline load (a live
+    // screen/webcam share pushing frames every 100ms through the full
+    // decode→AI→tracking→recorder pipeline) /api/status can legitimately
+    // take several hundred ms to over a second to answer on a single-core-
+    // bound Python process; a request that gets aborted here reads to the
+    // UI as "engine offline" even though it's alive and just busy.
+    const res = await fetch(`${ENGINE_BASE}/api/status`, { signal: AbortSignal.timeout(5000) });
     return res.ok;
   } catch {
     return false;
+  }
+}
+
+export interface EngineCameraState {
+  name: string;
+  running: boolean;
+  fps: number;
+  latency: number;
+  health_status: string;
+  resolution: string;
+  recording: boolean;
+}
+
+export interface EngineAppStatus {
+  server: string;
+  uptime: number;
+  modelLoaded: boolean;
+  cameraThreadsActive: number;
+  selectedModel: string;
+  cameras: Record<string, EngineCameraState>;
+  engine: {
+    status: "loading" | "ready" | "failed";
+    error: string | null;
+    elapsed_secs: number;
+    cpu_percent: number;
+    memory_mb: number;
+    gpu_percent: number;
+    device: string;
+    avg_fps: number;
+    avg_latency_ms: number;
+    active_cameras: number;
+  };
+}
+
+/** Full /api/status payload for the Engine Health panel — null if the process is unreachable. */
+export async function getEngineAppStatus(): Promise<EngineAppStatus | null> {
+  try {
+    const res = await fetch(`${ENGINE_BASE}/api/status`, { signal: AbortSignal.timeout(3000) });
+    if (!res.ok) return null;
+    return await res.json();
+  } catch {
+    return null;
   }
 }
 
@@ -33,19 +81,36 @@ function engineType(sourceType: string): string {
   return "rtsp";
 }
 
-let lastSyncedConfig = new Map<string, { zones: string; lines: string; rules: string }>();
+let lastSyncedConfig = new Map<string, { zones: string; lines: string; rules: string; zone_profile: string; profile_features: string }>();
 
 /**
  * Reconciles the local engine's running cameras with the bundle's assigned
  * list: registers/starts new ones (decrypting each connection string
  * server-side first), stops ones no longer assigned. Safe to call after
  * every sync — no-ops cheaply if the engine isn't reachable.
+ *
+ * Reconciles against the engine's *actually reported* camera list
+ * (/api/status), not just this module's own optimistic bookkeeping — the
+ * previous version trusted `registered` alone, which meant: (1) if the very
+ * first sync attempt raced the engine's own startup (isEngineOnline() false
+ * for the few seconds before uvicorn finishes binding), the camera was
+ * never registered and, since callers only re-invoke this on bundle change,
+ * never retried until something unrelated happened to refetch the bundle;
+ * and (2) if the engine process crashed/restarted and came back without a
+ * camera the desktop still believed was registered (e.g. a fresh/emptied
+ * DB), it would never be re-registered either. Both silently produced the
+ * exact "sidebar shows 1, Engine Health shows 0" desync this fixes. Callers
+ * should invoke this on an interval (see Workspace.tsx), not just on bundle
+ * change, so a failed attempt is retried automatically.
  */
 export async function syncCamerasToLocalEngine(
-  cameras: { id: string; name: string; source_type: string; zones?: string; lines?: string }[],
-  rules: any[] = []
+  cameras: { id: string; name: string; source_type: string; zones?: string; lines?: string; zone_profile?: string | null }[],
+  rules: any[] = [],
+  zoneProfileConfigs: any[] = []
 ): Promise<void> {
-  if (!(await isEngineOnline())) return;
+  const status = await getEngineAppStatus();
+  if (!status) return;
+  const live = new Set(Object.keys(status.cameras || {}));
 
   const wanted = new Set(cameras.map((c) => c.id));
   for (const staleId of registered) {
@@ -62,19 +127,51 @@ export async function syncCamerasToLocalEngine(
     const linesStr = cam.lines || "[]";
     const camRules = rules.filter((r) => r.camera_id === cam.id);
     const rulesStr = JSON.stringify(camRules);
+    const activeProfile = cam.zone_profile || null;
+    const profileConfig = zoneProfileConfigs.find(
+      (c) => c.camera_id === cam.id && c.profile === activeProfile
+    );
+    const profileFeaturesStr = profileConfig ? JSON.stringify(profileConfig.features) : "{}";
+
+    if (registered.has(cam.id) && !live.has(cam.id)) {
+      // We believe it's registered but the engine doesn't actually have it
+      // running (process restarted and lost it, DB was cleared, etc.) —
+      // drop the stale bookkeeping and fall through to re-register below.
+      registered.delete(cam.id);
+      lastSyncedConfig.delete(cam.id);
+    }
 
     if (registered.has(cam.id)) {
-      // Check if zones, lines, or rules have changed
+      // Check if zones, lines, rules, profile, or features have changed
       const last = lastSyncedConfig.get(cam.id);
-      if (!last || last.zones !== zonesStr || last.lines !== linesStr || last.rules !== rulesStr) {
+      if (
+        !last ||
+        last.zones !== zonesStr ||
+        last.lines !== linesStr ||
+        last.rules !== rulesStr ||
+        last.zone_profile !== (activeProfile || "") ||
+        last.profile_features !== profileFeaturesStr
+      ) {
         try {
           const res = await fetch(`${ENGINE_BASE}/api/cameras/${cam.id}/config`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ zones: zonesStr, lines: linesStr, rules: rulesStr }),
+            body: JSON.stringify({
+              zones: zonesStr,
+              lines: linesStr,
+              rules: rulesStr,
+              zone_profile: activeProfile,
+              profile_features: profileFeaturesStr,
+            }),
           });
           if (res.ok) {
-            lastSyncedConfig.set(cam.id, { zones: zonesStr, lines: linesStr, rules: rulesStr });
+            lastSyncedConfig.set(cam.id, {
+              zones: zonesStr,
+              lines: linesStr,
+              rules: rulesStr,
+              zone_profile: activeProfile || "",
+              profile_features: profileFeaturesStr,
+            });
           }
         } catch {
           // ignore error, retry next time
@@ -94,11 +191,19 @@ export async function syncCamerasToLocalEngine(
             zones: zonesStr,
             lines: linesStr,
             rules: rulesStr,
+            zone_profile: activeProfile,
+            profile_features: profileFeaturesStr,
           }),
         });
         if (res.ok) {
           registered.add(cam.id);
-          lastSyncedConfig.set(cam.id, { zones: zonesStr, lines: linesStr, rules: rulesStr });
+          lastSyncedConfig.set(cam.id, {
+            zones: zonesStr,
+            lines: linesStr,
+            rules: rulesStr,
+            zone_profile: activeProfile || "",
+            profile_features: profileFeaturesStr,
+          });
         }
       } catch (err) {
         console.error("Failed to register screen_share camera locally", err);
@@ -120,11 +225,19 @@ export async function syncCamerasToLocalEngine(
           zones: zonesStr,
           lines: linesStr,
           rules: rulesStr,
+          zone_profile: activeProfile,
+          profile_features: profileFeaturesStr,
         }),
       });
       if (res.ok) {
         registered.add(cam.id);
-        lastSyncedConfig.set(cam.id, { zones: zonesStr, lines: linesStr, rules: rulesStr });
+        lastSyncedConfig.set(cam.id, {
+          zones: zonesStr,
+          lines: linesStr,
+          rules: rulesStr,
+          zone_profile: activeProfile || "",
+          profile_features: profileFeaturesStr,
+        });
       }
     } catch {
       // engine went away mid-sync — next sync tick retries

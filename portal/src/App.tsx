@@ -25,6 +25,7 @@ import AuditPage from "./pages/app/Audit";
 import NotificationsPage from "./pages/app/Notifications";
 import SettingsPage from "./pages/app/Settings";
 import SupportPage from "./pages/app/Support";
+import ModelLibraryPage from "./pages/app/ModelLibrary";
 
 function Protected({ children }: { children: JSX.Element }) {
   const { session, loading } = useAuth();
@@ -53,6 +54,7 @@ export default function App() {
         <Route path="cameras" element={<CamerasPage />} />
         <Route path="camera-groups" element={<CameraGroupsPage />} />
         <Route path="sites" element={<SitesPage />} />
+        <Route path="models" element={<ModelLibraryPage />} />
         <Route path="alerts" element={<AlertsPage />} />
         <Route path="incidents" element={<IncidentsPage />} />
         <Route path="reports" element={<ReportsPage />} />

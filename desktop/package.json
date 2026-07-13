@@ -6,7 +6,9 @@
   "main": "dist-electron/main.js",
   "scripts": {
     "dev": "vite",
+    "build:engine": "powershell -ExecutionPolicy Bypass -File ../server/build_engine.ps1",
     "build": "tsc -p tsconfig.node.json && vite build && electron-builder --win && node scripts/checksum.js",
+    "build:full": "npm run build:engine && npm run build",
     "build:admin": "tsc -p tsconfig.node.json && vite build && electron-builder --win --config electron-builder.admin.json",
     "start": "tsc -p tsconfig.node.json && vite build && electron ."
   },
@@ -51,6 +53,15 @@
       "dist/**",
       "dist-electron/**",
       "build/icon.ico"
+    ],
+    "extraResources": [
+      {
+        "from": "../server/dist/camai-engine",
+        "to": "engine",
+        "filter": [
+          "**/*"
+        ]
+      }
     ],
     "publish": null
   }

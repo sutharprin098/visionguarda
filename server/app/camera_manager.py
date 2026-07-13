@@ -14,6 +14,13 @@ class CameraManager:
         self.yolo_backend = None
         self.camera_threads = {}
         self.selected_model_name = YOLO_MODEL  # Defaults to YOLO_MODEL (yolo11m-seg.pt)
+
+        # ── Engine startup state (surfaced via /api/status "engine" block for
+        # the desktop's Engine Health panel — model compilation can take
+        # tens of seconds to minutes on first run, see load_initial_model) ──
+        self.startup_status = "loading"   # "loading" | "ready" | "failed"
+        self.startup_error = None
+        self.startup_started_at = time.time()
         self.benchmark_results = {
             "status": "running",
             "yolo11n-seg": None,
@@ -34,13 +41,22 @@ class CameraManager:
     def load_initial_model(self):
         """Load initial model backend synchronously so server starts up instantly."""
         if self.yolo_backend is None:
-            print(f"[CameraManager] Loading initial AI backend: {self.selected_model_name}...", flush=True)
-            self.yolo_backend = EngineBackend(self.selected_model_name)
-            # Warm up
-            dummy_img = np.zeros((320, 320, 3), dtype=np.uint8)
-            tensor, _ = self.yolo_backend.preprocess(dummy_img, 320)
-            self.yolo_backend.run_inference(tensor)
-            print(f"[CameraManager] Initial AI backend {self.selected_model_name} loaded successfully.", flush=True)
+            self.startup_status = "loading"
+            self.startup_error = None
+            self.startup_started_at = time.time()
+            try:
+                print(f"[CameraManager] Loading initial AI backend: {self.selected_model_name}...", flush=True)
+                self.yolo_backend = EngineBackend(self.selected_model_name)
+                # Warm up
+                dummy_img = np.zeros((320, 320, 3), dtype=np.uint8)
+                tensor, _ = self.yolo_backend.preprocess(dummy_img, 320)
+                self.yolo_backend.run_inference(tensor)
+                print(f"[CameraManager] Initial AI backend {self.selected_model_name} loaded successfully.", flush=True)
+                self.startup_status = "ready"
+            except Exception as e:
+                self.startup_status = "failed"
+                self.startup_error = str(e)
+                raise
 
     def start_cameras(self):
         # 1. Load default model backend synchronously
@@ -217,6 +233,8 @@ class CameraManager:
             zones_json=cam["zones"],
             lines_json=cam["lines"],
             rules_json=cam.get("rules", "[]"),
+            zone_profile=cam.get("zone_profile"),
+            profile_features=cam.get("profile_features", "{}"),
             backend_model=self.yolo_backend
         )
         
@@ -257,10 +275,10 @@ class CameraManager:
         self.stop_all()
         self.start_cameras()
 
-    def update_camera_analytics_config(self, cam_id: str, zones_json: str, lines_json: str, rules_json: str = "[]"):
+    def update_camera_analytics_config(self, cam_id: str, zones_json: str, lines_json: str, rules_json: str = "[]", zone_profile: str = None, profile_features: str = "{}"):
         """Update analytics configuration on the fly."""
         if cam_id in self.camera_threads:
-            self.camera_threads[cam_id].update_config(zones_json, lines_json, rules_json)
+            self.camera_threads[cam_id].update_config(zones_json, lines_json, rules_json, zone_profile, profile_features)
 
     def update_camera_display_config(self, cam_id: str, max_width: int = None, quality: int = None):
         """Update MJPEG preview resolution/quality on the fly (display only)."""
