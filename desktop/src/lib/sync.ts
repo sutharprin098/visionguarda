@@ -70,7 +70,8 @@ export async function startRealtimeSync(
     }, 400);
   };
 
-  let channel = sb.channel("org-sync");
+  const channelName = `org-sync-${Math.random().toString(36).substring(2, 9)}`;
+  let channel = sb.channel(channelName);
   for (const table of WATCHED_TABLES) {
     channel = channel.on("postgres_changes", { event: "*", schema: "public", table }, refresh);
   }

@@ -18,6 +18,7 @@ export default function Workspace({
   const [bundle, setBundle] = useState<SyncBundle | null>(null);
   const [tab, setTab] = useState<"cameras" | "alerts" | "settings" | "engine">("cameras");
   const [syncError, setSyncError] = useState(false);
+  const [syncErrorDetails, setSyncErrorDetails] = useState<string | null>(null);
   const [isPackaged, setIsPackaged] = useState(true);
 
   useEffect(() => {
@@ -38,7 +39,15 @@ export default function Workspace({
     // admin revocation fails closed: wipe the vault, back to activation
     startRealtimeSync(setBundle, deactivate)
       .then((s) => (stop = s))
-      .catch((e) => (e instanceof DeactivatedError ? deactivate() : setSyncError(true)));
+      .catch((e) => {
+        if (e instanceof DeactivatedError) {
+          deactivate();
+        } else {
+          console.error("Workspace sync error:", e);
+          setSyncErrorDetails(e instanceof Error ? `${e.name}: ${e.message}` : String(e));
+          setSyncError(true);
+        }
+      });
     return () => stop?.();
   }, []);
 
@@ -155,6 +164,11 @@ export default function Workspace({
       <div className="flex h-screen flex-col items-center justify-center gap-3 text-zinc-400">
         <WifiOff size={24} />
         <p className="text-sm">Could not reach CamAI cloud. Check your connection.</p>
+        {syncErrorDetails && (
+          <p className="text-xs text-zinc-500 font-mono mt-1 bg-zinc-900 px-3 py-1.5 rounded border border-zinc-800 max-w-md text-center">
+            Error: {syncErrorDetails}
+          </p>
+        )}
       </div>
     );
   }

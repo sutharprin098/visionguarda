@@ -46,6 +46,9 @@ if (!gotTheLock) {
         webSecurity: false,
       },
     });
+    win.webContents.on("console-message", (event, level, message, line, sourceId) => {
+      console.log(`[Renderer Console] ${message}`);
+    });
     if (process.env.VITE_DEV_SERVER_URL) {
       win.loadURL(process.env.VITE_DEV_SERVER_URL);
     } else {
