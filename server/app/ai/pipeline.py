@@ -566,14 +566,15 @@ class PipelineCoordinator:
     """
 
     def __init__(self, camera_id: str, name: str, source_type: str, source: str,
-                 zones_json: str, lines_json: str, backend_model: EngineBackend, rules_json: str = "[]",
+                 zones_json: str, lines_json: str, backend_getter, rules_json: str = "[]",
                  zone_profile: str = None, profile_features: str = "{}"):
 
         self.camera_id   = camera_id
         self.name        = name
         self.source_type = source_type
         self.source      = source
-        self.backend     = backend_model
+        self._backend_getter = backend_getter
+        self._backend_override = None
 
         self.zones = json.loads(zones_json)
         self.lines = json.loads(lines_json)
@@ -646,6 +647,7 @@ class PipelineCoordinator:
         # every camera start/restart; the adaptive logic above/below this
         # value still applies (can step down to min_imgsz if this hardware is
         # still slow, or up toward max_imgsz if it's faster than expected).
+        backend_model = self.backend
         device = getattr(backend_model, "backend_device", "CPU").upper()
         if "GPU" in device or "CUDA" in device:
             self.current_imgsz = 640
@@ -704,6 +706,16 @@ class PipelineCoordinator:
         self._health_status = "connecting"
         self._last_probe_ts = 0.0
         self._last_resolution = ""
+
+    @property
+    def backend(self):
+        if self._backend_override is not None:
+            return self._backend_override
+        return self._backend_getter()
+
+    @backend.setter
+    def backend(self, val):
+        self._backend_override = val
 
     def _update_health_on_failure(self):
         """Classifies a capture failure as connecting/offline/auth_failed/
@@ -1012,10 +1024,14 @@ class PipelineCoordinator:
         # _watchdog_loop) only ever starts counting once this thread is
         # actually warm, instead of racing a compile it can't see.
         try:
-            dummy = np.zeros((self.current_imgsz, self.current_imgsz, 3), dtype=np.uint8)
-            tensor, _ = self.backend.preprocess(dummy, self.current_imgsz)
-            self.backend.run_inference(tensor)
-            print(f"[AI-{self.camera_id}] Warm-up inference complete (imgsz={self.current_imgsz}).", flush=True)
+            backend = self.backend
+            if backend is not None:
+                dummy = np.zeros((self.current_imgsz, self.current_imgsz, 3), dtype=np.uint8)
+                tensor, _ = backend.preprocess(dummy, self.current_imgsz)
+                backend.run_inference(tensor)
+                print(f"[AI-{self.camera_id}] Warm-up inference complete (imgsz={self.current_imgsz}).", flush=True)
+            else:
+                print(f"[AI-{self.camera_id}] Warm-up inference skipped (backend model not loaded yet).", flush=True)
         except Exception as e:
             print(f"[AI-{self.camera_id}] Warm-up inference failed (will retry on first real frame): {e}", flush=True)
         self._heartbeat["ai"] = time.time()
@@ -1041,9 +1057,16 @@ class PipelineCoordinator:
         # InferRequest cache would keep one abandoned entry (and its device
         # buffers) alive per restart for as long as the shared model stays
         # loaded.
-        self.backend.release_thread_request()
+        backend = self.backend
+        if backend is not None:
+            backend.release_thread_request()
 
     def _ai_loop_iteration(self, data):
+            backend = self.backend
+            if backend is None:
+                time.sleep(0.1)
+                return
+
             frame   = data["frame"]
             orig_h, orig_w = frame.shape[:2]
             motion  = self._detect_motion(frame)
@@ -1086,9 +1109,9 @@ class PipelineCoordinator:
                 # per-cycle cost multiplied lock/queue contention with every
                 # other camera's AI thread and was the direct cause of
                 # multi-second-to-multi-minute stale overlays.
-                tensor, t_pre   = self.backend.preprocess(inf_frame, self.current_imgsz)
-                outputs, t_inf  = self.backend.run_inference(tensor)
-                detections, masks_polygons, t_post = self.backend.postprocess(
+                tensor, t_pre   = backend.preprocess(inf_frame, self.current_imgsz)
+                outputs, t_inf  = backend.run_inference(tensor)
+                detections, masks_polygons, t_post = backend.postprocess(
                     outputs, (rh, rw), conf_thresh, iou_thresh, self.current_imgsz
                 )
 

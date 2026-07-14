@@ -73,7 +73,7 @@ function resolveEngine(): ResolvedEngine | null {
   //    resources/engine/, so no Python is ever required on the user's PC.
   const frozenCandidates = app.isPackaged
     ? [join(process.resourcesPath, "engine", "camai-engine.exe")]
-    : [join(__dirname, "..", "..", "server", "dist", "camai-engine", "camai-engine.exe")];
+    : [];
   for (const exe of frozenCandidates) {
     if (existsSync(exe)) return { frozenExe: exe, engineDir: dirname(exe) };
   }
@@ -109,6 +109,7 @@ function resolveEngine(): ResolvedEngine | null {
 }
 
 function appendLog(line: string): void {
+  console.log(`[Engine Supervisor] ${line.trim()}`);
   for (const l of line.split(/\r?\n/)) {
     if (!l) continue;
     logs.push(l);

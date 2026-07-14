@@ -43,3 +43,8 @@ server/production_readiness_report.json
 supabase/.temp/
 .DS_Store
 Thumbs.db
+
+# ── PyInstaller & Local Builds ──────────────────────────────────
+server/.venv-build/
+server/build/
+kernel.errors.txt

@@ -235,7 +235,7 @@ class CameraManager:
             rules_json=cam.get("rules", "[]"),
             zone_profile=cam.get("zone_profile"),
             profile_features=cam.get("profile_features", "{}"),
-            backend_model=self.yolo_backend
+            backend_getter=lambda: self.yolo_backend
         )
         
         # Set telemetry callback to push live metrics immediately

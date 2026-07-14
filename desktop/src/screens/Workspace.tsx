@@ -7,6 +7,15 @@ import { MediaShareSession, ShareStatus } from "../lib/mediaShare";
 import type { EngineProcessState } from "../lib/bridge";
 import ModelManagerUI from "../components/ModelManagerUI";
 import EngineHealthPanel from "../components/EngineHealthPanel";
+interface EngineHealthInfo {
+  online: boolean;
+  status: string;
+  ready: boolean;
+  engine_status: string;
+  engine_error: string | null;
+  model_loaded: boolean;
+  active_cameras: number;
+}
 
 export default function Workspace({
   onDeactivated,
@@ -20,6 +29,74 @@ export default function Workspace({
   const [syncError, setSyncError] = useState(false);
   const [syncErrorDetails, setSyncErrorDetails] = useState<string | null>(null);
   const [isPackaged, setIsPackaged] = useState(true);
+  const [healthInfo, setHealthInfo] = useState<EngineHealthInfo | null>(null);
+  const [procStatus, setProcStatus] = useState<any>(null);
+  const [logs, setLogs] = useState<string[]>([]);
+  const [consecutiveMisses, setConsecutiveMisses] = useState(0);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    // Fetch supervisor logs in real-time
+    window.camai.engine.getLogs().then((l) => !cancelled && setLogs(l.slice(-100)));
+    const offLog = window.camai.engine.onLog((line) => {
+      if (!cancelled) setLogs((prev) => [...prev.slice(-99), line]);
+    });
+
+    const checkHealth = async () => {
+      try {
+        const res = await fetch("http://127.0.0.1:8000/health", { signal: AbortSignal.timeout(3000) });
+        if (res.ok) {
+          const data = await res.json();
+          if (!cancelled) {
+            setHealthInfo({
+              online: true,
+              status: data.status || "ok",
+              ready: data.ready ?? false,
+              engine_status: data.engine_status || "unknown",
+              engine_error: data.engine_error || null,
+              model_loaded: data.model_loaded ?? false,
+              active_cameras: data.active_cameras ?? 0,
+            });
+            setConsecutiveMisses(0);
+          }
+        } else {
+          throw new Error("unhealthy");
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setConsecutiveMisses((m) => {
+            const next = m + 1;
+            if (next >= 2) {
+              setHealthInfo((h) => ({
+                online: false,
+                status: "unreachable",
+                ready: false,
+                engine_status: "failed",
+                engine_error: "Connection to port 8000 refused",
+                model_loaded: false,
+                active_cameras: 0,
+              }));
+            }
+            return next;
+          });
+        }
+      }
+
+      // Update supervisor status
+      const s = await window.camai.engine.getStatus();
+      if (!cancelled) setProcStatus(s);
+    };
+
+    checkHealth();
+    const id = setInterval(checkHealth, 1000); // Poll /health every second
+
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+      offLog();
+    };
+  }, []);
 
   useEffect(() => {
     window.camai.getConfig().then((cfg) => setIsPackaged(cfg.isPackaged));
@@ -242,7 +319,15 @@ export default function Workspace({
       </aside>
 
       <main className="flex-1 overflow-y-auto p-6">
-        {tab === "cameras" && <CamerasView cameras={bundle.cameras} isPackaged={isPackaged} />}
+        {tab === "cameras" && (
+          <CamerasView
+            cameras={bundle.cameras}
+            isPackaged={isPackaged}
+            healthInfo={healthInfo}
+            procStatus={procStatus}
+            logs={logs}
+          />
+        )}
         {tab === "alerts" && (
           <div className="space-y-2">
             {!bundle.notifications.length && <Panel title="Alerts">No unread alerts.</Panel>}
@@ -452,81 +537,24 @@ function EngineDiagnosticPanel({
   );
 }
 
-function CamerasView({ cameras, isPackaged }: { cameras: any[]; isPackaged: boolean }) {
-  const [healthInfo, setHealthInfo] = useState<EngineHealthInfo | null>(null);
-  const [procStatus, setProcStatus] = useState<any>(null);
-  const [logs, setLogs] = useState<string[]>([]);
-  const [consecutiveMisses, setConsecutiveMisses] = useState(0);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    // Fetch supervisor logs in real-time
-    window.camai.engine.getLogs().then((l) => !cancelled && setLogs(l.slice(-100)));
-    const offLog = window.camai.engine.onLog((line) => {
-      if (!cancelled) setLogs((prev) => [...prev.slice(-99), line]);
-    });
-
-    const checkHealth = async () => {
-      try {
-        const res = await fetch("http://127.0.0.1:8000/health", { signal: AbortSignal.timeout(800) });
-        if (res.ok) {
-          const data = await res.json();
-          if (!cancelled) {
-            setHealthInfo({
-              online: true,
-              status: data.status || "ok",
-              ready: data.ready ?? false,
-              engine_status: data.engine_status || "unknown",
-              engine_error: data.engine_error || null,
-              model_loaded: data.model_loaded ?? false,
-              active_cameras: data.active_cameras ?? 0,
-            });
-            setConsecutiveMisses(0);
-          }
-        } else {
-          throw new Error("unhealthy");
-        }
-      } catch (err) {
-        if (!cancelled) {
-          setConsecutiveMisses((m) => {
-            const next = m + 1;
-            if (next >= 2) {
-              setHealthInfo((h) => ({
-                online: false,
-                status: "unreachable",
-                ready: false,
-                engine_status: "failed",
-                engine_error: "Connection to port 8000 refused",
-                model_loaded: false,
-                active_cameras: 0,
-              }));
-            }
-            return next;
-          });
-        }
-      }
-
-      // Update supervisor status
-      const s = await window.camai.engine.getStatus();
-      if (!cancelled) setProcStatus(s);
-    };
-
-    checkHealth();
-    const id = setInterval(checkHealth, 1000); // Poll /health every second
-
-    return () => {
-      cancelled = true;
-      clearInterval(id);
-      offLog();
-    };
-  }, []);
-
+function CamerasView({
+  cameras,
+  isPackaged,
+  healthInfo,
+  procStatus,
+  logs,
+}: {
+  cameras: any[];
+  isPackaged: boolean;
+  healthInfo: EngineHealthInfo | null;
+  procStatus: any;
+  logs: string[];
+}) {
   if (!cameras.length) {
     return <Panel title="Cameras">No cameras assigned to you. Ask your administrator.</Panel>;
   }
 
-  const isEngineOffline = !healthInfo || !healthInfo.online || !healthInfo.ready;
+  const isEngineOffline = healthInfo !== null && (!healthInfo.online || !healthInfo.ready);
 
   return (
     <div className="space-y-4">
