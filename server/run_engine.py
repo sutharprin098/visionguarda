@@ -26,6 +26,19 @@ import sys
 def main() -> None:
     multiprocessing.freeze_support()
 
+    # Force UTF-8 (never-failing) stdout/stderr. In the frozen Windows EXE the
+    # console defaults to a legacy code page (cp1252), so a single print()
+    # containing any non-ASCII byte — a unicode camera name, an RTSP URL with
+    # accented chars, a status glyph in a log line — raises UnicodeEncodeError.
+    # Because model/camera startup runs inside a background task, that error
+    # would silently abort model loading and leave the engine with no cameras.
+    # errors="replace" guarantees a log line can never crash the engine.
+    for _stream in (sys.stdout, sys.stderr):
+        try:
+            _stream.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
+
     # Mark the process as the frozen engine so app code can branch on it
     # (e.g. skip dev-only file watching, resolve bundled model paths).
     os.environ.setdefault("CAMAI_FROZEN", "1")

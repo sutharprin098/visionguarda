@@ -83,6 +83,31 @@ def _passes_geometry_filter(class_name, x1, y1, x2, y2, frame_w, frame_h) -> boo
     return aspect <= bounds["max_aspect"]
 
 
+# Minimum plausible on-disk size (bytes) for a real YOLO model file of each
+# kind. A file that exists but is far smaller than this is almost always a
+# truncated/corrupted download or a Git-LFS pointer stub — loading it throws a
+# cryptic backend-internal error, so we detect it up front and say so plainly.
+_MODEL_MIN_BYTES = {".pt": 1_000_000, ".onnx": 1_000_000, ".xml": 2_000, ".bin": 500_000}
+
+
+def _model_file_problem(path):
+    """Return a human-readable reason string if `path` is missing or looks
+    corrupted/truncated, else None. Used to turn silent load failures into
+    clear, actionable diagnostics in the (frozen) engine log."""
+    if not path or not os.path.exists(path):
+        return f"file not found: {path}"
+    try:
+        size = os.path.getsize(path)
+    except OSError as e:
+        return f"cannot stat file ({e}): {path}"
+    ext = os.path.splitext(path)[1].lower()
+    floor = _MODEL_MIN_BYTES.get(ext, 0)
+    if size < floor:
+        return (f"file is only {size} bytes (expected >= {floor} for {ext}); "
+                f"likely truncated/corrupted or a Git-LFS pointer: {path}")
+    return None
+
+
 def nms(boxes, scores, iou_threshold):
     """
     Perform Non-Maximum Suppression (NMS) on bounding boxes.
@@ -127,6 +152,11 @@ class EngineBackend:
         self.model_name = model_name
         self.backend_type = None  # 'openvino', 'onnx', 'pytorch'
         self.backend_device = None  # 'GPU', 'CPU', 'CUDA', etc.
+        # Logged-once diagnostics so the (frozen) engine log confirms the model
+        # is actually producing output tensors of the expected shape, without
+        # spamming a line per frame.
+        self._logged_output_shape = False
+        self._infer_error_count = 0
 
         # OpenVINO specific
         self.ov_core = None
@@ -254,6 +284,15 @@ class EngineBackend:
             if not resolved_onnx:
                 resolved_onnx = os.path.join(".", f"{base_name}.onnx")
 
+        # Explicit, greppable resolution report — the single most useful line
+        # when diagnosing "model won't load" inside the frozen EXE, where
+        # there's no debugger and cwd/_MEIPASS/exe-dir paths differ from dev.
+        print(f"[AI Backend] Resolving model '{self.model_name}'. Searched dirs: {search_dirs}", flush=True)
+        print(f"[AI Backend] Candidate files -> "
+              f"OpenVINO XML: {resolved_ov_xml} (exists={os.path.exists(resolved_ov_xml)}), "
+              f"ONNX: {resolved_onnx} (exists={os.path.exists(resolved_onnx)}), "
+              f"PT: {resolved_pt} (exists={os.path.exists(resolved_pt)})", flush=True)
+
         candidates = []
         if "openvino" in self.preferred_backends and HAS_OPENVINO:
             if os.path.exists(resolved_ov_xml):
@@ -268,29 +307,58 @@ class EngineBackend:
             candidates.append(("pytorch", resolved_pt))
 
         if not candidates:
-            raise RuntimeError(
-                f"No supported backend source found for {self.model_name}. "
-                f"OpenVINO model path: {resolved_ov_xml}, ONNX path: {resolved_onnx}, PT path: {resolved_pt}"
+            # Distinguish "no file at all" (missing model) from "file present
+            # but the backend that reads it isn't installed" — different fixes.
+            any_file = any(os.path.exists(p) for p in (resolved_ov_xml, resolved_onnx, resolved_pt))
+            backends_present = (
+                f"openvino={HAS_OPENVINO}, onnxruntime={HAS_ONNXRUNTIME}, ultralytics={HAS_ULTRALYTICS}"
             )
+            if not any_file:
+                msg = (f"MODEL LOAD FAILED — model file for '{self.model_name}' not found. "
+                       f"Searched: {search_dirs}. Expected one of: {resolved_ov_xml}, "
+                       f"{resolved_onnx}, {resolved_pt}.")
+            else:
+                msg = (f"MODEL LOAD FAILED — a model file for '{self.model_name}' exists but no "
+                       f"backend able to read it is installed ({backends_present}).")
+            print(f"[AI Backend] [FAIL] {msg}", flush=True)
+            raise RuntimeError(msg)
+
+        # Corruption pre-check: warn (don't hard-fail) so a corrupt OpenVINO
+        # export can still fall through to a healthy ONNX/PT sibling instead of
+        # killing the whole engine.
+        for _bt, _path in candidates:
+            _problem = _model_file_problem(_path)
+            if _problem:
+                print(f"[AI Backend] [WARN] Possibly corrupted model for {_bt}: {_problem}", flush=True)
 
         # Stable sort: ties (e.g. two CPU-only options) keep preferred_backends order.
         candidates.sort(key=lambda c: self._backend_score(c[0]), reverse=True)
         print(f"[AI Backend] Candidate order (best acceleration first): "
               f"{[(bt, self._backend_score(bt)) for bt, _ in candidates]}", flush=True)
 
+        last_errors = []
         for backend_type, path in candidates:
             try:
+                print(f"[AI Backend] Attempting to load model via {backend_type}: {path}", flush=True)
                 if backend_type == "openvino":
                     self._load_openvino(path)
                 elif backend_type == "onnx":
                     self._load_onnx(path)
                 elif backend_type == "pytorch":
                     self._load_pytorch(path)
+                print(f"[AI Backend] [OK] MODEL LOADED: '{self.model_name}' via "
+                      f"{self.backend_type.upper()} on {self.backend_device} "
+                      f"(runtime={'GPU' if self.backend_device not in ('CPU', 'cpu') else 'CPU'})", flush=True)
                 return
             except Exception as e:
-                print(f"[AI Backend] Failed to initialize {backend_type} for {path}: {e}. Trying next backend.")
+                last_errors.append(f"{backend_type}: {e}")
+                print(f"[AI Backend] [FAIL] MODEL LOAD FAILED ({backend_type}) for {path}: {e}. "
+                      f"Trying next backend.", flush=True)
 
-        raise RuntimeError(f"Failed to initialize any backend for {self.model_name}.")
+        raise RuntimeError(
+            f"MODEL LOAD FAILED — could not initialize ANY backend for '{self.model_name}'. "
+            f"Errors: {'; '.join(last_errors)}"
+        )
 
     def _load_openvino(self, model_path):
         self.ov_core = ov.Core()
@@ -308,9 +376,32 @@ class EngineBackend:
         # triggered pipeline restart. A cached compile turns that into a
         # fast disk load, which matters for "automatic recovery" and
         # startup latency in production, not just local iteration speed.
-        cache_dir = os.path.join(os.path.dirname(model_path) or ".", "ov_cache")
-        os.makedirs(cache_dir, exist_ok=True)
-        self.ov_core.set_property({"CACHE_DIR": cache_dir})
+        # Write the compile cache to a GUARANTEED-writable per-user data dir,
+        # NOT next to the model. In the shipped EXE the model lives inside the
+        # app's install/resources folder, which a standard user often can't
+        # write to (and which must stay clean — a stray cache dir there also
+        # breaks --clean rebuilds). HISTORY_DIR resolves to %APPDATA%/CamAI
+        # (see app.config), always writable. Falls back to a temp dir if even
+        # that can't be created, and finally to disabling the cache rather than
+        # failing model load over a cache-dir problem.
+        cache_dir = None
+        try:
+            from app.config import HISTORY_DIR
+            cache_dir = os.path.join(str(HISTORY_DIR), "ov_cache")
+            os.makedirs(cache_dir, exist_ok=True)
+        except Exception:
+            try:
+                import tempfile
+                cache_dir = os.path.join(tempfile.gettempdir(), "camai_ov_cache")
+                os.makedirs(cache_dir, exist_ok=True)
+            except Exception:
+                cache_dir = None
+        if cache_dir:
+            try:
+                self.ov_core.set_property({"CACHE_DIR": cache_dir})
+                print(f"[AI Backend] OpenVINO compile cache dir: {cache_dir}", flush=True)
+            except Exception as e:
+                print(f"[AI Backend] OpenVINO cache disabled (set_property failed: {e})", flush=True)
 
         config = {"PERFORMANCE_HINT": "LATENCY"}
         if target_device == "CPU":
@@ -455,27 +546,53 @@ class EngineBackend:
     def run_inference(self, img_tensor):
         t0 = time.time()
 
-        if self.backend_type == "openvino":
-            req = self._get_ov_infer_request()
-            res = req.infer([img_tensor])
-            output0 = res[self.ov_output0]
-            output1 = res[self.ov_output1] if self.has_seg_output else None
-        elif self.backend_type == "onnx":
-            # ONNX Runtime sessions are documented thread-safe for concurrent
-            # Run() calls from multiple threads — no external lock needed.
-            input_name = self.ort_session.get_inputs()[0].name
-            res = self.ort_session.run(None, {input_name: img_tensor})
-            output0 = res[0]
-            output1 = res[1] if self.has_seg_output else None
-        elif self.backend_type == "pytorch":
-            with self._pt_lock:
-                with torch.no_grad():
-                    tensor_torch = torch.from_numpy(img_tensor).to("cuda" if self.backend_device == "CUDA" else "cpu")
-                    results = self.yolo_model(tensor_torch, verbose=False)
-            t_infer = (time.time() - t0) * 1000
-            return results, t_infer
-        else:
-            raise RuntimeError("Backend not initialized.")
+        try:
+            if self.backend_type == "openvino":
+                req = self._get_ov_infer_request()
+                res = req.infer([img_tensor])
+                output0 = res[self.ov_output0]
+                output1 = res[self.ov_output1] if self.has_seg_output else None
+            elif self.backend_type == "onnx":
+                # ONNX Runtime sessions are documented thread-safe for concurrent
+                # Run() calls from multiple threads — no external lock needed.
+                input_name = self.ort_session.get_inputs()[0].name
+                res = self.ort_session.run(None, {input_name: img_tensor})
+                output0 = res[0]
+                output1 = res[1] if self.has_seg_output else None
+            elif self.backend_type == "pytorch":
+                with self._pt_lock:
+                    with torch.no_grad():
+                        tensor_torch = torch.from_numpy(img_tensor).to("cuda" if self.backend_device == "CUDA" else "cpu")
+                        results = self.yolo_model(tensor_torch, verbose=False)
+                if not self._logged_output_shape:
+                    self._logged_output_shape = True
+                    print(f"[AI Backend] First inference OK (pytorch/{self.backend_device}). "
+                          f"Input tensor {getattr(img_tensor, 'shape', '?')} -> "
+                          f"{len(results)} result object(s).", flush=True)
+                t_infer = (time.time() - t0) * 1000
+                return results, t_infer
+            else:
+                raise RuntimeError("Backend not initialized.")
+        except Exception as e:
+            self._infer_error_count += 1
+            # Surface the first few inference errors loudly (then stay quiet to
+            # avoid flooding) — the pipeline's AI loop catches+recovers, but the
+            # engine log must show WHY inference is failing rather than silently
+            # producing zero detections.
+            if self._infer_error_count <= 5:
+                print(f"[AI Backend] [FAIL] INFERENCE ERROR #{self._infer_error_count} "
+                      f"({self.backend_type}/{self.backend_device}): {e}", flush=True)
+            raise
+
+        if not self._logged_output_shape:
+            self._logged_output_shape = True
+            _shape0 = getattr(output0, "shape", "?")
+            _shape1 = getattr(output1, "shape", None) if output1 is not None else None
+            print(f"[AI Backend] First inference OK ({self.backend_type}/{self.backend_device}). "
+                  f"Input tensor {getattr(img_tensor, 'shape', '?')} -> "
+                  f"output0 shape {_shape0}"
+                  + (f", output1(proto) shape {_shape1}" if _shape1 is not None else "")
+                  + ".", flush=True)
 
         t_infer = (time.time() - t0) * 1000
         return (output0, output1), t_infer

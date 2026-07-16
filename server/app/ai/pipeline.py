@@ -576,6 +576,22 @@ class PipelineCoordinator:
         self._backend_getter = backend_getter
         self._backend_override = None
 
+        # A local video FILE (as opposed to a live device/RTSP stream) is a
+        # finite source: cap.read() returns ret=False at EOF, which is normal
+        # end-of-media, NOT a device disconnect. Treated as the latter it would
+        # flap into "network_error" and stall 3s per loop (see _capture_loop).
+        # Detected purely by "is this an existing file on disk" so it works
+        # regardless of which coarse source_type the desktop tagged it with
+        # (it maps every non-webcam/usb source to 'rtsp'). URLs and device
+        # indices are never files, so they correctly fall through to the live
+        # reconnect path.
+        self._is_video_file = False
+        try:
+            if source_type not in ("webcam", "usb", "screenshare") and os.path.isfile(str(source)):
+                self._is_video_file = True
+        except Exception:
+            self._is_video_file = False
+
         self.zones = json.loads(zones_json)
         self.lines = json.loads(lines_json)
         self.rules = json.loads(rules_json)
@@ -865,6 +881,16 @@ class PipelineCoordinator:
                         continue
 
                     ret, frame = self.cap.read()
+                    if (not ret or frame is None) and self._is_video_file:
+                        # End of a finite video FILE — loop it seamlessly by
+                        # seeking back to the first frame rather than treating
+                        # EOF as a device disconnect. Keeps "Local Video" a
+                        # continuous source (stays "online", no 3s stall,
+                        # no false network_error). If the seek itself can't
+                        # produce a frame (truly unreadable/corrupt file), fall
+                        # through to the live-source recovery path below.
+                        self.cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+                        ret, frame = self.cap.read()
                     if not ret or frame is None:
                         # isOpened() can keep reporting True even after the device stops
                         # producing frames (unplugged/busy webcam, dead RTSP link) — without
@@ -1164,6 +1190,19 @@ class PipelineCoordinator:
                         masks_polygons = [masks_polygons[i] for i in kept] if masks_polygons else masks_polygons
 
                 self._last_infer_ts = time.time()
+
+                # Throttled inference/detection heartbeat (~every 5s per camera).
+                # Confirms in the (frozen) engine log that inference is running
+                # continuously and how many objects each pass yields — the
+                # "Inference Completed / Objects Detected / Detection Count /
+                # Runtime" debug signals, without a line per frame.
+                _now = time.time()
+                if _now - getattr(self, "_last_det_log_ts", 0.0) >= 5.0:
+                    self._last_det_log_ts = _now
+                    _bt = getattr(backend, "backend_type", "?")
+                    _dev = getattr(backend, "backend_device", "?")
+                    print(f"[AI-{self.camera_id}] Inference OK: dets={len(detections)} "
+                          f"infer={t_inf:.1f}ms backend={_bt}/{_dev} imgsz={self.current_imgsz}", flush=True)
 
             # Adaptive resolution tuning based on rolling inference latency
             if should_infer and t_inf > 0:
