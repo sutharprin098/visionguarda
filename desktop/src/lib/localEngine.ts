@@ -82,6 +82,13 @@ function engineType(sourceType: string): string {
 }
 
 let lastSyncedConfig = new Map<string, { zones: string; lines: string; rules: string; zone_profile: string; profile_features: string }>();
+// Last-seen cameras.updated_at per camera. The plaintext connection string
+// (RTSP URL etc.) is NEVER in the sync bundle — it's decrypted server-side only
+// at registration time — so a URL/source/type edit is invisible to the
+// zones/lines/rules diff below. updated_at bumps on ANY change to the camera
+// row, which is how we detect "the admin edited this camera" and re-register it
+// so the engine reconnects with the freshly-decrypted new settings.
+let lastUpdatedAt = new Map<string, string>();
 
 /**
  * Reconciles the local engine's running cameras with the bundle's assigned
@@ -104,7 +111,7 @@ let lastSyncedConfig = new Map<string, { zones: string; lines: string; rules: st
  * change, so a failed attempt is retried automatically.
  */
 export async function syncCamerasToLocalEngine(
-  cameras: { id: string; name: string; source_type: string; zones?: string; lines?: string; zone_profile?: string | null }[],
+  cameras: { id: string; name: string; source_type: string; zones?: string; lines?: string; zone_profile?: string | null; updated_at?: string }[],
   rules: any[] = [],
   zoneProfileConfigs: any[] = []
 ): Promise<void> {
@@ -118,6 +125,7 @@ export async function syncCamerasToLocalEngine(
       try { await fetch(`${ENGINE_BASE}/api/cameras/${staleId}`, { method: "DELETE" }); } catch { /* engine may have restarted */ }
       registered.delete(staleId);
       lastSyncedConfig.delete(staleId);
+      lastUpdatedAt.delete(staleId);
     }
   }
 
@@ -132,6 +140,18 @@ export async function syncCamerasToLocalEngine(
       (c) => c.camera_id === cam.id && c.profile === activeProfile
     );
     const profileFeaturesStr = profileConfig ? JSON.stringify(profileConfig.features) : "{}";
+    const camUpdatedAt = cam.updated_at || "";
+
+    // Admin edited the camera row (RTSP URL, source, type, name, or its
+    // zones/lines) — re-register so the engine tears down the old pipeline and
+    // reconnects with the freshly-decrypted connection + settings. The engine's
+    // start_camera_thread() stops+restarts an existing camera on re-POST, so
+    // detection resumes automatically on the new stream with no app restart.
+    if (registered.has(cam.id) && lastUpdatedAt.get(cam.id) !== camUpdatedAt) {
+      try { await fetch(`${ENGINE_BASE}/api/cameras/${cam.id}`, { method: "DELETE" }); } catch { /* engine may have restarted */ }
+      registered.delete(cam.id);
+      lastSyncedConfig.delete(cam.id);
+    }
 
     if (registered.has(cam.id) && !live.has(cam.id)) {
       // We believe it's registered but the engine doesn't actually have it
@@ -139,6 +159,18 @@ export async function syncCamerasToLocalEngine(
       // drop the stale bookkeeping and fall through to re-register below.
       registered.delete(cam.id);
       lastSyncedConfig.delete(cam.id);
+    } else if (!registered.has(cam.id) && live.has(cam.id)) {
+      // The engine already has it running, but our UI state was reset.
+      // Register it in our bookkeeping so we don't fetch and POST it again.
+      registered.add(cam.id);
+      lastUpdatedAt.set(cam.id, camUpdatedAt);
+      lastSyncedConfig.set(cam.id, {
+        zones: zonesStr,
+        lines: linesStr,
+        rules: rulesStr,
+        zone_profile: activeProfile || "",
+        profile_features: profileFeaturesStr,
+      });
     }
 
     if (registered.has(cam.id)) {
@@ -197,6 +229,7 @@ export async function syncCamerasToLocalEngine(
         });
         if (res.ok) {
           registered.add(cam.id);
+          lastUpdatedAt.set(cam.id, camUpdatedAt);
           lastSyncedConfig.set(cam.id, {
             zones: zonesStr,
             lines: linesStr,
@@ -231,6 +264,7 @@ export async function syncCamerasToLocalEngine(
       });
       if (res.ok) {
         registered.add(cam.id);
+        lastUpdatedAt.set(cam.id, camUpdatedAt);
         lastSyncedConfig.set(cam.id, {
           zones: zonesStr,
           lines: linesStr,
@@ -302,6 +336,7 @@ export function resetLocalEngineState(): void {
   registered = new Set();
   appliedModel = null;
   lastSyncedConfig = new Map();
+  lastUpdatedAt = new Map();
 }
 
 // The engine only ever runs one model process-wide (POST /api/model/select,
