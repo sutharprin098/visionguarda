@@ -49,7 +49,14 @@ def _object_category(class_name: str) -> str:
 #     COCO_CLASS_MAP, so the detector cannot emit them.
 #   - "face" IS listed for security and factory: YuNet genuinely produces it.
 PROFILE_CLASSES = {
-    "traffic": set(VEHICLE_CLASSES) | INFRASTRUCTURE_CLASSES,
+    # NOT `VEHICLE_CLASSES | INFRASTRUCTURE_CLASSES`: that set also contains
+    # traffic_cone and traffic_barrier, which are not in COCO_CLASS_MAP and so
+    # can never be emitted — listing them would have the traffic profile
+    # advertise two detections that never arrive, which is the exact failure
+    # this module was cleaned up to remove. Only traffic_light and stop_sign
+    # are real (backend.py ids 9 and 11).
+    # tests/test_zone_profiles.py asserts every class here is producible.
+    "traffic": set(VEHICLE_CLASSES) | {"traffic_light", "stop_sign"},
     "security": {"person", "backpack", "handbag", "suitcase", "umbrella", "face"},
     "factory": {"person", "face"},
     # "custom" and None mean "operator decides" — no profile-level narrowing.
