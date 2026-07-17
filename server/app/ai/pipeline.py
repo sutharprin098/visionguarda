@@ -13,7 +13,10 @@ from app.ai.backend import EngineBackend
 from app.ai import face as face_detect
 from app.storage import insert_alert, insert_history_record
 from app.recorder import CCTVRecorder
-from app.analytics import CameraAnalytics, VEHICLE_CLASSES, _object_category, _point_in_zone_shape, PROFILE_CLASSES
+from app.analytics import (
+    CameraAnalytics, VEHICLE_CLASSES, _object_category, _point_in_zone_shape,
+    PROFILE_CLASSES, filter_by_features,
+)
 from app.config import RECORDINGS_DIR
 from app.gpu_monitor import get_gpu_usage
 
@@ -1283,25 +1286,64 @@ class PipelineCoordinator:
             # vehicle instead of staying locked to it. The tracker already
             # solved this (constant-velocity Kalman model, updated every real
             # detection) — Module 4 should just use that state directly. ──
+            # A track may be claimed by AT MOST ONE detection.
+            #
+            # This used to be a per-detection argmax with no exclusivity: each
+            # detection independently picked its best track, so when two raw
+            # boxes overlapped the same object — an NMS near-duplicate, or a
+            # partially-occluded person split into two — both matched the same
+            # track and both had their bbox REWRITTEN to that track's box. The
+            # client then received two byte-identical detections and the overlay
+            # drew one box exactly on top of the other. Reproduced against the
+            # real ByteTracker: two dets in, both emitted as track_id=1 with
+            # bbox (100,100)-(200,300).
+            #
+            # Resolved greedily by descending IoU, which is enough here (a
+            # handful of boxes per frame) and, unlike the old loop, is symmetric:
+            # the detection that fits a track best wins it, and the losers are
+            # dropped rather than emitted as phantom copies. The tracker itself
+            # already decided they are one object — it returned one track for
+            # them — so keeping the loser would contradict it.
             tracks_by_id = {trk["track_id"]: trk for trk in tracks_raw}
             matched_track_ids = set()
-            for det in detections:
+
+            pairs = []  # (iou, det_idx, track_id)
+            for di, det in enumerate(detections):
                 bd = [det["bbox"]["x1"], det["bbox"]["y1"],
                       det["bbox"]["x2"], det["bbox"]["y2"]]
-                best_iou, best_id = 0.0, None
                 for trk in tracks_raw:
                     bt = [trk["bbox"]["x1"], trk["bbox"]["y1"],
                           trk["bbox"]["x2"], trk["bbox"]["y2"]]
                     iou = self.tracker._compute_iou(bd, bt)
-                    if iou > best_iou:
-                        best_iou, best_id = iou, trk["track_id"]
-                if best_iou > 0.3:
-                    det["track_id"] = best_id
-                    det["dwell_time"] = tracks_by_id[best_id]["dwell_time"]
-                    det["bbox"] = dict(tracks_by_id[best_id]["bbox"])
-                    det["confidence"] = tracks_by_id[best_id]["confidence"]
-                    det["tracking_status"] = "tracked"
-                    matched_track_ids.add(best_id)
+                    if iou > 0.3:
+                        pairs.append((iou, di, trk["track_id"]))
+            pairs.sort(key=lambda p: p[0], reverse=True)
+
+            det_to_track = {}
+            for iou, di, tid in pairs:
+                if di in det_to_track or tid in matched_track_ids:
+                    continue
+                det_to_track[di] = tid
+                matched_track_ids.add(tid)
+
+            # Detections that overlapped an already-claimed track are duplicate
+            # views of that same object; drop them (with their parallel mask).
+            _dup_idx = {
+                di for di, det in enumerate(detections)
+                if di not in det_to_track and any(p[1] == di for p in pairs)
+            }
+            for di, tid in det_to_track.items():
+                det = detections[di]
+                det["track_id"] = tid
+                det["dwell_time"] = tracks_by_id[tid]["dwell_time"]
+                det["bbox"] = dict(tracks_by_id[tid]["bbox"])
+                det["confidence"] = tracks_by_id[tid]["confidence"]
+                det["tracking_status"] = "tracked"
+            if _dup_idx:
+                _keep = [i for i in range(len(detections)) if i not in _dup_idx]
+                if len(masks) == len(detections):
+                    masks = [masks[i] for i in _keep]
+                detections = [detections[i] for i in _keep]
 
             # ── Coasting tracks: a confirmed track the tracker is still
             # predicting through a brief missed detection (occlusion, motion
@@ -1370,10 +1412,22 @@ class PipelineCoordinator:
             # traffic-profile camera still shipped person/handbag boxes to the
             # overlay while analytics quietly ignored them — the profile looked
             # like a UI switch because, downstream of analytics, it was one.
+            # Two independent narrowings, both applied before client_dets:
+            #   profile  — what this KIND of camera reports (traffic: no people)
+            #   features — what THIS operator switched on (Vehicle Detection off)
+            # The second existed only in the UI: person_detection /
+            # vehicle_detection / worker_detection appeared nowhere in the
+            # engine, so those switches did nothing at all and vehicles kept
+            # being boxed after being turned off.
             # masks is index-parallel with detections and must be narrowed with it.
             _allowed = PROFILE_CLASSES.get(self.zone_profile)
-            if _allowed and detections:
-                _keep = [i for i, d in enumerate(detections) if d.get("class") in _allowed]
+            if detections:
+                _feat_keep = filter_by_features(detections, self.profile_features)
+                _feat_ids = {id(d) for d in _feat_keep}
+                _keep = [
+                    i for i, d in enumerate(detections)
+                    if id(d) in _feat_ids and (not _allowed or d.get("class") in _allowed)
+                ]
                 if len(_keep) != len(detections):
                     if len(masks) == len(detections):
                         masks = [masks[i] for i in _keep]

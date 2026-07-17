@@ -56,6 +56,59 @@ PROFILE_CLASSES = {
 }
 
 
+# Which classes each feature toggle is RESPONSIBLE for reporting.
+#
+# Without this the toggles were decorative: "person_detection",
+# "vehicle_detection" and "worker_detection" appeared nowhere in the engine at
+# all, so switching Vehicle Detection off in Admin Studio changed nothing and
+# vehicles kept being boxed. The operator's switch has to actually mean
+# something, which is the whole point of "only show what I turned on".
+#
+# A class is owned by more than one feature on purpose (vehicle_detection and
+# vehicle_classification both cover cars): it survives if ANY owning feature is
+# on, so turning off classification doesn't silently blind the camera to cars.
+FEATURE_CLASSES = {
+    "person_detection": {"person"},
+    "worker_detection": {"person"},
+    "person_counting": {"person"},
+    "crowd_detection": {"person"},
+    "vehicle_detection": set(VEHICLE_CLASSES),
+    "vehicle_classification": set(VEHICLE_CLASSES),
+    "vehicle_counting": set(VEHICLE_CLASSES),
+    "face_detection": {"face"},
+    "object_left_behind": set(ITEM_CLASSES),
+    "object_removed": set(ITEM_CLASSES),
+    "traffic_light_violation": {"traffic_light"},
+    "stop_line_violation": {"stop_sign"},
+}
+
+
+def filter_by_features(detections, features):
+    """Drop classes whose every owning feature is switched off.
+
+    Complements filter_by_profile(): the profile says what this KIND of camera
+    reports, the features say what this operator asked for. Both must hold.
+
+    An empty/absent features dict means "not configured" and drops nothing —
+    a camera with no profile config must not silently stop reporting.
+    """
+    if not features:
+        return detections
+    enabled, disabled = set(), set()
+    for key, cfg in features.items():
+        owned = FEATURE_CLASSES.get(key)
+        if not owned:
+            continue
+        if isinstance(cfg, dict) and cfg.get("enabled"):
+            enabled |= owned
+        else:
+            disabled |= owned
+    drop = disabled - enabled
+    if not drop:
+        return detections
+    return [d for d in detections if d.get("class") not in drop]
+
+
 def filter_by_profile(detections, zone_profile):
     """Narrow detections to the classes a profile reports.
 

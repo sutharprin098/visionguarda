@@ -641,6 +641,11 @@ export default function AdminStudio({ onDeactivated }: { onDeactivated: () => vo
     // it did go green — and answered with a colour threshold that read concrete
     // as smoke on every frame. See FeatureDef.unavailable.
     const blocked = !!f.unavailable;
+    // Two different messages to a buyer: "coming soon" is scheduled work with a
+    // licence-clean model already evaluated; "no model" is an open problem with
+    // nothing suitable to build from. Collapsing them would overstate one and
+    // understate the other.
+    const soon = f.status === "coming-soon";
 
     return (
       <div key={f.key} className={clsx("rounded border p-2.5 transition",
@@ -650,14 +655,19 @@ export default function AdminStudio({ onDeactivated }: { onDeactivated: () => vo
             <div className="flex items-center gap-1.5">
               <span className={clsx("text-xs font-semibold", blocked ? "text-zinc-500" : "text-zinc-200")}>{f.label}</span>
               {blocked && (
-                <span className="rounded bg-warn/15 px-1 py-px text-[9px] font-bold uppercase tracking-wide text-warn">
-                  no model
+                <span className={clsx(
+                  "rounded px-1 py-px text-[9px] font-bold uppercase tracking-wide",
+                  soon ? "bg-sky-500/15 text-sky-400" : "bg-warn/15 text-warn",
+                )}>
+                  {soon ? "coming soon" : "no model"}
                 </span>
               )}
             </div>
             <p className="text-[10px] text-zinc-500 leading-snug mt-0.5">{f.description}</p>
             {blocked && (
-              <p className="mt-1 text-[10px] leading-snug text-warn/80">{f.unavailable}</p>
+              <p className={clsx("mt-1 text-[10px] leading-snug", soon ? "text-sky-400/80" : "text-warn/80")}>
+                {f.unavailable}
+              </p>
             )}
           </div>
           <button type="button" disabled={blocked}

@@ -106,7 +106,17 @@ export default function DetectionOverlay({ detections, mediaRef, fit = "cover" }
       ctx.restore();
 
       const id = det.track_id != null ? ` #${det.track_id}` : "";
-      const label = `${det.class.toUpperCase()}${id}  ${Math.round(det.confidence * 100)}%`;
+      // Speed is only a measurement when a two-line gate calibrated it; otherwise
+      // it's a pixel-derived estimate. Prefixing "~" keeps the distinction in
+      // front of the operator instead of dressing a guess up as a reading —
+      // which matters the moment a number like this is used to justify a fine.
+      let speed = "";
+      if (det.speed != null && det.speed > 0.5) {
+        speed = det.speed_calibrated
+          ? `  ${det.speed.toFixed(0)} km/h`
+          : `  ~${det.speed.toFixed(0)}`;
+      }
+      const label = `${det.class.toUpperCase()}${id}  ${Math.round(det.confidence * 100)}%${speed}`;
       ctx.font = "bold 11px Inter, system-ui, sans-serif";
       const tw = ctx.measureText(label).width;
       const lh = 16;

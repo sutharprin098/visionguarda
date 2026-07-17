@@ -59,6 +59,15 @@ export interface FeatureDef {
   /** Enabled by default when a fresh profile config is created. */
   defaultEnabled?: boolean;
   /**
+   * Distinguishes the two honest reasons a feature can't be switched on.
+   *   "coming-soon" — a permissively-licensed model exists and has been
+   *                   evaluated, but the integration isn't finished/validated.
+   *   "no-model"    — nothing suitable exists to build it from at all.
+   * Kept apart because they mean different things to a buyer: one is scheduled
+   * work, the other is an open research/licensing problem.
+   */
+  status?: "coming-soon" | "no-model";
+  /**
    * Set when NO model in this build can produce what the feature claims, so the
    * toggle cannot do anything. The UI must show this and refuse to enable it.
    *
@@ -296,7 +305,19 @@ const TRAFFIC: ProfileDef = {
     {
       key: "anpr", label: "ANPR", group: "Recognition", defaultEnabled: false,
       description: "Automatic number plate recognition on detected vehicles.",
-      unavailable: "No plate detector or OCR ships in this build — ANPR needs both, and neither exists here. The Plate Region setting has nothing to configure.",
+      status: "coming-soon",
+      // Both halves exist and are licence-clean — LPD-YuNet and CRNN-EN from
+      // OpenCV Zoo, Apache-2.0 — and both were downloaded and run. Not shipped
+      // because the detection could not be validated: on the only footage
+      // available (dtest/bus_pan.mp4) LPD at conf>=0.3 fired on 59/200 frames,
+      // and the highest-scoring "plate" (0.81) was the word "emisiones" painted
+      // on the side of the bus. It latches onto any rectangular text block. The
+      // one plate-sized region found was 58x28 px — too small for CRNN anyway.
+      // Finishing this needs footage with real plates to tune against, plus
+      // aspect/size gating and a vehicle-crop pass (the trick that made face
+      // detection work). Shipping it on the current evidence would put bus
+      // advertising into the plate log.
+      unavailable: "Coming soon. The plate detector and OCR are integrated-ready and licence-clean (Apache-2.0), but on our test footage the detector reads text painted on vehicles as plates, so it is not enabled until it can be validated against real plate footage.",
       params: [confidence(0.5), { key: "region", label: "Plate Region", type: "select", default: "auto", options: [
         { value: "auto", label: "Auto" }, { value: "eu", label: "Europe" }, { value: "us", label: "North America" }, { value: "in", label: "India" }, { value: "me", label: "Middle East" },
       ] }],
@@ -382,7 +403,12 @@ const SECURITY: ProfileDef = {
     },
     {
       key: "face_recognition", label: "Face Recognition", group: "Recognition", defaultEnabled: false,
-      unavailable: "Not in this build — face detection works, but identifying who a face belongs to needs an enrolled known-faces database, which does not exist yet.",
+      status: "coming-soon",
+      // SFace (Apache-2.0) is downloaded and loads via cv2.FaceRecognizerSF, and
+      // face detection — the hard prerequisite — is now real. What's missing is
+      // product, not model: an enrolment flow, a known-faces store, and a
+      // matching threshold policy. Deliberately not faked with a stub.
+      unavailable: "Coming soon. The recognition model is licence-clean (Apache-2.0) and face detection now works, but identifying who a face belongs to needs an enrolment flow and a known-faces database, which do not exist yet.",
       description: "Match detected faces against an enrolled gallery.",
       params: [
         { key: "match_threshold", label: "Match Threshold", type: "slider", min: 0.3, max: 0.95, step: 0.01, default: 0.62 },
@@ -394,12 +420,14 @@ const SECURITY: ProfileDef = {
     {
       key: "fire_detection", label: "Fire Detection", group: "Safety",
       description: "Vision-based fire detection.",
+      status: "no-model",
       unavailable: "No fire model ships in this build. The previous colour-threshold implementation was removed — it flagged anything red (a shirt, a sunset, a traffic cone) as fire.",
       params: [confidence(0.5)],
     },
     {
       key: "smoke_detection", label: "Smoke Detection", group: "Safety",
       description: "Vision-based smoke detection.",
+      status: "no-model",
       unavailable: "No smoke model ships in this build. The previous colour-threshold implementation was removed — measured on footage with no smoke it alarmed on 200/200 frames, reading concrete pavement as a smoke plume.",
       params: [confidence(0.5)],
     },
@@ -434,6 +462,7 @@ const FACTORY: ProfileDef = {
       // when nothing can produce a compliance finding.
       key: "ppe_detection", label: "PPE Detection", group: "Safety",
       description: "Verify workers wear the required personal protective equipment.",
+      status: "no-model",
       unavailable: "No PPE model ships in this build. The previous colour-threshold implementation was removed — on people wearing no PPE it invented helmets on 16% of checks and vests on 22%, at a hardcoded 0.95 confidence, flickering between compliant and violation frame to frame.",
       params: [confidence(0.45), {
         key: "required_ppe", label: "Required PPE", type: "classes",
@@ -441,10 +470,13 @@ const FACTORY: ProfileDef = {
       }],
     },
     { key: "helmet_detection", label: "Helmet Detection", group: "Safety", description: "Detect hard-hat compliance.",
+      status: "no-model",
       unavailable: "No helmet model ships in this build — COCO (and so yolox_tiny) has no helmet class.", params: [confidence(0.45)] },
     { key: "safety_vest", label: "Safety Vest", group: "Safety", description: "Detect hi-vis vest compliance.",
+      status: "no-model",
       unavailable: "No hi-vis model ships in this build — COCO (and so yolox_tiny) has no vest class.", params: [confidence(0.45)] },
     { key: "gloves", label: "Gloves", group: "Safety", description: "Detect glove compliance.",
+      status: "no-model",
       unavailable: "No glove model ships in this build — COCO (and so yolox_tiny) has no glove class.", params: [confidence(0.45)] },
     { key: "shoes", label: "Safety Shoes", group: "Safety", description: "Detect safety-footwear compliance.", params: [confidence(0.45)] },
     {
@@ -470,6 +502,7 @@ const FACTORY: ProfileDef = {
     {
       key: "forklift_detection", label: "Forklift Detection", group: "Detection",
       description: "Detect forklifts and industrial vehicles.",
+      status: "no-model",
       unavailable: "No forklift model ships in this build — COCO (and so yolox_tiny) has no forklift class. A forklift is currently detected as 'truck' at best.",
       params: [confidence(0.45)],
     },
@@ -579,3 +612,4 @@ export function reconcileFeatures(profile: ZoneProfileKey, stored: ProfileFeatur
 export function getProfile(key: ZoneProfileKey): ProfileDef {
   return ZONE_PROFILES[key];
 }
+

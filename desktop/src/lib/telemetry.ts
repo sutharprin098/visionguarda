@@ -22,6 +22,14 @@ export interface TelemetryDetection {
   confidence: number;
   track_id?: number | null;
   tracking_status?: string;
+  /** km/h. Only a real measurement when speed_calibrated is true — that needs a
+   *  two-line speed gate (a pair of lines carrying speedPairId + distanceM, the
+   *  real ground distance between them; analytics._update_speed_gate). Without
+   *  a gate this is a pixel-derived heuristic with an approximate scale factor,
+   *  so the UI must not present it as if it were measured. */
+  speed?: number;
+  speed_calibrated?: boolean;
+  direction?: string;
   bbox: { x1: number; y1: number; x2: number; y2: number };
 }
 
