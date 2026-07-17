@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef, useCallback } from "react";
-import { Video, Bell, Settings2, LogOut, Wifi, WifiOff, Sliders, Activity, AlertTriangle, RotateCw, Maximize2, Minimize2 } from "lucide-react";
+import { Video, Bell, Settings2, LogOut, Wifi, WifiOff, Sliders, Activity, AlertTriangle, RotateCw, Maximize2, Minimize2, Lock } from "lucide-react";
 import clsx from "clsx";
 import { startRealtimeSync, DeactivatedError, SyncBundle } from "../lib/sync";
 import { syncCamerasToLocalEngine, syncAiModelToLocalEngine, isEngineOnline, mjpegStreamUrl, resetLocalEngineState, reportCameraHealth } from "../lib/localEngine";
@@ -9,6 +9,7 @@ import type { ZoneProfileKey } from "../lib/zoneProfiles";
 import DetectionOverlay from "../components/DetectionOverlay";
 import ProfileDashboard from "../components/ProfileDashboard";
 import SourcePicker from "../components/SourcePicker";
+import { lockReason } from "../lib/rbac";
 import type { CaptureSource } from "../lib/bridge";
 import {
   AI_MODULES, ModuleKey, ModuleState,
@@ -37,7 +38,9 @@ export default function Workspace({
 }: {
   bundle: SyncBundle;
   onDeactivated: () => void;
-  onOpenAdminStudio: () => void;
+  /** Undefined when this user lacks cameras.manage — App decides, from the
+   *  user's permissions rather than from which build is running. */
+  onOpenAdminStudio?: () => void;
 }) {
   const [tab, setTab] = useState<"cameras" | "alerts" | "settings" | "engine">("cameras");
   const [syncError, setSyncError] = useState(false);
@@ -293,13 +296,24 @@ export default function Workspace({
               <n.icon size={15} /> {n.label}
             </button>
           ))}
-          {hasPermission("cameras.manage") && (
+          {hasPermission("cameras.manage") && onOpenAdminStudio ? (
             <button
               onClick={onOpenAdminStudio}
               className="mt-4 flex w-full items-center gap-2.5 rounded-md border border-accent/20 bg-accent/5 px-2.5 py-1.5 text-sm font-medium text-accent transition hover:bg-accent/10"
             >
               <Sliders size={15} /> Configure Canvas
             </button>
+          ) : (
+            // Shown locked rather than hidden: an operator who cannot find the
+            // control assumes the app is broken and asks us; one who sees it
+            // locked asks their admin, which is the correct escalation. The
+            // server rejects the write either way (RLS: cameras.manage).
+            <div
+              title={lockReason()}
+              className="mt-4 flex w-full cursor-not-allowed items-center gap-2.5 rounded-md border border-line bg-surface-2 px-2.5 py-1.5 text-sm font-medium text-zinc-600"
+            >
+              <Lock size={15} /> Configure Canvas
+            </div>
           )}
         </nav>
         <div className="border-t border-line p-3">

@@ -5,6 +5,7 @@ import AdminStudio from "./screens/AdminStudio"; // configuration drawings & rul
 import { restoreSession } from "./lib/session";
 import { startRealtimeSync, SyncBundle } from "./lib/sync";
 import { resetLocalEngineState } from "./lib/localEngine";
+import { canConfigure } from "./lib/rbac";
 
 type Phase = "booting" | "needs-activation" | "ready";
 
@@ -60,8 +61,21 @@ export default function App() {
     );
   }
 
-  const showWorkspace = appType !== "admin";
-  const showAdmin = appType === "admin" || currentScreen === "admin-studio";
+  // Admin access is the USER's permission, not the build's identity.
+  // It used to be `appType === "admin"`, which came from
+  // app.getName().includes("Admin Studio") — a build flag. Anyone running the
+  // Admin build got the whole configuration UI whatever their role, and their
+  // writes then failed silently against RLS. The server has always enforced
+  // cameras.manage (see lib/rbac.ts); this stops the UI disagreeing with it.
+  const mayConfigure = canConfigure(bundle);
+  const showWorkspace = appType !== "admin" || !mayConfigure;
+  const showAdmin = mayConfigure && (appType === "admin" || currentScreen === "admin-studio");
+
+  // An Admin-build user without the permission has nowhere to go: send them to
+  // the workspace rather than a blank screen.
+  if (appType === "admin" && !mayConfigure && currentScreen === "admin-studio") {
+    setCurrentScreen("workspace");
+  }
 
   return (
     <div className="h-screen w-screen relative overflow-hidden bg-[#0b0d10]">
@@ -73,7 +87,9 @@ export default function App() {
           <Workspace
             bundle={bundle}
             onDeactivated={() => setPhase("needs-activation")}
-            onOpenAdminStudio={() => setCurrentScreen("admin-studio")}
+            // undefined tells Workspace to render the entry point locked rather
+            // than offering a door that RLS will slam.
+            onOpenAdminStudio={mayConfigure ? () => setCurrentScreen("admin-studio") : undefined}
           />
         </div>
       )}
