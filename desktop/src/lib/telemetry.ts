@@ -36,11 +36,23 @@ export interface TelemetryDetection {
 export interface CameraTelemetry {
   people: number;
   vehicles: number;
+  items?: number;
   detections: TelemetryDetection[];
+  counters?: {
+    in?: number; out?: number;
+    people_in?: number; people_out?: number;
+    vehicles_in?: number; vehicles_out?: number;
+  };
+  zone_stats?: unknown[];
+  line_stats?: unknown[];
+  crowd_stats?: unknown;
   fps?: number;
   latency?: number;
   inference_latency?: number;
+  /** 0 whenever the face module is off — see pipeline.py's face gate. */
+  face_latency?: number;
   device?: string;
+  backend?: string;
   status?: string;
 }
 

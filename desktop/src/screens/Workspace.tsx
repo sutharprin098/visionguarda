@@ -4,8 +4,10 @@ import clsx from "clsx";
 import { startRealtimeSync, DeactivatedError, SyncBundle } from "../lib/sync";
 import { syncCamerasToLocalEngine, syncAiModelToLocalEngine, isEngineOnline, mjpegStreamUrl, resetLocalEngineState, reportCameraHealth } from "../lib/localEngine";
 import { MediaShareSession, ShareStatus } from "../lib/mediaShare";
-import { TelemetrySession, TelemetryDetection } from "../lib/telemetry";
+import { TelemetrySession, TelemetryDetection, CameraTelemetry } from "../lib/telemetry";
+import type { ZoneProfileKey } from "../lib/zoneProfiles";
 import DetectionOverlay from "../components/DetectionOverlay";
+import ProfileDashboard from "../components/ProfileDashboard";
 import SourcePicker from "../components/SourcePicker";
 import type { CaptureSource } from "../lib/bridge";
 import {
@@ -598,7 +600,7 @@ function CameraTile({ camera: c, engineOnline }: { camera: any; engineOnline: bo
   const [shareStatus, setShareStatus] = useState<ShareStatus>("idle");
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
   const [detections, setDetections] = useState<TelemetryDetection[]>([]);
-  const [aiStats, setAiStats] = useState<{ fps: number; people: number; vehicles: number } | null>(null);
+  const [telemetry, setTelemetry] = useState<CameraTelemetry | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [sourceName, setSourceName] = useState<string | null>(null);
   const [modules, setModules] = useState<ModuleState>(() => loadModules(c.id));
@@ -624,10 +626,10 @@ function CameraTile({ camera: c, engineOnline }: { camera: any; engineOnline: bo
   // while something is actually on screen — the engine pushes per subscriber,
   // so a hidden tile would cost real work for boxes nobody can see.
   useEffect(() => {
-    if (!engineOnline || !showingMedia) { setDetections([]); return; }
+    if (!engineOnline || !showingMedia) { setDetections([]); setTelemetry(null); return; }
     const session = new TelemetrySession(c.id, (t) => {
       setDetections(t.detections ?? []);
-      setAiStats({ fps: t.fps ?? 0, people: t.people ?? 0, vehicles: t.vehicles ?? 0 });
+      setTelemetry(t);
     });
     session.start();
     return () => session.stop();
@@ -782,9 +784,10 @@ function CameraTile({ camera: c, engineOnline }: { camera: any; engineOnline: bo
 
         {/* Stays visible in fullscreen — an operator watching a full-screen feed
             is exactly who needs to see the pipeline is still keeping up. */}
-        {showingMedia && aiStats && (
+        {showingMedia && telemetry && (
           <div className="absolute bottom-2 left-2 rounded bg-black/70 px-2 py-0.5 text-[10px] font-semibold text-zinc-200 shadow">
-            {shownDetections.length} shown · {aiStats.fps.toFixed(1)} fps
+            {shownDetections.length} shown · {(telemetry.fps ?? 0).toFixed(1)} fps
+            {telemetry.device ? ` · ${telemetry.device.toUpperCase()}` : ""}
           </div>
         )}
 
@@ -840,6 +843,11 @@ function CameraTile({ camera: c, engineOnline }: { camera: any; engineOnline: bo
           match on classes yolox_tiny never produces, so advertising them here
           as "active" would tell an operator a safety detector is running when
           nothing is. */}
+      {/* Per-profile dashboard — a traffic operator and a security operator want
+          different numbers. Every tile reads a field the engine actually emits. */}
+      {showingMedia && telemetry && (
+        <ProfileDashboard profile={(c.zone_profile as ZoneProfileKey) ?? null} t={telemetry} />
+      )}
       {showingMedia && (
         <div className="flex flex-wrap items-center gap-1.5 border-t border-line bg-surface-2 px-3 py-2">
           {/* The profile is set per camera in Admin Studio and enforced engine-side

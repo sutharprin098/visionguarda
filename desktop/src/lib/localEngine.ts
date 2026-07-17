@@ -110,6 +110,35 @@ let lastUpdatedAt = new Map<string, string>();
  * should invoke this on an interval (see Workspace.tsx), not just on bundle
  * change, so a failed attempt is retried automatically.
  */
+/** What the engine actually holds for a camera, straight from its own
+ *  /api/cameras. The only trustworthy answer to "is the engine already
+ *  configured the way the DB wants?" — inferring it from the DB is what let a
+ *  profile change go unsynced indefinitely. */
+async function getEngineCameraConfig(cameraId: string): Promise<{
+  zones: string; lines: string; rules: string; zone_profile: string; profile_features: string;
+} | null> {
+  try {
+    const res = await fetch(`${ENGINE_BASE}/api/cameras`, { signal: AbortSignal.timeout(4000) });
+    if (!res.ok) return null;
+    const list = await res.json();
+    const row = Array.isArray(list) ? list.find((c: any) => c.id === cameraId) : null;
+    if (!row) return null;
+    return {
+      zones: row.zones ?? "[]",
+      lines: row.lines ?? "[]",
+      rules: row.rules ?? "[]",
+      // The engine stores NULL for "no profile"; normalise to "" so it compares
+      // equal to the DB's null the same way activeProfile does below.
+      zone_profile: row.zone_profile ?? "",
+      profile_features: row.profile_features ?? "{}",
+    };
+  } catch {
+    // Unreachable/slow engine: returning null makes the caller treat the config
+    // as unknown, which forces a push rather than assuming it's already right.
+    return null;
+  }
+}
+
 export async function syncCamerasToLocalEngine(
   cameras: { id: string; name: string; source_type: string; zones?: string; lines?: string; zone_profile?: string | null; updated_at?: string }[],
   rules: any[] = [],
@@ -160,16 +189,29 @@ export async function syncCamerasToLocalEngine(
       registered.delete(cam.id);
       lastSyncedConfig.delete(cam.id);
     } else if (!registered.has(cam.id) && live.has(cam.id)) {
-      // The engine already has it running, but our UI state was reset.
-      // Register it in our bookkeeping so we don't fetch and POST it again.
+      // The engine already has it running, but our UI state was reset (app
+      // relaunch, renderer reload) — adopt it instead of re-POSTing.
+      //
+      // Seed the bookkeeping with what the ENGINE actually holds, not with what
+      // the DB says. This branch used to write the DB's values straight into
+      // lastSyncedConfig, i.e. assert "we already pushed this" without ever
+      // asking. The diff below then compared the DB against itself, matched,
+      // and pushed nothing — so a profile changed in Admin Studio while the
+      // engine was already running NEVER reached it. Observed live: the DB said
+      // zone_profile="traffic" while the engine was still on "security" with
+      // profile_features="{}", and because security's class filter reports no
+      // vehicles, every car/bus/truck was silently dropped. It read as "vehicle
+      // detection is broken" when the detector was fine and simply never told
+      // about the change.
+      const actual = await getEngineCameraConfig(cam.id);
       registered.add(cam.id);
       lastUpdatedAt.set(cam.id, camUpdatedAt);
       lastSyncedConfig.set(cam.id, {
-        zones: zonesStr,
-        lines: linesStr,
-        rules: rulesStr,
-        zone_profile: activeProfile || "",
-        profile_features: profileFeaturesStr,
+        zones: actual?.zones ?? "",
+        lines: actual?.lines ?? "",
+        rules: actual?.rules ?? "",
+        zone_profile: actual?.zone_profile ?? "",
+        profile_features: actual?.profile_features ?? "",
       });
     }
 

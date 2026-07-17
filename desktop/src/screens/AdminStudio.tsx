@@ -624,8 +624,15 @@ export default function AdminStudio({ onDeactivated }: { onDeactivated: () => vo
   // ---- feature card ----------------------------------------
   function drawBindingFor(f: FeatureDef): DrawBinding | null {
     if (!f.requiresGeometry) return null;
-    const purpose = f.requiresGeometry === "line" ? "counting_line" : f.requiresGeometry === "direction" ? "direction" : f.key;
-    return { featureKey: f.key, featureLabel: f.label, purpose };
+    // Prefer the feature's declared tool. Deriving purpose from requiresGeometry
+    // alone stamped EVERY line as "counting_line" and every zone as the feature
+    // key, so a stop line, a speed-gate calibration line and a counting line
+    // were indistinguishable downstream — publish_config's compile step sorts
+    // shapes into cameras.zones vs cameras.lines by exactly these purpose
+    // strings, and analytics keys lane attribution off zoneType == "lane".
+    const purpose = f.drawTool?.purpose
+      ?? (f.requiresGeometry === "line" ? "counting_line" : f.requiresGeometry === "direction" ? "direction" : f.key);
+    return { featureKey: f.key, featureLabel: f.drawTool?.label ?? f.label, purpose };
   }
   function drawModeFor(f: FeatureDef): DrawMode {
     if (f.requiresGeometry === "line" || f.requiresGeometry === "direction") return "line";
@@ -692,7 +699,10 @@ export default function AdminStudio({ onDeactivated }: { onDeactivated: () => vo
                 <button type="button"
                   onClick={() => { const b = drawBindingFor(f); if (b) beginDraw(drawModeFor(f), b); }}
                   className="text-[10px] flex items-center gap-1 text-accent hover:underline">
-                  <Pencil size={11} /> Draw {f.requiresGeometry}
+                  {/* Name the actual tool ("Draw Stop Line"), not the geometry
+                      class ("Draw line") — the profile's tool set is the thing
+                      the operator is looking for. */}
+                  <Pencil size={11} /> Draw {f.drawTool?.label ?? f.requiresGeometry}
                 </button>
               </div>
             )}

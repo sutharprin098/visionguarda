@@ -56,6 +56,17 @@ export interface FeatureDef {
   group: FeatureGroup;
   /** Feature needs one or more drawn geometries in the ROI editor to work. */
   requiresGeometry?: "zone" | "line" | "direction";
+  /**
+   * The drawing tool this feature offers, and the `purpose` stamped on shapes
+   * drawn with it. Without this every line was drawn as "counting_line" and
+   * every zone as "custom_zone" — derived from requiresGeometry alone — so a
+   * stop line, a speed gate and a counting line were indistinguishable to the
+   * engine, and analytics could not tell which rule a shape belonged to.
+   * The purpose strings are the ones analytics.py already reads (see
+   * _lane_for_point's zoneType=="lane", and the counting/entry/exit/calibration
+   * line purposes in publish_config's compile step).
+   */
+  drawTool?: { label: string; purpose: string };
   /** Enabled by default when a fresh profile config is created. */
   defaultEnabled?: boolean;
   /**
@@ -217,6 +228,7 @@ const TRAFFIC: ProfileDef = {
   features: [
     {
       key: "lane_detection", label: "Lane Detection", group: "Detection", requiresGeometry: "zone", defaultEnabled: true,
+      drawTool: { label: "Lane", purpose: "lane" },
       // Honest as-is: there is no lane *segmentation* model, and none is needed.
       // analytics._lane_for_point() attributes a vehicle to whichever zone the
       // operator drew with zoneType "lane". Worth stating so the confidence
@@ -230,8 +242,8 @@ const TRAFFIC: ProfileDef = {
       params: [confidence(0.4), classes(VEHICLE_CLASSES, ["car", "truck", "bus", "motorcycle"])],
     },
     {
-      key: "vehicle_classification", label: "Vehicle Classification", group: "Detection",
-      description: "Sub-classify detected vehicles (sedan / truck / bus / two-wheeler).",
+      key: "vehicle_classification", label: "Vehicle Classification", group: "Detection", defaultEnabled: true,
+      description: "Sub-classify detected vehicles (car / truck / bus / two-wheeler) using the detector's own COCO classes.",
       params: [confidence(0.45)],
     },
     {
@@ -246,17 +258,19 @@ const TRAFFIC: ProfileDef = {
       ],
     },
     {
-      key: "vehicle_counting", label: "Vehicle Counting", group: "Tracking & Counting", requiresGeometry: "line",
+      key: "vehicle_counting", label: "Vehicle Counting", group: "Tracking & Counting", requiresGeometry: "line", defaultEnabled: true,
+      drawTool: { label: "Counting Line", purpose: "counting_line" },
       description: "Count vehicles crossing a counting line.",
       params: [directionParam, classes(VEHICLE_CLASSES, ["car", "truck", "bus"])],
     },
     {
-      key: "line_crossing", label: "Line Crossing", group: "Events & Violations", requiresGeometry: "line",
+      key: "line_crossing", label: "Line Crossing", group: "Events & Violations", requiresGeometry: "line", defaultEnabled: true,
+      drawTool: { label: "Counting Line", purpose: "counting_line" },
       description: "Fire an event whenever a tracked object crosses a line.",
       params: [directionParam],
     },
     {
-      key: "wrong_way_detection", label: "Wrong Way Detection", group: "Events & Violations", requiresGeometry: "direction",
+      key: "wrong_way_detection", label: "Wrong Way Detection", group: "Events & Violations", requiresGeometry: "direction", defaultEnabled: true,
       description: "Flag vehicles moving against the permitted direction of travel.",
       params: [
         { key: "allowed_direction", label: "Allowed Direction", type: "select", default: "north", options: [
@@ -267,38 +281,48 @@ const TRAFFIC: ProfileDef = {
       ],
     },
     {
-      key: "speed_estimation", label: "Speed Estimation", group: "Events & Violations", requiresGeometry: "line",
-      description: "Estimate speed from a calibrated distance and flag over-limit vehicles.",
+      key: "speed_estimation", label: "Speed Estimation", group: "Events & Violations", requiresGeometry: "line", defaultEnabled: true,
+      drawTool: { label: "Speed Zone", purpose: "calibration_line" },
+      // Real km/h needs BOTH lines of the gate, paired via speedPairId with the
+      // true ground distance in distanceM (analytics._update_speed_gate). Until
+      // then the engine reports a pixel-derived estimate, which the overlay
+      // renders as "~12" rather than "12 km/h" — say so here so the operator
+      // knows the second line is not optional.
+      description: "Measures km/h between a pair of calibration lines a known real distance apart. Draw BOTH lines and set the distance — with only one line the reading stays an uncalibrated estimate.",
       params: [
         { key: "speed_limit", label: "Speed Limit", type: "number", min: 5, max: 200, step: 5, unit: "km/h", default: 60 },
         { key: "calibration_m", label: "Calibration Distance", type: "number", min: 1, max: 500, step: 1, unit: "m", default: 20, help: "Real-world distance between the two calibration lines." },
       ],
     },
     {
-      key: "queue_length", label: "Queue Length", group: "Analytics", requiresGeometry: "zone",
+      key: "queue_length", label: "Queue Length", group: "Analytics", requiresGeometry: "zone", defaultEnabled: true,
+      drawTool: { label: "Road ROI", purpose: "road_roi" },
       description: "Measure standing queue length inside a zone.",
       params: [seconds("stationary_seconds", "Stationary Time", 5, "How long a vehicle must be still to join the queue."),
         { key: "alert_count", label: "Alert Above", type: "number", min: 1, max: 200, step: 1, unit: "veh", default: 10 }],
     },
     {
-      key: "traffic_density", label: "Traffic Density", group: "Analytics", requiresGeometry: "zone",
+      key: "traffic_density", label: "Traffic Density", group: "Analytics", requiresGeometry: "zone", defaultEnabled: true,
+      drawTool: { label: "Road ROI", purpose: "road_roi" },
       description: "Report occupancy density of a road segment.",
       params: [{ key: "high_threshold", label: "High Density At", type: "slider", min: 0.1, max: 1, step: 0.05, default: 0.6, unit: "occupancy" }],
     },
     {
-      key: "illegal_parking", label: "Illegal Parking", group: "Events & Violations", requiresGeometry: "zone",
+      key: "illegal_parking", label: "Illegal Parking", group: "Events & Violations", requiresGeometry: "zone", defaultEnabled: true,
+      drawTool: { label: "Road ROI", purpose: "no_parking_zone" },
       description: "Flag vehicles stopped in a no-parking zone beyond a grace period.",
       params: [seconds("grace_seconds", "Grace Period", 60)],
     },
     {
-      key: "stop_line_violation", label: "Stop Line Violation", group: "Events & Violations", requiresGeometry: "line",
+      key: "stop_line_violation", label: "Stop Line Violation", group: "Events & Violations", requiresGeometry: "line", defaultEnabled: true,
+      drawTool: { label: "Stop Line", purpose: "stop_line" },
       description: "Flag vehicles crossing the stop line on red.",
       params: [{ key: "signal_source", label: "Signal State Source", type: "select", default: "detector", options: [
         { value: "detector", label: "On-frame light detector" }, { value: "manual", label: "External signal input" },
       ] }],
     },
     {
-      key: "u_turn_detection", label: "U-Turn Detection", group: "Events & Violations",
+      key: "u_turn_detection", label: "U-Turn Detection", group: "Events & Violations", defaultEnabled: true,
       description: "Detect vehicles performing a U-turn.",
       params: [{ key: "min_angle", label: "Min Turn Angle", type: "slider", min: 90, max: 180, step: 5, unit: "°", default: 150 }],
     },
@@ -323,7 +347,8 @@ const TRAFFIC: ProfileDef = {
       ] }],
     },
     {
-      key: "traffic_light_violation", label: "Traffic Light Violation", group: "Events & Violations", requiresGeometry: "line",
+      key: "traffic_light_violation", label: "Traffic Light Violation", group: "Events & Violations", requiresGeometry: "line", defaultEnabled: true,
+      drawTool: { label: "Traffic Signal ROI", purpose: "signal_roi" },
       description: "Combine signal state and line crossing to flag red-light running.",
       params: [seconds("grace_seconds", "Amber Grace", 2)],
     },
@@ -351,53 +376,66 @@ const SECURITY: ProfileDef = {
     },
     {
       key: "intrusion_detection", label: "Intrusion Detection", group: "Events & Violations", requiresGeometry: "zone", defaultEnabled: true,
+      drawTool: { label: "Restricted Zone", purpose: "intrusion_zone" },
       description: "Alert when a person enters a protected zone.",
       params: [confidence(0.4), { key: "sensitivity", label: "Sensitivity", type: "select", default: "normal", options: [
         { value: "low", label: "Low" }, { value: "normal", label: "Normal" }, { value: "high", label: "High" },
       ] }],
     },
     {
-      key: "restricted_area", label: "Restricted Area", group: "Events & Violations", requiresGeometry: "zone",
+      key: "restricted_area", label: "Restricted Area", group: "Events & Violations", requiresGeometry: "zone", defaultEnabled: true,
+      drawTool: { label: "Restricted Zone", purpose: "restricted_zone" },
       description: "Access-controlled zone — any presence is a violation.",
       params: [classes(SECURITY_CLASSES, ["person"])],
     },
     {
-      key: "perimeter_protection", label: "Perimeter Protection", group: "Events & Violations", requiresGeometry: "line",
+      key: "perimeter_protection", label: "Perimeter Protection", group: "Events & Violations", requiresGeometry: "line", defaultEnabled: true,
+      drawTool: { label: "Fence", purpose: "fence_line" },
       description: "Trip-wire crossing on a perimeter fence line.",
       params: [directionParam],
     },
     {
-      key: "dwell_time", label: "Dwell Time", group: "Analytics", requiresGeometry: "zone",
+      key: "dwell_time", label: "Dwell Time", group: "Analytics", requiresGeometry: "zone", defaultEnabled: true,
+      drawTool: { label: "Polygon", purpose: "dwell_zone" },
       description: "Measure how long people remain in a zone.",
       params: [seconds("dwell_seconds", "Dwell Threshold", 30)],
     },
     {
-      key: "loitering", label: "Loitering", group: "Events & Violations", requiresGeometry: "zone",
+      key: "loitering", label: "Loitering", group: "Events & Violations", requiresGeometry: "zone", defaultEnabled: true,
+      drawTool: { label: "Polygon", purpose: "loiter_zone" },
       description: "Alert when a person lingers beyond a threshold.",
       params: [seconds("loiter_seconds", "Loiter Threshold", 60)],
     },
     {
-      key: "crowd_detection", label: "Crowd Detection", group: "Analytics", requiresGeometry: "zone",
+      key: "crowd_detection", label: "Crowd Detection", group: "Analytics", requiresGeometry: "zone", defaultEnabled: true,
+      drawTool: { label: "Polygon", purpose: "crowd_zone" },
       description: "Alert when people-count in a zone exceeds a limit.",
       params: [{ key: "max_people", label: "Crowd Above", type: "number", min: 1, max: 500, step: 1, unit: "ppl", default: 10 }],
     },
     {
-      key: "person_counting", label: "Person Counting", group: "Tracking & Counting", requiresGeometry: "line",
+      key: "person_counting", label: "Person Counting", group: "Tracking & Counting", requiresGeometry: "line", defaultEnabled: true,
+      drawTool: { label: "Entry/Exit Line", purpose: "entry_line" },
       description: "Count people crossing an entry/exit line.",
       params: [directionParam],
     },
     {
-      key: "object_left_behind", label: "Object Left Behind", group: "Events & Violations", requiresGeometry: "zone",
+      key: "object_left_behind", label: "Object Left Behind", group: "Events & Violations", requiresGeometry: "zone", defaultEnabled: true,
+      drawTool: { label: "Polygon", purpose: "abandoned_zone" },
       description: "Detect abandoned bags/objects that remain static.",
       params: [seconds("static_seconds", "Abandoned After", 30)],
     },
     {
-      key: "object_removed", label: "Object Removed", group: "Events & Violations", requiresGeometry: "zone",
+      key: "object_removed", label: "Object Removed", group: "Events & Violations", requiresGeometry: "zone", defaultEnabled: true,
+      drawTool: { label: "Polygon", purpose: "asset_zone" },
       description: "Detect removal of a monitored asset from a zone.",
       params: [seconds("missing_seconds", "Missing After", 10)],
     },
     {
-      key: "face_detection", label: "Face Detection", group: "Recognition",
+      // The only default-on feature here that carries a real per-frame cost
+      // (~35ms — its own YuNet pass). On by default because the Security
+      // profile is the one that asks for faces; a traffic camera never pays it
+      // (pipeline.py gates the pass on the profile as well as this toggle).
+      key: "face_detection", label: "Face Detection", group: "Recognition", defaultEnabled: true,
       description: "Detects faces inside each person box (YuNet). Costs ~35 ms/frame while on, nothing while off.",
       params: [confidence(0.6)],
     },
@@ -478,24 +516,29 @@ const FACTORY: ProfileDef = {
     { key: "gloves", label: "Gloves", group: "Safety", description: "Detect glove compliance.",
       status: "no-model",
       unavailable: "No glove model ships in this build — COCO (and so yolox_tiny) has no glove class.", params: [confidence(0.45)] },
-    { key: "shoes", label: "Safety Shoes", group: "Safety", description: "Detect safety-footwear compliance.", params: [confidence(0.45)] },
+    { key: "shoes", label: "Safety Shoes", group: "Safety", description: "Detect safety-footwear compliance.",
+      status: "no-model",
+      unavailable: "No footwear model ships in this build — COCO (and so yolox_tiny) has no shoe class.", params: [confidence(0.45)] },
     {
       key: "worker_detection", label: "Worker Detection", group: "Detection", defaultEnabled: true,
       description: "Detect workers on the floor.",
       params: [confidence(0.4)],
     },
     {
-      key: "worker_counting", label: "Worker Counting", group: "Tracking & Counting", requiresGeometry: "line",
+      key: "worker_counting", label: "Worker Counting", group: "Tracking & Counting", requiresGeometry: "line", defaultEnabled: true,
+      drawTool: { label: "Safe Zone", purpose: "entry_line" },
       description: "Count workers entering/leaving an area.",
       params: [directionParam],
     },
     {
-      key: "machine_monitoring", label: "Machine Monitoring", group: "Analytics", requiresGeometry: "zone",
+      key: "machine_monitoring", label: "Machine Monitoring", group: "Analytics", requiresGeometry: "zone", defaultEnabled: true,
+      drawTool: { label: "Machine Area", purpose: "machine_zone" },
       description: "Monitor machine activity / idle state within a zone.",
       params: [seconds("idle_seconds", "Idle Alert After", 120)],
     },
     {
       key: "conveyor_monitoring", label: "Conveyor Monitoring", group: "Analytics", requiresGeometry: "zone",
+      drawTool: { label: "Machine Area", purpose: "machine_zone" },
       description: "Detect conveyor jams or stoppages.",
       params: [seconds("stall_seconds", "Stall Alert After", 15)],
     },
@@ -507,19 +550,31 @@ const FACTORY: ProfileDef = {
       params: [confidence(0.45)],
     },
     {
-      key: "restricted_machine_zone", label: "Restricted Machine Zone", group: "Events & Violations", requiresGeometry: "zone",
+      key: "restricted_machine_zone", label: "Restricted Machine Zone", group: "Events & Violations", requiresGeometry: "zone", defaultEnabled: true,
+      drawTool: { label: "Danger Zone", purpose: "restricted_zone" },
       description: "Alert when a worker enters a machine's danger radius.",
       params: [seconds("grace_seconds", "Grace Period", 2)],
     },
     {
-      key: "hazard_zone", label: "Hazard Zone", group: "Events & Violations", requiresGeometry: "zone",
+      key: "hazard_zone", label: "Hazard Zone", group: "Events & Violations", requiresGeometry: "zone", defaultEnabled: true,
+      drawTool: { label: "Danger Zone", purpose: "hazard_zone" },
       description: "General hazard area — any presence is flagged.",
       params: [classes(FACTORY_CLASSES, ["person"])],
     },
     { key: "fire_detection", label: "Fire Detection", group: "Safety", description: "Vision-based fire detection.",
+      status: "no-model",
       unavailable: "No fire model ships in this build. The previous colour-threshold implementation was removed — it flagged anything red as fire.", params: [confidence(0.5)] },
     { key: "smoke_detection", label: "Smoke Detection", group: "Safety", description: "Vision-based smoke detection.",
+      status: "no-model",
       unavailable: "No smoke model ships in this build. The previous colour-threshold implementation was removed — it alarmed on 200/200 frames of smoke-free footage, reading concrete as smoke.", params: [confidence(0.5)] },
+    {
+      // Fall detection is the one Safety feature here that genuinely works, so
+      // it is the one that is on by default. It needs no model: analytics flags
+      // a tracked person whose box becomes wider than tall.
+      key: "fall_detection", label: "Fall Detection", group: "Safety", defaultEnabled: true,
+      description: "Flags a person whose bounding box becomes wider than tall (lying/collapsed posture).",
+      params: [confidence(0.5)],
+    },
     roiEditor,
     alertRules,
   ],
