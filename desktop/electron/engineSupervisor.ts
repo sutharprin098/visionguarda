@@ -9,6 +9,7 @@ import { app, BrowserWindow } from "electron";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { request } from "node:http";
+import { safeSend } from "./safeSend";
 
 export type EngineProcessState =
   | "not_configured"
@@ -161,13 +162,17 @@ function appendLog(line: string): void {
     logs.push(l);
   }
   if (logs.length > MAX_LOG_LINES) logs.splice(0, logs.length - MAX_LOG_LINES);
-  getWin()?.webContents.send("engine:log", line);
+  // `getWin()?.` guarded only against a null window — a CLOSED window is still
+  // a live object, so this threw "Object has been destroyed" whenever the engine
+  // logged a line after the window went away (i.e. on almost every quit, since
+  // shutdownEngine kills the child and the child logs on its way out).
+  safeSend(getWin(), "engine:log", line);
 }
 
 function setState(s: EngineProcessState, err: string | null = null): void {
   state = s;
   lastError = err;
-  getWin()?.webContents.send("engine:status", getStatus());
+  safeSend(getWin(), "engine:status", getStatus());
 }
 
 export function getStatus() {

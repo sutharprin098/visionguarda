@@ -9,6 +9,28 @@ import {
   setEnginePath, getEnginePath,
 } from "./engineSupervisor";
 import { setupDownloadHandlers } from "./downloadManager";
+import { safeSend } from "./safeSend";
+
+// ---------------------------------------------------------------------------
+// Last-resort handlers.
+//
+// Electron's default for an uncaught exception in the main process is to show a
+// crash dialog and die. For an unattended CCTV client that is the worst possible
+// answer: the operator sees a modal, the engine is orphaned, and the cameras
+// stop. Everything reaching here is by definition a bug we did not anticipate,
+// so log it loudly and keep running — a degraded client still recording beats a
+// dead one.
+//
+// Registered before app.whenReady() on purpose: a throw during startup is
+// exactly when there is no window to report it with.
+process.on("uncaughtException", (err) => {
+  console.error("[main] UNCAUGHT EXCEPTION:", err?.stack || err);
+  safeSend(winRef(), "main-error", { kind: "uncaughtException", message: String(err?.message ?? err) });
+});
+process.on("unhandledRejection", (reason) => {
+  console.error("[main] UNHANDLED REJECTION:", reason);
+  safeSend(winRef(), "main-error", { kind: "unhandledRejection", message: String(reason) });
+});
 
 const SUPABASE_URL = process.env.CAMAI_SUPABASE_URL ?? "https://kuqyhceykvisqfyghiot.supabase.co";
 const ANON_KEY = process.env.CAMAI_SUPABASE_ANON_KEY ?? "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imt1cXloY2V5a3Zpc3FmeWdoaW90Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM4Mzc1MjksImV4cCI6MjA5OTQxMzUyOX0.EvmBR-6sjtUO8UWBm9A0Sv9Ms5GMSs7BDsvw8fVZ8LI";
@@ -18,12 +40,22 @@ const ANON_KEY = process.env.CAMAI_SUPABASE_ANON_KEY ?? "eyJhbGciOiJIUzI1NiIsInR
 // refuses rather than defaulting to the entire screen.
 let pendingCaptureSourceId: string | null = null;
 
+// `win` lives inside the else-branch below, but the process-level handlers above
+// are registered outside it and still need to reach the window. Resolved lazily
+// through this rather than hoisting `win`, so there is exactly one place that
+// knows how to find it.
+let winRef: () => BrowserWindow | null = () => null;
+
 const gotTheLock = app.requestSingleInstanceLock();
 if (!gotTheLock) {
   app.quit();
 } else {
   app.on("second-instance", () => {
-    if (win) {
+    // isDestroyed(), not just a null check: after the window closes, `win` is
+    // still a live object and isMinimized() throws "Object has been destroyed".
+    // This fires when the user relaunches the app while it is quitting —
+    // precisely when the window is half-gone.
+    if (win && !win.isDestroyed()) {
       if (win.isMinimized()) win.restore();
       win.focus();
     }
@@ -32,6 +64,7 @@ if (!gotTheLock) {
   if (process.env.CAMAI_REMOTE_DEBUG) app.commandLine.appendSwitch("remote-debugging-port", process.env.CAMAI_REMOTE_DEBUG);
 
   let win: BrowserWindow | null = null;
+  winRef = () => win;
 
   function createWindow() {
     const iconPath = join(__dirname, "../build/icon.ico");
@@ -245,15 +278,39 @@ if (!gotTheLock) {
     // Forward OS power-state transitions to the renderer so its stream
     // managers know to actively re-check/re-acquire media on resume rather
     // than waiting for the next heartbeat timeout to notice.
-    powerMonitor.on("suspend", () => win?.webContents.send("power-event", "suspend"));
-    powerMonitor.on("resume", () => win?.webContents.send("power-event", "resume"));
-    powerMonitor.on("lock-screen", () => win?.webContents.send("power-event", "lock-screen"));
-    powerMonitor.on("unlock-screen", () => win?.webContents.send("power-event", "unlock-screen"));
+    //
+    // These fire on the OS's schedule, not ours — a laptop lid closing after
+    // the window is gone still emits "suspend". `win?.` did not protect against
+    // that: a closed BrowserWindow is a live object, so the optional chain
+    // passed and .send() threw "Object has been destroyed".
+    powerMonitor.on("suspend", () => safeSend(win, "power-event", "suspend"));
+    powerMonitor.on("resume", () => safeSend(win, "power-event", "resume"));
+    powerMonitor.on("lock-screen", () => safeSend(win, "power-event", "lock-screen"));
+    powerMonitor.on("unlock-screen", () => safeSend(win, "power-event", "unlock-screen"));
+
+    // A renderer crash leaves `win` alive but its webContents destroyed — the
+    // exact state that makes every unguarded win.webContents.send() throw. Log
+    // it so a silent white window is diagnosable instead of a mystery; safeSend
+    // already handles the send side.
+    app.on("render-process-gone", (_evt, contents, details) => {
+      console.error(`[main] render-process-gone: reason=${details.reason} exitCode=${details.exitCode}`);
+    });
+    app.on("child-process-gone", (_evt, details) => {
+      console.error(`[main] child-process-gone: type=${details.type} reason=${details.reason} exitCode=${details.exitCode}`);
+    });
 
     // Local AI engine: launch on app start, keep it alive for the life of
     // the app (see engineSupervisor.ts for restart/crash-loop handling).
     startEngine(() => win);
   });
+
+  // Drop the reference the moment the window goes, so anything that fires
+  // between "closed" and process exit resolves null rather than a destroyed
+  // object. safeSend would catch it anyway; this stops it being reached.
+  app.on("browser-window-created", (_e, w) => {
+    w.on("closed", () => { if (win === w) win = null; });
+  });
+
   app.on("window-all-closed", () => app.quit());
   app.on("before-quit", () => shutdownEngine());
 }

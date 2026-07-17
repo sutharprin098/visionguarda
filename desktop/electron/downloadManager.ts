@@ -1,4 +1,5 @@
 import { BrowserWindow } from "electron";
+import { safeSend } from "./safeSend";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as crypto from "node:crypto";
@@ -87,7 +88,7 @@ export function setupDownloadHandlers(ipcMain: any, getMainWindow: () => Browser
         const checksum = calculateFileChecksum(tempPath);
         if (checksum !== expectedChecksum) {
           try { fs.unlinkSync(tempPath); } catch {}
-          win.webContents.send(`download-progress:${downloadKey}`, {
+          safeSend(getMainWindow(), `download-progress:${downloadKey}`, {
             status: "error",
             error: "Checksum verification failed"
           });
@@ -98,7 +99,7 @@ export function setupDownloadHandlers(ipcMain: any, getMainWindow: () => Browser
         const signatureVerified = verifyDigitalSignature(tempPath, signature);
         if (!signatureVerified) {
           try { fs.unlinkSync(tempPath); } catch {}
-          win.webContents.send(`download-progress:${downloadKey}`, {
+          safeSend(getMainWindow(), `download-progress:${downloadKey}`, {
             status: "error",
             error: "Digital signature verification failed"
           });
@@ -111,18 +112,18 @@ export function setupDownloadHandlers(ipcMain: any, getMainWindow: () => Browser
             fs.unlinkSync(finalPath);
           }
           fs.renameSync(tempPath, finalPath);
-          win.webContents.send(`download-progress:${downloadKey}`, {
+          safeSend(getMainWindow(), `download-progress:${downloadKey}`, {
             status: "complete",
             path: finalPath
           });
         } catch (renameErr: any) {
-          win.webContents.send(`download-progress:${downloadKey}`, {
+          safeSend(getMainWindow(), `download-progress:${downloadKey}`, {
             status: "error",
             error: `Failed to finalize file: ${renameErr.message}`
           });
         }
       } else {
-        win.webContents.send(`download-progress:${downloadKey}`, {
+        safeSend(getMainWindow(), `download-progress:${downloadKey}`, {
           status: state.aborted ? "paused" : "error",
           error: errorMsg || "Download failed"
         });
@@ -235,7 +236,12 @@ function performDownload(
         const percent = state.totalBytes > 0 ? (state.downloadedBytes / state.totalBytes) * 100 : 0;
         const remainingSeconds = state.speed > 0 ? (state.totalBytes - state.downloadedBytes) / state.speed : 0;
 
-        win.webContents.send(`download-progress:${downloadKey}`, {
+        // performDownload receives `win` as a parameter captured when the
+        // download started, so by the time this progress tick fires the window
+        // may be long gone. safeSend checks isDestroyed rather than trusting
+        // the reference — which is the whole reason a captured BrowserWindow is
+        // survivable here at all.
+        safeSend(win, `download-progress:${downloadKey}`, {
           status: "downloading",
           downloadedBytes: state.downloadedBytes,
           totalBytes: state.totalBytes,
