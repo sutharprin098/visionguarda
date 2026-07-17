@@ -357,7 +357,7 @@ function ModelForm({ initial, onCancel, onSaved, onError }: {
       </div>
 
       <div className="grid grid-cols-2 gap-3">
-        <Field label="Framework"><input className="input" value={f.framework ?? ""} onChange={(e) => set("framework", e.target.value)} placeholder="Ultralytics, PaddlePaddle…" /></Field>
+        <Field label="Framework"><input className="input" value={f.framework ?? ""} onChange={(e) => set("framework", e.target.value)} placeholder="Megvii, PaddlePaddle…" /></Field>
         <Field label="Size (MB)"><input className="input" type="number" min={0} step={0.1} value={sizeMb} onChange={(e) => setSizeMb(e.target.value)} /></Field>
       </div>
 

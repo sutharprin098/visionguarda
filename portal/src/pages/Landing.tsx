@@ -2,7 +2,7 @@ import { Link } from "react-router-dom";
 import { Cctv, ShieldCheck, Siren, Cpu, KeyRound, RadioTower, ArrowRight } from "lucide-react";
 
 const FEATURES = [
-  { icon: Cpu, title: "Live AI Analytics", text: "YOLO11 + ByteTrack detection, tracking, counting and speed — on your own hardware." },
+  { icon: Cpu, title: "Live AI Analytics", text: "YOLOX + ByteTrack detection, tracking, counting and speed — on your own hardware." },
   { icon: KeyRound, title: "One-Key Activation", text: "Enter a license key once. Cameras, permissions and settings sync automatically." },
   { icon: ShieldCheck, title: "Enterprise Security", text: "Row-level isolation per organization, AES-256 secrets, full audit trail." },
   { icon: Siren, title: "Alerts & Incidents", text: "AI events escalate into a full incident workflow with assignment and resolution tracking." },

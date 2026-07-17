@@ -1,8 +1,10 @@
 -r server-requirements.txt
 pytest==8.3.3
-# Dev/offline-only. ultralytics (AGPL-3.0) is used exclusively by
-# export_models.py to convert .pt weights to ONNX/OpenVINO, and as a
-# last-resort .pt inference fallback in backend.py when no exported model
-# exists. It is NOT required to run the product — see LICENSING.md before
-# shipping it to any customer environment.
-ultralytics==8.4.90
+# Dev/offline-only, used solely by export_models.py to regenerate the YOLOX
+# detector weights from the upstream Apache-2.0 checkpoints. NOT required to
+# run the product: the shipped engine infers through OpenVINO / ONNX Runtime
+# and nothing under app/ imports torch. All permissive — no AGPL anywhere in
+# the dependency set, runtime or dev. See LICENSING.md.
+torch==2.12.1
+loguru==0.7.2
+tabulate==0.9.0

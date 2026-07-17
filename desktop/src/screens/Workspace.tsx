@@ -18,13 +18,14 @@ interface EngineHealthInfo {
 }
 
 export default function Workspace({
+  bundle,
   onDeactivated,
   onOpenAdminStudio,
 }: {
+  bundle: SyncBundle;
   onDeactivated: () => void;
   onOpenAdminStudio: () => void;
 }) {
-  const [bundle, setBundle] = useState<SyncBundle | null>(null);
   const [tab, setTab] = useState<"cameras" | "alerts" | "settings" | "engine">("cameras");
   const [syncError, setSyncError] = useState(false);
   const [syncErrorDetails, setSyncErrorDetails] = useState<string | null>(null);
@@ -111,22 +112,7 @@ export default function Workspace({
     onDeactivated();
   }
 
-  useEffect(() => {
-    let stop: (() => void) | undefined;
-    // admin revocation fails closed: wipe the vault, back to activation
-    startRealtimeSync(setBundle, deactivate)
-      .then((s) => (stop = s))
-      .catch((e) => {
-        if (e instanceof DeactivatedError) {
-          deactivate();
-        } else {
-          console.error("Workspace sync error:", e);
-          setSyncErrorDetails(e instanceof Error ? `${e.name}: ${e.message}` : String(e));
-          setSyncError(true);
-        }
-      });
-    return () => stop?.();
-  }, []);
+  // Realtime sync is now managed at the App level to persist state during screen switching.
 
   // Keep the local AI engine's running cameras in step with what's assigned.
   // Runs on an interval, not just on bundle change — the engine can still be
@@ -319,7 +305,7 @@ export default function Workspace({
       </aside>
 
       <main className="flex-1 overflow-y-auto p-6">
-        {tab === "cameras" && (
+        <div style={{ display: tab === "cameras" ? "block" : "none" }}>
           <CamerasView
             cameras={bundle.cameras}
             isPackaged={isPackaged}
@@ -327,76 +313,74 @@ export default function Workspace({
             procStatus={procStatus}
             logs={logs}
           />
-        )}
-        {tab === "alerts" && (
-          <div className="space-y-2">
-            {!bundle.notifications.length && <Panel title="Alerts">No unread alerts.</Panel>}
-            {bundle.notifications.map((n: any) => (
-              <div key={n.id} className="card p-3">
-                <div className="text-sm font-medium text-zinc-100">{n.title}</div>
-                {n.body && <div className="mt-0.5 text-sm text-zinc-500">{n.body}</div>}
-              </div>
-            ))}
-          </div>
-        )}
-        {tab === "settings" && (
-          <div className="space-y-6">
-            <Panel title="AI Profile & Rules">
-              <div className="rounded-lg bg-surface-1 border border-line p-5">
-                <div className="flex items-center gap-3">
-                  <div className="h-10 w-10 rounded bg-accent/15 flex items-center justify-center text-accent text-lg font-semibold uppercase">
-                    {String(aiSettings["ai.profile"] || "Traffic").charAt(0)}
-                  </div>
-                  <div>
-                    <h3 className="text-sm font-semibold text-zinc-200 capitalize">
-                      Active Profile: {aiSettings["ai.profile"] || "Traffic"}
-                    </h3>
-                    <div className="text-xs text-zinc-500 mt-0.5">
-                      Configured via CamAI cloud and synchronized to this client.
-                    </div>
+        </div>
+        <div style={{ display: tab === "alerts" ? "block" : "none" }} className="space-y-2">
+          {!bundle.notifications.length && <Panel title="Alerts">No unread alerts.</Panel>}
+          {bundle.notifications.map((n: any) => (
+            <div key={n.id} className="card p-3">
+              <div className="text-sm font-medium text-zinc-100">{n.title}</div>
+              {n.body && <div className="mt-0.5 text-sm text-zinc-500">{n.body}</div>}
+            </div>
+          ))}
+        </div>
+        <div style={{ display: tab === "settings" ? "block" : "none" }} className="space-y-6">
+          <Panel title="AI Profile & Rules">
+            <div className="rounded-lg bg-surface-1 border border-line p-5">
+              <div className="flex items-center gap-3">
+                <div className="h-10 w-10 rounded bg-accent/15 flex items-center justify-center text-accent text-lg font-semibold uppercase">
+                  {String(aiSettings["ai.profile"] || "Traffic").charAt(0)}
+                </div>
+                <div>
+                  <h3 className="text-sm font-semibold text-zinc-200 capitalize">
+                    Active Profile: {aiSettings["ai.profile"] || "Traffic"}
+                  </h3>
+                  <div className="text-xs text-zinc-500 mt-0.5">
+                    Configured via CamAI cloud and synchronized to this client.
                   </div>
                 </div>
+              </div>
 
-                <div className="mt-6 space-y-4 border-t border-line/60 pt-4">
-                  <div>
-                    <div className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider">Detection Classes</div>
-                    <div className="flex flex-wrap gap-1.5 mt-2">
-                      {Array.isArray(aiSettings["ai.classes"]) ? (
-                        (aiSettings["ai.classes"] as string[]).map((c) => (
-                          <span key={c} className="text-xs bg-surface-2 px-2.5 py-1 rounded text-zinc-400 capitalize">
-                            {c}
-                          </span>
-                        ))
-                      ) : (
-                        <span className="text-xs text-zinc-500">No classes active.</span>
-                      )}
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-4 pt-2">
-                    <div>
-                      <div className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider">Engine Synchronization</div>
-                      <div className="mt-1 text-xs text-ok flex items-center gap-1.5 font-medium">
-                        <span className="relative flex h-2 w-2">
-                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-ok opacity-75"></span>
-                          <span className="relative inline-flex rounded-full h-2 w-2 bg-ok"></span>
+              <div className="mt-6 space-y-4 border-t border-line/60 pt-4">
+                <div>
+                  <div className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider">Detection Classes</div>
+                  <div className="flex flex-wrap gap-1.5 mt-2">
+                    {Array.isArray(aiSettings["ai.classes"]) ? (
+                      (aiSettings["ai.classes"] as string[]).map((c) => (
+                        <span key={c} className="text-xs bg-surface-2 px-2.5 py-1 rounded text-zinc-400 capitalize">
+                          {c}
                         </span>
-                        Active & Running
-                      </div>
+                      ))
+                    ) : (
+                      <span className="text-xs text-zinc-500">No classes active.</span>
+                    )}
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4 pt-2">
+                  <div>
+                    <div className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider">Engine Synchronization</div>
+                    <div className="mt-1 text-xs text-ok flex items-center gap-1.5 font-medium">
+                      <span className="relative flex h-2 w-2">
+                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-ok opacity-75"></span>
+                        <span className="relative inline-flex rounded-full h-2 w-2 bg-ok"></span>
+                      </span>
+                      Active & Running
                     </div>
-                    <div>
-                      <div className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider">Active Configuration Rules</div>
-                      <div className="mt-1 text-xs text-zinc-400 font-mono">
-                        {Array.isArray(aiSettings["ai.classes"]) ? `${(aiSettings["ai.classes"] as string[]).length} rules loaded` : "Default rules"}
-                      </div>
+                  </div>
+                  <div>
+                    <div className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider">Active Configuration Rules</div>
+                    <div className="mt-1 text-xs text-zinc-400 font-mono">
+                      {Array.isArray(aiSettings["ai.classes"]) ? `${(aiSettings["ai.classes"] as string[]).length} rules loaded` : "Default rules"}
                     </div>
                   </div>
                 </div>
               </div>
-            </Panel>
-          </div>
-        )}
-        {tab === "engine" && <EngineHealthPanel />}
+            </div>
+          </Panel>
+        </div>
+        <div style={{ display: tab === "engine" ? "block" : "none" }}>
+          <EngineHealthPanel />
+        </div>
       </main>
     </div>
   );
@@ -563,7 +547,7 @@ function CamerasView({
       )}
       <div className="grid grid-cols-2 gap-4 xl:grid-cols-3">
         {cameras.map((c) => (
-          <CameraTile key={c.id} camera={c} engineOnline={healthInfo?.online && healthInfo?.ready} />
+          <CameraTile key={c.id} camera={c} engineOnline={healthInfo ? (healthInfo.online && healthInfo.ready) : null} />
         ))}
       </div>
     </div>
@@ -604,7 +588,7 @@ function CameraTile({ camera: c, engineOnline }: { camera: any; engineOnline: bo
   const sessionRef = useRef<MediaShareSession | null>(null);
 
   const isScreenShareCam = c.source_type === "screen_share";
-  const showStream = engineOnline && !streamFailed && (!isScreenShareCam || sharingType === null);
+  const showStream = engineOnline && !streamFailed && !isScreenShareCam;
 
   useEffect(() => {
     if (videoRef.current) videoRef.current.srcObject = localStream;

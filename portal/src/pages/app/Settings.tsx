@@ -406,8 +406,11 @@ function AiTab({ canConfigure }: { canConfigure: boolean }) {
     if (!org) return;
     setBusy(true);
 
-    // Resolve model name and properties based on active profile and sensitivity
-    let resolvedModel = "YOLO11 Seg"; // Default high quality segmentation
+    // Resolve model name and properties based on active profile and sensitivity.
+    // These are ai_model_packages.name values (see migration 0030) — the
+    // catalog's segmentation entry was retired with the YOLOX swap, so the
+    // top sensitivity tier now maps to the most accurate detector instead.
+    let resolvedModel = "YOLOX M"; // Default high quality detection
     let activeSensitivity: "low" | "medium" | "high" = "high";
 
     if (activeProfile === "traffic") {
@@ -421,11 +424,11 @@ function AiTab({ canConfigure }: { canConfigure: boolean }) {
     }
 
     if (activeSensitivity === "low") {
-      resolvedModel = "YOLO11 Nano";
+      resolvedModel = "YOLOX Tiny";
     } else if (activeSensitivity === "medium") {
-      resolvedModel = "YOLO11 Small";
+      resolvedModel = "YOLOX S";
     } else {
-      resolvedModel = "YOLO11 Seg";
+      resolvedModel = "YOLOX M";
     }
 
     // Special factory logic: if factory PPE is checked, use PPE Detection model

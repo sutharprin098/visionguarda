@@ -38,11 +38,15 @@ except Exception:  # pragma: no cover - psutil always present in the bundle
 
 
 def _device() -> str:
-    try:
-        import torch
-        return "cuda" if torch.cuda.is_available() else "cpu"
-    except Exception:
-        return "cpu"
+    """Device the AI backend actually loaded on.
+
+    Read from the live backend rather than probed via torch: torch is not a
+    runtime dependency, so the old torch probe always fell through to "cpu"
+    and reported CPU even when OpenVINO had the model on an Intel GPU.
+    """
+    backend = getattr(manager, "yolo_backend", None)
+    device = getattr(backend, "backend_device", None) if backend else None
+    return device.lower() if device else "cpu"
 
 
 def _proc_metrics() -> tuple[float, float]:
@@ -77,7 +81,7 @@ def models():
     return {
         "active": manager.selected_model_name,
         "loaded": manager.yolo_model is not None,
-        "builtin": ["yolo11n-seg.pt", "yolo11s-seg.pt", "yolo11m-seg.pt"],
+        "builtin": ["yolox_tiny", "yolox_s", "yolox_m"],
         "device": _device(),
     }
 

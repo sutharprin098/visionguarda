@@ -32,10 +32,20 @@ Write-Host "==> Freezing engine with PyInstaller"
 
 $exe = Join-Path $PSScriptRoot "dist\camai-engine\camai-engine.exe"
 if (Test-Path $exe) {
+    # Ship the default (Fast tier) detector only — the heavier tiers are
+    # fetched/exported on demand via export_models.py. No .pt is copied: the
+    # engine never loads PyTorch checkpoints, so shipping one would bloat the
+    # installer with a file nothing reads.
     Write-Host "==> Copying default model files into dist\camai-engine..."
-    Copy-Item (Join-Path $PSScriptRoot "yolo11n-seg.pt") (Join-Path $PSScriptRoot "dist\camai-engine\") -Force
-    Copy-Item (Join-Path $PSScriptRoot "yolo11n-seg.onnx") (Join-Path $PSScriptRoot "dist\camai-engine\") -Force
-    Copy-Item -Recurse (Join-Path $PSScriptRoot "yolo11n-seg_openvino_model") (Join-Path $PSScriptRoot "dist\camai-engine\") -Force
+    $modelBase = "yolox_tiny"
+    foreach ($item in @("$modelBase.onnx", "${modelBase}_openvino_model")) {
+        $src = Join-Path $PSScriptRoot $item
+        if (-not (Test-Path $src)) {
+            Write-Error "Missing model artifact '$item'. Run: python export_models.py $modelBase"
+            exit 1
+        }
+        Copy-Item -Recurse -Force $src (Join-Path $PSScriptRoot "dist\camai-engine\")
+    }
 
     Write-Host "==> SUCCESS: $exe" -ForegroundColor Green
 } else {

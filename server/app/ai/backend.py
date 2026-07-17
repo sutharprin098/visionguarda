@@ -17,13 +17,15 @@ try:
 except ImportError:
     HAS_ONNXRUNTIME = False
 
-# Try importing PyTorch/Ultralytics as fallback
-try:
-    from ultralytics import YOLO
-    import torch
-    HAS_ULTRALYTICS = True
-except ImportError:
-    HAS_ULTRALYTICS = False
+
+# Grid strides of the YOLOX detection head. The ONNX/OpenVINO exports are
+# produced with decode_in_inference=False, so the graph emits raw per-anchor
+# offsets and postprocess() below applies the grid decode itself. That keeps
+# the input dimension dynamic (the graph bakes in no grid constants), which is
+# what lets the pipeline's adaptive imgsz move between 320 and 1280 against a
+# single exported model.
+_YOLOX_STRIDES = (8, 16, 32)
+_YOLOX_PAD_VALUE = 114
 
 
 COCO_CLASS_MAP = {
@@ -148,9 +150,15 @@ def nms(boxes, scores, iou_threshold):
 
 
 class EngineBackend:
-    def __init__(self, model_name: str = "yolo11n-seg.pt", preferred_backends=None):
+    def __init__(self, model_name: str = "yolox_s", preferred_backends=None):
         self.model_name = model_name
-        self.backend_type = None  # 'openvino', 'onnx', 'pytorch'
+        # YOLOX and YOLO11 exports differ in preprocessing (letterbox+raw BGR vs
+        # stretch+normalized RGB) and in output layout, so both paths are keyed
+        # off the model name. YOLOX is what ships; the YOLO11 path is retained
+        # because the pre/postprocess for it is first-party and a buyer holding
+        # an Ultralytics licence can drop their own yolo11 export straight in.
+        self.is_yolox = "yolox" in os.path.basename(model_name).lower()
+        self.backend_type = None  # 'openvino', 'onnx'
         self.backend_device = None  # 'GPU', 'CPU', 'CUDA', etc.
         # Logged-once diagnostics so the (frozen) engine log confirms the model
         # is actually producing output tensors of the expected shape, without
@@ -176,15 +184,7 @@ class EngineBackend:
         # ONNX specific
         self.ort_session = None
 
-        # PyTorch specific
-        self.yolo_model = None
-        # Ultralytics' YOLO() wraps a stateful predictor that isn't documented
-        # thread-safe for concurrent calls, unlike OpenVINO/ONNX Runtime — keep
-        # this path (rarely used; only when neither OpenVINO nor ONNX models
-        # are available) serialized per-instance.
-        self._pt_lock = threading.Lock()
-
-        self.preferred_backends = preferred_backends or ["openvino", "onnx", "pytorch"]
+        self.preferred_backends = preferred_backends or ["openvino", "onnx"]
 
         # Load and configure the backend
         self._initialize_backend()
@@ -208,13 +208,6 @@ class EngineBackend:
             if "CUDAExecutionProvider" in providers:
                 return 90   # plain CUDA EP
             return 10        # CPU-only ONNX Runtime build
-        if backend_type == "pytorch" and HAS_ULTRALYTICS:
-            try:
-                if torch.cuda.is_available():
-                    return 85
-            except Exception:
-                pass
-            return 5
         if backend_type == "openvino" and HAS_OPENVINO:
             try:
                 if "GPU" in ov.Core().available_devices:
@@ -244,7 +237,6 @@ class EngineBackend:
         # Also try parent directory of BASE_DIR (e.g. server base folder relative to build)
         search_dirs.append(os.path.dirname(str(BASE_DIR)))
 
-        resolved_pt = None
         resolved_onnx = None
         resolved_ov_xml = None
 
@@ -252,7 +244,6 @@ class EngineBackend:
 
         # 1. If self.model_name is an absolute path that exists, use it
         if os.path.isabs(self.model_name) and os.path.exists(self.model_name):
-            resolved_pt = self.model_name
             dir_name = os.path.dirname(self.model_name)
             xml = os.path.join(dir_name, f"{base_name}_openvino_model", f"{base_name}.xml")
             onnx = os.path.join(dir_name, f"{base_name}.onnx")
@@ -265,20 +256,15 @@ class EngineBackend:
             for d in search_dirs:
                 if not d:
                     continue
-                pt = os.path.join(d, self.model_name)
                 xml = os.path.join(d, f"{base_name}_openvino_model", f"{base_name}.xml")
                 onnx = os.path.join(d, f"{base_name}.onnx")
-                
-                if os.path.exists(pt) and not resolved_pt:
-                    resolved_pt = pt
+
                 if os.path.exists(xml) and not resolved_ov_xml:
                     resolved_ov_xml = xml
                 if os.path.exists(onnx) and not resolved_onnx:
                     resolved_onnx = onnx
 
             # Fallback to defaults/as-is if not found
-            if not resolved_pt:
-                resolved_pt = self.model_name
             if not resolved_ov_xml:
                 resolved_ov_xml = os.path.join(".", f"{base_name}_openvino_model", f"{base_name}.xml")
             if not resolved_onnx:
@@ -290,8 +276,7 @@ class EngineBackend:
         print(f"[AI Backend] Resolving model '{self.model_name}'. Searched dirs: {search_dirs}", flush=True)
         print(f"[AI Backend] Candidate files -> "
               f"OpenVINO XML: {resolved_ov_xml} (exists={os.path.exists(resolved_ov_xml)}), "
-              f"ONNX: {resolved_onnx} (exists={os.path.exists(resolved_onnx)}), "
-              f"PT: {resolved_pt} (exists={os.path.exists(resolved_pt)})", flush=True)
+              f"ONNX: {resolved_onnx} (exists={os.path.exists(resolved_onnx)})", flush=True)
 
         candidates = []
         if "openvino" in self.preferred_backends and HAS_OPENVINO:
@@ -303,20 +288,17 @@ class EngineBackend:
         if "onnx" in self.preferred_backends and HAS_ONNXRUNTIME and os.path.exists(resolved_onnx):
             candidates.append(("onnx", resolved_onnx))
 
-        if "pytorch" in self.preferred_backends and HAS_ULTRALYTICS and os.path.exists(resolved_pt):
-            candidates.append(("pytorch", resolved_pt))
-
         if not candidates:
             # Distinguish "no file at all" (missing model) from "file present
             # but the backend that reads it isn't installed" — different fixes.
-            any_file = any(os.path.exists(p) for p in (resolved_ov_xml, resolved_onnx, resolved_pt))
+            any_file = any(os.path.exists(p) for p in (resolved_ov_xml, resolved_onnx))
             backends_present = (
-                f"openvino={HAS_OPENVINO}, onnxruntime={HAS_ONNXRUNTIME}, ultralytics={HAS_ULTRALYTICS}"
+                f"openvino={HAS_OPENVINO}, onnxruntime={HAS_ONNXRUNTIME}"
             )
             if not any_file:
                 msg = (f"MODEL LOAD FAILED — model file for '{self.model_name}' not found. "
                        f"Searched: {search_dirs}. Expected one of: {resolved_ov_xml}, "
-                       f"{resolved_onnx}, {resolved_pt}.")
+                       f"{resolved_onnx}.")
             else:
                 msg = (f"MODEL LOAD FAILED — a model file for '{self.model_name}' exists but no "
                        f"backend able to read it is installed ({backends_present}).")
@@ -344,8 +326,6 @@ class EngineBackend:
                     self._load_openvino(path)
                 elif backend_type == "onnx":
                     self._load_onnx(path)
-                elif backend_type == "pytorch":
-                    self._load_pytorch(path)
                 print(f"[AI Backend] [OK] MODEL LOADED: '{self.model_name}' via "
                       f"{self.backend_type.upper()} on {self.backend_device} "
                       f"(runtime={'GPU' if self.backend_device not in ('CPU', 'cpu') else 'CPU'})", flush=True)
@@ -504,14 +484,6 @@ class EngineBackend:
         self.backend_device = device
         print(f"[AI Backend] Successfully initialized ONNX Runtime engine on {device}.")
 
-    def _load_pytorch(self, model_path):
-        device = "cuda" if torch.cuda.is_available() else "cpu"
-        print(f"[AI Backend] Loading PyTorch model: {model_path} on {device}...")
-        self.yolo_model = YOLO(model_path)
-        self.backend_type = "pytorch"
-        self.backend_device = "CUDA" if device == "cuda" else "CPU"
-        print(f"[AI Backend] Successfully initialized PyTorch fallback engine on {self.backend_device}.")
-
     def _get_ov_infer_request(self):
         """Return this thread's dedicated InferRequest, creating it on first use.
 
@@ -536,7 +508,7 @@ class EngineBackend:
         Call this when a camera pipeline thread is shutting down so a
         restarted camera (new thread, new thread-id) doesn't leave the old
         InferRequest's device buffers cached forever on the shared backend.
-        No-op for backends other than OpenVINO (ONNX/PyTorch keep no
+        No-op for backends other than OpenVINO (ONNX Runtime keeps no
         per-thread state here).
         """
         tid = threading.get_ident()
@@ -559,18 +531,6 @@ class EngineBackend:
                 res = self.ort_session.run(None, {input_name: img_tensor})
                 output0 = res[0]
                 output1 = res[1] if self.has_seg_output else None
-            elif self.backend_type == "pytorch":
-                with self._pt_lock:
-                    with torch.no_grad():
-                        tensor_torch = torch.from_numpy(img_tensor).to("cuda" if self.backend_device == "CUDA" else "cpu")
-                        results = self.yolo_model(tensor_torch, verbose=False)
-                if not self._logged_output_shape:
-                    self._logged_output_shape = True
-                    print(f"[AI Backend] First inference OK (pytorch/{self.backend_device}). "
-                          f"Input tensor {getattr(img_tensor, 'shape', '?')} -> "
-                          f"{len(results)} result object(s).", flush=True)
-                t_infer = (time.time() - t0) * 1000
-                return results, t_infer
             else:
                 raise RuntimeError("Backend not initialized.")
         except Exception as e:
@@ -607,75 +567,134 @@ class EngineBackend:
             measurements.append((time.time() - start) * 1000)
         return float(np.mean(measurements)), float(np.std(measurements)), float(t_preprocess)
 
+    @staticmethod
+    def _yolox_scale(orig_h, orig_w, target_size):
+        """Letterbox scale factor for a frame of this shape at this imgsz.
+
+        Deliberately recomputed from shape rather than carried over from
+        preprocess(): every camera pipeline calls preprocess/postprocess
+        concurrently on one shared backend, so stashing per-call state on self
+        would race. Both sides derive it from the same two numbers instead.
+        """
+        return min(target_size / orig_h, target_size / orig_w)
+
     def preprocess(self, frame, target_size=320):
         t0 = time.time()
 
-        resized = cv2.resize(frame, (target_size, target_size), interpolation=cv2.INTER_LINEAR)
-        rgb = cv2.cvtColor(resized, cv2.COLOR_BGR2RGB)
-        img_data = rgb.astype(np.float32) / 255.0
-        img_data = np.transpose(img_data, (2, 0, 1))
+        if self.is_yolox:
+            # YOLOX letterboxes to preserve aspect ratio, pads the unused right
+            # and bottom edges with 114, and consumes raw BGR in 0-255 — it has
+            # no normalization layer, so dividing by 255 here would silently
+            # scale every activation down and produce near-empty detections.
+            orig_h, orig_w = frame.shape[:2]
+            r = self._yolox_scale(orig_h, orig_w, target_size)
+            new_h, new_w = int(round(orig_h * r)), int(round(orig_w * r))
+            padded = np.full((target_size, target_size, 3), _YOLOX_PAD_VALUE, dtype=np.uint8)
+            padded[:new_h, :new_w] = cv2.resize(
+                frame, (new_w, new_h), interpolation=cv2.INTER_LINEAR
+            )
+            img_data = padded.transpose(2, 0, 1).astype(np.float32)
+        else:
+            resized = cv2.resize(frame, (target_size, target_size), interpolation=cv2.INTER_LINEAR)
+            rgb = cv2.cvtColor(resized, cv2.COLOR_BGR2RGB)
+            img_data = rgb.astype(np.float32) / 255.0
+            img_data = np.transpose(img_data, (2, 0, 1))
+
         img_tensor = np.expand_dims(img_data, axis=0)
         img_tensor = np.ascontiguousarray(img_tensor)
 
         t_preprocess = (time.time() - t0) * 1000
         return img_tensor, t_preprocess
 
+    def _yolox_grid(self, target_imgsz):
+        """Per-anchor (grid_x, grid_y) and stride columns for this imgsz."""
+        grids, strides = [], []
+        for s in _YOLOX_STRIDES:
+            gh = gw = target_imgsz // s
+            xv, yv = np.meshgrid(np.arange(gw), np.arange(gh))
+            grids.append(np.stack((xv, yv), 2).reshape(-1, 2))
+            strides.append(np.full((gh * gw, 1), s, dtype=np.float32))
+        return np.concatenate(grids, 0).astype(np.float32), np.concatenate(strides, 0)
+
+    def _postprocess_yolox(self, model_outputs, orig_shape, conf_threshold, iou_threshold,
+                           target_imgsz, t0):
+        output0, _ = model_outputs
+        out = np.squeeze(output0, axis=0)
+
+        grid, stride = self._yolox_grid(target_imgsz)
+        if grid.shape[0] != out.shape[0]:
+            # Only happens if the imgsz used for preprocess and postprocess drift
+            # apart; decoding against a mismatched grid silently yields garbage
+            # boxes rather than raising, so fail loudly instead.
+            raise RuntimeError(
+                f"YOLOX grid mismatch: model returned {out.shape[0]} anchors but imgsz "
+                f"{target_imgsz} implies {grid.shape[0]}."
+            )
+
+        xy = (out[:, :2] + grid) * stride
+        wh = np.exp(out[:, 2:4]) * stride
+        boxes = np.concatenate([xy - wh / 2, xy + wh / 2], axis=1)
+
+        # YOLOX splits confidence into an objectness column and per-class
+        # columns; the usable score is their product.
+        class_ids_of_interest = CLASS_IDS_OF_INTEREST
+        scores_interest = out[:, 5:][:, class_ids_of_interest] * out[:, 4:5]
+        max_score_idx = np.argmax(scores_interest, axis=1)
+        max_scores = np.max(scores_interest, axis=1)
+        max_class_ids = np.array(class_ids_of_interest)[max_score_idx]
+
+        keep_idx = max_scores > conf_threshold
+        boxes = boxes[keep_idx]
+        scores = max_scores[keep_idx]
+        class_ids = max_class_ids[keep_idx]
+
+        if len(boxes) == 0:
+            return [], [], (time.time() - t0) * 1000
+
+        nms_keep = nms(boxes, scores, iou_threshold)
+        if len(nms_keep) == 0:
+            return [], [], (time.time() - t0) * 1000
+
+        boxes = boxes[nms_keep]
+        scores = scores[nms_keep]
+        class_ids = class_ids[nms_keep]
+
+        orig_h, orig_w = orig_shape
+        # Undo the letterbox. Padding only ever sits on the right/bottom edges,
+        # so the scale divides out and there is no offset to subtract.
+        r = self._yolox_scale(orig_h, orig_w, target_imgsz)
+
+        detections = []
+        for idx in range(len(boxes)):
+            box = boxes[idx] / r
+            ox1 = max(0, int(box[0]))
+            oy1 = max(0, int(box[1]))
+            ox2 = min(orig_w, int(box[2]))
+            oy2 = min(orig_h, int(box[3]))
+            if ox2 <= ox1 or oy2 <= oy1:
+                continue
+
+            class_name = COCO_CLASS_MAP.get(class_ids[idx], "unknown")
+            if not _passes_geometry_filter(class_name, ox1, oy1, ox2, oy2, orig_w, orig_h):
+                continue
+            detections.append({
+                "class": class_name,
+                "confidence": float(scores[idx]),
+                "bbox": {"x1": ox1, "y1": oy1, "x2": ox2, "y2": oy2},
+                "track_id": None,
+            })
+
+        # Detection-only model: callers index masks_polygons in lockstep with
+        # detections, so return an empty polygon per detection rather than [].
+        return detections, [[] for _ in detections], (time.time() - t0) * 1000
+
     def postprocess(self, model_outputs, orig_shape, conf_threshold=0.25, iou_threshold=0.45, target_imgsz=320):
         t0 = time.time()
 
-        if self.backend_type == "pytorch":
-            results, _ = model_outputs
-            result = results[0]
-            detections = []
-            masks_polygons = []
-
-            orig_h, orig_w = orig_shape
-            boxes = result.boxes
-            masks = result.masks
-
-            if boxes is not None:
-                xyxys = boxes.xyxy.cpu().numpy()
-                confs = boxes.conf.cpu().numpy()
-                clss = boxes.cls.cpu().numpy()
-
-                for idx, xyxy in enumerate(xyxys):
-                    conf = confs[idx]
-                    if conf < conf_threshold:
-                        continue
-                    class_id = int(clss[idx])
-                    if class_id not in COCO_CLASS_MAP:
-                        continue
-
-                    class_name = COCO_CLASS_MAP.get(class_id, "unknown")
-                    if not _passes_geometry_filter(class_name, xyxy[0], xyxy[1], xyxy[2], xyxy[3], orig_w, orig_h):
-                        continue
-                    detections.append({
-                        "class": class_name,
-                        "confidence": float(conf),
-                        "bbox": {
-                            "x1": float(xyxy[0]),
-                            "y1": float(xyxy[1]),
-                            "x2": float(xyxy[2]),
-                            "y2": float(xyxy[3])
-                        },
-                        "track_id": int(boxes.id[idx].item()) if boxes.id is not None else None
-                    })
-
-            if masks is not None and len(masks.data) > 0:
-                for mask_tensor in masks.data:
-                    mask_np = mask_tensor.cpu().numpy()
-                    binary = (mask_np > 0.5).astype("uint8") * 255
-                    contours, _ = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-                    if contours:
-                        largest = max(contours, key=cv2.contourArea)
-                        epsilon = 0.015 * cv2.arcLength(largest, True)
-                        approx = cv2.approxPolyDP(largest, epsilon, True)
-                        pts = approx.reshape(-1, 2)
-                        norm_pts = [[round(float(pt[0]) / orig_w, 3), round(float(pt[1]) / orig_h, 3)] for pt in pts]
-                        masks_polygons.append(norm_pts)
-
-            t_post = (time.time() - t0) * 1000
-            return detections, masks_polygons, t_post
+        if self.is_yolox:
+            return self._postprocess_yolox(
+                model_outputs, orig_shape, conf_threshold, iou_threshold, target_imgsz, t0
+            )
 
         output0, output1 = model_outputs
         out0 = np.squeeze(output0, axis=0)

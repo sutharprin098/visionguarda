@@ -17,8 +17,16 @@ server/dist/
 
 # ── Model weights & exports (see server/export_models.py) ───────
 *.pt
+*.pth
 *.onnx
 *_openvino_model/
+# Upstream YOLOX checkout that export_models.py clones on demand.
+server/.yolox_upstream/
+
+# Retired AGPL-3.0 YOLO11/YOLOv8 weights, kept out of the working tree while
+# the swap to Apache-2.0 YOLOX beds in. Safe to delete outright — nothing
+# builds or ships from here. See LICENSING.md.
+_agpl_quarantine/
 
 # OpenVINO on-disk kernel cache (server/app/ai/backend.py CACHE_DIR) --
 # machine/driver-specific compiled artifacts, safe and fast to regenerate.
@@ -28,6 +36,11 @@ ov_cache/
 server/history/
 server/uploads/
 server/test-results/
+# Same runtime artifacts, but written at the repo root when the engine is
+# driven from here (recordings, snapshots, the history sqlite) rather than
+# from server/. Hundreds of MB of .mp4 — never source.
+dtest/
+test-history/
 
 # ── Logs / scratch / generated reports ──────────────────────────
 *.log

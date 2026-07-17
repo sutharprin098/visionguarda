@@ -17,7 +17,7 @@ real, current deployment of the web portal and every module's backend wiring.
 
 ```
 client/    Standalone local CCTV viewer (MJPEG + WS telemetry) — not part of the SaaS portal
-server/    Local AI engine (FastAPI, YOLO11, ByteTrack) — runs on the customer's machine/LAN
+server/    Local AI engine (FastAPI, YOLOX, ByteTrack) — runs on the customer's machine/LAN
 portal/    SaaS admin portal (this is what's deployed to Vercel)
 desktop/   Windows Electron app — license activation + realtime workspace
 supabase/  Multi-tenant backend: Postgres+RLS, Auth, Realtime, Storage, Edge Functions
@@ -204,5 +204,6 @@ placeholder or mock data.
 
 ## 8. Known operational notes
 
-- YOLO11 weights are AGPL-licensed (Ultralytics) — see `LICENSING.md` §2 for the
-  buyer's options.
+- Detector weights are YOLOX (Megvii, Apache-2.0) — commercially
+  redistributable with attribution, no licence to purchase. Regenerate with
+  `python server/export_models.py`. See `LICENSING.md` §2.

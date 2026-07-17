@@ -342,21 +342,26 @@ export function resetLocalEngineState(): void {
 // The engine only ever runs one model process-wide (POST /api/model/select,
 // server/app/main.py select_model) — there is no per-camera model concept,
 // so this intentionally only syncs the org-wide `ai.model` setting.
-const ENGINE_MODELS = new Set(["yolo11n-seg.pt", "yolo11s-seg.pt", "yolo11m-seg.pt"]);
+const ENGINE_MODELS = new Set(["yolox_tiny", "yolox_s", "yolox_m"]);
 let appliedModel: string | null = null;
 
+// The `ai_models` catalog now names the shipped detectors exactly as the engine
+// does, so this is a membership check rather than a name rewrite. Catalog rows
+// the engine can't run (see syncAiModelToLocalEngine) still return null here.
 function toEngineModelName(dbName: string): string | null {
-  const withExt = `${dbName.endsWith("-seg") ? dbName : `${dbName}-seg`}.pt`;
-  return ENGINE_MODELS.has(withExt) ? withExt : null;
+  return ENGINE_MODELS.has(dbName) ? dbName : null;
 }
 
 /**
  * Hot-swaps the local engine's active model when the org's `ai.model`
- * setting changes. No-ops if the engine is offline, the setting is unset,
- * or the name doesn't map to one of the engine's supported models — the
- * catalog in `ai_models` currently includes non-seg variants the engine
- * can't actually run; those are silently skipped rather than sent as a
- * request that would 400.
+ * setting changes. No-ops if the engine is offline or the setting is unset.
+ *
+ * Names outside the built-in set are still forwarded rather than dropped:
+ * /api/model/select also resolves operator-supplied models from the engine's
+ * MODELS_DIR, and only that endpoint knows whether such a file exists. The
+ * cost is that a catalog row naming a model nobody installed (the `ai_models`
+ * catalog lists more than the engine ships) 400s on each sync tick instead of
+ * being skipped locally.
  */
 export async function syncAiModelToLocalEngine(dbModelName: string | undefined): Promise<void> {
   if (!dbModelName || !(await isEngineOnline())) return;

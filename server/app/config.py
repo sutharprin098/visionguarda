@@ -42,7 +42,7 @@ UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
 MODELS_DIR.mkdir(parents=True, exist_ok=True)
 
 # YOLO Settings
-YOLO_MODEL = "yolo11n-seg.pt"
+YOLO_MODEL = "yolox_tiny"
 CONFIDENCE_THRESHOLD = 0.3
 IOU_THRESHOLD = 0.5
 INFERENCE_SIZE = 320  # Fast inference size

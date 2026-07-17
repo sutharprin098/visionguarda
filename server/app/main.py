@@ -285,37 +285,40 @@ def get_system_status():
         }
         
     # Recommendation logic:
-    # If active model is yolo11m-seg.pt or yolo11s-seg.pt, and we're on CPU, recommend a lighter model
-    try:
-        import torch
-        device = "cuda" if torch.cuda.is_available() else "cpu"
-    except ImportError:
-        device = "cpu"
-    
+    # If a heavier model is active and we're on CPU, recommend a lighter one.
+    # Device is read from the loaded backend rather than probed via torch:
+    # torch is not a runtime dependency (nothing in server-requirements.txt
+    # pulls it in), so a torch probe reported "cpu" even on machines where the
+    # engine was really running on an Intel GPU through OpenVINO.
+    backend = manager.yolo_backend
+    backend_device = getattr(backend, "backend_device", None) if backend else None
+    device = "cpu" if backend_device in (None, "CPU", "cpu") else backend_device.lower()
+
     recommendation = {
         "should_switch": False,
         "message": "",
         "suggested_model": ""
     }
-    
+
     if device == "cpu":
-        if manager.selected_model_name == "yolo11m-seg.pt":
+        if manager.selected_model_name == "yolox_m":
             recommendation = {
                 "should_switch": True,
-                "message": "Performance Warning: YOLO11m Seg is active on CPU. Inference latency is high. We recommend switching to a lighter model (YOLO11s Seg or YOLO11n Seg) for real-time performance.",
-                "suggested_model": "yolo11s-seg.pt"
+                "message": "Performance Warning: YOLOX-M is active on CPU. Inference latency is high. We recommend switching to a lighter model (YOLOX-S or YOLOX-Tiny) for real-time performance.",
+                "suggested_model": "yolox_s"
             }
-        elif manager.selected_model_name == "yolo11s-seg.pt":
+        elif manager.selected_model_name == "yolox_s":
             # Check if latency is high
             running_threads = [t for t in manager.camera_threads.values() if t.running]
             avg_latency = sum(t.latest_telemetry.get("latency", 0) for t in running_threads) / len(running_threads) if running_threads else 0
             if avg_latency > 250.0:
                 recommendation = {
                     "should_switch": True,
-                    "message": "Performance Warning: YOLO11s Seg is experiencing high latency on CPU. We recommend switching to the ultra-lightweight YOLO11n Seg model.",
-                    "suggested_model": "yolo11n-seg.pt"
+                    "message": "Performance Warning: YOLOX-S is experiencing high latency on CPU. We recommend switching to the ultra-lightweight YOLOX-Tiny model.",
+                    "suggested_model": "yolox_tiny"
                 }
-        
+
+
     running_states = [c for c in camera_states.values() if c["running"]]
     avg_fps = sum(c["fps"] for c in running_states) / len(running_states) if running_states else 0.0
     avg_latency = sum(c["latency"] for c in running_states) / len(running_states) if running_states else 0.0
@@ -362,7 +365,7 @@ def select_model(payload: ModelSelectPayload):
     if custom_path.exists():
         target_path = str(custom_path)
     # 2. Check if model exists in base directory
-    elif model_name in ["yolo11n-seg.pt", "yolo11s-seg.pt", "yolo11m-seg.pt"]:
+    elif model_name in ["yolox_tiny", "yolox_s", "yolox_m"]:
         target_path = model_name
     else:
         # Check if the name is an absolute path that exists

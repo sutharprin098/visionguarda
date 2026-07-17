@@ -311,3 +311,22 @@ begin
   return json_build_object('success', true);
 end;
 $$;
+
+
+-- Re-pin search_path on both procedures.
+--
+-- This file was originally numbered 0028 and collided with
+-- 0028_fix_constraints_and_foreign_keys.sql — Supabase derives the migration
+-- version from the filename's numeric prefix, so only one of the two could
+-- ever be recorded as "0028" and this one was silently skipped on the remote.
+-- It is renumbered to 0032 so it actually applies. (Verified against the live
+-- DB before renumbering: public.profile_configs and cameras.zone_profile did
+-- not exist, which is what broke the Admin Studio zone flow.)
+--
+-- The create-or-replace calls above rewrite publish_config/rollback_config and
+-- drop the `SET search_path` that 0031 attached (CREATE OR REPLACE resets a
+-- function's config; its ACL survives, so 0031's REVOKEs still stand). Without
+-- this, renumbering would silently un-harden an unqualified-name lookup in a
+-- security-definer function.
+alter function public.publish_config(uuid, text, uuid)  set search_path = public, pg_temp;
+alter function public.rollback_config(uuid, int, uuid)  set search_path = public, pg_temp;

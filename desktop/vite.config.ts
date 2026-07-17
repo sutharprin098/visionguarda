@@ -10,5 +10,8 @@ export default defineConfig({
       { entry: "electron/preload.ts", vite: { build: { outDir: "dist-electron" } } },
     ]),
   ],
+  server: {
+    port: 5180,
+  },
   base: "./",
 });

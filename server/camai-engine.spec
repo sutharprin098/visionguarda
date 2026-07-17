@@ -6,10 +6,16 @@ bundles and launches. No system Python / venv / pip required on the target PC.
 Build with:  pyinstaller camai-engine.spec --noconfirm
 (or use build_engine.ps1, which installs deps + PyInstaller first.)
 
-onedir (not onefile) is deliberate: torch / opencv / onnxruntime load native
-DLLs that a onefile bundle must unpack to a temp dir on every launch — slow
-(tens of seconds) and a frequent source of AV false-positives. onedir starts
-fast and is what electron-builder ships as extraResources/engine/.
+onedir (not onefile) is deliberate: opencv / onnxruntime / openvino load
+native DLLs that a onefile bundle must unpack to a temp dir on every launch —
+slow (tens of seconds) and a frequent source of AV false-positives. onedir
+starts fast and is what electron-builder ships as extraResources/engine/.
+
+Note what is NOT bundled: torch, torchvision and ultralytics. Inference runs
+entirely on OpenVINO / ONNX Runtime and nothing under app/ imports them, so
+collecting them only bloated the installer by gigabytes — and, in
+ultralytics' case, shipped an AGPL-3.0 package inside a proprietary binary.
+torch remains a dev-only dependency of export_models.py (see LICENSING.md).
 """
 from PyInstaller.utils.hooks import collect_all, collect_submodules
 
@@ -19,9 +25,6 @@ datas, binaries, hiddenimports = [], [], []
 # Guarded so a missing optional backend (e.g. openvino, tensorrt) doesn't
 # abort the whole build — the engine degrades to whatever is installed.
 _PACKAGES = [
-    "ultralytics",     # detection/seg models (pulls torch indirectly)
-    "torch",
-    "torchvision",
     "cv2",             # opencv-python
     "onnxruntime",
     "openvino",

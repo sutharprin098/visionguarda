@@ -13,7 +13,7 @@ class CameraManager:
     def __init__(self):
         self.yolo_backend = None
         self.camera_threads = {}
-        self.selected_model_name = YOLO_MODEL  # Defaults to YOLO_MODEL (yolo11m-seg.pt)
+        self.selected_model_name = YOLO_MODEL  # Defaults to YOLO_MODEL (yolox_tiny)
 
         # ── Engine startup state (surfaced via /api/status "engine" block for
         # the desktop's Engine Health panel — model compilation can take
@@ -23,9 +23,9 @@ class CameraManager:
         self.startup_started_at = time.time()
         self.benchmark_results = {
             "status": "running",
-            "yolo11n-seg": None,
-            "yolo11s-seg": None,
-            "yolo11m-seg": None,
+            "yolox_tiny": None,
+            "yolox_s": None,
+            "yolox_m": None,
             "selected": YOLO_MODEL,
             "device": "cpu"
         }
@@ -133,9 +133,9 @@ class CameraManager:
         print("[CameraManager] Starting background model benchmarking...", flush=True)
         dummy_img = np.zeros((320, 320, 3), dtype=np.uint8)
         models_to_test = {
-            "yolo11n-seg": "yolo11n-seg.pt",
-            "yolo11s-seg": "yolo11s-seg.pt",
-            "yolo11m-seg": "yolo11m-seg.pt"
+            "yolox_tiny": "yolox_tiny",
+            "yolox_s": "yolox_s",
+            "yolox_m": "yolox_m"
         }
 
         stats = {}
@@ -166,13 +166,13 @@ class CameraManager:
                     "error": str(e)
                 }
 
-        selected = "yolo11n-seg.pt"
+        selected = "yolox_tiny"
         candidates = [(name, stats[name]["avg_latency_ms"]) for name in stats if stats[name].get("status") == "success"]
         candidates.sort(key=lambda x: x[1])
 
         for name, latency in candidates:
             if latency <= 120.0:
-                selected = f"{name}.pt"
+                selected = name
                 break
 
         if not candidates:

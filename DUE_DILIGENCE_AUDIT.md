@@ -1,5 +1,18 @@
 # CamAI — Enterprise Due Diligence Audit
 
+> **Status update — 2026-07-16.** The single critical blocker this audit
+> identified (§8, §24: AGPL-3.0 YOLO11 model weights) has been **resolved**.
+> The detector was migrated to YOLOX (Apache-2.0), the `ultralytics`
+> dependency and its `.pt` inference fallback were removed, and
+> `build_engine.ps1` — the only path by which AGPL weights reached a
+> customer — now ships Apache-2.0 weights only. The unused root
+> `yolov8n-seg.pt` (§26.1) is gone. See `LICENSING.md` §2 for the full
+> record. **The body of this report is preserved as it was written on
+> 2026-07-12** and its §4 / §8 / §24 findings describe the pre-migration
+> state; §8 and §24 carry inline resolution notes. Sections unrelated to
+> the detector are unaffected. A re-audit should be commissioned before
+> close so the buyer receives a report that is current end-to-end.
+
 Prepared 2026-07-12 for an outright source-code + IP sale. This report is
 based on a full read of the repository (194 tracked files across
 `client/`, `server/`, `portal/`, `desktop/`, `supabase/`, root), every
@@ -182,7 +195,13 @@ limitation, not a guarantee of originality.
 
 ## 8. AGPL Risk
 
-**High, but scoped and already correctly disclosed.** The only AGPL
+> **RESOLVED 2026-07-16 — remediation path 2 (detector swap) was taken.**
+> The detector is now YOLOX (Apache-2.0); `ultralytics` is out of
+> `dev-requirements.txt`; nothing in the repository imports it; and no AGPL
+> weights are produced, bundled or shipped. Current AGPL risk: **none**.
+> The assessment below records the position as of 2026-07-12.
+
+**[2026-07-12] High, but scoped and already correctly disclosed.** The only AGPL
 exposure in the entire codebase is the YOLO11-seg model weights (§4).
 The `ultralytics` package that produced them is confirmed dev-only and
 never touches the production runtime. This is a model-licensing problem,
@@ -373,10 +392,14 @@ pipeline rewrite.
 
 ## 24. Critical Blockers
 
-1. **YOLO11-seg model weights are AGPL-3.0** and the current product
+> **[2026-07-16] None outstanding.** The one blocker below was closed by
+> migrating the detector to YOLOX (Apache-2.0). See the banner at the top of
+> this report and `LICENSING.md` §2.
+
+1. ~~**YOLO11-seg model weights are AGPL-3.0** and the current product
    cannot be redistributed/sold to end customers as-is without one of the
    three remediations in §8/§22. This is the single deal-relevant legal
-   blocker in the entire codebase.
+   blocker in the entire codebase.~~ — **RESOLVED 2026-07-16.**
 
 ## 25. High Risk Issues
 
@@ -393,8 +416,9 @@ pipeline rewrite.
 
 ## 26. Medium Risk Issues
 
-1. Unused root `yolov8n-seg.pt` — dead AGPL-licensed file, unreferenced,
-   should be deleted before handoff (§4).
+1. ~~Unused root `yolov8n-seg.pt` — dead AGPL-licensed file, unreferenced,
+   should be deleted before handoff (§4).~~ — **DONE 2026-07-16**; removed
+   from the working tree along with the retired YOLO11 weights.
 2. `server/package.json` — vestigial Node/Express dependency set for a
    server that is actually 100% Python; recommend removing for clarity
    (§3a).

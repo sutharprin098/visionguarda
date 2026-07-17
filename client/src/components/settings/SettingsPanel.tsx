@@ -9,9 +9,9 @@ import api from '../../utils/api';
 import { formatUptime } from '../../utils/formatters';
 
 const PERFORMANCE_TIERS = [
-  { key: 'yolo11n-seg.pt', name: 'Fast', description: 'Lowest latency, best for many simultaneous feeds' },
-  { key: 'yolo11s-seg.pt', name: 'Balanced', description: 'Balances speed and detection accuracy' },
-  { key: 'yolo11m-seg.pt', name: 'Accurate', description: 'Highest detection accuracy, more processing time' },
+  { key: 'yolox_tiny', name: 'Fast', description: 'Lowest latency, best for many simultaneous feeds' },
+  { key: 'yolox_s', name: 'Balanced', description: 'Balances speed and detection accuracy' },
+  { key: 'yolox_m', name: 'Accurate', description: 'Highest detection accuracy, more processing time' },
 ];
 
 function tierName(modelFile?: string) {

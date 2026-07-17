@@ -107,7 +107,7 @@ def main():
     ap.add_argument("--seconds", type=float, default=15.0, help="measurement window per pass")
     args = ap.parse_args()
 
-    backend = EngineBackend("yolo11n-seg.pt")
+    backend = EngineBackend("yolox_tiny")
     print(f"Backend: {backend.backend_type} on {backend.backend_device}\n")
 
     print(f"=== Pass 1: single camera, {args.seconds:.0f}s ===")

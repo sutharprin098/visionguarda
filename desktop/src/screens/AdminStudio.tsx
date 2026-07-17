@@ -23,6 +23,7 @@ import {
 } from "lucide-react";
 import clsx from "clsx";
 import { getSupabase } from "../lib/session";
+import { fnErrorMessage } from "../lib/fnError";
 import { isEngineOnline, mjpegStreamUrl } from "../lib/localEngine";
 import {
   ZONE_PROFILES,
@@ -136,26 +137,70 @@ export default function AdminStudio({ onDeactivated }: { onDeactivated: () => vo
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // ---- initial load ----------------------------------------
+  // ---- initial load with real-time subscriptions -----------------------
   useEffect(() => {
+    let active = true;
+    let channel: any = null;
+
     async function loadData() {
       const sb = await getSupabase();
-      const { data: profile } = await sb.from("profiles").select("org_id").single();
+      // Must filter by the signed-in user: profiles_read (0001) exposes every
+      // profile in the org, so an unfiltered .single() sees N rows and fails
+      // with PGRST116 the moment an org has a second user — silently leaving
+      // orgId null, which then blocks publishing.
+      const { data: auth } = await sb.auth.getUser();
+      if (!active) return;
+      if (!auth?.user) { console.error("[AdminStudio] no authenticated user; cannot resolve org"); return; }
+      const { data: profile, error: profErr } = await sb
+        .from("profiles").select("org_id").eq("id", auth.user.id).maybeSingle();
+      if (!active) return;
+      if (profErr) console.error("[AdminStudio] org lookup failed", profErr);
       if (profile?.org_id) setOrgId(profile.org_id);
 
       const { data: cams } = await sb.from("cameras").select("*");
+      if (!active) return;
       if (cams) {
         setCameras(cams);
-        if (cams.length > 0) setSelectedCam(cams[0]);
+        setSelectedCam((prev) => {
+          if (prev && cams.some((c) => c.id === prev.id)) {
+            // Keep the selected camera intact, but update its fields
+            return cams.find((c) => c.id === prev.id) || prev;
+          }
+          return cams.length > 0 ? cams[0] : null;
+        });
       }
       const { data: vers } = await sb.from("config_versions").select("*").order("version", { ascending: false });
+      if (!active) return;
       if (vers) setVersions(vers);
     }
+
     loadData();
 
-    isEngineOnline().then(setEngineOnline);
-    const interval = setInterval(() => isEngineOnline().then(setEngineOnline), 10_000);
-    return () => clearInterval(interval);
+    // Subscribe to real-time additions/edits of cameras & configs
+    getSupabase().then((sb) => {
+      if (!active) return;
+      channel = sb.channel("admin-studio-sync")
+        .on("postgres_changes", { event: "*", schema: "public", table: "cameras" }, () => {
+          loadData();
+        })
+        .on("postgres_changes", { event: "*", schema: "public", table: "config_versions" }, () => {
+          loadData();
+        })
+        .subscribe();
+    });
+
+    isEngineOnline().then((online) => active && setEngineOnline(online));
+    const interval = setInterval(() => {
+      isEngineOnline().then((online) => active && setEngineOnline(online));
+    }, 10_000);
+
+    return () => {
+      active = false;
+      clearInterval(interval);
+      if (channel) {
+        getSupabase().then((sb) => sb.removeChannel(channel));
+      }
+    };
   }, []);
 
   // ---- per-camera load: drawings, rules, profile config ----
@@ -450,10 +495,13 @@ export default function AdminStudio({ onDeactivated }: { onDeactivated: () => vo
 
   // ---- publish / rollback ----------------------------------
   const publishConfig = async () => {
+    if (!orgId) { alert("Publishing failed: your organization is still loading. Retry in a moment."); return; }
     setPublishing(true);
     try {
       const sb = await getSupabase();
-      const { error } = await sb.functions.invoke("publish-config", { body: { comment: publishComment || "Configuration update" } });
+      const { error } = await sb.functions.invoke("publish-config", {
+        body: { org_id: orgId, comment: publishComment || "Configuration update" },
+      });
       if (error) throw error;
       const { data: vers } = await sb.from("config_versions").select("*").order("version", { ascending: false });
       if (vers) setVersions(vers);
@@ -462,16 +510,17 @@ export default function AdminStudio({ onDeactivated }: { onDeactivated: () => vo
       setPublishComment("");
       alert("Configuration published. Cameras are hot-swapping live.");
     } catch (e: any) {
-      alert(`Publishing failed: ${e.message}`);
+      alert(await fnErrorMessage("Publishing", e));
     } finally { setPublishing(false); }
   };
 
   const rollbackConfig = async (version: number) => {
     if (!confirm(`Roll back to version ${version}? This overwrites current drafts.`)) return;
+    if (!orgId) { alert("Rollback failed: your organization is still loading. Retry in a moment."); return; }
     setPublishing(true);
     try {
       const sb = await getSupabase();
-      const { error } = await sb.functions.invoke("rollback-config", { body: { version } });
+      const { error } = await sb.functions.invoke("rollback-config", { body: { org_id: orgId, version } });
       if (error) throw error;
       const { data: vers } = await sb.from("config_versions").select("*").order("version", { ascending: false });
       if (vers) setVersions(vers);
@@ -486,7 +535,7 @@ export default function AdminStudio({ onDeactivated }: { onDeactivated: () => vo
       }
       alert(`Rolled back to version ${version}.`);
     } catch (e: any) {
-      alert(`Rollback failed: ${e.message}`);
+      alert(await fnErrorMessage("Rollback", e));
     } finally { setPublishing(false); }
   };
 
