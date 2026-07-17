@@ -30,6 +30,8 @@ export interface TelemetryDetection {
   speed?: number;
   speed_calibrated?: boolean;
   direction?: string;
+  /** Seconds this track has been in frame (analytics sets it from first_seen). */
+  dwell_time?: number;
   bbox: { x1: number; y1: number; x2: number; y2: number };
 }
 
@@ -46,6 +48,10 @@ export interface CameraTelemetry {
   zone_stats?: unknown[];
   line_stats?: unknown[];
   crowd_stats?: unknown;
+  /** {alert_type: count} since the camera started, reset on a profile switch.
+   *  Alert types come from analytics.py — e.g. zone_intrusion, loitering,
+   *  wrong_way, speed_limit, fall_alert, face_detection. */
+  alert_counts?: Record<string, number>;
   fps?: number;
   latency?: number;
   inference_latency?: number;

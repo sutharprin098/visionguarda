@@ -23,6 +23,15 @@ function fmt(n: number | undefined, unit = ""): string {
   return `${Math.round(n * 10) / 10}${unit}`;
 }
 
+/** Sum the alert types a tile covers. analytics.py is the source of these
+ *  strings; a tile must only name types something actually raises, or it
+ *  displays a confident 0 for a detector that does not exist (which is how
+ *  "Fire Alerts" would have read on a build with no fire model). */
+function alerts(t: CameraTelemetry, ...types: string[]): number {
+  const a = t.alert_counts ?? {};
+  return types.reduce((s, k) => s + (a[k] ?? 0), 0);
+}
+
 function tilesFor(profile: ZoneProfileKey | null, t: CameraTelemetry): Tile[] {
   const c = t.counters ?? {};
   const fps = { label: "FPS", value: fmt(t.fps) };
@@ -44,30 +53,57 @@ function tilesFor(profile: ZoneProfileKey | null, t: CameraTelemetry): Tile[] {
         hint: avg == null ? "Needs a calibrated speed gate (two lines + real distance)" : undefined,
       },
       { label: "Density", value: t.zone_stats?.length ? `${t.zone_stats.length} zone(s)` : "—" },
-      { label: "Queue", value: t.crowd_stats ? fmt((t.crowd_stats as any).max_count ?? 0) : "—" },
+      // wrong_direction + speed_limit are what analytics actually raises for a
+      // traffic camera. stop-line / u-turn / red-light have no alert type yet,
+      // so they are not silently folded in as a zero.
+      { label: "Violations", value: String(alerts(t, "wrong_direction", "speed_limit")) },
       fps,
     ];
   }
 
   if (profile === "security") {
     const faces = (t.detections ?? []).filter((d) => d.class === "face").length;
+    const dwells = (t.detections ?? []).map((d) => d.dwell_time ?? 0).filter((v) => v > 0);
+    const maxDwell = dwells.length ? Math.max(...dwells) : null;
     return [
       { label: "People", value: String(t.people ?? 0) },
       { label: "Counted", value: `${c.people_in ?? 0} in / ${c.people_out ?? 0} out` },
       { label: "Faces", value: String(faces) },
-      { label: "Items", value: String(t.items ?? 0) },
-      { label: "Crowd", value: t.crowd_stats ? fmt((t.crowd_stats as any).max_count ?? 0) : "—" },
+      { label: "Intrusions", value: String(alerts(t, "human_entry")) },
+      {
+        label: "Alerts",
+        value: String(alerts(t, "human_entry", "loitering", "abandoned_object", "overcrowding", "crowd_density", "zone_full")),
+      },
+      // Longest time any tracked person has currently been in frame. dwell_time
+      // rides on each detection (analytics sets it from the track's first_seen),
+      // so this needs no extra plumbing — it was simply never surfaced.
+      { label: "Dwell", value: maxDwell != null ? `${Math.round(maxDwell)}s` : "—" },
       fps,
     ];
+    // Deliberately no "Unknown Faces" tile: that needs face RECOGNITION, which
+    // is coming-soon (the model is licence-clean but there is no enrolment
+    // database yet). A tile reading "0 unknown faces" would say the camera had
+    // checked and cleared everyone.
   }
 
   if (profile === "factory") {
     return [
       { label: "Workers", value: String(t.people ?? 0) },
       { label: "Counted", value: `${c.people_in ?? 0} in / ${c.people_out ?? 0} out` },
+      // Both of these are backed by features that genuinely run: fall_alert is
+      // the bbox-aspect heuristic, human_entry is restricted_machine_zone /
+      // hazard_zone presence.
+      { label: "Falls", value: String(alerts(t, "fall_alert")) },
+      { label: "Machine Events", value: String(alerts(t, "human_entry")) },
       { label: "Zones", value: t.zone_stats?.length ? String(t.zone_stats.length) : "—" },
       fps,
     ];
+    // Deliberately no "PPE Compliance" / "Fire Alerts" / "Smoke Alerts" tiles.
+    // analytics still has ppe_violation / fire_alert / smoke_alert branches, but
+    // their producers were removed with the colour-threshold fabrications, so
+    // those counts can only ever be 0. A "Fire Alerts: 0" tile is the most
+    // dangerous thing on this page — it reads as "no fire detected" from a
+    // detector that does not exist.
   }
 
   // custom / unset — no template, so report what the engine reports.

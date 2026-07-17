@@ -602,6 +602,12 @@ class PipelineCoordinator:
         self.zone_profile = zone_profile
         self.profile_features = json.loads(profile_features) if isinstance(profile_features, str) else (profile_features or {})
 
+        # {alert_type: count} since this camera started — surfaced in telemetry
+        # so the per-profile dashboard can show Violations / Alerts / Falls
+        # without hitting storage. Reset on a profile switch (see update_config):
+        # a security camera's intrusion tally means nothing to a traffic camera.
+        self._alert_counts = {}
+
         self.running        = False
         self.incoming_frame = None       # screenshare push target
         self._last_push_ts  = 0.0        # last time push_frame() delivered a frame (screenshare staleness)
@@ -797,12 +803,20 @@ class PipelineCoordinator:
         self.zone_profile = zone_profile
         self.profile_features = json.loads(profile_features) if isinstance(profile_features, str) else (profile_features or {})
         self.analytics.reset_counters()
-        # Counters are per-profile; a security camera's people_in must not carry
-        # into a traffic camera's vehicle counts. reset_counters() above does
-        # that. The other stateful thing a profile switch invalidates is the
-        # face model: drop it when nothing wants it any more, so "unload unused
-        # models" is true rather than merely claimed. Cheap to reload (~130ms)
-        # and only ever paid on a profile change, never per frame.
+        self._alert_counts = {}
+        # Counters are per-profile; a security camera's people_in and its
+        # intrusion tally must not carry into a traffic camera's vehicle counts
+        # and violations. The other stateful thing a profile switch invalidates
+        # is the face model: drop it when nothing wants it any more.
+        #
+        # Note on "unload unused models": measured, this does NOT return memory
+        # to the OS — RSS held at 276.8 MB across unload. What it buys is real
+        # but smaller: no stale model state across a switch, and the next load
+        # re-reads the new profile's confidence. yolox_tiny is deliberately NOT
+        # unloaded: every profile needs classes from it (traffic wants vehicles,
+        # security people, factory people), and it costs ~7.0 s to load — so
+        # dropping it on a switch would blind the camera for seven seconds to
+        # save nothing.
         _releases_face = not self._wants_faces()
         if _releases_face and face_detect.is_loaded():
             face_detect.unload()
@@ -1517,6 +1531,11 @@ class PipelineCoordinator:
                         screenshot_path=f"/history/recordings/{snap}",
                     )
                     self.recorder.trigger_event_start(alert["message"])
+                    # Alerts only ever went to storage, so a live dashboard had
+                    # no way to show "Violations" / "Alerts" / "Falls" without
+                    # polling the DB. Keep a per-type session tally the
+                    # telemetry payload can carry.
+                    self._alert_counts[alert["type"]] = self._alert_counts.get(alert["type"], 0) + 1
             else:
                 self.recorder.trigger_event_stop()
 
@@ -1543,6 +1562,10 @@ class PipelineCoordinator:
                 # Carried separately from trk_lat so the face module's cost is
                 # attributable rather than buried in "tracking".
                 "t_face":         t_face,
+                # {alert_type: count} since this camera started. Lets the client
+                # render Violations / Alerts / Falls / Machine Events without
+                # querying storage.
+                "alert_counts":   dict(self._alert_counts),
             })
 
     # -----------------------------------------------------------------------
@@ -1658,6 +1681,7 @@ class PipelineCoordinator:
                 "line_stats": data["line_stats"],
                 "crowd_stats": data["crowd_stats"],
                 "parking_stats": data.get("parking_stats", {"total": 0, "occupied": 0, "free": 0, "occupancy_percent": 0.0, "slots": []}),
+                "alert_counts": data.get("alert_counts", {}),
                 "stage_errors": dict(self._stage_errors),
                 "queue_depth": 1 if self._grabbed_slot._ready.is_set() else 0,
                 "debug_tracks": len(self.tracker.tracks),
