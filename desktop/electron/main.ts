@@ -13,6 +13,11 @@ import { setupDownloadHandlers } from "./downloadManager";
 const SUPABASE_URL = process.env.CAMAI_SUPABASE_URL ?? "https://kuqyhceykvisqfyghiot.supabase.co";
 const ANON_KEY = process.env.CAMAI_SUPABASE_ANON_KEY ?? "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imt1cXloY2V5a3Zpc3FmeWdoaW90Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM4Mzc1MjksImV4cCI6MjA5OTQxMzUyOX0.EvmBR-6sjtUO8UWBm9A0Sv9Ms5GMSs7BDsvw8fVZ8LI";
 
+// The source id the renderer picked, read by setDisplayMediaRequestHandler on
+// the very next getDisplayMedia call. Null means "no pick" — the handler then
+// refuses rather than defaulting to the entire screen.
+let pendingCaptureSourceId: string | null = null;
+
 const gotTheLock = app.requestSingleInstanceLock();
 if (!gotTheLock) {
   app.quit();
@@ -123,6 +128,53 @@ if (!gotTheLock) {
 
   setupDownloadHandlers(ipcMain, () => win);
 
+  // ---------- IPC: selective screen capture ----------
+  //
+  // Only 'screen' and 'window' exist — Electron 31's own typings say
+  // "available types can be `screen` and `window`". Browser tabs are NOT
+  // enumerable: a Chrome tab is not an OS window (Chrome renders every tab into
+  // one window), and only Chrome itself can isolate a tab, for a page running
+  // inside Chrome that calls getDisplayMedia. Sharing "Chrome — WhatsApp Web"
+  // therefore shares the Chrome *window*, and follows whatever tab is active.
+  ipcMain.handle("get-capture-sources", async () => {
+    const sources = await desktopCapturer.getSources({
+      types: ["screen", "window"],
+      thumbnailSize: { width: 320, height: 180 },
+      fetchWindowIcons: true,
+    });
+    return sources
+      // Electron's own window is in the list; sharing the app into itself is a
+      // hall-of-mirrors and never what anyone means.
+      .filter((s) => !s.name.includes("CamAI Desktop"))
+      .map((s) => ({
+        id: s.id,
+        name: s.name,
+        kind: s.id.startsWith("screen:") ? "screen" : "window",
+        thumbnail: s.thumbnail?.isEmpty() ? null : s.thumbnail.toDataURL(),
+        appIcon: s.appIcon && !s.appIcon.isEmpty() ? s.appIcon.toDataURL() : null,
+      }));
+  });
+
+  // Set immediately before the renderer calls getDisplayMedia; consumed by the
+  // display-media handler above.
+  ipcMain.handle("set-capture-source", (_evt, sourceId: string | null) => {
+    pendingCaptureSourceId = sourceId;
+    return { ok: true };
+  });
+
+  // "Is the thing we're sharing still on screen?" — the renderer polls this so
+  // a closed window surfaces as a message rather than a frozen last frame.
+  ipcMain.handle("capture-source-exists", async (_evt, sourceId: string) => {
+    try {
+      const sources = await desktopCapturer.getSources({ types: ["screen", "window"], thumbnailSize: { width: 0, height: 0 } });
+      return { exists: sources.some((s) => s.id === sourceId) };
+    } catch {
+      // Don't report a transient enumeration failure as "source gone" — that
+      // would tear down a perfectly good share.
+      return { exists: true };
+    }
+  });
+
   ipcMain.handle("get-config", () => {
     const isAdmin = app.getName().includes("Admin Studio") || process.env.CAMAI_APP_TYPE === "admin";
     return {
@@ -147,16 +199,32 @@ if (!gotTheLock) {
   app.whenReady().then(() => {
     createWindow();
 
-    session.defaultSession.setDisplayMediaRequestHandler(async (request, callback) => {
+    // Hands getDisplayMedia the source the operator actually picked.
+    //
+    // This used to be `callback({ video: sources[0] })` — getSources() returns
+    // screens first, so every share was silently "Entire Screen" no matter what
+    // the operator wanted, and there was no way to share a single window.
+    //
+    // pendingCaptureSourceId is set over IPC immediately before the renderer
+    // calls getDisplayMedia (see "set-capture-source"). The id is re-resolved
+    // against a fresh getSources() here rather than trusted: window ids are
+    // ephemeral and the window may have closed between the picker and the
+    // request, in which case callback({video: undefined}) rejects the promise
+    // and the renderer reports it as "no longer available" instead of silently
+    // grabbing the wrong surface.
+    session.defaultSession.setDisplayMediaRequestHandler(async (_request, callback) => {
       try {
-        const sources = await desktopCapturer.getSources({ types: ["screen", "window"] });
-        if (sources.length > 0) {
-          callback({ video: sources[0] });
-        } else {
+        const wanted = pendingCaptureSourceId;
+        if (!wanted) {
+          // No explicit pick — refuse rather than fall back to the whole screen.
           callback({ video: undefined });
+          return;
         }
+        const sources = await desktopCapturer.getSources({ types: ["screen", "window"], thumbnailSize: { width: 0, height: 0 } });
+        const match = sources.find((s) => s.id === wanted);
+        callback(match ? { video: match } : { video: undefined });
       } catch (err) {
-        console.error("Failed to get screen sources:", err);
+        console.error("[capture] getSources failed:", err);
         callback({ video: undefined });
       }
     });

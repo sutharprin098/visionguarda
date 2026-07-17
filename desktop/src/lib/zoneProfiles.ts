@@ -58,6 +58,26 @@ export interface FeatureDef {
   requiresGeometry?: "zone" | "line" | "direction";
   /** Enabled by default when a fresh profile config is created. */
   defaultEnabled?: boolean;
+  /**
+   * Set when NO model in this build can produce what the feature claims, so the
+   * toggle cannot do anything. The UI must show this and refuse to enable it.
+   *
+   * These are not merely "unimplemented" — until 2026-07-17 each was wired to a
+   * fabrication that produced confident, wrong output:
+   *   - fire/smoke: an HSV colour threshold. Measured on ordinary street
+   *     footage containing neither, it raised a smoke alarm on 200/200 frames
+   *     (it read concrete pavement as a smoke plume).
+   *   - PPE: an HSV check of the top 18% of a person box, emitted at a
+   *     hardcoded 0.95 confidence. On people wearing no PPE it invented helmets
+   *     on 16% of checks and vests on 22%, flickering frame to frame.
+   * Those were removed. Showing an inert switch is honest; showing a switch
+   * that cries wolf is not. Real support needs a trained model, and the licence
+   * matters as much as the accuracy — nearly every public fire/smoke/PPE model
+   * is YOLOv5/v8-derived and therefore AGPL-3.0, which this product moved off
+   * deliberately (see LICENSING.md, and app/ai/face.py for the MIT/Apache route
+   * taken to make face detection real).
+   */
+  unavailable?: string;
   /** Special panels rendered by the UI instead of a param card. */
   kind?: "feature" | "roi_editor" | "schedule" | "alerts";
   params: FeatureParam[];
@@ -188,7 +208,11 @@ const TRAFFIC: ProfileDef = {
   features: [
     {
       key: "lane_detection", label: "Lane Detection", group: "Detection", requiresGeometry: "zone", defaultEnabled: true,
-      description: "Segment lanes and attribute vehicles to the lane they occupy.",
+      // Honest as-is: there is no lane *segmentation* model, and none is needed.
+      // analytics._lane_for_point() attributes a vehicle to whichever zone the
+      // operator drew with zoneType "lane". Worth stating so the confidence
+      // slider isn't read as tuning a model that doesn't exist.
+      description: "Attributes each vehicle to whichever zone you drew as a lane. Geometry-based — draw one zone per lane; no lane-segmentation model is involved.",
       params: [confidence(0.4)],
     },
     {
@@ -272,6 +296,7 @@ const TRAFFIC: ProfileDef = {
     {
       key: "anpr", label: "ANPR", group: "Recognition", defaultEnabled: false,
       description: "Automatic number plate recognition on detected vehicles.",
+      unavailable: "No plate detector or OCR ships in this build — ANPR needs both, and neither exists here. The Plate Region setting has nothing to configure.",
       params: [confidence(0.5), { key: "region", label: "Plate Region", type: "select", default: "auto", options: [
         { value: "auto", label: "Auto" }, { value: "eu", label: "Europe" }, { value: "us", label: "North America" }, { value: "in", label: "India" }, { value: "me", label: "Middle East" },
       ] }],
@@ -352,11 +377,12 @@ const SECURITY: ProfileDef = {
     },
     {
       key: "face_detection", label: "Face Detection", group: "Recognition",
-      description: "Detect faces for downstream recognition.",
-      params: [confidence(0.5)],
+      description: "Detects faces inside each person box (YuNet). Costs ~35 ms/frame while on, nothing while off.",
+      params: [confidence(0.6)],
     },
     {
       key: "face_recognition", label: "Face Recognition", group: "Recognition", defaultEnabled: false,
+      unavailable: "Not in this build — face detection works, but identifying who a face belongs to needs an enrolled known-faces database, which does not exist yet.",
       description: "Match detected faces against an enrolled gallery.",
       params: [
         { key: "match_threshold", label: "Match Threshold", type: "slider", min: 0.3, max: 0.95, step: 0.01, default: 0.62 },
@@ -368,16 +394,22 @@ const SECURITY: ProfileDef = {
     {
       key: "fire_detection", label: "Fire Detection", group: "Safety",
       description: "Vision-based fire detection.",
+      unavailable: "No fire model ships in this build. The previous colour-threshold implementation was removed — it flagged anything red (a shirt, a sunset, a traffic cone) as fire.",
       params: [confidence(0.5)],
     },
     {
       key: "smoke_detection", label: "Smoke Detection", group: "Safety",
       description: "Vision-based smoke detection.",
+      unavailable: "No smoke model ships in this build. The previous colour-threshold implementation was removed — measured on footage with no smoke it alarmed on 200/200 frames, reading concrete pavement as a smoke plume.",
       params: [confidence(0.5)],
     },
     {
+      // Was described as "Pose-based" — it never was. analytics.py flags a
+      // person whose tracked box becomes wider than tall (w/h > 1.25), which
+      // is a real, working heuristic but has no pose model behind it and will
+      // not catch a fall that keeps the box upright. Describe what it does.
       key: "fall_detection", label: "Fall Detection", group: "Safety",
-      description: "Pose-based detection of a person falling.",
+      description: "Flags a person whose bounding box becomes wider than tall (lying/collapsed posture).",
       params: [confidence(0.5)],
     },
     roiEditor,
@@ -398,16 +430,22 @@ const FACTORY: ProfileDef = {
   groupOrder: ["Safety", "Detection", "Tracking & Counting", "Events & Violations", "Analytics", "ROI & Zones", "Alerts"],
   features: [
     {
-      key: "ppe_detection", label: "PPE Detection", group: "Safety", defaultEnabled: true,
+      // defaultEnabled removed: a compliance feature must not be on by default
+      // when nothing can produce a compliance finding.
+      key: "ppe_detection", label: "PPE Detection", group: "Safety",
       description: "Verify workers wear the required personal protective equipment.",
+      unavailable: "No PPE model ships in this build. The previous colour-threshold implementation was removed — on people wearing no PPE it invented helmets on 16% of checks and vests on 22%, at a hardcoded 0.95 confidence, flickering between compliant and violation frame to frame.",
       params: [confidence(0.45), {
         key: "required_ppe", label: "Required PPE", type: "classes",
         classOptions: ["helmet", "vest", "gloves", "shoes", "mask", "goggles"], default: ["helmet", "vest"],
       }],
     },
-    { key: "helmet_detection", label: "Helmet Detection", group: "Safety", description: "Detect hard-hat compliance.", params: [confidence(0.45)] },
-    { key: "safety_vest", label: "Safety Vest", group: "Safety", description: "Detect hi-vis vest compliance.", params: [confidence(0.45)] },
-    { key: "gloves", label: "Gloves", group: "Safety", description: "Detect glove compliance.", params: [confidence(0.45)] },
+    { key: "helmet_detection", label: "Helmet Detection", group: "Safety", description: "Detect hard-hat compliance.",
+      unavailable: "No helmet model ships in this build — COCO (and so yolox_tiny) has no helmet class.", params: [confidence(0.45)] },
+    { key: "safety_vest", label: "Safety Vest", group: "Safety", description: "Detect hi-vis vest compliance.",
+      unavailable: "No hi-vis model ships in this build — COCO (and so yolox_tiny) has no vest class.", params: [confidence(0.45)] },
+    { key: "gloves", label: "Gloves", group: "Safety", description: "Detect glove compliance.",
+      unavailable: "No glove model ships in this build — COCO (and so yolox_tiny) has no glove class.", params: [confidence(0.45)] },
     { key: "shoes", label: "Safety Shoes", group: "Safety", description: "Detect safety-footwear compliance.", params: [confidence(0.45)] },
     {
       key: "worker_detection", label: "Worker Detection", group: "Detection", defaultEnabled: true,
@@ -432,6 +470,7 @@ const FACTORY: ProfileDef = {
     {
       key: "forklift_detection", label: "Forklift Detection", group: "Detection",
       description: "Detect forklifts and industrial vehicles.",
+      unavailable: "No forklift model ships in this build — COCO (and so yolox_tiny) has no forklift class. A forklift is currently detected as 'truck' at best.",
       params: [confidence(0.45)],
     },
     {
@@ -444,8 +483,10 @@ const FACTORY: ProfileDef = {
       description: "General hazard area — any presence is flagged.",
       params: [classes(FACTORY_CLASSES, ["person"])],
     },
-    { key: "fire_detection", label: "Fire Detection", group: "Safety", description: "Vision-based fire detection.", params: [confidence(0.5)] },
-    { key: "smoke_detection", label: "Smoke Detection", group: "Safety", description: "Vision-based smoke detection.", params: [confidence(0.5)] },
+    { key: "fire_detection", label: "Fire Detection", group: "Safety", description: "Vision-based fire detection.",
+      unavailable: "No fire model ships in this build. The previous colour-threshold implementation was removed — it flagged anything red as fire.", params: [confidence(0.5)] },
+    { key: "smoke_detection", label: "Smoke Detection", group: "Safety", description: "Vision-based smoke detection.",
+      unavailable: "No smoke model ships in this build. The previous colour-threshold implementation was removed — it alarmed on 200/200 frames of smoke-free footage, reading concrete as smoke.", params: [confidence(0.5)] },
     roiEditor,
     alertRules,
   ],

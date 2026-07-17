@@ -1,9 +1,20 @@
-import { useEffect, useState, useRef } from "react";
-import { Video, Bell, Settings2, LogOut, Wifi, WifiOff, Sliders, Activity, AlertTriangle, RotateCw } from "lucide-react";
+import { useEffect, useState, useRef, useCallback } from "react";
+import { Video, Bell, Settings2, LogOut, Wifi, WifiOff, Sliders, Activity, AlertTriangle, RotateCw, Maximize2, Minimize2 } from "lucide-react";
 import clsx from "clsx";
 import { startRealtimeSync, DeactivatedError, SyncBundle } from "../lib/sync";
 import { syncCamerasToLocalEngine, syncAiModelToLocalEngine, isEngineOnline, mjpegStreamUrl, resetLocalEngineState, reportCameraHealth } from "../lib/localEngine";
 import { MediaShareSession, ShareStatus } from "../lib/mediaShare";
+import { TelemetrySession, TelemetryDetection } from "../lib/telemetry";
+import DetectionOverlay from "../components/DetectionOverlay";
+import SourcePicker from "../components/SourcePicker";
+import type { CaptureSource } from "../lib/bridge";
+import {
+  AI_MODULES, ModuleKey, ModuleState,
+  loadModules, saveModules, filterDetections,
+} from "../lib/aiModules";
+
+// Remembered across launches by name, not id — see startSharing().
+const LAST_SOURCE_KEY = "camai.lastCaptureSource";
 import type { EngineProcessState } from "../lib/bridge";
 import ModelManagerUI from "../components/ModelManagerUI";
 import EngineHealthPanel from "../components/EngineHealthPanel";
@@ -570,6 +581,7 @@ const STATUS_TONES: Record<string, string> = {
 const SHARE_STATUS_LABELS: Record<ShareStatus, string> = {
   idle: "", acquiring: "Starting…", connecting: "Connecting…",
   live: "Live", reconnecting: "Reconnecting…", error: "Error",
+  source_gone: "Source gone",
 };
 const SHARE_STATUS_TONES: Record<ShareStatus, string> = {
   idle: "", acquiring: "bg-warn/20 text-warn animate-pulse",
@@ -577,6 +589,7 @@ const SHARE_STATUS_TONES: Record<ShareStatus, string> = {
   live: "bg-red-500/20 text-red-400 animate-pulse",
   reconnecting: "bg-warn/20 text-warn animate-pulse",
   error: "bg-danger/20 text-danger",
+  source_gone: "bg-danger/20 text-danger",
 };
 
 function CameraTile({ camera: c, engineOnline }: { camera: any; engineOnline: boolean | null }) {
@@ -584,29 +597,115 @@ function CameraTile({ camera: c, engineOnline }: { camera: any; engineOnline: bo
   const [sharingType, setSharingType] = useState<"screen" | "webcam" | null>(null);
   const [shareStatus, setShareStatus] = useState<ShareStatus>("idle");
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
+  const [detections, setDetections] = useState<TelemetryDetection[]>([]);
+  const [aiStats, setAiStats] = useState<{ fps: number; people: number; vehicles: number } | null>(null);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [sourceName, setSourceName] = useState<string | null>(null);
+  const [modules, setModules] = useState<ModuleState>(() => loadModules(c.id));
+  const [isFull, setIsFull] = useState(false);
+  const tileRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const sessionRef = useRef<MediaShareSession | null>(null);
 
   const isScreenShareCam = c.source_type === "screen_share";
   const showStream = engineOnline && !streamFailed && !isScreenShareCam;
 
+  // The media element the overlay measures: the local <video> while sharing,
+  // otherwise the MJPEG <img>. Both show the same frames the engine analysed.
+  const imgRef = useRef<HTMLImageElement>(null);
+  const mediaRef = (sharingType !== null ? videoRef : imgRef) as React.RefObject<HTMLVideoElement | HTMLImageElement>;
+  const showingMedia = sharingType !== null || showStream;
+
   useEffect(() => {
     if (videoRef.current) videoRef.current.srcObject = localStream;
   }, [localStream]);
+
+  // Detections are pushed once per AI cycle to /ws subscribers. Only subscribe
+  // while something is actually on screen — the engine pushes per subscriber,
+  // so a hidden tile would cost real work for boxes nobody can see.
+  useEffect(() => {
+    if (!engineOnline || !showingMedia) { setDetections([]); return; }
+    const session = new TelemetrySession(c.id, (t) => {
+      setDetections(t.detections ?? []);
+      setAiStats({ fps: t.fps ?? 0, people: t.people ?? 0, vehicles: t.vehicles ?? 0 });
+    });
+    session.start();
+    return () => session.stop();
+  }, [c.id, engineOnline, showingMedia]);
 
   // Persistent across transient disconnects — only torn down on unmount or
   // an explicit "Stop Share" click, never on a dropped socket or a paused
   // display (see lib/mediaShare.ts for the reconnect/re-acquire logic).
   useEffect(() => () => { sessionRef.current?.stop(); sessionRef.current = null; }, []);
 
-  function startSharing(type: "screen" | "webcam") {
-    sessionRef.current?.stop();
-    const session = new MediaShareSession(c.id, type, {
-      onStatus: setShareStatus,
-      onStream: setLocalStream,
+  const toggleModule = (key: ModuleKey) => {
+    setModules((prev) => {
+      const next = { ...prev, [key]: !prev[key] };
+      saveModules(c.id, next);
+      return next;
     });
+  };
+
+  // ---- Fullscreen ----
+  // Driven off the Fullscreen API's own event rather than local state, so ESC
+  // (which the browser handles itself and never routes through our handler)
+  // can't leave the button showing the wrong icon.
+  const toggleFullscreen = useCallback(() => {
+    const el = tileRef.current;
+    if (!el) return;
+    if (document.fullscreenElement) void document.exitFullscreen().catch(() => {});
+    else void el.requestFullscreen().catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    const onChange = () => setIsFull(document.fullscreenElement === tileRef.current);
+    document.addEventListener("fullscreenchange", onChange);
+    return () => document.removeEventListener("fullscreenchange", onChange);
+  }, []);
+
+  // F11 would otherwise fullscreen the whole Electron window, which is not what
+  // an operator pressing it over a camera tile means. Only claim it while this
+  // tile is hovered/fullscreen so other tiles' handlers don't all fire at once.
+  useEffect(() => {
+    if (!isFull) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "F11") { e.preventDefault(); toggleFullscreen(); }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [isFull, toggleFullscreen]);
+
+  // The overlay sizes itself from the media element's box, which changes the
+  // instant we enter/leave fullscreen — force a redraw by nudging state so the
+  // boxes don't stay laid out for the old size until the next telemetry tick.
+  useEffect(() => {
+    if (!showingMedia) return;
+    const onResize = () => setDetections((d) => [...d]);
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, [showingMedia]);
+  useEffect(() => { setDetections((d) => [...d]); }, [isFull]);
+
+  // Screen shares must name their surface; webcam has no picker.
+  function startSharing(type: "screen" | "webcam", source?: CaptureSource) {
+    // Always tear the previous session down first — two live sessions would
+    // both push frames for the same camera_id, doubling engine load and making
+    // the stream flicker between two surfaces.
+    sessionRef.current?.stop();
+    const session = new MediaShareSession(
+      c.id,
+      type,
+      { onStatus: setShareStatus, onStream: setLocalStream },
+      source?.id,
+    );
     sessionRef.current = session;
     setSharingType(type);
+    setSourceName(type === "webcam" ? "Webcam" : source?.name ?? null);
+    if (source) {
+      // Persist by NAME: desktopCapturer ids are per-session handles and never
+      // match after a relaunch or after the window is reopened.
+      try { localStorage.setItem(LAST_SOURCE_KEY, source.name); } catch { /* private mode */ }
+    }
     void session.start();
   }
 
@@ -616,24 +715,41 @@ function CameraTile({ camera: c, engineOnline }: { camera: any; engineOnline: bo
     setSharingType(null);
     setShareStatus("idle");
     setLocalStream(null);
+    setSourceName(null);
   }
+
+  // Fullscreen shows the whole frame letterboxed (contain) instead of
+  // centre-cropping it (cover): a cropped fullscreen would hide detections that
+  // are really there, which is worse than black bars. The overlay is told which
+  // fit is in play so the boxes track the change.
+  const fit: "cover" | "contain" = isFull ? "contain" : "cover";
+  const mediaClass = `h-full w-full ${isFull ? "object-contain" : "object-cover"}`;
+  const shownDetections = filterDetections(detections, modules);
 
   return (
     <div className="card overflow-hidden">
-      <div className="relative flex aspect-video items-center justify-center bg-surface-0 text-zinc-600">
+      <div
+        ref={tileRef}
+        onDoubleClick={showingMedia ? toggleFullscreen : undefined}
+        className={clsx(
+          "relative flex items-center justify-center bg-surface-0 text-zinc-600",
+          isFull ? "h-screen w-screen" : "aspect-video",
+        )}
+      >
         {sharingType !== null ? (
           <video
             ref={videoRef}
             autoPlay
             playsInline
             muted
-            className="h-full w-full object-cover bg-black"
+            className={`${mediaClass} bg-black`}
           />
         ) : showStream ? (
           <img
+            ref={imgRef}
             src={mjpegStreamUrl(c.id)}
             alt={c.name}
-            className="h-full w-full object-cover"
+            className={mediaClass}
             onError={() => setStreamFailed(true)}
           />
         ) : isScreenShareCam ? (
@@ -642,9 +758,9 @@ function CameraTile({ camera: c, engineOnline }: { camera: any; engineOnline: bo
             <div className="flex gap-2">
               <button
                 className="flex items-center gap-1.5 rounded bg-accent/20 px-2.5 py-1.5 text-xs font-semibold text-accent hover:bg-accent/30 transition"
-                onClick={() => startSharing("screen")}
+                onClick={() => setPickerOpen(true)}
               >
-                Share Screen
+                Choose Source…
               </button>
               <button
                 className="flex items-center gap-1.5 rounded bg-zinc-800 px-2.5 py-1.5 text-xs font-semibold text-zinc-300 hover:bg-zinc-700 transition"
@@ -658,12 +774,107 @@ function CameraTile({ camera: c, engineOnline }: { camera: any; engineOnline: bo
           <Video size={28} />
         )}
 
-        {sharingType !== null && (
-          <div className="absolute top-2 right-2 bg-red-600/90 text-white text-[10px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded shadow">
-            Sharing {sharingType}
+        {/* Boxes sit above the media and below the status chips. object-cover
+            matches the className on both the <video> and the <img> above. */}
+        {showingMedia && shownDetections.length > 0 && (
+          <DetectionOverlay detections={shownDetections} mediaRef={mediaRef} fit={fit} />
+        )}
+
+        {/* Stays visible in fullscreen — an operator watching a full-screen feed
+            is exactly who needs to see the pipeline is still keeping up. */}
+        {showingMedia && aiStats && (
+          <div className="absolute bottom-2 left-2 rounded bg-black/70 px-2 py-0.5 text-[10px] font-semibold text-zinc-200 shadow">
+            {shownDetections.length} shown · {aiStats.fps.toFixed(1)} fps
           </div>
         )}
+
+        {showingMedia && (
+          <button
+            onClick={toggleFullscreen}
+            title={isFull ? "Exit full screen (ESC or F11)" : "Full screen (F11)"}
+            className="absolute bottom-2 right-2 rounded bg-black/70 p-1.5 text-zinc-300 hover:bg-black/90 hover:text-white"
+          >
+            {isFull ? <Minimize2 size={13} /> : <Maximize2 size={13} />}
+          </button>
+        )}
+
+        {/* Name the actual surface, not just the mode — "Sharing screen" gave the
+            operator no way to tell which screen/window was going out. */}
+        {sharingType !== null && (
+          <div className="absolute top-2 right-2 max-w-[70%] truncate rounded bg-red-600/90 px-2 py-0.5 text-[10px] font-semibold text-white shadow"
+               title={sourceName ?? undefined}>
+            Sharing: {sourceName ?? sharingType}
+          </div>
+        )}
+
+        {/* Terminal state: the window we were capturing is gone. Offer a re-pick
+            rather than retrying an id that can never resolve again. */}
+        {shareStatus === "source_gone" && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-surface-0/95 p-4 text-center">
+            <AlertTriangle size={22} className="text-warn" />
+            <div className="text-xs text-zinc-300">Selected source is no longer available.</div>
+            <div className="flex gap-2">
+              <button onClick={() => setPickerOpen(true)}
+                      className="rounded bg-accent/20 px-2.5 py-1.5 text-xs font-semibold text-accent hover:bg-accent/30">
+                Choose another source
+              </button>
+              <button onClick={stopSharing}
+                      className="rounded bg-surface-3 px-2.5 py-1.5 text-xs font-semibold text-zinc-300 hover:bg-zinc-700">
+                Stop
+              </button>
+            </div>
+          </div>
+        )}
+
+        {pickerOpen && (
+          <SourcePicker
+            lastSourceName={(() => { try { return localStorage.getItem(LAST_SOURCE_KEY); } catch { return null; } })()}
+            onCancel={() => setPickerOpen(false)}
+            onPick={(src) => { setPickerOpen(false); startSharing("screen", src); }}
+          />
+        )}
       </div>
+      {/* Active AI — lists only modules backed by a class the detector actually
+          emits (backend.py COCO_CLASS_MAP). Deliberately does NOT list
+          face/fire/smoke: those toggles exist in the zone-profile editor but
+          match on classes yolox_tiny never produces, so advertising them here
+          as "active" would tell an operator a safety detector is running when
+          nothing is. */}
+      {showingMedia && (
+        <div className="flex flex-wrap items-center gap-1.5 border-t border-line bg-surface-2 px-3 py-2">
+          {/* The profile is set per camera in Admin Studio and enforced engine-side
+              (analytics.PROFILE_CLASSES): a traffic camera does not report people.
+              Surfaced here so an operator can see why a class is absent instead of
+              assuming detection is broken. */}
+          <span
+            className={clsx(
+              "mr-1 rounded px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider",
+              c.zone_profile ? "bg-accent/20 text-accent" : "bg-surface-3 text-zinc-500",
+            )}
+            title={c.zone_profile
+              ? `Zone profile: ${c.zone_profile} — this camera only reports classes this profile covers`
+              : "No zone profile set — this camera reports every detected class"}
+          >
+            {c.zone_profile ?? "no profile"}
+          </span>
+          <span className="mr-0.5 text-[10px] font-semibold uppercase tracking-wider text-zinc-500">Active AI</span>
+          {AI_MODULES.map((m) => (
+            <button
+              key={m.key}
+              onClick={() => toggleModule(m.key)}
+              title={modules[m.key] ? `Hide ${m.label}` : `Show ${m.label}`}
+              className={clsx(
+                "rounded-full px-2 py-0.5 text-[10px] font-medium transition",
+                modules[m.key]
+                  ? "bg-accent/20 text-accent"
+                  : "bg-surface-3 text-zinc-600 line-through",
+              )}
+            >
+              {modules[m.key] ? "✓ " : ""}{m.label}
+            </button>
+          ))}
+        </div>
+      )}
       <div className="flex items-center justify-between px-3 py-2 bg-surface-1">
         <span className="text-sm text-zinc-200">{c.name}</span>
         <div className="flex items-center gap-2">

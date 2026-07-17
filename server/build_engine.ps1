@@ -47,6 +47,19 @@ if (Test-Path $exe) {
         Copy-Item -Recurse -Force $src (Join-Path $PSScriptRoot "dist\camai-engine\")
     }
 
+    # YuNet face detector (MIT — see fetch_face_models.py). Only ~230 KB, and
+    # nothing loads it unless a camera enables face_detection, so it costs the
+    # installer almost nothing and costs runtime exactly zero when unused.
+    # Not fatal if absent: the engine logs why face detection can't run rather
+    # than failing the whole build.
+    $faceModel = Join-Path $PSScriptRoot "models_face\face_detection_yunet_2023mar.onnx"
+    if (Test-Path $faceModel) {
+        Copy-Item -Force $faceModel (Join-Path $PSScriptRoot "dist\camai-engine\")
+        Write-Host "==> Bundled YuNet face detector (MIT)"
+    } else {
+        Write-Warning "face_detection_yunet_2023mar.onnx missing - face detection will be unavailable in this build. Run: python fetch_face_models.py"
+    }
+
     Write-Host "==> SUCCESS: $exe" -ForegroundColor Green
 } else {
     Write-Error "Build finished but $exe was not produced."

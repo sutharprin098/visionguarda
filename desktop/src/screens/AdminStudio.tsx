@@ -635,21 +635,42 @@ export default function AdminStudio({ onDeactivated }: { onDeactivated: () => vo
   function renderFeatureCard(f: FeatureDef) {
     const cfg = features[f.key] ?? { enabled: false, params: {} };
     const bound = drawings.filter((d) => d.feature_key === f.key);
+    // No model in this build can produce what the feature claims. The switch is
+    // held off rather than left live: an operator who turns on "Fire Detection"
+    // and sees it go green will believe a fire raises an alarm. Until 2026-07-17
+    // it did go green — and answered with a colour threshold that read concrete
+    // as smoke on every frame. See FeatureDef.unavailable.
+    const blocked = !!f.unavailable;
 
     return (
-      <div key={f.key} className={clsx("rounded border p-2.5 transition", cfg.enabled ? "border-line bg-surface-0" : "border-line/60 bg-surface-0/40")}>
+      <div key={f.key} className={clsx("rounded border p-2.5 transition",
+        blocked ? "border-line/40 bg-surface-0/20" : cfg.enabled ? "border-line bg-surface-0" : "border-line/60 bg-surface-0/40")}>
         <div className="flex items-start justify-between gap-2">
           <div className="min-w-0">
-            <div className="text-xs font-semibold text-zinc-200">{f.label}</div>
+            <div className="flex items-center gap-1.5">
+              <span className={clsx("text-xs font-semibold", blocked ? "text-zinc-500" : "text-zinc-200")}>{f.label}</span>
+              {blocked && (
+                <span className="rounded bg-warn/15 px-1 py-px text-[9px] font-bold uppercase tracking-wide text-warn">
+                  no model
+                </span>
+              )}
+            </div>
             <p className="text-[10px] text-zinc-500 leading-snug mt-0.5">{f.description}</p>
+            {blocked && (
+              <p className="mt-1 text-[10px] leading-snug text-warn/80">{f.unavailable}</p>
+            )}
           </div>
-          <button type="button" onClick={() => toggleFeature(f.key)}
-            className={clsx("relative h-5 w-9 rounded-full transition shrink-0", cfg.enabled ? "bg-accent" : "bg-surface-3")}>
-            <span className={clsx("absolute top-0.5 h-4 w-4 rounded-full bg-white transition-all", cfg.enabled ? "left-[18px]" : "left-0.5")} />
+          <button type="button" disabled={blocked}
+            onClick={() => { if (!blocked) toggleFeature(f.key); }}
+            title={blocked ? f.unavailable : undefined}
+            className={clsx("relative h-5 w-9 rounded-full transition shrink-0",
+              blocked ? "cursor-not-allowed bg-surface-3/50" : cfg.enabled ? "bg-accent" : "bg-surface-3")}>
+            <span className={clsx("absolute top-0.5 h-4 w-4 rounded-full transition-all",
+              blocked ? "bg-zinc-600 left-0.5" : "bg-white", !blocked && cfg.enabled ? "left-[18px]" : "left-0.5")} />
           </button>
         </div>
 
-        {cfg.enabled && (
+        {cfg.enabled && !blocked && (
           <div className="mt-2.5 space-y-2 pt-2 border-t border-line">
             {f.params.map((p) => <div key={p.key}>{renderParam(f.key, p, cfg.params[p.key])}</div>)}
 

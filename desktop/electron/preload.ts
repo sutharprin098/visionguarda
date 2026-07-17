@@ -6,6 +6,11 @@ contextBridge.exposeInMainWorld("camai", {
   updateRefreshToken: (t: string) => ipcRenderer.invoke("update-refresh-token", t),
   deactivate: () => ipcRenderer.invoke("deactivate"),
   getConfig: () => ipcRenderer.invoke("get-config"),
+  capture: {
+    getSources: () => ipcRenderer.invoke("get-capture-sources"),
+    setSource: (sourceId: string | null) => ipcRenderer.invoke("set-capture-source", sourceId),
+    sourceExists: (sourceId: string) => ipcRenderer.invoke("capture-source-exists", sourceId),
+  },
   downloadModel: (args: any) => ipcRenderer.invoke("download-model", args),
   pauseDownload: (args: any) => ipcRenderer.invoke("pause-download", args),
   getDownloadStatus: (args: any) => ipcRenderer.invoke("get-download-status", args),

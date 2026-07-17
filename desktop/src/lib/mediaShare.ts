@@ -13,7 +13,7 @@
 // both getDisplayMedia and getUserMedia in this app (see electron/main.ts),
 // so re-acquisition never needs a user gesture.
 
-export type ShareStatus = "idle" | "acquiring" | "connecting" | "live" | "reconnecting" | "error";
+export type ShareStatus = "idle" | "acquiring" | "connecting" | "live" | "reconnecting" | "error" | "source_gone";
 
 export interface ShareCallbacks {
   onStatus?: (status: ShareStatus, detail?: string) => void;
@@ -58,15 +58,18 @@ export class MediaShareSession {
   private reconnectAttempt = 0;
   private stopped = true;
   private status: ShareStatus = "idle";
+  /** desktopCapturer id of the exact surface to capture ("screen" kind only). */
+  private sourceId: string | null = null;
   private unsubPower: (() => void) | null = null;
 
   private readonly onOnline = () => { if (!this.stopped) this.ensureConnected(); };
   private readonly onOffline = () => { if (!this.stopped) this.setStatus("reconnecting", "network offline"); };
 
-  constructor(cameraId: string, kind: "screen" | "webcam", cb: ShareCallbacks = {}) {
+  constructor(cameraId: string, kind: "screen" | "webcam", cb: ShareCallbacks = {}, sourceId?: string) {
     this.cameraId = cameraId;
     this.kind = kind;
     this.cb = cb;
+    this.sourceId = sourceId ?? null;
   }
 
   getStream(): MediaStream | null { return this.stream; }
@@ -116,9 +119,21 @@ export class MediaShareSession {
     this.setStatus("acquiring");
     try {
       const constraints: MediaStreamConstraints = { video: { width: 960, height: 540, frameRate: 10 } };
-      const stream = this.kind === "screen"
-        ? await navigator.mediaDevices.getDisplayMedia(constraints)
-        : await navigator.mediaDevices.getUserMedia(constraints);
+      let stream: MediaStream;
+      if (this.kind === "screen") {
+        if (!this.sourceId) {
+          // Refuse rather than let the main process fall back to a surface the
+          // operator never chose. A share with no pick is a bug, not a default.
+          throw new Error("no capture source selected");
+        }
+        // Tell main which source this very next getDisplayMedia call means.
+        // The two are ordered, not raced: setSource resolves over IPC before
+        // getDisplayMedia is issued, and the main handler reads it synchronously.
+        await window.camai.capture.setSource(this.sourceId);
+        stream = await navigator.mediaDevices.getDisplayMedia(constraints);
+      } else {
+        stream = await navigator.mediaDevices.getUserMedia(constraints);
+      }
 
       if (this.stopped) {
         stream.getTracks().forEach((t) => t.stop());
@@ -129,11 +144,17 @@ export class MediaShareSession {
       this.cb.onStream?.(stream);
 
       const track = stream.getVideoTracks()[0];
+      // Fires when the shared window closes, or the operator hits Chromium's
+      // own "Stop sharing". The former is unrecoverable for this source.
       track.onended = () => {
         if (this.stopped) return;
         this.stream = null;
         this.cb.onStream?.(null);
-        this.scheduleStreamReacquire();
+        void this.sourceIsGone().then((gone) => {
+          if (this.stopped) return;
+          if (gone) this.setStatus("source_gone", "Selected source is no longer available.");
+          else this.scheduleStreamReacquire();
+        });
       };
 
       if (!this.video) {
@@ -154,8 +175,27 @@ export class MediaShareSession {
         this.setStatus(this.ws?.readyState === WebSocket.OPEN ? "live" : "connecting");
       }
     } catch (err) {
+      // A window that has been closed can never be re-acquired, so retrying it
+      // on a timer forever just burns CPU and leaves the operator staring at
+      // "reconnecting". Distinguish "gone for good" from a transient failure
+      // and make the dead case terminal + nameable.
+      if (await this.sourceIsGone()) {
+        this.setStatus("source_gone", "Selected source is no longer available.");
+        return;
+      }
       this.setStatus("error", err instanceof Error ? err.message : "failed to acquire media");
       this.scheduleStreamReacquire();
+    }
+  }
+
+  /** True only when we're capturing a specific surface and it has vanished. */
+  private async sourceIsGone(): Promise<boolean> {
+    if (this.kind !== "screen" || !this.sourceId) return false;
+    try {
+      const { exists } = await window.camai.capture.sourceExists(this.sourceId);
+      return !exists;
+    } catch {
+      return false; // can't prove it's gone — treat as transient
     }
   }
 

@@ -10,9 +10,10 @@ from uuid import uuid4
 from scipy.optimize import linear_sum_assignment
 
 from app.ai.backend import EngineBackend
+from app.ai import face as face_detect
 from app.storage import insert_alert, insert_history_record
 from app.recorder import CCTVRecorder
-from app.analytics import CameraAnalytics, VEHICLE_CLASSES, _object_category, _point_in_zone_shape
+from app.analytics import CameraAnalytics, VEHICLE_CLASSES, _object_category, _point_in_zone_shape, PROFILE_CLASSES
 from app.config import RECORDINGS_DIR
 from app.gpu_monitor import get_gpu_usage
 
@@ -1328,6 +1329,56 @@ class PipelineCoordinator:
                 })
                 masks.append([])
 
+            # ── Face pass: a SECOND model, and the only module here whose
+            # toggle actually saves inference time when off ────────────────
+            # yolox emits every COCO class in one forward pass, so switching
+            # "vehicles" off saves nothing. YuNet is a separate network, so this
+            # block is the real thing: enabled -> ~35ms, disabled -> 0ms, never
+            # loaded. Runs on person crops (measured ~2x faster and +25% recall
+            # vs the whole frame — see app/ai/face.py). Must land in
+            # `detections` before analytics.update(), because analytics.py's
+            # face_detection loop matches on det["class"] == "face"; that loop
+            # has existed since the feature shipped and has never once fired.
+            face_cfg = (self.profile_features or {}).get("face_detection", {})
+            # Gate on the profile too, not just the toggle. Measured: a traffic
+            # camera with face_detection left on burned 21.6ms/frame running
+            # YuNet and then had every face thrown away by the profile filter
+            # below (traffic reports vehicles only) — pure waste, invisible in
+            # the output. A profile that cannot report faces must not pay for
+            # detecting them.
+            _profile_wants_faces = "face" in (PROFILE_CLASSES.get(self.zone_profile) or {"face"})
+            t_face0 = time.perf_counter()
+            if face_cfg.get("enabled") and _profile_wants_faces:
+                fd = face_detect.get_detector(float(face_cfg.get("confidence", 0.6)))
+                if fd is not None:
+                    person_boxes = [d["bbox"] for d in detections if d.get("class") == "person"]
+                    faces = fd.detect_in_persons(frame, person_boxes)
+                    for fdet in faces:
+                        detections.append(fdet)
+                        # masks stays index-parallel with detections (see the
+                        # coasting block above); a face has no mask.
+                        masks.append([])
+                    if fd.last_error:
+                        self._stage_errors["face"] = fd.last_error
+                        fd.last_error = None
+            t_face = (time.perf_counter() - t_face0) * 1000
+
+            # ── Apply the zone profile to what this camera reports ──────────
+            # Must happen here, not only inside analytics.update(): that method
+            # rebinds its own local `detections`, which never affected the list
+            # the client_dets below are built from. The result was that a
+            # traffic-profile camera still shipped person/handbag boxes to the
+            # overlay while analytics quietly ignored them — the profile looked
+            # like a UI switch because, downstream of analytics, it was one.
+            # masks is index-parallel with detections and must be narrowed with it.
+            _allowed = PROFILE_CLASSES.get(self.zone_profile)
+            if _allowed and detections:
+                _keep = [i for i, d in enumerate(detections) if d.get("class") in _allowed]
+                if len(_keep) != len(detections):
+                    if len(masks) == len(detections):
+                        masks = [masks[i] for i in _keep]
+                    detections = [detections[i] for i in _keep]
+
             # ── Rule engine + analytics: MUST receive absolute pixel coords ──
             # bbox is already the tracker's smoothed position; analytics.update()
             # only adds det["speed"] and drives zone/line/dwell logic from it.
@@ -1414,6 +1465,9 @@ class PipelineCoordinator:
                 "crowd_stats":    crowd_stats,
                 "parking_stats":  parking_stats,
                 "trk_lat":        trk_lat,
+                # Carried separately from trk_lat so the face module's cost is
+                # attributable rather than buried in "tracking".
+                "t_face":         t_face,
             })
 
     # -----------------------------------------------------------------------
@@ -1508,6 +1562,9 @@ class PipelineCoordinator:
                 "decode_latency":     round(data["dec_lat"],  1),
                 "preprocess_latency": round(data["t_pre"],    1),
                 "inference_latency":  round(data["t_inf"],    1),
+                # 0.0 whenever face_detection is off — makes the module's real
+                # cost visible instead of it hiding inside total_latency.
+                "face_latency":       round(data.get("t_face", 0.0), 1),
                 "postprocess_latency":round(data["t_post"],   1),
                 "tracking_latency":   round(data["trk_lat"],  1),
                 "rendering_latency":  round(tel_lat,           1),

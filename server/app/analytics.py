@@ -25,6 +25,53 @@ def _object_category(class_name: str) -> str:
         return "person"
     return "other"
 
+
+# --- Zone Profiles ---------------------------------------------------------
+#
+# What a profile actually IS, mechanically: the set of classes the camera
+# reports. This is what makes "Traffic mode" more than a UI switch — a traffic
+# camera stops reporting handbags, a security camera stops reporting buses, and
+# the operator's overlay, counts and alerts all narrow accordingly.
+#
+# What it is NOT: an inference saving. yolox_tiny emits every class in
+# COCO_CLASS_MAP in a single forward pass, so excluding "bus" costs the same as
+# including it. The one module with its own model — and therefore a real
+# on/off cost — is face detection (app/ai/face.py, ~35ms when on, 0 when off).
+#
+# Every class named here must be producible by something, or the profile
+# advertises a capability that silently never appears:
+#   - "fire"/"smoke" are NOT listed: the colour-threshold code that invented
+#     them was removed (it read concrete as smoke on 100% of frames). No
+#     producer exists until a real model ships.
+#   - "helmet"/"vest"/"no_helmet"/"no_vest" are NOT listed: same reason — the
+#     HSV heuristic that invented them (16%/22% false-positive) was removed.
+#   - "dog"/"cat"/"bear"/"gloves"/"shoes" are NOT listed: never in
+#     COCO_CLASS_MAP, so the detector cannot emit them.
+#   - "face" IS listed for security and factory: YuNet genuinely produces it.
+PROFILE_CLASSES = {
+    "traffic": set(VEHICLE_CLASSES) | INFRASTRUCTURE_CLASSES,
+    "security": {"person", "backpack", "handbag", "suitcase", "umbrella", "face"},
+    "factory": {"person", "face"},
+    # "custom" and None mean "operator decides" — no profile-level narrowing.
+}
+
+
+def filter_by_profile(detections, zone_profile):
+    """Narrow detections to the classes a profile reports.
+
+    Must be applied by the pipeline BEFORE building client_dets, not only
+    inside CameraAnalytics.update(). update() rebinds its local `detections`
+    name, which never mutated the caller's list — so for the profile's entire
+    existence the filter gated analytics' own zone/line logic while the overlay
+    and telemetry still showed every class. Verified: a traffic-profile camera
+    emitted person and handbag detections to the client.
+    """
+    allowed = PROFILE_CLASSES.get(zone_profile)
+    if not allowed:
+        return detections
+    return [d for d in detections if d.get("class") in allowed]
+
+
 # --- Geometry Utilities ---
 
 def ccw(A, B, C):
@@ -220,75 +267,6 @@ class _SpeedKalman1D:
         return self.value
 
 
-def _detect_ppe_hsv(frame, bbox, frame_w, frame_h):
-    """
-    HSV color segmentation on person crops to check for hard-hats and high-vis vests.
-    - Head area: top 18% of person bounding box.
-    - Torso area: 18% to 55% of person bounding box.
-    """
-    x1 = max(0, int(bbox["x1"]))
-    y1 = max(0, int(bbox["y1"]))
-    x2 = min(frame_w - 1, int(bbox["x2"]))
-    y2 = min(frame_h - 1, int(bbox["y2"]))
-    
-    h = y2 - y1
-    w = x2 - x1
-    if h <= 10 or w <= 10:
-        return False, False
-        
-    person_crop = frame[y1:y2, x1:x2]
-    if person_crop.size == 0:
-        return False, False
-        
-    hsv = cv2.cvtColor(person_crop, cv2.COLOR_BGR2HSV)
-    
-    # 1. Helmet check (top 18% of crop)
-    head_h = int(h * 0.18)
-    has_helmet = False
-    if head_h > 0:
-        head_crop = hsv[0:head_h, :]
-        if head_crop.size > 0:
-            total_head = head_crop.shape[0] * head_crop.shape[1]
-            
-            # Common helmet colors
-            mask_yellow = cv2.inRange(head_crop, np.array([15, 80, 100]), np.array([35, 255, 255]))
-            mask_blue = cv2.inRange(head_crop, np.array([90, 70, 80]), np.array([130, 255, 255]))
-            mask_red1 = cv2.inRange(head_crop, np.array([0, 80, 80]), np.array([10, 255, 255]))
-            mask_red2 = cv2.inRange(head_crop, np.array([170, 80, 80]), np.array([180, 255, 255]))
-            mask_white = cv2.inRange(head_crop, np.array([0, 0, 190]), np.array([180, 50, 255]))
-            
-            helmet_pixels = (
-                cv2.countNonZero(mask_yellow) +
-                cv2.countNonZero(mask_blue) +
-                cv2.countNonZero(mask_red1) +
-                cv2.countNonZero(mask_red2) +
-                cv2.countNonZero(mask_white)
-            )
-            has_helmet = (helmet_pixels / total_head) > 0.12
-            
-    # 2. Vest check (18% to 55% of crop)
-    torso_start = head_h
-    torso_end = int(h * 0.55)
-    has_vest = False
-    if torso_end > torso_start:
-        torso_crop = hsv[torso_start:torso_end, :]
-        if torso_crop.size > 0:
-            total_torso = torso_crop.shape[0] * torso_crop.shape[1]
-            
-            # Neon green / high-vis orange
-            mask_neon = cv2.inRange(torso_crop, np.array([30, 60, 80]), np.array([85, 255, 255]))
-            mask_orange1 = cv2.inRange(torso_crop, np.array([0, 80, 100]), np.array([25, 255, 255]))
-            mask_orange2 = cv2.inRange(torso_crop, np.array([155, 80, 100]), np.array([180, 255, 255]))
-            
-            vest_pixels = (
-                cv2.countNonZero(mask_neon) +
-                cv2.countNonZero(mask_orange1) +
-                cv2.countNonZero(mask_orange2)
-            )
-            has_vest = (vest_pixels / total_torso) > 0.15
-            
-    return has_helmet, has_vest
-
 
 # --- Analytics Engines ---
 
@@ -355,6 +333,12 @@ class CameraAnalytics:
         
         # Alert timestamps to prevent spam: {alert_key: last_trigger_time}
         self.alert_cooldowns = {}
+
+        # Features an operator has switched on that this build cannot actually
+        # deliver (no model ships for them). Warned once per camera rather than
+        # per frame — the point is that the gap is visible in the log, not that
+        # it floods it.
+        self._warned_unavailable = {}
         self.cooldown_period = 3.0
         
         # --- Advanced Zone & Line Metrics Persistence ---
@@ -418,109 +402,108 @@ class CameraAnalytics:
                     else:
                         schedule_active = (current_time >= start_t) or (current_time <= end_t)
 
-        # 2. Dynamic Class Filtering per Profile (applied to incoming YOLO detections)
-        if zone_profile == "traffic":
-            detections = [d for d in detections if d["class"] in VEHICLE_CLASSES]
-        elif zone_profile == "security":
-            sec_classes = {"person", "backpack", "handbag", "suitcase", "fire", "smoke", "face", "dog", "cat", "bear"}
-            detections = [d for d in detections if d["class"] in sec_classes]
-        elif zone_profile == "factory":
-            fac_classes = {"person", "helmet", "vest", "gloves", "shoes", "no_helmet", "no_vest"}
-            detections = [d for d in detections if d["class"] in fac_classes]
+        # 2. Dynamic Class Filtering per Profile — see filter_by_profile().
+        # Applied defensively here as well as in the pipeline, because this
+        # method is the one that drives zone/line/alert logic and must never
+        # see a class the profile excludes even if a caller forgets.
+        detections = filter_by_profile(detections, zone_profile)
 
-        # 3. Enhance detections with Face and PPE heuristics
-        enhanced_detections = []
-        for det in detections:
-            enhanced_detections.append(det)
-            
-            # Face Detection Heuristic (Security Profile)
-            if zone_profile == "security" and features.get("face_detection", {}).get("enabled"):
-                if det["class"] == "person":
-                    bbox = det["bbox"]
-                    x1, y1, x2, y2 = bbox["x1"], bbox["y1"], bbox["x2"], bbox["y2"]
-                    h = y2 - y1
-                    face_y2 = y1 + int(h * 0.18)
-                    enhanced_detections.append({
-                        "class": "face",
-                        "confidence": det.get("confidence", 0.9),
-                        "bbox": {"x1": x1, "y1": y1, "x2": x2, "y2": face_y2}
-                    })
-                    
-            # PPE Detection Heuristic (Factory Profile)
-            if zone_profile == "factory" and features.get("ppe_detection", {}).get("enabled") and frame is not None:
-                if det["class"] == "person":
-                    bbox = det["bbox"]
-                    has_helmet, has_vest = _detect_ppe_hsv(frame, bbox, frame_w, frame_h)
-                    
-                    x1, y1, x2, y2 = bbox["x1"], bbox["y1"], bbox["x2"], bbox["y2"]
-                    h = y2 - y1
-                    
-                    # Helmet region
-                    helmet_y2 = y1 + int(h * 0.18)
-                    if has_helmet:
-                        enhanced_detections.append({
-                            "class": "helmet",
-                            "confidence": 0.95,
-                            "bbox": {"x1": x1, "y1": y1, "x2": x2, "y2": helmet_y2}
-                        })
-                    else:
-                        enhanced_detections.append({
-                            "class": "no_helmet",
-                            "confidence": 0.95,
-                            "bbox": {"x1": x1, "y1": y1, "x2": x2, "y2": helmet_y2}
-                        })
-                        
-                    # Vest region
-                    vest_y1 = y1 + int(h * 0.18)
-                    vest_y2 = y1 + int(h * 0.55)
-                    if has_vest:
-                        enhanced_detections.append({
-                            "class": "vest",
-                            "confidence": 0.95,
-                            "bbox": {"x1": x1, "y1": vest_y1, "x2": x2, "y2": vest_y2}
-                        })
-                    else:
-                        enhanced_detections.append({
-                            "class": "no_vest",
-                            "confidence": 0.95,
-                            "bbox": {"x1": x1, "y1": vest_y1, "x2": x2, "y2": vest_y2}
-                        })
-                        
-        detections = enhanced_detections
+        # 3. Enhance detections with PPE heuristics
+        #
+        # The "Face Detection Heuristic" that used to live here has been REMOVED.
+        # It did not detect faces: for every person box it emitted a "face"
+        # covering the top 18% of that box, carrying the *person's* confidence
+        # (typically 0.9). It never looked at a single pixel of the face region,
+        # so a person facing away, wearing a helmet, or too far to resolve still
+        # produced "Face Detected: Human facial features recognized" at 0.90.
+        #
+        # Real face detection now runs in the pipeline (app/ai/face.py, YuNet /
+        # MIT) before analytics.update() is called, and appends genuine
+        # class=="face" detections with genuine scores. The alert loop below is
+        # unchanged — it just finally has real input. Re-adding a geometric
+        # guess here would double every face and undo that.
+        # The PPE heuristic that used to live here has been REMOVED too.
+        #
+        # _detect_ppe_hsv() colour-thresholded the top 18% of a person box for
+        # yellow/blue/white ("helmet") and the 18-55% band for hi-vis ("vest"),
+        # then emitted helmet/no_helmet/vest/no_vest at a HARDCODED confidence
+        # of 0.95 — a number with nothing behind it, since the function returns
+        # only a bool.
+        #
+        # Measured against dtest/bus_pan.mp4, on two pedestrians wearing neither
+        # a helmet nor a vest (240 person-checks over 120 frames):
+        #
+        #     "helmet" : 39/240  (16%)  — every one false
+        #     "vest"   : 53/240  (22%)  — every one false
+        #
+        # It also flickers frame to frame, so a single worker alternates between
+        # helmet and no_helmet, spraying PPE-violation alerts at random. Blonde
+        # hair, a blue cap, or sky behind the head reads as a hard hat; a bare
+        # head in shadow reads as a violation. For a compliance feature — where
+        # the output is "this worker is unsafe" — inventing both the finding and
+        # its confidence is worse than reporting nothing.
+        #
+        # Real PPE detection needs a trained helmet/vest model. COCO (and so
+        # yolox_tiny) has no such class. The same licence constraint as
+        # fire/smoke applies: most public PPE models are YOLOv5/v8 (AGPL-3.0).
+        if frame is not None and zone_profile == "factory":
+            if features.get("ppe_detection", {}).get("enabled") and not self._warned_unavailable.get("ppe_detection"):
+                self._warned_unavailable["ppe_detection"] = True
+                print(
+                    "[analytics] ppe_detection is enabled for this camera but no PPE model "
+                    "ships with this build — it will not produce detections. The previous "
+                    "colour-threshold implementation was removed: on people wearing no PPE "
+                    "it invented helmets on 16% of checks and vests on 22%, at a hardcoded "
+                    "confidence of 0.95.",
+                    flush=True,
+                )
 
-        # 4. Fire & Smoke detection (Security / Factory)
+        # 4. Fire & Smoke detection (Security / Factory) — REMOVED, see below.
+        #
+        # What was here: an HSV colour threshold over a 160x120 downscale.
+        # "Fire" was >0.5% of pixels being bright orange/red; "smoke" was >2% of
+        # pixels being low-saturation and mid-bright — i.e. grey. Both then
+        # appended a detection with a HARDCODED confidence (0.9 / 0.85) and a
+        # bbox covering the entire frame, which fired
+        # "CRITICAL FIRE WARNING" / "Smoke Alarm: Smoke plume detected".
+        #
+        # Measured against dtest/bus_pan.mp4 — ordinary street footage with no
+        # fire and no smoke anywhere in it — the shipped thresholds produced:
+        #
+        #     fire  :   0/200 frames
+        #     smoke : 200/200 frames   <- 100% false-positive rate
+        #
+        # The smoke mask latched onto concrete pavement, a building facade and a
+        # beige coat: 2402 px against a 384 px threshold, 6x over. Anything grey
+        # is "smoke"; anything red is "fire". A red shirt, a sunset, a traffic
+        # cone or a concrete floor all trip it.
+        #
+        # This is deliberately deleted rather than retuned. No threshold over
+        # hue separates smoke from concrete — the information isn't in the
+        # colour histogram, which is why real fire/smoke detection uses a
+        # trained model. A safety alarm that fires on every frame is worse than
+        # no alarm: it trains the operator to ignore it, so the one real fire is
+        # missed too.
+        #
+        # Restoring these features needs a real detector. The licence matters as
+        # much as the accuracy: nearly every public fire/smoke model is
+        # YOLOv5/YOLOv8 derived and therefore AGPL-3.0, which would
+        # re-contaminate a binary this product deliberately cleaned (see
+        # LICENSING.md, and app/ai/face.py for the MIT/Apache path taken for
+        # faces). Until such a model ships, fire_detection / smoke_detection
+        # produce nothing and say so, rather than crying wolf.
         if frame is not None and zone_profile in ("security", "factory"):
-            hsv_fire = False
-            hsv_smoke = False
-            
-            small_frame = cv2.resize(frame, (160, 120))
-            hsv_img = cv2.cvtColor(small_frame, cv2.COLOR_BGR2HSV)
-            
-            if features.get("fire_detection", {}).get("enabled"):
-                mask1 = cv2.inRange(hsv_img, np.array([0, 100, 180]), np.array([20, 255, 255]))
-                mask2 = cv2.inRange(hsv_img, np.array([160, 100, 180]), np.array([180, 255, 255]))
-                fire_pixels = cv2.countNonZero(mask1) + cv2.countNonZero(mask2)
-                if fire_pixels > int(0.005 * 160 * 120):
-                    hsv_fire = True
-                    
-            if features.get("smoke_detection", {}).get("enabled"):
-                mask_smoke = cv2.inRange(hsv_img, np.array([0, 0, 120]), np.array([180, 50, 220]))
-                smoke_pixels = cv2.countNonZero(mask_smoke)
-                if smoke_pixels > int(0.02 * 160 * 120):
-                    hsv_smoke = True
-                    
-            if hsv_fire:
-                detections.append({
-                    "class": "fire",
-                    "confidence": 0.9,
-                    "bbox": {"x1": 10, "y1": 10, "x2": frame_w - 10, "y2": frame_h - 10}
-                })
-            if hsv_smoke:
-                detections.append({
-                    "class": "smoke",
-                    "confidence": 0.85,
-                    "bbox": {"x1": 10, "y1": 10, "x2": frame_w - 10, "y2": frame_h - 10}
-                })
+            for _feat in ("fire_detection", "smoke_detection"):
+                if features.get(_feat, {}).get("enabled") and not self._warned_unavailable.get(_feat):
+                    self._warned_unavailable[_feat] = True
+                    print(
+                        f"[analytics] {_feat} is enabled for this camera but no "
+                        f"{_feat.split('_')[0]} model ships with this build — it will not "
+                        f"produce detections. The previous colour-threshold implementation "
+                        f"was removed: it false-alarmed on 100% of frames of ordinary "
+                        f"footage (concrete read as smoke).",
+                        flush=True,
+                    )
 
         # Save schedule state for later gating of standard alerts
         self._schedule_active = schedule_active
