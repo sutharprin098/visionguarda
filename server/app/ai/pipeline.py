@@ -26,6 +26,55 @@ os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = (
 )
 
 
+# ---------------------------------------------------------------------------
+# Detection confidence floor (org setting `ai.confidence`)
+# ---------------------------------------------------------------------------
+# Process-wide, not per-camera, for the same reason the model is: the desktop
+# syncs one org-level `ai.confidence` value (portal Settings -> settings table),
+# and there is no per-camera concept of it anywhere in the schema.
+#
+# This used to be the literal 0.25 hardcoded in _ai_loop. The portal has written
+# `ai.confidence` to the DB since 0002_cameras_gis_ai.sql and NOTHING ever read
+# it — an admin moving detection sensitivity changed a row and nothing else, with
+# no error to show for it. The value below is the default only until the desktop
+# pushes the org's actual setting (POST /api/detection/confidence).
+DEFAULT_CONFIDENCE = 0.25
+
+# Bounds, enforced on the way in so a bad value can't blind every camera:
+# below ~0.10 the detector emits mostly noise, above ~0.90 it reports almost
+# nothing. An operator who drags the slider to an extreme gets the extreme's
+# clamped edge, never a dead pipeline.
+MIN_CONFIDENCE = 0.10
+MAX_CONFIDENCE = 0.90
+
+# In a crowded scene the threshold drops so half-occluded objects still register.
+# Expressed as a RATIO of the operator's setting rather than the old hardcoded
+# 0.15, so their choice keeps its meaning at both ends: 0.6 reproduces the
+# previous 0.25 -> 0.15 exactly, and a stricter setting stays proportionally
+# stricter when the scene fills up instead of collapsing back to a fixed floor.
+CROWDED_CONF_RATIO = 0.6
+CROWDED_TRACK_COUNT = 5
+
+_confidence_lock = threading.Lock()
+_detection_confidence = DEFAULT_CONFIDENCE
+
+
+def set_detection_confidence(value: float) -> float:
+    """Set the process-wide detection floor. Returns the clamped value actually
+    applied, so the caller can report what took effect rather than what it asked
+    for. Every camera's next AI cycle picks it up — no restart, no re-register."""
+    global _detection_confidence
+    v = max(MIN_CONFIDENCE, min(MAX_CONFIDENCE, float(value)))
+    with _confidence_lock:
+        _detection_confidence = v
+    return v
+
+
+def get_detection_confidence() -> float:
+    with _confidence_lock:
+        return _detection_confidence
+
+
 def _vehicle_classes_compatible(a: str, b: str) -> bool:
     """True if a and b are both vehicle-family classes (car/bus/truck/
     motorcycle/bicycle) -- used to let track-continuation matching survive
@@ -474,6 +523,133 @@ class ByteTracker:
                     }
                 })
         return out
+
+
+COAST_RENDER_FRAMES = 5
+
+
+def resolve_emitted_detections(tracker, tracks_raw, detections, masks,
+                               coast_render_frames=COAST_RENDER_FRAMES):
+    """Decide the FINAL set of boxes for one frame: exactly one per object.
+
+    Returns (detections, masks), index-parallel, each detection carrying a
+    track_id and a tracking_status of "tracked" or "coasting".
+
+    Emission is TRACKER-AUTHORITATIVE. The tracker is the only component that
+    decides object identity, so it is the only source of boxes here.
+
+    This function replaces a block that emitted the UNION of (raw detections)
+    and (coasting tracks), which is what put TWO boxes on a single object:
+
+      The IoU>0.3 pass below is a SECOND, independent association, run after
+      the tracker already did its own (Hungarian + appearance + class gates).
+      The two disagree routinely — a fast object's Kalman box can sit under
+      0.3 IoU from its own raw box, and the tracker's gates can reject a match
+      this IoU pass would happily make. So whenever the tracker dropped a frame
+      for object O while the detector still fired on it:
+
+        * O's raw detection survived unmatched, with NO track_id, and
+          defaulted to tracking_status="tracked"        -> SOLID box
+        * O's confirmed track was unmatched, time_since_update>=1, so the
+          coast loop drew its Kalman prediction          -> DASHED box
+
+      Two boxes on one object — one solid, one dashed — persisting up to
+      coast_render_frames at a time and re-triggering constantly.
+
+    Those unmatched raw detections were also why speed never appeared on them:
+    with no track_id, analytics.update() skips a detection entirely (it is
+    keyed by track), so they went out with no speed at all. Every box emitted
+    here carries a track_id, so every box is eligible for speed and dwell.
+
+    Faces are deliberately NOT handled here — they come from a separate model
+    (YuNet) with no tracker, and are appended by the caller afterwards.
+    """
+    tracks_by_id = {trk["track_id"]: trk for trk in tracks_raw}
+
+    # A track may be claimed by AT MOST ONE detection, resolved greedily by
+    # descending IoU: the detection that fits a track best wins it. This is
+    # what stops an NMS near-duplicate (or a partially-occluded person split
+    # into two boxes) from having its bbox rewritten to the same track's box
+    # and emitting two byte-identical detections.
+    pairs = []  # (iou, det_idx, track_id)
+    for di, det in enumerate(detections):
+        bd = [det["bbox"]["x1"], det["bbox"]["y1"],
+              det["bbox"]["x2"], det["bbox"]["y2"]]
+        for trk in tracks_raw:
+            bt = [trk["bbox"]["x1"], trk["bbox"]["y1"],
+                  trk["bbox"]["x2"], trk["bbox"]["y2"]]
+            iou = tracker._compute_iou(bd, bt)
+            if iou > 0.3:
+                pairs.append((iou, di, trk["track_id"]))
+    pairs.sort(key=lambda p: p[0], reverse=True)
+
+    det_to_track = {}
+    matched_track_ids = set()
+    for iou, di, tid in pairs:
+        if di in det_to_track or tid in matched_track_ids:
+            continue
+        det_to_track[di] = tid
+        matched_track_ids.add(tid)
+
+    out_dets, out_masks = [], []
+    masks_parallel = len(masks) == len(detections)
+    track_to_det = {tid: di for di, tid in det_to_track.items()}
+
+    # One box per live track. A detection that claimed a track contributes its
+    # class and mask; a track that no detection claimed still emits from its
+    # own Kalman state, so a fast mover this IoU pass failed to re-associate
+    # can no longer vanish from the overlay.
+    for trk in tracks_raw:
+        tid = trk["track_id"]
+        di = track_to_det.get(tid)
+        if di is not None:
+            det = detections[di]
+            det["track_id"] = tid
+            det["dwell_time"] = trk["dwell_time"]
+            det["bbox"] = dict(trk["bbox"])
+            det["confidence"] = trk["confidence"]
+            det["tracking_status"] = "tracked"
+            out_dets.append(det)
+            out_masks.append(masks[di] if masks_parallel else [])
+        else:
+            out_dets.append({
+                "class": trk["class"],
+                "confidence": trk["confidence"],
+                "track_id": tid,
+                "dwell_time": trk["dwell_time"],
+                "bbox": dict(trk["bbox"]),
+                "tracking_status": "tracked",
+            })
+            out_masks.append([])
+
+    # Coasting: a confirmed track the tracker is still predicting through a
+    # brief missed detection (occlusion, motion blur, one bad frame). Emit the
+    # prediction so the object never loses its box mid-occlusion — "automatic
+    # recovery after missed detections" requires the box to keep existing (and
+    # moving) through the gap rather than blinking out and back.
+    #
+    # tracks_by_id (everything emitted above) is the exclusion set, so a track
+    # can never be emitted twice. tracks_raw only contains time_since_update==0
+    # tracks and this loop only takes time_since_update>0 ones, so the sets are
+    # already disjoint; the guard defends the invariant rather than relying on
+    # it holding forever.
+    for t in tracker.tracks:
+        if t.track_id in tracks_by_id or t.state != "confirmed":
+            continue
+        if not (0 < t.time_since_update <= coast_render_frames):
+            continue
+        cbbox = t.get_bbox()
+        out_dets.append({
+            "class": t.class_name,
+            "confidence": round(float(t.confidence), 2),
+            "track_id": t.track_id,
+            "dwell_time": round(time.time() - t.first_seen, 1),
+            "bbox": {"x1": cbbox[0], "y1": cbbox[1], "x2": cbbox[2], "y2": cbbox[3]},
+            "tracking_status": "coasting",
+        })
+        out_masks.append([])
+
+    return out_dets, out_masks
 
 
 # ---------------------------------------------------------------------------
@@ -1148,13 +1324,18 @@ class PipelineCoordinator:
             detections:     list = []
             masks_polygons: list = []
             t_pre = t_inf = t_post = 0.0
-            conf_thresh = 0.25
+            # Read once per cycle, not once per process: set_detection_confidence
+            # can land between two cycles, and this is the read that makes an
+            # admin's change take effect on the very next frame.
+            base_conf   = get_detection_confidence()
+            conf_thresh = base_conf
             iou_thresh  = 0.45
 
             if should_infer:
                 n_tracks    = len(self.tracker.tracks)
-                conf_thresh = 0.15 if n_tracks > 5 else 0.25
-                iou_thresh  = 0.65 if n_tracks > 5 else 0.45
+                crowded     = n_tracks > CROWDED_TRACK_COUNT
+                conf_thresh = round(base_conf * CROWDED_CONF_RATIO, 3) if crowded else base_conf
+                iou_thresh  = 0.65 if crowded else 0.45
 
                 roi = self._get_roi(orig_h, orig_w)
                 if roi:
@@ -1311,100 +1492,9 @@ class PipelineCoordinator:
             # Update shared counter so _ai_loop can decide whether to keep inferring
             self._n_active_tracks = len(self.tracker.tracks)
 
-            # ── Assign track IDs (+ dwell time) back to YOLO detections via IoU,
-            # and hand rendering over to the tracker's own Kalman-filtered
-            # position instead of the raw per-frame detector box. The raw box
-            # jitters frame to frame (detector noise) and was previously run
-            # through a *second*, independent EMA smoothing pass in
-            # analytics.py — two uncoordinated smoothers stacked in series is
-            # exactly what produces a box that visibly trails a fast-moving
-            # vehicle instead of staying locked to it. The tracker already
-            # solved this (constant-velocity Kalman model, updated every real
-            # detection) — Module 4 should just use that state directly. ──
-            # A track may be claimed by AT MOST ONE detection.
-            #
-            # This used to be a per-detection argmax with no exclusivity: each
-            # detection independently picked its best track, so when two raw
-            # boxes overlapped the same object — an NMS near-duplicate, or a
-            # partially-occluded person split into two — both matched the same
-            # track and both had their bbox REWRITTEN to that track's box. The
-            # client then received two byte-identical detections and the overlay
-            # drew one box exactly on top of the other. Reproduced against the
-            # real ByteTracker: two dets in, both emitted as track_id=1 with
-            # bbox (100,100)-(200,300).
-            #
-            # Resolved greedily by descending IoU, which is enough here (a
-            # handful of boxes per frame) and, unlike the old loop, is symmetric:
-            # the detection that fits a track best wins it, and the losers are
-            # dropped rather than emitted as phantom copies. The tracker itself
-            # already decided they are one object — it returned one track for
-            # them — so keeping the loser would contradict it.
-            tracks_by_id = {trk["track_id"]: trk for trk in tracks_raw}
-            matched_track_ids = set()
-
-            pairs = []  # (iou, det_idx, track_id)
-            for di, det in enumerate(detections):
-                bd = [det["bbox"]["x1"], det["bbox"]["y1"],
-                      det["bbox"]["x2"], det["bbox"]["y2"]]
-                for trk in tracks_raw:
-                    bt = [trk["bbox"]["x1"], trk["bbox"]["y1"],
-                          trk["bbox"]["x2"], trk["bbox"]["y2"]]
-                    iou = self.tracker._compute_iou(bd, bt)
-                    if iou > 0.3:
-                        pairs.append((iou, di, trk["track_id"]))
-            pairs.sort(key=lambda p: p[0], reverse=True)
-
-            det_to_track = {}
-            for iou, di, tid in pairs:
-                if di in det_to_track or tid in matched_track_ids:
-                    continue
-                det_to_track[di] = tid
-                matched_track_ids.add(tid)
-
-            # Detections that overlapped an already-claimed track are duplicate
-            # views of that same object; drop them (with their parallel mask).
-            _dup_idx = {
-                di for di, det in enumerate(detections)
-                if di not in det_to_track and any(p[1] == di for p in pairs)
-            }
-            for di, tid in det_to_track.items():
-                det = detections[di]
-                det["track_id"] = tid
-                det["dwell_time"] = tracks_by_id[tid]["dwell_time"]
-                det["bbox"] = dict(tracks_by_id[tid]["bbox"])
-                det["confidence"] = tracks_by_id[tid]["confidence"]
-                det["tracking_status"] = "tracked"
-            if _dup_idx:
-                _keep = [i for i in range(len(detections)) if i not in _dup_idx]
-                if len(masks) == len(detections):
-                    masks = [masks[i] for i in _keep]
-                detections = [detections[i] for i in _keep]
-
-            # ── Coasting tracks: a confirmed track the tracker is still
-            # predicting through a brief missed detection (occlusion, motion
-            # blur, one bad frame) but that didn't match a raw detection this
-            # frame. Emit its Kalman-predicted box anyway so the vehicle never
-            # simply loses its box mid-occlusion — this is what "automatic
-            # recovery after missed detections" requires: the box has to keep
-            # existing (and moving) through the gap, not disappear and
-            # reappear. Bounded to a short window; beyond that the tracker
-            # itself ages the track out (see ByteTracker.update).
-            COAST_RENDER_FRAMES = 5
-            for t in self.tracker.tracks:
-                if t.track_id in matched_track_ids or t.state != "confirmed":
-                    continue
-                if not (0 < t.time_since_update <= COAST_RENDER_FRAMES):
-                    continue
-                cbbox = t.get_bbox()
-                detections.append({
-                    "class": t.class_name,
-                    "confidence": round(float(t.confidence), 2),
-                    "track_id": t.track_id,
-                    "dwell_time": round(time.time() - t.first_seen, 1),
-                    "bbox": {"x1": cbbox[0], "y1": cbbox[1], "x2": cbbox[2], "y2": cbbox[3]},
-                    "tracking_status": "coasting",
-                })
-                masks.append([])
+            detections, masks = resolve_emitted_detections(
+                self.tracker, tracks_raw, detections, masks
+            )
 
             # ── Face pass: a SECOND model, and the only module here whose
             # toggle actually saves inference time when off ────────────────
@@ -1477,6 +1567,57 @@ class PipelineCoordinator:
                 zone_profile=self.zone_profile, profile_features=self.profile_features
             )
 
+            # ── Why speed is/isn't a number, decided once per frame ──────────
+            # "Speed Estimation" is a per-camera zone-profile toggle
+            # (desktop/src/lib/zoneProfiles.ts: key "speed_estimation",
+            # defaultEnabled: true) that, until now, NOTHING in the engine ever
+            # read — grep for it under server/ and there were zero hits. An
+            # operator could switch it on or off and the engine behaved
+            # identically either way. It now gates the feature for real, and the
+            # reason a camera has no km/h is reported to the client instead of
+            # being left as a silent blank:
+            #
+            #   disabled          — the profile's Speed Estimation toggle is off
+            #   needs_calibration — on, but no usable two-line gate is
+            #                       configured, so no honest km/h exists
+            #   calibrated        — a real gate measured this track
+            #
+            # A gate needs BOTH lines paired via speedPairId AND the true ground
+            # distance in distanceM. Anything less is not calibration, so we
+            # report needs_calibration rather than falling back to the profile's
+            # calibration_m default — guessing the distance would manufacture a
+            # plausible-looking km/h out of thin air, which is the exact failure
+            # this whole change exists to remove.
+            # Absent key == not enabled, same convention as _wants_faces(). A
+            # profile that does not declare speed_estimation (security, factory)
+            # is not asking for speed, so it must not be nagged to calibrate a
+            # gate it has no use for.
+            _speed_cfg = (self.profile_features or {}).get("speed_estimation", {})
+            _speed_enabled = bool(_speed_cfg.get("enabled"))
+
+            def _speed_for(det):
+                """(speed_kmh|None, status) for one detection.
+
+                Speed is now automatic: analytics derives metres-per-pixel from
+                the detected object's own height (CLASS_HEIGHT_M) and reports an
+                estimate with no operator setup at all. A two-line gate, when one
+                exists, overrides it with a true measurement.
+
+                  calibrated  — measured by a gate; trustworthy enough to act on
+                  estimated   — auto-derived from object size; ~+/-20-30%
+                  unavailable — class has no size prior, or the box is clipped by
+                                the frame edge so its height (and therefore the
+                                scale) would be wrong
+                  disabled    — the camera's Speed Estimation toggle is off
+                """
+                if not _speed_enabled:
+                    return None, "disabled"
+                if det.get("speed") is None:
+                    return None, "unavailable"
+                if det.get("speed_calibrated"):
+                    return det["speed"], "calibrated"
+                return det["speed"], "estimated"
+
             # ── Build normalized client_dets AFTER analytics has smoothed bbox─
             client_dets = []
             people_count = vehicles_count = items_count = other_count = 0
@@ -1490,12 +1631,18 @@ class PipelineCoordinator:
                 vehicles_count += int(category == "vehicle")
                 items_count += int(category == "item")
                 other_count += int(category in ("infrastructure", "other"))
+                # speed is None unless a calibrated two-line gate measured it
+                # (analytics.py). It is sent through as null rather than
+                # coerced to 0.0 — "no measurement" and "measured 0 km/h" are
+                # different facts and the overlay renders them differently.
+                _speed, _speed_status = _speed_for(det)
                 client_dets.append({
                     "class":      det["class"],
                     "confidence": round(float(conf), 2),
                     "track_id":   det.get("track_id"),
-                    "speed":      round(float(det.get("speed", 0.0)), 1),
-                    "speed_calibrated": bool(det.get("speed_calibrated", False)),
+                    "speed":      round(float(_speed), 1) if _speed is not None else None,
+                    "speed_calibrated": _speed_status == "calibrated",
+                    "speed_status": _speed_status,
                     "dwell_time": det.get("dwell_time", 0.0),
                     "tracking_status": det.get("tracking_status", "tracked"),
                     "direction":  det.get("direction", "stationary"),

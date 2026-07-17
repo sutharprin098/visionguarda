@@ -42,6 +42,16 @@ export interface CamaiBridge {
     onLog(cb: (line: string) => void): () => void;
     onStatus(cb: (status: EngineStatus) => void): () => void;
   };
+  /** OS-level window fullscreen. Distinct from the in-app viewer overlay: the
+   *  overlay always fills the app window, this additionally removes the window
+   *  chrome. Fullscreens onto whichever display the window is on. */
+  window: {
+    setFullScreen(value: boolean): Promise<{ ok: boolean; fullscreen: boolean }>;
+    isFullScreen(): Promise<{ ok: boolean; fullscreen: boolean }>;
+    /** Fires when the OS changes fullscreen, including changes we did not ask for. */
+    onFullScreen(cb: (value: boolean) => void): () => void;
+    onResized(cb: (size: { width: number; height: number; fullscreen: boolean }) => void): () => void;
+  };
   onPowerEvent(cb: (evt: "suspend" | "resume" | "lock-screen" | "unlock-screen") => void): () => void;
 }
 

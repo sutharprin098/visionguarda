@@ -4,7 +4,7 @@ import Workspace from "./screens/Workspace";
 import AdminStudio from "./screens/AdminStudio"; // configuration drawings & rule studio
 import { restoreSession } from "./lib/session";
 import { startRealtimeSync, SyncBundle } from "./lib/sync";
-import { resetLocalEngineState } from "./lib/localEngine";
+import { resetLocalEngineState, syncCamerasToLocalEngine } from "./lib/localEngine";
 import { canConfigure } from "./lib/rbac";
 
 type Phase = "booting" | "needs-activation" | "ready";
@@ -41,6 +41,36 @@ export default function App() {
 
     return () => stop?.();
   }, [phase]);
+
+  // Keep the local AI engine's running cameras in step with what's assigned.
+  //
+  // This lived inside Workspace, which is why Admin Studio showed no video. In
+  // the Admin build `showWorkspace` is false (see below), so Workspace never
+  // mounts, so this effect never ran, so the engine was never told a single
+  // camera existed. Admin Studio then pointed an <img> at
+  // /api/cameras/<id>/stream for a camera the engine had never heard of; the
+  // request failed and the browser rendered the tag's alt text — the "small
+  // Live placeholder". The engine itself was online and healthy the whole time,
+  // which is exactly why it read as "the studio is unfinished" rather than as a
+  // broken image.
+  //
+  // Registering cameras with the local engine is an application-level concern,
+  // not a Workspace one: every screen that shows a stream depends on it. Hoisted
+  // here so it runs for whichever screen is up, in either build.
+  //
+  // Interval, not just on bundle change: the engine can still be loading its
+  // model (tens of seconds) when this first fires, and a sync that no-ops
+  // because the engine wasn't reachable yet would otherwise never be retried
+  // until something unrelated refetched the bundle.
+  useEffect(() => {
+    if (phase !== "ready" || !bundle) return;
+    const sync = () => void syncCamerasToLocalEngine(
+      bundle.cameras, bundle.rule_engine_rules || [], bundle.zone_profile_configs || [],
+    );
+    sync();
+    const id = setInterval(sync, 8_000);
+    return () => clearInterval(id);
+  }, [phase, bundle?.cameras, bundle?.rule_engine_rules, bundle?.zone_profile_configs]);
 
   if (phase === "booting" || appType === null) {
     return (

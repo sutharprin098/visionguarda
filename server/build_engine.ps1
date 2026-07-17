@@ -28,9 +28,37 @@ Write-Host "==> Installing engine requirements + PyInstaller"
 & $py -m pip install pyinstaller
 
 Write-Host "==> Freezing engine with PyInstaller"
+# Timestamped BEFORE the freeze so we can prove the exe below is the one this
+# run produced, not a leftover from a previous build.
+$buildStart = Get-Date
+
 & $py -m PyInstaller camai-engine.spec --noconfirm --clean
 
+# NOTE: keep this file pure ASCII. npm runs it via Windows PowerShell 5.1,
+# which reads .ps1 as ANSI when there is no BOM, so a stray non-ASCII character
+# (an em-dash, a curly quote) mangles into garbage and throws a ParserError.
+#
+# $ErrorActionPreference="Stop" does NOT apply to native commands: `&` returns a
+# non-zero exit code without throwing. Without this check a failed (or killed)
+# PyInstaller run fell straight through to the Test-Path below, found the STALE
+# exe from the last successful build, and printed "SUCCESS" - shipping an
+# installer whose engine predates the source changes it was built for. That has
+# already bitten this project once: the AGPL swap was fixed in source on 07-16
+# but the shipped EXE still carried the old engine until 07-17.
+if ($LASTEXITCODE -ne 0) {
+    Write-Error "PyInstaller failed with exit code $LASTEXITCODE. The engine was NOT rebuilt."
+    exit 1
+}
+
 $exe = Join-Path $PSScriptRoot "dist\camai-engine\camai-engine.exe"
+
+# Existence is not freshness. Assert the exe was actually written by THIS run.
+if ((Test-Path $exe) -and ((Get-Item $exe).LastWriteTime -lt $buildStart)) {
+    $written = (Get-Item $exe).LastWriteTime
+    Write-Error "STALE ENGINE: $exe was last written $written, before this build started ($buildStart). PyInstaller produced no new binary - refusing to let a stale engine be packaged."
+    exit 1
+}
+
 if (Test-Path $exe) {
     # Ship the default (Fast tier) detector only — the heavier tiers are
     # fetched/exported on demand via export_models.py. No .pt is copied: the

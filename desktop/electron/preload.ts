@@ -41,6 +41,20 @@ contextBridge.exposeInMainWorld("camai", {
       return () => ipcRenderer.removeListener("engine:status", listener);
     },
   },
+  window: {
+    setFullScreen: (value: boolean) => ipcRenderer.invoke("window-set-fullscreen", value),
+    isFullScreen: () => ipcRenderer.invoke("window-is-fullscreen"),
+    onFullScreen: (cb: (value: boolean) => void) => {
+      const listener = (_evt: any, value: boolean) => cb(value);
+      ipcRenderer.on("window:fullscreen", listener);
+      return () => ipcRenderer.removeListener("window:fullscreen", listener);
+    },
+    onResized: (cb: (size: { width: number; height: number; fullscreen: boolean }) => void) => {
+      const listener = (_evt: any, size: any) => cb(size);
+      ipcRenderer.on("window:resized", listener);
+      return () => ipcRenderer.removeListener("window:resized", listener);
+    },
+  },
   onPowerEvent: (cb: (evt: "suspend" | "resume" | "lock-screen" | "unlock-screen") => void) => {
     const listener = (_evt: any, name: any) => cb(name);
     ipcRenderer.on("power-event", listener);

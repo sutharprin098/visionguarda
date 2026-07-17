@@ -2,14 +2,16 @@ import { useEffect, useState, useRef, useCallback } from "react";
 import { Video, Bell, Settings2, LogOut, Wifi, WifiOff, Sliders, Activity, AlertTriangle, RotateCw, Maximize2, Minimize2, Lock } from "lucide-react";
 import clsx from "clsx";
 import { startRealtimeSync, DeactivatedError, SyncBundle } from "../lib/sync";
-import { syncCamerasToLocalEngine, syncAiModelToLocalEngine, isEngineOnline, mjpegStreamUrl, resetLocalEngineState, reportCameraHealth } from "../lib/localEngine";
+import { syncAiModelToLocalEngine, syncAiConfidenceToLocalEngine, mjpegStreamUrl, resetLocalEngineState, reportCameraHealth } from "../lib/localEngine";
 import { MediaShareSession, ShareStatus } from "../lib/mediaShare";
 import { TelemetrySession, TelemetryDetection, CameraTelemetry } from "../lib/telemetry";
 import type { ZoneProfileKey } from "../lib/zoneProfiles";
 import DetectionOverlay from "../components/DetectionOverlay";
+import FullscreenViewer from "../components/FullscreenViewer";
 import ProfileDashboard from "../components/ProfileDashboard";
 import SourcePicker from "../components/SourcePicker";
 import { lockReason } from "../lib/rbac";
+import { getSupabase } from "../lib/session";
 import type { CaptureSource } from "../lib/bridge";
 import {
   AI_MODULES, ModuleKey, ModuleState,
@@ -43,6 +45,11 @@ export default function Workspace({
   onOpenAdminStudio?: () => void;
 }) {
   const [tab, setTab] = useState<"cameras" | "alerts" | "settings" | "engine">("cameras");
+  // Which camera is showing full-window, or null. Lifted to Workspace (not the
+  // tile) because the viewer has to cover the sidebar and the tab bar, and
+  // because switching camera while fullscreen has to keep the SAME viewer
+  // mounted — a per-tile fullscreen element cannot do either.
+  const [fullscreenCamId, setFullscreenCamId] = useState<string | null>(null);
   const [syncError, setSyncError] = useState(false);
   const [syncErrorDetails, setSyncErrorDetails] = useState<string | null>(null);
   const [isPackaged, setIsPackaged] = useState(true);
@@ -130,21 +137,10 @@ export default function Workspace({
 
   // Realtime sync is now managed at the App level to persist state during screen switching.
 
-  // Keep the local AI engine's running cameras in step with what's assigned.
-  // Runs on an interval, not just on bundle change — the engine can still be
-  // starting up (model load can take tens of seconds to minutes) when this
-  // first fires, and a sync attempt that no-ops because the engine wasn't
-  // reachable yet would otherwise never be retried until something
-  // unrelated happened to refetch the bundle. This is what caused a
-  // registered cloud camera to never actually reach the local engine,
-  // showing "Cameras (1)" in the sidebar while Engine Health stayed at 0.
-  useEffect(() => {
-    if (!bundle) return;
-    const sync = () => void syncCamerasToLocalEngine(bundle.cameras, bundle.rule_engine_rules || [], bundle.zone_profile_configs || []);
-    sync();
-    const id = setInterval(sync, 8_000);
-    return () => clearInterval(id);
-  }, [bundle?.cameras, bundle?.rule_engine_rules, bundle?.zone_profile_configs]);
+  // NOTE: camera->local-engine sync used to live here. It now runs in App, because
+  // Admin Studio needs it too and this component never mounts in the Admin build
+  // — see the comment on that effect. Two copies would double the registration
+  // traffic in the desktop build for no benefit.
 
   // push each assigned camera's live connection state (online/offline/
   // connecting/auth_failed/network_error) to Supabase so the portal's
@@ -212,6 +208,20 @@ export default function Workspace({
     };
   }, [orgModel, bundle?.ai_model_packages]);
 
+  // Push the org's detection floor to the engine whenever it changes (and once
+  // on mount, since the engine starts on its default and has no idea what the
+  // org set). Retried on an interval rather than only on change: the engine is a
+  // separate process that can still be booting — or can restart and come back on
+  // the default — long after the bundle last changed, and a one-shot push would
+  // leave it silently running a confidence nobody chose.
+  const orgConfidence = bundle?.settings.find((s) => s.scope === "org" && s.key === "ai.confidence")?.value;
+  useEffect(() => {
+    if (orgConfidence == null) return;
+    void syncAiConfidenceToLocalEngine(orgConfidence);
+    const id = setInterval(() => void syncAiConfidenceToLocalEngine(orgConfidence), 8_000);
+    return () => clearInterval(id);
+  }, [orgConfidence]);
+
   // Check if user has permission or is super admin
   const hasPermission = (perm: string): boolean => {
     if (!bundle) return false;
@@ -273,6 +283,18 @@ export default function Workspace({
 
   return (
     <div className="flex h-screen">
+      {/* Covers the entire shell — sidebar, tabs, grid, stats, settings — with
+          plain fixed positioning. The layout underneath is never torn down, so
+          exiting restores it exactly, and any screen-share session in a tile
+          keeps running because no tile unmounts. */}
+      {fullscreenCamId && (
+        <FullscreenViewer
+          cameras={bundle.cameras}
+          cameraId={fullscreenCamId}
+          onSelectCamera={setFullscreenCamId}
+          onExit={() => setFullscreenCamId(null)}
+        />
+      )}
       <aside className="flex w-56 shrink-0 flex-col border-r border-line bg-surface-1">
         <div className="flex items-center gap-2.5 px-4 py-4">
           <img src="./favicon.svg" alt="CamAI" className="h-8 w-8 rounded-md" />
@@ -339,6 +361,8 @@ export default function Workspace({
             healthInfo={healthInfo}
             procStatus={procStatus}
             logs={logs}
+            onFullscreen={setFullscreenCamId}
+            paused={fullscreenCamId !== null}
           />
         </div>
         <div style={{ display: tab === "alerts" ? "block" : "none" }} className="space-y-2">
@@ -383,6 +407,12 @@ export default function Workspace({
                   </div>
                 </div>
 
+                <ConfidenceControl
+                  orgId={bundle.organization?.id ?? null}
+                  value={typeof aiSettings["ai.confidence"] === "number" ? (aiSettings["ai.confidence"] as number) : 0.25}
+                  canEdit={hasPermission("ai.configure")}
+                />
+
                 <div className="grid grid-cols-2 gap-4 pt-2">
                   <div>
                     <div className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider">Engine Synchronization</div>
@@ -409,6 +439,111 @@ export default function Workspace({
           <EngineHealthPanel />
         </div>
       </main>
+    </div>
+  );
+}
+
+/**
+ * Detection confidence, org-wide (`settings` key `ai.confidence`).
+ *
+ * Writes the setting and nothing else: realtime sync brings the new row back
+ * into the bundle, and Workspace's sync effect pushes it to the local engine.
+ * Deliberately NOT POSTing to the engine directly from here — that would apply
+ * on this one machine while the row it saved says something else on every other
+ * machine in the org, which is the kind of split-brain nobody can debug from a
+ * screenshot.
+ *
+ * The slider commits on release (onChange fires per pixel of drag; each one
+ * would be a Supabase round-trip and an engine push).
+ */
+function ConfidenceControl({
+  orgId,
+  value,
+  canEdit,
+}: {
+  orgId: string | null;
+  value: number;
+  canEdit: boolean;
+}) {
+  // Local while dragging so the handle tracks the cursor; the prop is the truth
+  // once the write lands and syncs back.
+  const [draft, setDraft] = useState(value);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const dragging = useRef(false);
+
+  // Adopt the synced value unless the operator is mid-drag — otherwise a sync
+  // tick landing during a drag yanks the handle out from under them.
+  useEffect(() => {
+    if (!dragging.current) setDraft(value);
+  }, [value]);
+
+  async function commit(next: number) {
+    if (!orgId || !canEdit) return;
+    // A click or a Tab through the slider fires the same handlers as a drag;
+    // without this, merely focusing the control writes to the org's settings and
+    // shows up in the audit trail as a change nobody made.
+    if (next === value) return;
+    setSaving(true);
+    setError(null);
+    try {
+      const sb = await getSupabase();
+      // Check .error, don't just await: PostgREST reports an RLS refusal as a
+      // resolved promise carrying an error, so an unauthorised write here would
+      // otherwise look exactly like a successful one.
+      const { error: err } = await sb.from("settings").upsert(
+        { org_id: orgId, scope: "org", key: "ai.confidence", value: next as any },
+        { onConflict: "org_id,scope,key" },
+      );
+      if (err) {
+        setError(err.message);
+        setDraft(value); // don't leave the UI showing a value that never saved
+      }
+    } catch (e: any) {
+      setError(e?.message ?? "Could not save");
+      setDraft(value);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="pt-2">
+      <div className="flex items-center justify-between">
+        <div className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider">
+          Detection Confidence
+        </div>
+        <div className="text-xs font-mono text-zinc-300">{Math.round(draft * 100)}%</div>
+      </div>
+      <input
+        type="range"
+        min={0.1}
+        max={0.9}
+        step={0.05}
+        value={draft}
+        disabled={!canEdit || !orgId || saving}
+        onPointerDown={() => { dragging.current = true; }}
+        onChange={(e) => setDraft(Number(e.target.value))}
+        onPointerUp={() => { dragging.current = false; void commit(draft); }}
+        onKeyUp={() => { void commit(draft); }}
+        className="mt-2 w-full accent-accent disabled:opacity-40 disabled:cursor-not-allowed"
+      />
+      <div className="mt-1 flex items-center justify-between text-[10px] text-zinc-500">
+        <span>More detections (10%)</span>
+        <span>Fewer, surer (90%)</span>
+      </div>
+      {canEdit ? (
+        <div className="mt-1.5 text-[10px] text-zinc-500">
+          {saving
+            ? "Saving…"
+            : "Applies to every camera in this org, live — no restart."}
+        </div>
+      ) : (
+        <div className="mt-1.5 flex items-center gap-1 text-[10px] text-zinc-600">
+          <Lock size={9} /> {lockReason()}
+        </div>
+      )}
+      {error && <div className="mt-1 text-[10px] text-danger">Could not save: {error}</div>}
     </div>
   );
 }
@@ -554,12 +689,17 @@ function CamerasView({
   healthInfo,
   procStatus,
   logs,
+  onFullscreen,
+  paused,
 }: {
   cameras: any[];
   isPackaged: boolean;
   healthInfo: EngineHealthInfo | null;
   procStatus: any;
   logs: string[];
+  onFullscreen: (id: string) => void;
+  /** The fullscreen viewer is covering the grid — see CameraTile. */
+  paused: boolean;
 }) {
   if (!cameras.length) {
     return <Panel title="Cameras">No cameras assigned to you. Ask your administrator.</Panel>;
@@ -574,7 +714,13 @@ function CamerasView({
       )}
       <div className="grid grid-cols-2 gap-4 xl:grid-cols-3">
         {cameras.map((c) => (
-          <CameraTile key={c.id} camera={c} engineOnline={healthInfo ? (healthInfo.online && healthInfo.ready) : null} />
+          <CameraTile
+            key={c.id}
+            camera={c}
+            engineOnline={healthInfo ? (healthInfo.online && healthInfo.ready) : null}
+            onFullscreen={() => onFullscreen(c.id)}
+            paused={paused}
+          />
         ))}
       </div>
     </div>
@@ -608,7 +754,33 @@ const SHARE_STATUS_TONES: Record<ShareStatus, string> = {
   source_gone: "bg-danger/20 text-danger",
 };
 
-function CameraTile({ camera: c, engineOnline }: { camera: any; engineOnline: boolean | null }) {
+/**
+ * `paused` = the fullscreen viewer is open, so this tile is completely covered
+ * and every byte it pulls is wasted. It is not a cosmetic flag; it is the whole
+ * fullscreen performance fix.
+ *
+ * WHY FULLSCREEN LAGGED: the viewer is an overlay, so the grid underneath never
+ * unmounts — by design, to keep screen shares alive and restore the layout
+ * exactly. But that also meant every tile kept its MJPEG <img> streaming and its
+ * telemetry WebSocket open while invisible, and the viewer then opened ONE MORE
+ * full-window MJPEG stream of its own. So the moment an operator hit fullscreen,
+ * the app decoded N+1 streams to show 1, with the newly-added one the largest.
+ *
+ * The sharp edge is the connection cap: Chromium allows 6 concurrent
+ * connections per host, and every MJPEG stream is one that never closes. With 6
+ * cameras the grid alone pins all 6, so the viewer's own stream — and every
+ * fetch to 127.0.0.1:8000, including /api/status and health polling — queues
+ * behind connections that will not end until the tab does. That is not slowness
+ * that resolves; it is a stall that lasts as long as fullscreen is open, and it
+ * reads to the operator as "fullscreen lags".
+ *
+ * So a covered tile drops its stream and its socket, leaving the viewer alone on
+ * the host. The cost is an MJPEG reconnect (a frame or two) when the viewer
+ * closes, which is invisible next to the stall it removes. Detection is entirely
+ * unaffected either way: the engine analyses registered cameras regardless of
+ * who is watching — this only changes who is pulling pixels.
+ */
+function CameraTile({ camera: c, engineOnline, onFullscreen, paused }: { camera: any; engineOnline: boolean | null; onFullscreen: () => void; paused: boolean }) {
   const [streamFailed, setStreamFailed] = useState(false);
   const [sharingType, setSharingType] = useState<"screen" | "webcam" | null>(null);
   const [shareStatus, setShareStatus] = useState<ShareStatus>("idle");
@@ -618,13 +790,15 @@ function CameraTile({ camera: c, engineOnline }: { camera: any; engineOnline: bo
   const [pickerOpen, setPickerOpen] = useState(false);
   const [sourceName, setSourceName] = useState<string | null>(null);
   const [modules, setModules] = useState<ModuleState>(() => loadModules(c.id));
-  const [isFull, setIsFull] = useState(false);
+  // Which tile a keyboard shortcut applies to when several are on screen.
+  const [isHovered, setIsHovered] = useState(false);
   const tileRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const sessionRef = useRef<MediaShareSession | null>(null);
 
   const isScreenShareCam = c.source_type === "screen_share";
-  const showStream = engineOnline && !streamFailed && !isScreenShareCam;
+  // `!paused` drops the MJPEG connection while the viewer covers this tile.
+  const showStream = engineOnline && !streamFailed && !isScreenShareCam && !paused;
 
   // The media element the overlay measures: the local <video> while sharing,
   // otherwise the MJPEG <img>. Both show the same frames the engine analysed.
@@ -639,15 +813,19 @@ function CameraTile({ camera: c, engineOnline }: { camera: any; engineOnline: bo
   // Detections are pushed once per AI cycle to /ws subscribers. Only subscribe
   // while something is actually on screen — the engine pushes per subscriber,
   // so a hidden tile would cost real work for boxes nobody can see.
+  // `!paused` is not redundant with showingMedia: a screen-share tile keeps
+  // showingMedia true while covered (its <video> is local and its share session
+  // must keep pushing frames to the engine), so without this its telemetry
+  // socket would stay open behind the viewer for boxes nobody can see.
   useEffect(() => {
-    if (!engineOnline || !showingMedia) { setDetections([]); setTelemetry(null); return; }
+    if (!engineOnline || !showingMedia || paused) { setDetections([]); setTelemetry(null); return; }
     const session = new TelemetrySession(c.id, (t) => {
       setDetections(t.detections ?? []);
       setTelemetry(t);
     });
     session.start();
     return () => session.stop();
-  }, [c.id, engineOnline, showingMedia]);
+  }, [c.id, engineOnline, showingMedia, paused]);
 
   // Persistent across transient disconnects — only torn down on unmount or
   // an explicit "Stop Share" click, never on a dropped socket or a paused
@@ -663,44 +841,30 @@ function CameraTile({ camera: c, engineOnline }: { camera: any; engineOnline: bo
   };
 
   // ---- Fullscreen ----
-  // Driven off the Fullscreen API's own event rather than local state, so ESC
-  // (which the browser handles itself and never routes through our handler)
-  // can't leave the button showing the wrong icon.
-  const toggleFullscreen = useCallback(() => {
-    const el = tileRef.current;
-    if (!el) return;
-    if (document.fullscreenElement) void document.exitFullscreen().catch(() => {});
-    else void el.requestFullscreen().catch(() => {});
-  }, []);
-
+  // The tile no longer fullscreens itself. It used to call
+  // tileRef.requestFullscreen().catch(() => {}) — an API that can reject for
+  // reasons the page cannot inspect, with the rejection swallowed, so a refusal
+  // and a success were indistinguishable and the button "did nothing" with no
+  // error anywhere. It also could not satisfy "switch camera while fullscreen",
+  // because the fullscreen element was one specific tile.
+  //
+  // Opening the viewer is now a state change in Workspace, which cannot be
+  // refused. See components/FullscreenViewer.tsx.
+  //
+  // F11 is claimed only while this tile is hovered, so with a grid of tiles the
+  // key resolves to the one under the cursor rather than firing on all of them.
+  // (ESC/F11 to EXIT are owned by the viewer itself.)
   useEffect(() => {
-    const onChange = () => setIsFull(document.fullscreenElement === tileRef.current);
-    document.addEventListener("fullscreenchange", onChange);
-    return () => document.removeEventListener("fullscreenchange", onChange);
-  }, []);
-
-  // F11 would otherwise fullscreen the whole Electron window, which is not what
-  // an operator pressing it over a camera tile means. Only claim it while this
-  // tile is hovered/fullscreen so other tiles' handlers don't all fire at once.
-  useEffect(() => {
-    if (!isFull) return;
+    if (!isHovered || !showingMedia) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "F11") { e.preventDefault(); toggleFullscreen(); }
+      if (e.key === "F11") {
+        e.preventDefault();
+        onFullscreen();
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [isFull, toggleFullscreen]);
-
-  // The overlay sizes itself from the media element's box, which changes the
-  // instant we enter/leave fullscreen — force a redraw by nudging state so the
-  // boxes don't stay laid out for the old size until the next telemetry tick.
-  useEffect(() => {
-    if (!showingMedia) return;
-    const onResize = () => setDetections((d) => [...d]);
-    window.addEventListener("resize", onResize);
-    return () => window.removeEventListener("resize", onResize);
-  }, [showingMedia]);
-  useEffect(() => { setDetections((d) => [...d]); }, [isFull]);
+  }, [isHovered, showingMedia, onFullscreen]);
 
   // Screen shares must name their surface; webcam has no picker.
   function startSharing(type: "screen" | "webcam", source?: CaptureSource) {
@@ -738,19 +902,26 @@ function CameraTile({ camera: c, engineOnline }: { camera: any; engineOnline: bo
   // centre-cropping it (cover): a cropped fullscreen would hide detections that
   // are really there, which is worse than black bars. The overlay is told which
   // fit is in play so the boxes track the change.
-  const fit: "cover" | "contain" = isFull ? "contain" : "cover";
-  const mediaClass = `h-full w-full ${isFull ? "object-contain" : "object-cover"}`;
+  // The tile is always the grid-sized, centre-cropped view now; the letterboxed
+  // full-frame view is the viewer's job.
+  const fit: "cover" | "contain" = "cover";
+  const mediaClass = "h-full w-full object-cover";
   const shownDetections = filterDetections(detections, modules);
+
+  // The "Calibration Required" badge lived here. Speed is automatic now (the
+  // engine scales from each object's own height), so there is no setup left to
+  // prompt for — a permanent badge demanding calibration for a feature that
+  // already works would just be noise. Which numbers are measured vs estimated
+  // is still visible per box: the overlay marks estimates with "~".
 
   return (
     <div className="card overflow-hidden">
       <div
         ref={tileRef}
-        onDoubleClick={showingMedia ? toggleFullscreen : undefined}
-        className={clsx(
-          "relative flex items-center justify-center bg-surface-0 text-zinc-600",
-          isFull ? "h-screen w-screen" : "aspect-video",
-        )}
+        onDoubleClick={showingMedia ? onFullscreen : undefined}
+        onMouseEnter={() => setIsHovered(true)}
+        onMouseLeave={() => setIsHovered(false)}
+        className="relative flex aspect-video items-center justify-center bg-surface-0 text-zinc-600"
       >
         {sharingType !== null ? (
           <video
@@ -807,11 +978,11 @@ function CameraTile({ camera: c, engineOnline }: { camera: any; engineOnline: bo
 
         {showingMedia && (
           <button
-            onClick={toggleFullscreen}
-            title={isFull ? "Exit full screen (ESC or F11)" : "Full screen (F11)"}
+            onClick={onFullscreen}
+            title="Full screen (F11, or double-click)"
             className="absolute bottom-2 right-2 rounded bg-black/70 p-1.5 text-zinc-300 hover:bg-black/90 hover:text-white"
           >
-            {isFull ? <Minimize2 size={13} /> : <Maximize2 size={13} />}
+            <Maximize2 size={13} />
           </button>
         )}
 

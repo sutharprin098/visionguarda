@@ -22,13 +22,28 @@ export interface TelemetryDetection {
   confidence: number;
   track_id?: number | null;
   tracking_status?: string;
-  /** km/h. Only a real measurement when speed_calibrated is true — that needs a
-   *  two-line speed gate (a pair of lines carrying speedPairId + distanceM, the
-   *  real ground distance between them; analytics._update_speed_gate). Without
-   *  a gate this is a pixel-derived heuristic with an approximate scale factor,
-   *  so the UI must not present it as if it were measured. */
-  speed?: number;
+  /** km/h, or null when no honest number exists.
+   *
+   *  Automatic: the engine derives metres-per-pixel from the object's own pixel
+   *  height against a real-world prior (analytics.CLASS_HEIGHT_M — a car is
+   *  ~1.5m tall), so speed works on a bare camera with nothing drawn. A two-line
+   *  gate, when configured, overrides it with a true measurement.
+   *
+   *  ALWAYS check speed_calibrated before treating this as fact. An estimate is
+   *  ~+/-20-30%: the height prior is a class average, and a vehicle driving
+   *  straight at the camera reads low because it covers little pixel distance.
+   *  The engine will not raise a speeding alert from an estimate, and neither
+   *  should any UI present one as a measurement. */
+  speed?: number | null;
+  /** True only for a gate-measured reading. Never true for the auto estimate. */
   speed_calibrated?: boolean;
+  /** Where the number came from:
+   *   - "calibrated"  — measured by a two-line gate; act on it
+   *   - "estimated"   — auto-derived from object size; indicative only
+   *   - "unavailable" — no size prior for this class, or the box is clipped by
+   *                     the frame edge so its height would mislead the scale
+   *   - "disabled"    — the camera's Speed Estimation toggle is off */
+  speed_status?: "calibrated" | "estimated" | "unavailable" | "disabled";
   direction?: string;
   /** Seconds this track has been in frame (analytics sets it from first_seen). */
   dwell_time?: number;

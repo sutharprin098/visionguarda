@@ -301,6 +301,59 @@ def _parking_visual_score(frame, poly_pts) -> float:
     return float(100.0 * (0.45 * grad_frac + 0.35 * spread + 0.20 * deviant_frac))
 
 
+# ---------------------------------------------------------------------------
+# Automatic scale reference
+# ---------------------------------------------------------------------------
+#
+# Typical real-world HEIGHT of each class, in metres. This is the scale
+# reference that makes speed work with no lines to draw: if a car is 60px tall
+# on screen and cars are ~1.5m tall, then ~0.025 m/px at that car's depth.
+#
+# HEIGHT, not width, on purpose. A car's bounding box width is ~1.8m seen head
+# on but ~4.5m seen side on — the same object, a 2.5x different prior, and the
+# detector cannot tell us which way it is facing. Height barely changes with
+# viewing angle, so it is the only dimension usable without knowing orientation.
+#
+# These are approximations of real objects, NOT tuning constants: a car really is
+# about this tall, and if the number is wrong the fix is a better measurement of
+# cars. That is the whole difference from the invented SPEED_SCALE=100.0 this
+# replaces, which corresponded to nothing physical and changed meaning whenever
+# the camera moved.
+CLASS_HEIGHT_M = {
+    "person": 1.70,
+    "bicycle": 1.20,   # bike + rider
+    "motorcycle": 1.50,
+    "car": 1.50,
+    "bus": 3.20,
+    "truck": 3.20,
+}
+
+# A box touching the frame edge is CLIPPED: the object continues outside the
+# image, so its on-screen height is smaller than the object really is. That
+# inflates metres-per-pixel and therefore the speed — the classic way this
+# technique produces 200km/h ghosts as a vehicle enters or leaves frame. Such
+# boxes are excluded from scale estimation (the track keeps its last good scale).
+_EDGE_MARGIN_PX = 3
+# Below this the height quantisation error alone is several percent per pixel.
+_MIN_SCALE_HEIGHT_PX = 24.0
+
+
+def _estimate_mpp(bbox, class_name, frame_w, frame_h):
+    """Metres-per-pixel at this detection's depth, or None if not estimable."""
+    real_h = CLASS_HEIGHT_M.get(class_name)
+    if real_h is None:
+        return None
+    h_px = float(bbox["y2"]) - float(bbox["y1"])
+    if h_px < _MIN_SCALE_HEIGHT_PX:
+        return None
+    if (float(bbox["x1"]) <= _EDGE_MARGIN_PX
+            or float(bbox["y1"]) <= _EDGE_MARGIN_PX
+            or float(bbox["x2"]) >= frame_w - _EDGE_MARGIN_PX
+            or float(bbox["y2"]) >= frame_h - _EDGE_MARGIN_PX):
+        return None
+    return real_h / h_px
+
+
 class _SpeedKalman1D:
     """Scalar Kalman filter smoothing a per-frame noisy speed measurement
     into a stable continuous value.
@@ -346,13 +399,15 @@ class CameraAnalytics:
         # New track state mappings
         self.track_classes = {}   # track_id -> class_name
         self.track_speeds = {}    # track_id -> speed (km/h), Kalman-smoothed
-        self.track_last_pts = {}  # track_id -> (timestamp, (cx, cy))
+        self.track_last_pts = {}  # track_id -> (timestamp, (cx, cy))  [normalised]
         self.speed_filters = {}   # track_id -> _SpeedKalman1D
-        # Approximate pixel-to-world scale factor for the uncalibrated speed
-        # estimate below (heuristic — see _update_speed_gate for the actually
-        # calibrated two-line/real-distance measurement, which always takes
-        # priority over this one whenever a camera has a gate configured).
-        self.SPEED_SCALE = 100.0
+        # --- Automatic scale estimation ------------------------------------
+        # track_id -> metres-per-pixel at that object's depth, EMA-smoothed.
+        self.track_mpp = {}
+        # track_id -> (timestamp, (cx_px, cy_px)) in ABSOLUTE PIXELS. Speed has
+        # to be measured in pixel space: normalised space is anisotropic, so a
+        # diagonal displacement there is not proportional to real distance.
+        self.track_last_px = {}
         self.SPEED_HARD_CAP = 200.0  # sanity bound only, not a per-class heuristic
 
         # track_id -> ts this id last appeared in detections. The tracker
@@ -641,35 +696,74 @@ class CameraAnalytics:
             bottom_x = cx
             bottom_y = bbox["y2"] / frame_h  # bottom edge collision point
             
-            # Speed Estimation — raw per-frame pixel displacement fed through
-            # a Kalman filter (_SpeedKalman1D) instead of a fixed-weight EMA,
-            # so the displayed value tracks real speed changes continuously
-            # without spiking on single-frame detector noise or visibly
-            # freezing while the true speed is changing. This heuristic
-            # estimate (SPEED_SCALE is an approximate, uncalibrated pixel-
-            # to-world factor) is overridden below whenever a calibrated
-            # two-line real-distance gate reading exists for this track —
-            # see _update_speed_gate / "Apply calibrated speed" further down.
-            speed = self.track_speeds.get(track_id, 0.0)
-            if track_id in self.track_last_pts:
-                last_time, (last_cx, last_cy) = self.track_last_pts[track_id]
-                dt = now - last_time
-                MIN_DT = 0.02  # guards only against near-zero dt, not a throttle on update rate
-                if dt >= MIN_DT:
-                    dx = cx - last_cx
-                    dy = cy - last_cy
-                    dist = np.sqrt(dx*dx + dy*dy)
-                    raw_speed = min((dist / dt) * self.SPEED_SCALE / (cy + 0.2), self.SPEED_HARD_CAP)
-                    filt = self.speed_filters.setdefault(track_id, _SpeedKalman1D())
-                    speed = max(0.0, filt.update(raw_speed))
-                    self.track_speeds[track_id] = speed
-                    self.track_last_pts[track_id] = (now, (cx, cy))
-            else:
-                self.track_last_pts[track_id] = (now, (cx, cy))
-                self.speed_filters[track_id] = _SpeedKalman1D()
-                self.track_speeds[track_id] = 0.0
+            # ── Automatic speed estimation — no lines to draw ────────────────
+            #
+            # Real km/h needs a real scale reference. Rather than asking the
+            # operator to draw a calibration gate, the OBJECT ITSELF is the
+            # reference: a car is ~1.5m tall, so its pixel height tells us
+            # metres-per-pixel at its depth (see CLASS_HEIGHT_M). Displacement in
+            # pixels x metres-per-pixel / seconds = m/s. Real units, derived from
+            # a real measured quantity, self-calibrating per camera.
+            #
+            # This REPLACES a fabricated value: speed used to be
+            #   (normalised_displacement / dt) * 100.0 / (cy + 0.2)
+            # where 100.0 was invented and (cy+0.2) stood in for perspective. It
+            # could not be km/h and changed meaning if you re-mounted the camera.
+            #
+            # Honest about accuracy: this is an ESTIMATE, roughly +/-20-30%. The
+            # height prior is a class average (a hatchback and an SUV are both
+            # "car"), and it assumes motion roughly parallel to the image plane —
+            # a vehicle driving straight at the camera covers little pixel
+            # distance for a lot of real distance, so it reads low. Good enough
+            # to see that traffic is doing ~50 vs ~90. NOT good enough to fine
+            # anyone, which is why speed_calibrated stays False and the
+            # speed-limit alerts below still require a real two-line gate.
+            x1p, y1p = float(bbox["x1"]), float(bbox["y1"])
+            x2p, y2p = float(bbox["x2"]), float(bbox["y2"])
+            cx_px, cy_px = (x1p + x2p) / 2.0, (y1p + y2p) / 2.0
 
-            det["speed"] = round(float(speed), 1)
+            mpp_raw = _estimate_mpp(bbox, class_name, frame_w, frame_h)
+            if mpp_raw is not None:
+                prev_mpp = self.track_mpp.get(track_id)
+                # EMA: the detector's box height jitters a few px frame to frame,
+                # and scale feeds speed multiplicatively, so raw jitter would show
+                # up directly as speed noise.
+                self.track_mpp[track_id] = (
+                    mpp_raw if prev_mpp is None else 0.7 * prev_mpp + 0.3 * mpp_raw
+                )
+            mpp = self.track_mpp.get(track_id)  # last good scale if clipped this frame
+
+            speed_kmh = self.track_speeds.get(track_id)
+            last_px = self.track_last_px.get(track_id)
+            if last_px is not None and mpp is not None:
+                last_time, (last_cx_px, last_cy_px) = last_px
+                dt = now - last_time
+                MIN_DT = 0.02   # guards near-zero dt only
+                MAX_DT = 2.0    # a long gap means the track was re-identified, not moving
+                if dt >= MIN_DT:
+                    if dt <= MAX_DT:
+                        dist_px = float(np.hypot(cx_px - last_cx_px, cy_px - last_cy_px))
+                        raw_kmh = min((dist_px * mpp / dt) * 3.6, self.SPEED_HARD_CAP)
+                        filt = self.speed_filters.setdefault(track_id, _SpeedKalman1D())
+                        speed_kmh = max(0.0, filt.update(raw_kmh))
+                        self.track_speeds[track_id] = speed_kmh
+                    self.track_last_px[track_id] = (now, (cx_px, cy_px))
+            else:
+                self.track_last_px[track_id] = (now, (cx_px, cy_px))
+                self.speed_filters.setdefault(track_id, _SpeedKalman1D())
+
+            # Keep the normalised trail updated for direction/history consumers.
+            self.track_last_pts[track_id] = (now, (cx, cy))
+
+            if speed_kmh is None:
+                det["speed"] = None
+                det["speed_source"] = "unavailable"
+            else:
+                det["speed"] = round(float(speed_kmh), 1)
+                det["speed_source"] = "estimated"
+            # Only a two-line gate sets this True (below). An estimate is never
+            # "calibrated", however plausible its number looks.
+            det["speed_calibrated"] = False
 
             # Direction: 8-way compass label from recent screen-space motion.
             last_pt = self.track_history[track_id][-1] if self.track_history.get(track_id) else None
@@ -1248,10 +1342,17 @@ class CameraAnalytics:
                 "total_count": self.line_counters[l_id]["in_count"] + self.line_counters[l_id]["out_count"]
             }
 
-        # --- Apply calibrated (real-world) speed over the heuristic estimate ---
-        # A gate crossing is a one-shot event, so the reading stays visible
-        # for CALIBRATED_SPEED_TTL seconds after being measured instead of
-        # only flashing for the single frame it was computed on.
+        # --- Apply calibrated (real-world) speed over the auto estimate --------
+        # A two-line gate is a MEASUREMENT, not an estimate: the track crossed
+        # two lines a known ground distance apart, so speed = metres / seconds.
+        # It beats the object-height estimate whenever one exists, because it
+        # needs no assumption about how tall the vehicle is or which way it is
+        # travelling. Drawing a gate is now an accuracy upgrade rather than the
+        # price of seeing any speed at all.
+        #
+        # A gate crossing is a one-shot event, so the reading stays visible for
+        # CALIBRATED_SPEED_TTL seconds after being measured instead of only
+        # flashing for the single frame it was computed on.
         for det in detections:
             track_id = det.get("track_id")
             if track_id is None:
@@ -1260,8 +1361,8 @@ class CameraAnalytics:
             if calibrated and now - calibrated["ts"] <= self.CALIBRATED_SPEED_TTL:
                 det["speed"] = round(calibrated["speed_kmh"], 1)
                 det["speed_calibrated"] = True
-            else:
-                det["speed_calibrated"] = False
+                det["speed_source"] = "calibrated"
+            # else: leave the automatic estimate the per-detection loop produced.
 
         # Custom speed limit rules check
         if rules and (zone_profile is None or zone_profile == "custom"):
@@ -1271,12 +1372,24 @@ class CameraAnalytics:
                     continue
                 class_name = self.track_classes.get(track_id, "person")
                 category = _object_category(class_name)
-                speed = det.get("speed", 0.0)
-                
+                speed = det.get("speed")
+
                 for rule in rules:
                     if not rule.get("is_enabled", True):
                         continue
                     if rule.get("trigger_type") == "speed_limit":
+                        # MEASURED speed only. det["speed"] is now usually
+                        # populated by the automatic object-height estimate,
+                        # which is ~+/-20-30% — fine for showing an operator that
+                        # traffic is doing ~50, nowhere near good enough to
+                        # accuse a specific vehicle of speeding. A violation is
+                        # an accusation, so it requires a two-line gate.
+                        # Gating on `speed is not None` would silently re-enable
+                        # exactly the fabricated-evidence behaviour this replaced.
+                        # Scoped to this branch, not the whole det loop: a future
+                        # trigger_type must not inherit "skip unless a gate exists".
+                        if not det.get("speed_calibrated") or speed is None:
+                            continue
                         conds = rule.get("conditions", {})
                         speed_limit = float(conds.get("speed_limit") or conds.get("speed_threshold") or 50.0)
                         
@@ -1343,7 +1456,13 @@ class CameraAnalytics:
                         if track_id is not None:
                             cls_name = self.track_classes.get(track_id, "person")
                             if _object_category(cls_name) == "vehicle":
-                                speed = det.get("speed", 0.0)
+                                # Calibrated (gate-measured) readings only — see
+                                # the custom speed_limit rule above. The automatic
+                                # estimate is deliberately not enough to raise a
+                                # violation against a named vehicle.
+                                speed = det.get("speed")
+                                if not det.get("speed_calibrated") or speed is None:
+                                    continue
                                 if speed > limit_val:
                                     alert_key = f"traffic_speed_violation_{track_id}"
                                     if now - self.alert_cooldowns.get(alert_key, 0) > 15.0:
@@ -1500,6 +1619,10 @@ class CameraAnalytics:
             if tid in self.track_classes: del self.track_classes[tid]
             if tid in self.track_speeds: del self.track_speeds[tid]
             if tid in self.track_last_pts: del self.track_last_pts[tid]
+            # Auto-scale state is per-track and must die with it, or a busy road
+            # grows these dicts unbounded across a shift.
+            self.track_mpp.pop(tid, None)
+            self.track_last_px.pop(tid, None)
             self.speed_filters.pop(tid, None)
             self.track_last_seen.pop(tid, None)
             self.item_stationary_since.pop(tid, None)

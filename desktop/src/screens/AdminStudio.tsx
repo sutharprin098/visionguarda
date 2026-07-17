@@ -20,11 +20,32 @@ import {
   Boxes,
   Pencil,
   AlertCircle,
+  Undo2,
+  Redo2,
+  Copy as CopyIcon,
+  Lock,
+  Unlock,
+  Eye,
+  EyeOff,
 } from "lucide-react";
 import clsx from "clsx";
 import { getSupabase } from "../lib/session";
 import { fnErrorMessage } from "../lib/fnError";
 import { isEngineOnline, mjpegStreamUrl } from "../lib/localEngine";
+import {
+  History,
+  circleRadiusPx,
+  duplicateShape,
+  hitVertex,
+  isHidden,
+  isInteractive,
+  isLocked,
+  moveVertex,
+  topmostAt,
+  translateShape,
+  type EditableShape,
+  type View,
+} from "../lib/zoneEditor";
 import {
   ZONE_PROFILES,
   PROFILE_ORDER,
@@ -133,8 +154,32 @@ export default function AdminStudio({ onDeactivated }: { onDeactivated: () => vo
   const [publishComment, setPublishComment] = useState("");
   const [publishing, setPublishing] = useState(false);
   const [engineOnline, setEngineOnline] = useState<boolean | null>(null);
+  // The MJPEG <img> failing is a distinct state from the engine being down: the
+  // engine can be healthy while this particular camera has no decoded frames.
+  const [streamFailed, setStreamFailed] = useState(false);
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const videoRef = useRef<HTMLImageElement>(null);
+
+  // ---- direct-manipulation editor state --------------------------------
+  // History holds SNAPSHOTS of the whole drawing set. Undo/redo then diffs two
+  // snapshots and persists the difference (see persistSnapshot) — which works
+  // for creates and deletes too, because deletion here is soft (deleted_at), so
+  // "undo a delete" is just clearing that column rather than re-inserting a row
+  // under a new id and orphaning any rule bound to the old one.
+  const historyRef = useRef<History<Drawing[]> | null>(null);
+  const clipboardRef = useRef<Drawing | null>(null);
+  // Live drag state. A ref, not state: this updates on every pointermove and
+  // re-rendering the whole studio at pointer rate would drop frames on the
+  // MJPEG element behind the canvas.
+  const dragRef = useRef<{
+    kind: "move" | "vertex";
+    id: string;
+    vertexIndex: number;
+    lastPt: number[];
+    moved: boolean;
+  } | null>(null);
+  const [historyTick, setHistoryTick] = useState(0); // re-render undo/redo affordances
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // ---- initial load with real-time subscriptions -----------------------
@@ -230,6 +275,9 @@ export default function AdminStudio({ onDeactivated }: { onDeactivated: () => vo
     }
   }, [orgId]);
 
+  // A previous camera's dead stream must not poison the next one's viewport.
+  useEffect(() => { setStreamFailed(false); }, [selectedCam?.id]);
+
   useEffect(() => {
     if (!selectedCam) return;
     const cam = selectedCam;
@@ -237,6 +285,11 @@ export default function AdminStudio({ onDeactivated }: { onDeactivated: () => vo
       const sb = await getSupabase();
       const { data: draws } = await sb.from("analytics_drawings").select("*").eq("camera_id", cam.id).is("deleted_at", null);
       setDrawings(draws ?? []);
+      // Undo must never reach across a camera switch into another camera's
+      // shapes — that would "restore" geometry onto a camera it never belonged
+      // to. Each camera's saved set is its own history root.
+      seedHistory(draws ?? []);
+      setEditingDrawingId(null);
       const { data: ruleList } = await sb.from("rule_engine_rules").select("*").eq("camera_id", cam.id).is("deleted_at", null);
       setRules(ruleList ?? []);
 
@@ -355,7 +408,13 @@ export default function AdminStudio({ onDeactivated }: { onDeactivated: () => vo
     // saved geometries
     drawings.forEach((d) => {
       if (!d.points?.length) return;
+      if (isHidden(d as EditableShape)) return; // hidden means hidden
       const editing = editingDrawingId === d.id;
+      const locked = isLocked(d as EditableShape);
+      ctx.save();
+      // A locked shape is still visible but visibly not editable, so an operator
+      // who cannot drag it knows why instead of assuming the canvas is broken.
+      if (locked) ctx.globalAlpha = 0.55;
       ctx.strokeStyle = editing ? "#a855f7" : d.properties?.color || "#f43f5e";
       ctx.fillStyle = editing ? "rgba(168,85,247,0.2)" : d.properties?.fillColor || "rgba(244,63,94,0.12)";
       ctx.lineWidth = editing ? 3 : 2;
@@ -380,9 +439,268 @@ export default function AdminStudio({ onDeactivated }: { onDeactivated: () => vo
       const first = d.points[0];
       ctx.font = "bold 10px Inter, sans-serif";
       ctx.fillStyle = editing ? "#a855f7" : d.properties?.color || "#f43f5e";
-      ctx.fillText(d.name, first[0] * canvas.width, first[1] * canvas.height - 8);
+      ctx.fillText(`${locked ? "🔒 " : ""}${d.name}`, first[0] * canvas.width, first[1] * canvas.height - 8);
+
+      // Selection handles: the grab targets for resize. Drawn only for the
+      // selected, unlocked shape — handles on every shape at once turns a busy
+      // scene into confetti. hitVertex() uses an 8px tolerance, so these are
+      // drawn at radius 5 to sit just inside their own hit area.
+      if (editing && !locked) {
+        const handles = d.type === "circle" ? d.points.slice(0, 2) : d.points;
+        handles.forEach(([nx, ny], i) => {
+          const hx = nx * canvas.width;
+          const hy = ny * canvas.height;
+          ctx.beginPath();
+          ctx.arc(hx, hy, 5, 0, Math.PI * 2);
+          ctx.fillStyle = "#0f172a";
+          ctx.fill();
+          ctx.lineWidth = 2;
+          // The circle's centre handle moves the whole shape; its rim handle
+          // resizes. Different jobs, different colours.
+          ctx.strokeStyle = d.type === "circle" && i === 0 ? "#a855f7" : "#facc15";
+          ctx.stroke();
+        });
+      }
+      ctx.restore();
     });
   }, [drawings, activePoints, drawMode, editingDrawingId, activeProfile]);
+
+  // ---- editor: history + persistence -----------------------------------
+
+  /** Reset history whenever the camera's saved set is (re)loaded, so undo can
+   *  never reach back into a different camera's shapes. */
+  const seedHistory = useCallback((initial: Drawing[]) => {
+    historyRef.current = new History<Drawing[]>(initial);
+    setHistoryTick((t) => t + 1);
+  }, []);
+
+  /** Record a new state and persist the difference from the previous one.
+   *  Every mutation funnels through here so history and the database can't
+   *  disagree about what the current shapes are. */
+  const commit = useCallback(async (next: Drawing[]) => {
+    const h = historyRef.current;
+    const prev = h ? h.current : drawings;
+    h?.push(next);
+    setDrawings(next);
+    setHistoryTick((t) => t + 1);
+    await persistSnapshot(prev, next);
+  }, [drawings]);
+
+  async function persistSnapshot(prev: Drawing[], next: Drawing[]) {
+    const sb = await getSupabase();
+    const prevById = new Map(prev.map((d) => [d.id, d]));
+    const nextById = new Map(next.map((d) => [d.id, d]));
+    const now = new Date().toISOString();
+
+    let rulesTouched = false;
+    try {
+      // Changed (geometry / name / flags)
+      for (const d of next) {
+        const before = prevById.get(d.id);
+        if (!before) {
+          // Present now, absent before: a re-instated shape (undo of a delete).
+          await sb.from("analytics_drawings")
+            .update({ deleted_at: null, points: d.points, name: d.name, properties: d.properties })
+            .eq("id", d.id);
+          // Bring its rules back with it. Deleting a shape cascades to the rules
+          // bound to it (below), so undoing that delete has to restore them or
+          // the shape returns silently disarmed — every alert it used to raise
+          // gone, with nothing on screen saying so.
+          await sb.from("rule_engine_rules").update({ deleted_at: null }).eq("trigger_source_id", d.id);
+          rulesTouched = true;
+          continue;
+        }
+        const changed =
+          JSON.stringify(before.points) !== JSON.stringify(d.points) ||
+          before.name !== d.name ||
+          JSON.stringify(before.properties ?? {}) !== JSON.stringify(d.properties ?? {});
+        if (changed) {
+          await sb.from("analytics_drawings")
+            .update({ points: d.points, name: d.name, properties: d.properties })
+            .eq("id", d.id);
+        }
+      }
+      // Removed — cascade to bound rules. A rule whose trigger_source_id points
+      // at a deleted shape is a dangling reference the engine would compile and
+      // then never be able to fire.
+      for (const d of prev) {
+        if (!nextById.has(d.id)) {
+          await sb.from("analytics_drawings").update({ deleted_at: now }).eq("id", d.id);
+          await sb.from("rule_engine_rules").update({ deleted_at: now }).eq("trigger_source_id", d.id);
+          rulesTouched = true;
+        }
+      }
+
+      if (rulesTouched && selectedCam) {
+        const { data: ruleList } = await sb.from("rule_engine_rules")
+          .select("*").eq("camera_id", selectedCam.id).is("deleted_at", null);
+        setRules(ruleList ?? []);
+      }
+    } catch (e) {
+      console.error("[AdminStudio] failed to persist shape change:", e);
+    }
+  }
+
+  const undo = useCallback(async () => {
+    const h = historyRef.current;
+    if (!h?.canUndo) return;
+    const prev = h.current;
+    const next = h.undo();
+    setDrawings(next);
+    setHistoryTick((t) => t + 1);
+    await persistSnapshot(prev, next);
+  }, []);
+
+  const redo = useCallback(async () => {
+    const h = historyRef.current;
+    if (!h?.canRedo) return;
+    const prev = h.current;
+    const next = h.redo();
+    setDrawings(next);
+    setHistoryTick((t) => t + 1);
+    await persistSnapshot(prev, next);
+  }, []);
+
+  // ---- editor: shape operations ----------------------------------------
+
+  const updateShape = useCallback((id: string, patch: Partial<Drawing>) => {
+    void commit(drawings.map((d) => (d.id === id ? { ...d, ...patch } : d)));
+  }, [drawings, commit]);
+
+  const toggleFlag = useCallback((id: string, flag: "locked" | "hidden") => {
+    const d = drawings.find((x) => x.id === id);
+    if (!d) return;
+    updateShape(id, { properties: { ...(d.properties ?? {}), [flag]: !d.properties?.[flag] } });
+  }, [drawings, updateShape]);
+
+  const removeShape = useCallback((id: string) => {
+    if (isLocked(drawings.find((d) => d.id === id) as EditableShape)) return;
+    void commit(drawings.filter((d) => d.id !== id));
+    if (editingDrawingId === id) setEditingDrawingId(null);
+  }, [drawings, commit, editingDrawingId]);
+
+  /** Duplicate needs a real row (the id is DB-generated), so this inserts first
+   *  and only then records history — otherwise undo would target an id that
+   *  does not exist yet. */
+  const duplicate = useCallback(async (id: string) => {
+    const src = drawings.find((d) => d.id === id);
+    if (!src || !selectedCam || !orgId) return;
+    const ghost = duplicateShape(src as EditableShape, "pending");
+    const sb = await getSupabase();
+    const { data, error } = await sb.from("analytics_drawings").insert([{
+      org_id: orgId, camera_id: selectedCam.id, name: ghost.name, type: src.type,
+      purpose: src.purpose, profile: src.profile, feature_key: src.feature_key,
+      points: ghost.points, properties: ghost.properties, is_draft: true,
+    }]).select();
+    if (error || !data?.[0]) { console.error("[AdminStudio] duplicate failed:", error); return; }
+    const created = data[0] as Drawing;
+    historyRef.current?.push([...drawings, created]);
+    setDrawings((prev) => [...prev, created]);
+    setEditingDrawingId(created.id);
+    setHistoryTick((t) => t + 1);
+  }, [drawings, selectedCam, orgId]);
+
+  // ---- editor: pointer interaction --------------------------------------
+
+  const viewOf = (): View | null => {
+    const c = canvasRef.current;
+    return c ? { w: c.clientWidth, h: c.clientHeight } : null;
+  };
+
+  const pointFrom = (e: React.MouseEvent<HTMLCanvasElement>): number[] | null => {
+    const canvas = canvasRef.current;
+    if (!canvas) return null;
+    const rect = canvas.getBoundingClientRect();
+    return [
+      Number(((e.clientX - rect.left) / rect.width).toFixed(4)),
+      Number(((e.clientY - rect.top) / rect.height).toFixed(4)),
+    ];
+  };
+
+  const handlePointerDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    if (drawMode !== "view") return; // a draw tool is active; clicks build shapes
+    const pt = pointFrom(e);
+    const view = viewOf();
+    if (!pt || !view) return;
+
+    const selected = drawings.find((d) => d.id === editingDrawingId);
+    // Prefer a handle on the ALREADY-selected shape: when shapes overlap, the
+    // operator reaching for a vertex means that vertex, not whatever sits on top.
+    if (selected && isInteractive(selected as EditableShape)) {
+      const vi = hitVertex(selected as EditableShape, pt, view);
+      if (vi !== null) {
+        dragRef.current = { kind: "vertex", id: selected.id, vertexIndex: vi, lastPt: pt, moved: false };
+        return;
+      }
+    }
+
+    const hit = topmostAt(drawings as EditableShape[], pt, view);
+    setEditingDrawingId(hit ? hit.id : null);
+    if (hit) dragRef.current = { kind: "move", id: hit.id, vertexIndex: -1, lastPt: pt, moved: false };
+  };
+
+  const handlePointerMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    const drag = dragRef.current;
+    if (!drag) return;
+    const pt = pointFrom(e);
+    if (!pt) return;
+
+    // Local state only while dragging; the database write happens once on
+    // release. Persisting every pointermove would fire a request per pixel.
+    setDrawings((prev) => prev.map((d) => {
+      if (d.id !== drag.id) return d;
+      const updated = drag.kind === "vertex"
+        ? moveVertex(d as EditableShape, drag.vertexIndex, pt)
+        : translateShape(d as EditableShape, pt[0] - drag.lastPt[0], pt[1] - drag.lastPt[1]);
+      return { ...d, points: updated.points };
+    }));
+    drag.lastPt = pt;
+    drag.moved = true;
+  };
+
+  const handlePointerUp = () => {
+    const drag = dragRef.current;
+    dragRef.current = null;
+    // A click that selected without moving must not push a history entry, or
+    // undo would appear to do nothing for one press per click.
+    if (!drag?.moved) return;
+    void commit(drawings);
+  };
+
+  // Keyboard: Delete / Ctrl+Z / Ctrl+Shift+Z / Ctrl+Y / Ctrl+C / Ctrl+V / Ctrl+D.
+  // Ignored while typing in an input, or the rename field would eat them.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
+      const ctrl = e.ctrlKey || e.metaKey;
+
+      if (ctrl && e.key.toLowerCase() === "z") {
+        e.preventDefault();
+        void (e.shiftKey ? redo() : undo());
+      } else if (ctrl && e.key.toLowerCase() === "y") {
+        e.preventDefault();
+        void redo();
+      } else if (ctrl && e.key.toLowerCase() === "c" && editingDrawingId) {
+        clipboardRef.current = drawings.find((d) => d.id === editingDrawingId) ?? null;
+      } else if (ctrl && e.key.toLowerCase() === "v" && clipboardRef.current) {
+        e.preventDefault();
+        void duplicate(clipboardRef.current.id);
+      } else if (ctrl && e.key.toLowerCase() === "d" && editingDrawingId) {
+        e.preventDefault();
+        void duplicate(editingDrawingId);
+      } else if ((e.key === "Delete" || e.key === "Backspace") && editingDrawingId) {
+        e.preventDefault();
+        removeShape(editingDrawingId);
+      } else if (e.key === "Escape") {
+        setEditingDrawingId(null);
+        setActivePoints([]);
+        setDrawMode("view");
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [undo, redo, duplicate, removeShape, editingDrawingId, drawings]);
 
   // ---- drawing interaction ---------------------------------
   function beginDraw(mode: DrawMode, binding: DrawBinding) {
@@ -443,7 +761,19 @@ export default function AdminStudio({ onDeactivated }: { onDeactivated: () => vo
     try {
       const { data, error } = await sb.from("analytics_drawings").insert([newDrawing]).select();
       if (error) throw error;
-      if (data) setDrawings((prev) => [...prev, data[0] as Drawing]);
+      if (data) {
+        // Record the creation so Ctrl+Z removes a shape just drawn. Pushed
+        // directly rather than via commit(): the row already exists (the id is
+        // DB-generated), so there is nothing further to persist and re-running
+        // the diff would just re-write it.
+        const created = data[0] as Drawing;
+        setDrawings((prev) => {
+          const nextSet = [...prev, created];
+          historyRef.current?.push(nextSet);
+          return nextSet;
+        });
+        setHistoryTick((t) => t + 1);
+      }
     } catch (e) {
       console.error("Failed to insert drawing:", e);
     }
@@ -452,15 +782,10 @@ export default function AdminStudio({ onDeactivated }: { onDeactivated: () => vo
     setDrawBinding(null);
   };
 
-  const deleteDrawing = async (id: string) => {
-    const sb = await getSupabase();
-    try {
-      await sb.from("analytics_drawings").update({ deleted_at: new Date().toISOString() }).eq("id", id);
-      setDrawings((prev) => prev.filter((d) => d.id !== id));
-      await sb.from("rule_engine_rules").update({ deleted_at: new Date().toISOString() }).eq("trigger_source_id", id);
-      setRules((prev) => prev.filter((r) => r.trigger_source_id !== id));
-    } catch (e) { console.error(e); }
-  };
+  // deleteDrawing() lived here. It wrote straight to the database, so a delete
+  // was invisible to the undo stack and unrecoverable. Deletion now goes through
+  // removeShape -> commit -> persistSnapshot, which records history and cascades
+  // to bound rules in both directions.
 
   // ---- alert rules -----------------------------------------
   const handleAddRule = async (e: React.FormEvent) => {
@@ -722,19 +1047,52 @@ export default function AdminStudio({ onDeactivated }: { onDeactivated: () => vo
         <div className="text-[10px] uppercase font-bold tracking-wider text-zinc-500">Geometries ({drawings.length})</div>
         {drawings.length === 0 ? (
           <div className="text-xs text-zinc-500 italic">No shapes yet.</div>
-        ) : drawings.map((d) => (
-          <div key={d.id} onClick={() => setEditingDrawingId(editingDrawingId === d.id ? null : d.id)}
-            className={clsx("p-2 rounded border text-xs flex justify-between items-center cursor-pointer",
-              editingDrawingId === d.id ? "bg-accent/10 border-accent" : "bg-surface-0 border-line hover:border-zinc-700")}>
-            <div className="min-w-0">
-              <div className="font-semibold text-zinc-200 truncate">{d.name}</div>
-              <div className="text-[9px] text-zinc-500 font-mono capitalize">{d.type} • {d.feature_key || d.purpose}</div>
+        ) : drawings.map((d) => {
+          const locked = isLocked(d as EditableShape);
+          const hidden = isHidden(d as EditableShape);
+          return (
+            <div key={d.id} onClick={() => setEditingDrawingId(editingDrawingId === d.id ? null : d.id)}
+              className={clsx("p-2 rounded border text-xs cursor-pointer group/shape",
+                editingDrawingId === d.id ? "bg-accent/10 border-accent" : "bg-surface-0 border-line hover:border-zinc-700",
+                hidden && "opacity-50")}>
+              <div className="flex justify-between items-center gap-1">
+                <div className="min-w-0 flex-1">
+                  {/* Rename in place. onBlur/Enter commits, so a half-typed name
+                      never reaches the database on every keystroke. */}
+                  <input
+                    value={d.name}
+                    onClick={(e) => e.stopPropagation()}
+                    onChange={(e) => setDrawings((prev) => prev.map((x) => x.id === d.id ? { ...x, name: e.target.value } : x))}
+                    onBlur={(e) => { const v = e.target.value.trim(); if (v && v !== historyRef.current?.current.find((x) => x.id === d.id)?.name) updateShape(d.id, { name: v }); }}
+                    onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
+                    className="w-full bg-transparent border-b border-transparent hover:border-zinc-700 focus:border-accent font-semibold text-zinc-200 truncate outline-none px-0.5"
+                  />
+                  <div className="text-[9px] text-zinc-500 font-mono capitalize px-0.5">{d.type} • {d.feature_key || d.purpose}</div>
+                </div>
+                <div className="flex items-center shrink-0">
+                  <button onClick={(e) => { e.stopPropagation(); toggleFlag(d.id, "hidden"); }}
+                    title={hidden ? "Show" : "Hide"} className="p-1 text-zinc-500 hover:text-zinc-200">
+                    {hidden ? <EyeOff size={12} /> : <Eye size={12} />}
+                  </button>
+                  <button onClick={(e) => { e.stopPropagation(); toggleFlag(d.id, "locked"); }}
+                    title={locked ? "Unlock" : "Lock"} className={clsx("p-1 hover:text-zinc-200", locked ? "text-amber-400" : "text-zinc-500")}>
+                    {locked ? <Lock size={12} /> : <Unlock size={12} />}
+                  </button>
+                  <button onClick={(e) => { e.stopPropagation(); void duplicate(d.id); }}
+                    title="Duplicate" className="p-1 text-zinc-500 hover:text-zinc-200">
+                    <CopyIcon size={12} />
+                  </button>
+                  <button onClick={(e) => { e.stopPropagation(); removeShape(d.id); }}
+                    disabled={locked}
+                    title={locked ? "Unlock to delete" : "Delete"}
+                    className="p-1 text-zinc-500 hover:text-danger disabled:opacity-30 disabled:hover:text-zinc-500">
+                    <Trash2 size={13} />
+                  </button>
+                </div>
+              </div>
             </div>
-            <button onClick={(e) => { e.stopPropagation(); deleteDrawing(d.id); }} className="text-zinc-500 hover:text-danger p-1">
-              <Trash2 size={13} />
-            </button>
-          </div>
-        ))}
+          );
+        })}
       </div>
     );
   }
@@ -920,6 +1278,35 @@ export default function AdminStudio({ onDeactivated }: { onDeactivated: () => vo
             </div>
           </div>
           <div className="flex items-center gap-2">
+            {/* Edit actions. historyTick is read here so these re-evaluate their
+                disabled state as the history stack changes. */}
+            {(() => {
+              void historyTick;
+              const h = historyRef.current;
+              const sel = drawings.find((d) => d.id === editingDrawingId);
+              const selLocked = sel ? isLocked(sel as EditableShape) : false;
+              return (
+                <div className="flex items-center gap-1 border-r border-line pr-2 mr-1">
+                  <button onClick={() => void undo()} disabled={!h?.canUndo} title="Undo (Ctrl+Z)"
+                    className="p-1 rounded text-zinc-400 hover:text-zinc-100 hover:bg-surface-2 disabled:opacity-30 disabled:hover:bg-transparent">
+                    <Undo2 size={13} />
+                  </button>
+                  <button onClick={() => void redo()} disabled={!h?.canRedo} title="Redo (Ctrl+Shift+Z)"
+                    className="p-1 rounded text-zinc-400 hover:text-zinc-100 hover:bg-surface-2 disabled:opacity-30 disabled:hover:bg-transparent">
+                    <Redo2 size={13} />
+                  </button>
+                  <button onClick={() => editingDrawingId && void duplicate(editingDrawingId)} disabled={!sel} title="Duplicate (Ctrl+D)"
+                    className="p-1 rounded text-zinc-400 hover:text-zinc-100 hover:bg-surface-2 disabled:opacity-30 disabled:hover:bg-transparent">
+                    <CopyIcon size={13} />
+                  </button>
+                  <button onClick={() => editingDrawingId && removeShape(editingDrawingId)} disabled={!sel || selLocked}
+                    title={selLocked ? "Unlock the shape to delete it" : "Delete (Del)"}
+                    className="p-1 rounded text-zinc-400 hover:text-danger hover:bg-surface-2 disabled:opacity-30 disabled:hover:bg-transparent">
+                    <Trash2 size={13} />
+                  </button>
+                </div>
+              );
+            })()}
             {drawBinding && drawMode !== "view" && (
               <span className="text-[10px] text-zinc-400">Binding to: <b className="text-zinc-200">{drawBinding.featureLabel}</b></span>
             )}
@@ -942,16 +1329,50 @@ export default function AdminStudio({ onDeactivated }: { onDeactivated: () => vo
               </div>
             ) : (
               <div className="relative aspect-video max-h-full max-w-full rounded border border-line overflow-hidden shadow-2xl bg-zinc-950">
-                {engineOnline ? (
-                  <img src={mjpegStreamUrl(selectedCam.id)} alt="Live" className="h-full w-full object-contain pointer-events-none" />
+                {engineOnline && !streamFailed ? (
+                  // key: force a fresh MJPEG connection per camera. Without it React
+                  // reuses the element and the browser can keep serving the previous
+                  // camera's open multipart response.
+                  <img
+                    key={selectedCam.id}
+                    ref={videoRef}
+                    src={mjpegStreamUrl(selectedCam.id)}
+                    alt=""
+                    className="h-full w-full object-contain pointer-events-none"
+                    onLoad={() => setStreamFailed(false)}
+                    onError={() => setStreamFailed(true)}
+                  />
                 ) : (
-                  <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-zinc-900/90 text-zinc-500">
+                  // A broken <img> renders its alt text, so this used to show the
+                  // word "Live" in the corner and nothing else — indistinguishable
+                  // from an unfinished screen. Say which of the two things is
+                  // actually wrong instead.
+                  <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-zinc-900/90 px-6 text-center text-zinc-500">
                     <Video size={36} />
-                    <span className="text-xs">Live stream offline — drawing still works on the grid</span>
+                    {!engineOnline ? (
+                      <span className="text-xs">Local AI engine offline — drawing still works on the grid</span>
+                    ) : (
+                      <>
+                        <span className="text-xs text-zinc-300">No live stream for {selectedCam.name}</span>
+                        <span className="text-[11px]">
+                          The engine is running but isn't decoding this camera. Check the
+                          source is reachable in Engine Health. Drawing still works.
+                        </span>
+                      </>
+                    )}
                   </div>
                 )}
-                <canvas ref={canvasRef} onClick={handleCanvasClick}
-                  className={clsx("absolute inset-0 w-full h-full z-10", drawMode === "view" ? "cursor-default" : "cursor-crosshair")} />
+                <canvas
+                  ref={canvasRef}
+                  onClick={handleCanvasClick}
+                  onMouseDown={handlePointerDown}
+                  onMouseMove={handlePointerMove}
+                  onMouseUp={handlePointerUp}
+                  // Releasing outside the canvas must still end the drag, or the
+                  // shape keeps following the cursor after the button is up.
+                  onMouseLeave={handlePointerUp}
+                  className={clsx("absolute inset-0 w-full h-full z-10",
+                    drawMode !== "view" ? "cursor-crosshair" : editingDrawingId ? "cursor-move" : "cursor-default")} />
               </div>
             )
           ) : (

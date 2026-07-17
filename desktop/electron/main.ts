@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, session, desktopCapturer, powerMonitor } from "electron";
+import { app, BrowserWindow, ipcMain, session, desktopCapturer, powerMonitor, Menu } from "electron";
 import { join } from "node:path";
 import { existsSync } from "node:fs";
 import { computeFingerprint } from "./fingerprint";
@@ -66,7 +66,47 @@ if (!gotTheLock) {
   let win: BrowserWindow | null = null;
   winRef = () => win;
 
+  // ---- Window fullscreen -------------------------------------------------
+  // The renderer's viewer overlay does NOT depend on these: it fills the app
+  // window with plain layout, so the camera goes fullscreen-in-app even if the
+  // OS-level call is refused. This is the enhancement on top — it takes the
+  // window itself fullscreen (hiding the title bar / taskbar) on the display the
+  // window currently occupies, which is what makes multi-monitor work: Windows
+  // fullscreens onto the monitor the window is on, so dragging to the second
+  // screen and going fullscreen fills that one.
+  //
+  // Deliberately NOT document.requestFullscreen(): that returns a promise that
+  // can reject for reasons the page cannot inspect, and the previous
+  // implementation swallowed the rejection (.catch(() => {})) — which is exactly
+  // why clicking the button looked like it did nothing at all.
+  ipcMain.handle("window-set-fullscreen", (_e, value: boolean) => {
+    const w = winRef();
+    if (!w || w.isDestroyed()) return { ok: false, fullscreen: false };
+    w.setFullScreen(!!value);
+    console.log(`[main] window fullscreen -> ${w.isFullScreen()}`);
+    return { ok: true, fullscreen: w.isFullScreen() };
+  });
+
+  ipcMain.handle("window-is-fullscreen", () => {
+    const w = winRef();
+    return { ok: true, fullscreen: !!w && !w.isDestroyed() && w.isFullScreen() };
+  });
+
   function createWindow() {
+    // Drop Electron's stock application menu.
+    //
+    // It is already invisible (autoHideMenuBar), but its ACCELERATORS stayed
+    // live — and its View menu binds F11 to role "togglefullscreen". That
+    // swallowed F11 before the renderer's keydown handler ever saw it, and
+    // fullscreened the whole BrowserWindow (sidebar, tabs and all) instead of
+    // the camera tile the operator was pointing at. Nothing else in the stock
+    // menu is reachable in a kiosk-style CCTV client, so the whole thing goes;
+    // Chromium still handles clipboard/undo natively without a menu.
+    //
+    // With this gone, F11 is delivered to the page as an ordinary key event and
+    // Workspace's per-tile handler owns it.
+    Menu.setApplicationMenu(null);
+
     const iconPath = join(__dirname, "../build/icon.ico");
     win = new BrowserWindow({
       width: 1440,
@@ -86,6 +126,25 @@ if (!gotTheLock) {
     });
     win.webContents.on("console-message", (event, level, message, line, sourceId) => {
       console.log(`[Renderer Console] ${message}`);
+    });
+
+    // The OS can change fullscreen without the renderer asking (the user hits the
+    // title-bar control, or Windows exits fullscreen on a display change). Push
+    // the truth down so React never renders an exit button for a state the window
+    // is no longer in.
+    win.on("enter-full-screen", () => {
+      console.log("[main] enter-full-screen");
+      safeSend(winRef(), "window:fullscreen", true);
+    });
+    win.on("leave-full-screen", () => {
+      console.log("[main] leave-full-screen");
+      safeSend(winRef(), "window:fullscreen", false);
+    });
+    win.on("resize", () => {
+      const w = winRef();
+      if (!w || w.isDestroyed()) return;
+      const [width, height] = w.getSize();
+      safeSend(w, "window:resized", { width, height, fullscreen: w.isFullScreen() });
     });
     if (process.env.VITE_DEV_SERVER_URL) {
       win.loadURL(process.env.VITE_DEV_SERVER_URL);

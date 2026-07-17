@@ -17,6 +17,7 @@ from app.storage import (
     get_all_recordings
 )
 from app.camera_manager import manager
+from app.ai.pipeline import get_detection_confidence, set_detection_confidence
 from app.gpu_monitor import get_gpu_usage
 
 app = FastAPI(title="CamAI CCTV Analytics Platform")
@@ -268,6 +269,9 @@ class CameraRecordingPayload(BaseModel):
 class ModelSelectPayload(BaseModel):
     model_name: str
 
+class ConfidencePayload(BaseModel):
+    confidence: float
+
 # Status
 @app.get("/api/status")
 def get_system_status():
@@ -383,6 +387,25 @@ def select_model(payload: ModelSelectPayload):
     if not success:
         raise HTTPException(status_code=500, detail=f"Failed to hot-swap to selected model '{model_name}'.")
     return {"success": True, "message": f"Successfully swapped active model to {model_name}"}
+
+@app.get("/api/detection/confidence")
+def read_detection_confidence():
+    return {"confidence": get_detection_confidence()}
+
+@app.post("/api/detection/confidence")
+def set_confidence(payload: ConfidencePayload):
+    """Set the detection confidence floor for every running camera.
+
+    Process-wide and applied live: each camera's AI loop reads the value at the
+    top of its next cycle, so this takes effect within one frame with no restart
+    and no re-registration.
+
+    The APPLIED value is returned rather than the requested one, because it is
+    clamped (see pipeline.MIN/MAX_CONFIDENCE) — a caller that echoes its own
+    request back to an admin would show a number the detector isn't using.
+    """
+    applied = set_detection_confidence(payload.confidence)
+    return {"success": True, "confidence": applied}
 
 # Cameras
 @app.get("/api/cameras")

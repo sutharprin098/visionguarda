@@ -139,7 +139,31 @@ async function getEngineCameraConfig(cameraId: string): Promise<{
   }
 }
 
-export async function syncCamerasToLocalEngine(
+/** Serialises sync runs. `registered`/`lastUpdatedAt`/`lastSyncedConfig` are
+ *  module-level mutable maps and this function awaits repeatedly, so two
+ *  overlapping calls interleave on shared state — one can DELETE a camera while
+ *  the other is mid-adopt, or both can decide it is unregistered and POST it
+ *  twice (which tears down and restarts the pipeline under a live view).
+ *
+ *  Overlap is not hypothetical: React StrictMode double-invokes effects in dev
+ *  (mount -> cleanup -> mount), so the immediate sync() fires twice back to back
+ *  on every launch. Chaining rather than coalescing because each call carries
+ *  its own bundle data — dropping the second would silently discard the newer
+ *  configuration until the next 8s tick. */
+let syncChain: Promise<void> = Promise.resolve();
+
+export function syncCamerasToLocalEngine(
+  cameras: { id: string; name: string; source_type: string; zones?: string; lines?: string; zone_profile?: string | null; updated_at?: string }[],
+  rules: any[] = [],
+  zoneProfileConfigs: any[] = []
+): Promise<void> {
+  syncChain = syncChain
+    .then(() => doSyncCamerasToLocalEngine(cameras, rules, zoneProfileConfigs))
+    .catch((e) => { console.error("[localEngine] camera sync failed:", e); });
+  return syncChain;
+}
+
+async function doSyncCamerasToLocalEngine(
   cameras: { id: string; name: string; source_type: string; zones?: string; lines?: string; zone_profile?: string | null; updated_at?: string }[],
   rules: any[] = [],
   zoneProfileConfigs: any[] = []
@@ -180,6 +204,17 @@ export async function syncCamerasToLocalEngine(
       try { await fetch(`${ENGINE_BASE}/api/cameras/${cam.id}`, { method: "DELETE" }); } catch { /* engine may have restarted */ }
       registered.delete(cam.id);
       lastSyncedConfig.delete(cam.id);
+      // `live` is a snapshot taken at the top of this call and has just gone
+      // stale for this id. Without this line the adopt branch below sees
+      // (!registered && live) and "adopts" the camera we deleted milliseconds
+      // ago: it marks it registered, skips the re-register path entirely, and
+      // POSTs config to a camera that no longer exists (observed: DELETE 200
+      // followed immediately by POST /config 404). The engine is then left with
+      // NO camera while the desktop believes it has one, so nothing re-creates
+      // it and every stream URL 404s until the next bundle change happens to
+      // shake it loose. That is a dead live view for an operator, on the very
+      // path that is supposed to keep the view alive after an edit.
+      live.delete(cam.id);
     }
 
     if (registered.has(cam.id) && !live.has(cam.id)) {
@@ -418,5 +453,61 @@ export async function syncAiModelToLocalEngine(dbModelName: string | undefined):
     if (res.ok) appliedModel = modelName;
   } catch {
     // engine went away mid-sync — next sync tick retries
+  }
+}
+
+// Mirrors pipeline.MIN/MAX_CONFIDENCE. Duplicated deliberately: the engine
+// clamps too (it must — it is reachable without going through this module), and
+// this copy exists only so the drift check below can predict what the engine
+// will hold and stop comparing against a value it was never going to accept.
+const CONF_MIN = 0.1;
+const CONF_MAX = 0.9;
+
+/**
+ * Pushes the org's `ai.confidence` setting to the local engine's detection
+ * floor. Process-wide, exactly like the model above — there is no per-camera
+ * confidence in the schema.
+ *
+ * This closes a hole, not an optimisation: the portal has written
+ * `ai.confidence` to `settings` for as long as the key has existed, and nothing
+ * on either side ever read it. The engine ran a hardcoded 0.25 regardless, so an
+ * admin changing detection sensitivity saved a row, saw a success toast, and
+ * changed nothing whatsoever about what the cameras detected.
+ *
+ * Compares against what the ENGINE REPORTS, not against a local "last pushed"
+ * cache. A cache is wrong here in the one case that matters: the engine is a
+ * separate process that can crash and restart back on its default while the
+ * bundle never changes, and a module that believed its own bookkeeping would
+ * decide the push was unnecessary and leave every camera on a confidence nobody
+ * chose, indefinitely. This is the same failure the camera-config sync above was
+ * already bitten by — see getEngineCameraConfig.
+ */
+export async function syncAiConfidenceToLocalEngine(dbConfidence: unknown): Promise<void> {
+  const raw = typeof dbConfidence === "number" ? dbConfidence : Number(dbConfidence);
+  if (!Number.isFinite(raw)) return;
+  // What the engine will actually hold once it clamps. Without this, an
+  // out-of-range org setting (0.95) would never equal the engine's clamped 0.90
+  // and would re-POST on every tick, forever.
+  const wanted = Math.max(CONF_MIN, Math.min(CONF_MAX, raw));
+
+  try {
+    const cur = await fetch(`${ENGINE_BASE}/api/detection/confidence`, {
+      signal: AbortSignal.timeout(4000),
+    });
+    if (cur.ok) {
+      const body = await cur.json();
+      // Float equality via epsilon: these are round-tripped through JSON and
+      // through Python floats, so 0.4 does not always come back as exactly 0.4.
+      if (typeof body?.confidence === "number" && Math.abs(body.confidence - wanted) < 1e-6) return;
+    }
+    // A failed/unreachable GET deliberately falls through to the POST: unknown
+    // engine state must mean "push", never "assume it's already right".
+    await fetch(`${ENGINE_BASE}/api/detection/confidence`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ confidence: wanted }),
+    });
+  } catch {
+    // engine went away mid-sync — next tick retries
   }
 }
