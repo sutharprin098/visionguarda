@@ -226,6 +226,33 @@ _INSTANCE: Optional[FaceDetector] = None
 _LOAD_FAILED = False
 
 
+def unload() -> bool:
+    """Drop the loaded detector so a profile that no longer wants faces stops
+    holding it.
+
+    Honest about the size of the win: YuNet is 0.23 MB on disk and ~7 MB RSS,
+    so this is not where memory is won — yolox and OpenVINO's runtime dominate.
+    It matters because "unload unused models" should mean something rather than
+    being claimed and not done, and because the next get_detector() re-reads the
+    confidence from the profile that asked for it.
+
+    Not called per frame — only when a camera's config changes to one that
+    doesn't want faces (pipeline.py), so the ~130 ms reload cost is paid at
+    most once per profile switch, not per cycle.
+    """
+    global _INSTANCE, _LOAD_FAILED
+    if _INSTANCE is None:
+        return False
+    _INSTANCE = None
+    _LOAD_FAILED = False   # a later profile may want it again
+    print("[face] YuNet unloaded — no camera requires face detection", flush=True)
+    return True
+
+
+def is_loaded() -> bool:
+    return _INSTANCE is not None
+
+
 def get_detector(conf: float = 0.6) -> Optional[FaceDetector]:
     """Process-wide singleton — the model is ~230 KB but constructing it costs
     ~130 ms, and every camera thread that enables the feature would otherwise

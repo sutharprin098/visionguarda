@@ -525,8 +525,20 @@ const FACTORY: ProfileDef = {
       params: [confidence(0.4)],
     },
     {
+      // Was mislabelled "Safe Zone" to satisfy the spec's factory tool list —
+      // but this feature draws a LINE and counts crossings; a safe zone is an
+      // area. Naming a counting line "Safe Zone" would have an operator draw
+      // the wrong geometry and then wonder why nothing worked.
+      //
+      // The spec's remaining two factory tools are deliberately absent:
+      //   Safe Zone     — analytics has no inverse-of-hazard rule ("alert when
+      //                   a worker LEAVES an area"); hazard_zone flags presence,
+      //                   not absence. Adding the tool without the rule is how
+      //                   the dead toggles this release removed came about.
+      //   Forklift Route— needs forklift detection, and COCO/yolox_tiny has no
+      //                   forklift class (see forklift_detection, "no model").
       key: "worker_counting", label: "Worker Counting", group: "Tracking & Counting", requiresGeometry: "line", defaultEnabled: true,
-      drawTool: { label: "Safe Zone", purpose: "entry_line" },
+      drawTool: { label: "Entry/Exit Line", purpose: "entry_line" },
       description: "Count workers entering/leaving an area.",
       params: [directionParam],
     },
@@ -640,7 +652,8 @@ export function buildDefaultFeatures(profile: ZoneProfileKey): ProfileFeatures {
   for (const f of ZONE_PROFILES[profile].features) {
     const params: Record<string, unknown> = {};
     for (const p of f.params) params[p.key] = p.default;
-    out[f.key] = { enabled: !!f.defaultEnabled, params };
+    // A feature with no model can never be on, whatever its defaultEnabled says.
+    out[f.key] = { enabled: !f.unavailable && !!f.defaultEnabled, params };
   }
   return out;
 }
@@ -656,7 +669,17 @@ export function reconcileFeatures(profile: ZoneProfileKey, stored: ProfileFeatur
   for (const f of ZONE_PROFILES[profile].features) {
     const s = stored[f.key];
     if (!s) continue;
-    base[f.key].enabled = typeof s.enabled === "boolean" ? s.enabled : base[f.key].enabled;
+    // Stored params still win, but a stored `enabled` cannot resurrect a
+    // feature with no model. Configs saved before those features were
+    // recognised as unbacked still carry enabled:true — the live DB has a
+    // factory camera with ppe_detection ON, saved while the PPE "detector" was
+    // an HSV colour guess that invented helmets on 16% of checks. Honouring
+    // that stored true would put the switch back in the on position, which is
+    // precisely the impression this release exists to remove. The engine
+    // ignores it either way; this stops the UI from claiming otherwise.
+    base[f.key].enabled = f.unavailable
+      ? false
+      : (typeof s.enabled === "boolean" ? s.enabled : base[f.key].enabled);
     for (const p of f.params) {
       if (s.params && p.key in s.params) base[f.key].params[p.key] = s.params[p.key];
     }

@@ -788,12 +788,33 @@ class PipelineCoordinator:
         self.running = False
 
     def update_config(self, zones_json: str, lines_json: str, rules_json: str = "[]", zone_profile: str = None, profile_features: str = "{}"):
+        """Hot-swap this camera's profile. No restart: the next AI cycle reads
+        the new zone_profile/profile_features and narrows classes, runs (or
+        skips) the face pass, and drives the new zone/line rules accordingly."""
         self.zones = json.loads(zones_json)
         self.lines = json.loads(lines_json)
         self.rules = json.loads(rules_json)
         self.zone_profile = zone_profile
         self.profile_features = json.loads(profile_features) if isinstance(profile_features, str) else (profile_features or {})
         self.analytics.reset_counters()
+        # Counters are per-profile; a security camera's people_in must not carry
+        # into a traffic camera's vehicle counts. reset_counters() above does
+        # that. The other stateful thing a profile switch invalidates is the
+        # face model: drop it when nothing wants it any more, so "unload unused
+        # models" is true rather than merely claimed. Cheap to reload (~130ms)
+        # and only ever paid on a profile change, never per frame.
+        _releases_face = not self._wants_faces()
+        if _releases_face and face_detect.is_loaded():
+            face_detect.unload()
+
+    def _wants_faces(self) -> bool:
+        """Both gates must pass: the operator's toggle AND a profile whose class
+        list actually reports faces (a traffic camera discards them, so paying
+        ~35ms to detect them would be pure waste)."""
+        if not (self.profile_features or {}).get("face_detection", {}).get("enabled"):
+            return False
+        allowed = PROFILE_CLASSES.get(self.zone_profile)
+        return "face" in allowed if allowed else True
 
     def update_display_config(self, max_width: int = None, quality: int = None):
         """Adjust the MJPEG preview encode target at runtime (display only —
@@ -1381,16 +1402,16 @@ class PipelineCoordinator:
             # `detections` before analytics.update(), because analytics.py's
             # face_detection loop matches on det["class"] == "face"; that loop
             # has existed since the feature shipped and has never once fired.
-            face_cfg = (self.profile_features or {}).get("face_detection", {})
             # Gate on the profile too, not just the toggle. Measured: a traffic
             # camera with face_detection left on burned 21.6ms/frame running
             # YuNet and then had every face thrown away by the profile filter
             # below (traffic reports vehicles only) — pure waste, invisible in
             # the output. A profile that cannot report faces must not pay for
-            # detecting them.
-            _profile_wants_faces = "face" in (PROFILE_CLASSES.get(self.zone_profile) or {"face"})
+            # detecting them. Same predicate update_config() uses to decide
+            # whether to unload the model, so the two can't drift apart.
+            face_cfg = (self.profile_features or {}).get("face_detection", {})
             t_face0 = time.perf_counter()
-            if face_cfg.get("enabled") and _profile_wants_faces:
+            if self._wants_faces():
                 fd = face_detect.get_detector(float(face_cfg.get("confidence", 0.6)))
                 if fd is not None:
                     person_boxes = [d["bbox"] for d in detections if d.get("class") == "person"]
