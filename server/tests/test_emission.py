@@ -38,6 +38,33 @@ def _tracker_with_coasting_track(bbox, cls="car", frames_missed=1):
     return tracker
 
 
+def test_overlapping_same_class_tracks_collapse_to_one_box():
+    """Two confirmed tracks stacked on one physical object (an ID switch that
+    left both alive) must NOT paint two boxes on one person. Same-class boxes
+    at IoU>0.7 collapse to one — the 'N boxes on one human' fix."""
+    tracker = ByteTracker(max_lost_frames=10, reid_ttl=30.0, n_init=2)
+    box = (100, 100, 200, 300)
+    near = (104, 103, 205, 305)   # IoU with box > 0.7
+    tracks_raw = [trk(1, box, cls="person"), trk(2, near, cls="person")]
+    dets, masks = resolve_emitted_detections(
+        tracker, tracks_raw, [det(box, cls="person"), det(near, cls="person")], [[], []]
+    )
+    assert len(dets) == 1, f"one person must emit one box, got {len(dets)}"
+    assert len(masks) == len(dets)
+
+
+def test_overlapping_different_class_boxes_both_survive():
+    """A rider's person box and motorcycle box overlap heavily but are different
+    objects — the dedup must never merge across classes."""
+    tracker = ByteTracker(max_lost_frames=10, reid_ttl=30.0, n_init=2)
+    box = (100, 100, 200, 300)
+    tracks_raw = [trk(1, box, cls="person"), trk(2, box, cls="motorcycle")]
+    dets, _ = resolve_emitted_detections(
+        tracker, tracks_raw, [det(box, cls="person"), det(box, cls="motorcycle")], [[], []]
+    )
+    assert {d["class"] for d in dets} == {"person", "motorcycle"}
+
+
 def test_object_never_gets_both_a_raw_box_and_a_coasting_box():
     """THE regression test for duplicate boxes.
 

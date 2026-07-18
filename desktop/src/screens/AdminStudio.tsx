@@ -303,7 +303,16 @@ export default function AdminStudio({ onDeactivated }: { onDeactivated: () => vo
     setDrawMode("view");
     setDrawBinding(null);
     setEditingDrawingId(null);
-  }, [selectedCam, loadProfileConfig]);
+    // Key on the camera's stable ID, NOT the selectedCam object. The admin-studio
+    // realtime channel calls loadData() on every `cameras` row change, and the
+    // desktop reports camera health into cameras.status every 10s — so the
+    // selectedCam OBJECT reference churns every ~10s even though the SAME camera
+    // is still selected. Keying on the object re-ran this effect on that churn
+    // and called setActivePoints([]) mid-draw, so a polygon you were placing
+    // vanished before you could save it. The ID only changes on a real camera
+    // switch, which is the only time the draft should actually be discarded.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedCam?.id]);
 
   // ---- profile selection -----------------------------------
   async function selectProfile(profileKey: ZoneProfileKey) {
