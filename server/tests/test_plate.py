@@ -71,6 +71,23 @@ def test_decode_generic_normalised_cxcywh():
     assert raw[0]["_score"] == pytest.approx(0.9)
 
 
+def test_decode_generic_transposed_yolov8_layout():
+    """A real YOLOv8 plate export is [1, 4+nc, N] (channels-first, N anchors) with
+    cx,cy,w,h in INPUT PIXELS. The decoder must transpose to [N, 4+nc]; without it
+    it read N features per row and produced boxes with confidences in the hundreds
+    (the bug the MIT plate detector surfaced). N here is large so the >=5 guard
+    triggers the transpose."""
+    d = _bare(input_size=(640, 640))
+    N = 8400
+    arr = np.zeros((1, 5, N), np.float32)          # [1, 4+nc, N]
+    arr[0, :, 0] = [320, 200, 80, 30, 0.9]         # one plate: pixels + score
+    raw = d._decode_generic(arr, scale=1.0, crop_w=640, crop_h=640)
+    assert len(raw) == 1, f"expected 1 detection, got {len(raw)}"
+    x1, y1, x2, y2 = raw[0]["_box"]
+    assert (x1, y1, x2, y2) == pytest.approx((280, 185, 360, 215))  # 320±40, 200±15
+    assert raw[0]["_score"] == pytest.approx(0.9)
+
+
 def test_decode_generic_respects_confidence():
     d = _bare(conf=0.8)
     arr = np.zeros((1, 2, 5), np.float32)
