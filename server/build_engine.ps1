@@ -88,6 +88,23 @@ if (Test-Path $exe) {
         Write-Warning "face_detection_yunet_2023mar.onnx missing - face detection will be unavailable in this build. Run: python fetch_face_models.py"
     }
 
+    # Helmet (RT-DETR/YOLOv8) + ANPR (plate detector + CRNN OCR) models. Whole
+    # folders so the model, its classes.txt/charset.txt sidecars, and any
+    # OpenVINO IR travel together. app/ai/helmet.py + plate.py resolve them from
+    # a 'helmet'/'plate' folder next to the exe (see their _candidate_dirs). Not
+    # fatal if absent: those features log why they can't run and the rest of the
+    # engine ships fine. Install them first with prepare_helmet_model.py /
+    # prepare_plate_model.py so this build carries them.
+    foreach ($feat in @("helmet", "plate")) {
+        $src = Join-Path $PSScriptRoot "models\$feat"
+        if (Test-Path $src) {
+            Copy-Item -Recurse -Force $src (Join-Path $PSScriptRoot "dist\camai-engine\")
+            Write-Host "==> Bundled $feat models"
+        } else {
+            Write-Warning "models\$feat missing - $feat detection will be unavailable in this build. Install it with prepare_${feat}_model.py"
+        }
+    }
+
     Write-Host "==> SUCCESS: $exe" -ForegroundColor Green
 } else {
     Write-Error "Build finished but $exe was not produced."

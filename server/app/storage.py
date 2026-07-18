@@ -53,9 +53,17 @@ def init_db():
                 message TEXT NOT NULL,
                 screenshot_path TEXT,
                 video_path TEXT,
+                detail TEXT DEFAULT '{}', -- JSON: structured event fields
+                                          -- (plate_text, speed, track_id, ...),
+                                          -- mirrors Supabase alerts.detail jsonb
                 FOREIGN KEY(camera_id) REFERENCES cameras(id) ON DELETE CASCADE
             )
         """)
+        # Add detail on upgrade of an existing install.
+        try:
+            conn.execute("ALTER TABLE alerts ADD COLUMN detail TEXT DEFAULT '{}'")
+        except sqlite3.OperationalError:
+            pass
 
         # History table (compact metrics)
         conn.execute("""
@@ -126,13 +134,19 @@ def delete_camera(camera_id: str):
         conn.commit()
 
 # Alerts
-def insert_alert(alert_id: str, camera_id: str, alert_type: str, message: str, screenshot_path: str = None, video_path: str = None):
+def insert_alert(alert_id: str, camera_id: str, alert_type: str, message: str, screenshot_path: str = None, video_path: str = None, detail: dict = None):
+    """Persist one event. `detail` is structured, queryable event data
+    (plate_text, speed_kmh, track_id, confidence, helmet_status, direction, …) —
+    the plate number and everything else live here as JSON, not buried in the
+    message string, and this is the shape the Supabase `alerts.detail` jsonb
+    column syncs to. timestamp is UTC ISO-8601 so it sorts and syncs unambiguously."""
     with get_db() as conn:
         timestamp = datetime.utcnow().isoformat() + "Z"
         conn.execute("""
-            INSERT INTO alerts (id, timestamp, camera_id, alert_type, message, screenshot_path, video_path)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-        """, (alert_id, timestamp, camera_id, alert_type, message, screenshot_path, video_path))
+            INSERT INTO alerts (id, timestamp, camera_id, alert_type, message, screenshot_path, video_path, detail)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """, (alert_id, timestamp, camera_id, alert_type, message, screenshot_path, video_path,
+              json.dumps(detail or {})))
         conn.commit()
 
 def get_recent_alerts(limit: int = 50):
