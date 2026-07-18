@@ -90,6 +90,41 @@ HELMET_NMS = _env_float("CAMAI_HELMET_NMS", 0.45)
 HELMET_INPUT_SIZE = _env_int("CAMAI_HELMET_INPUT_SIZE", 640)
 HELMET_COOLDOWN = _env_float("CAMAI_HELMET_COOLDOWN", 15.0)
 
+# --- ANPR / number-plate detection (Apache-2.0) ----------------------------
+# Vehicle-crop + gating first: the plate detector runs ONLY on car/truck/bus/
+# motorcycle crops (never the full frame), and candidates are gated by aspect
+# ratio and size before they count as plates. This is the fix for the failure
+# that kept ANPR "coming soon" — on the full frame the detector read painted
+# vehicle text (e.g. "emisiones" on a bus) as a plate. Model path is pluggable
+# (LPD-YuNet is Chinese-trained; an India-tuned detector can drop in here).
+ANPR_ENABLED = _env_bool("CAMAI_ANPR_ENABLED", True)
+ANPR_MODEL_DIR = Path(os.getenv("CAMAI_ANPR_MODEL_DIR", str(MODELS_DIR / "plate")))
+ANPR_MODEL = os.getenv("CAMAI_ANPR_MODEL", "plate_detector.onnx")
+ANPR_CLASSES_FILE = os.getenv("CAMAI_ANPR_CLASSES", "classes.txt")
+ANPR_THRESHOLD = _env_float("CAMAI_ANPR_THRESHOLD", 0.5)
+ANPR_NMS = _env_float("CAMAI_ANPR_NMS", 0.3)
+# Aspect band accepts BOTH single-row (~3-6:1) and two-row plates (~1.3-2.5:1) —
+# Indian two-wheeler plates are commonly two-row, so a wide-only band would miss
+# exactly the DM pilot's target vehicles.
+ANPR_ASPECT_MIN = _env_float("CAMAI_ANPR_ASPECT_MIN", 1.2)
+ANPR_ASPECT_MAX = _env_float("CAMAI_ANPR_ASPECT_MAX", 6.5)
+# A plate narrower than this (px) carries too few characters to OCR reliably.
+ANPR_MIN_PLATE_W = _env_int("CAMAI_ANPR_MIN_PLATE_W", 40)
+# A real plate is a small fraction of the vehicle it's on; a "plate" covering
+# most of the vehicle crop is painted text or a mis-detection.
+ANPR_MAX_AREA_FRAC = _env_float("CAMAI_ANPR_MAX_AREA_FRAC", 0.35)
+
+# OCR stage — reads characters off a gated plate crop (CRNN, OpenCV Zoo,
+# Apache-2.0). Optional and independent: if the OCR model is absent, plates are
+# still localised (plate_text stays None) and CamAI keeps running. Charset is
+# loaded from a file, never hardcoded. Model + charset live in ANPR_MODEL_DIR.
+ANPR_OCR_ENABLED = _env_bool("CAMAI_ANPR_OCR_ENABLED", True)
+ANPR_OCR_MODEL = os.getenv("CAMAI_ANPR_OCR_MODEL", "plate_ocr.onnx")
+ANPR_OCR_CHARSET = os.getenv("CAMAI_ANPR_OCR_CHARSET", "charset.txt")
+# Reject OCR output shorter than this — a plate has several characters, and a
+# 1-2 char read is noise, not a plate number.
+ANPR_OCR_MIN_LEN = _env_int("CAMAI_ANPR_OCR_MIN_LEN", 4)
+
 # Web Server Settings.
 # The engine exposes unauthenticated camera streams and control endpoints —
 # it is designed to sit on loopback behind the desktop app / local viewer.
