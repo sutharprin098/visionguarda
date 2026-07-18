@@ -20,7 +20,7 @@ from app.analytics import (
     CameraAnalytics, VEHICLE_CLASSES, _object_category, _point_in_zone_shape,
     PROFILE_CLASSES, filter_by_features,
 )
-from app.config import RECORDINGS_DIR
+from app.config import RECORDINGS_DIR, HELMET_INTERVAL_S, ANPR_INTERVAL_S
 from app.gpu_monitor import get_gpu_usage
 
 # Minimum buffering for all FFMPEG-based capture sources
@@ -1574,8 +1574,13 @@ class PipelineCoordinator:
             # turns a no_helmet sitting on a tracked motorcycle into a deduped
             # helmet_violation / triple_riding alert. If the model file is
             # absent the detector returns nothing and logs why — it never fakes.
+            # Throttled: a helmet doesn't change frame-to-frame and running a
+            # second network every frame throttles tracking. Skipped between
+            # runs — violations still fire (analytics dedups per rider).
             t_helmet0 = time.perf_counter()
-            if self._wants_helmet():
+            _now_sec = time.time()
+            if self._wants_helmet() and (_now_sec - getattr(self, "_helmet_last", 0.0)) >= HELMET_INTERVAL_S:
+                self._helmet_last = _now_sec
                 helmet_cfg = (self.profile_features or {}).get("helmet_detection", {})
                 hd = helmet_detect.get_detector(float(helmet_cfg.get("confidence", 0.35)))
                 if hd is not None:
@@ -1595,8 +1600,13 @@ class PipelineCoordinator:
             # before analytics, which associates a read plate to the vehicle
             # track it sits on and logs a deduped number_plate event. A frame
             # with no vehicle costs zero; a missing model disables ANPR only.
+            # Throttled hard: ANPR is the heaviest pass (a plate detector + OCR
+            # on every vehicle crop). Running it every frame froze the loop to
+            # <1 fps in a live run. Coarse cadence loses nothing — the plate is
+            # deduped over ANPR_EVENT_COOLDOWN. Skipped entirely between runs.
             t_anpr0 = time.perf_counter()
-            if self._wants_anpr():
+            if self._wants_anpr() and (_now_sec - getattr(self, "_anpr_last", 0.0)) >= ANPR_INTERVAL_S:
+                self._anpr_last = _now_sec
                 anpr_cfg = (self.profile_features or {}).get("anpr", {})
                 pd = plate_detect.get_detector(float(anpr_cfg.get("confidence", 0.5)))
                 if pd is not None:

@@ -89,6 +89,11 @@ HELMET_THRESHOLD = _env_float("CAMAI_HELMET_THRESHOLD", 0.35)
 HELMET_NMS = _env_float("CAMAI_HELMET_NMS", 0.45)
 HELMET_INPUT_SIZE = _env_int("CAMAI_HELMET_INPUT_SIZE", 640)
 HELMET_COOLDOWN = _env_float("CAMAI_HELMET_COOLDOWN", 15.0)
+# Run the helmet detector at most this often (seconds). It is a second network,
+# and a helmet doesn't change frame-to-frame; running it every frame on a busy
+# scene throttles the whole tracking loop. Between runs the pass is skipped —
+# violations still fire (analytics dedups per rider over HELMET_COOLDOWN).
+HELMET_INTERVAL_S = _env_float("CAMAI_HELMET_INTERVAL_S", 0.3)
 
 # --- ANPR / number-plate detection (Apache-2.0) ----------------------------
 # Vehicle-crop + gating first: the plate detector runs ONLY on car/truck/bus/
@@ -127,6 +132,12 @@ ANPR_OCR_MIN_LEN = _env_int("CAMAI_ANPR_OCR_MIN_LEN", 4)
 # Log a read plate at most once per this many seconds per vehicle track — the
 # same dedup idea as helmet violations, keyed to the vehicle it sits on.
 ANPR_EVENT_COOLDOWN = _env_float("CAMAI_ANPR_EVENT_COOLDOWN", 30.0)
+# Run the plate detector at most this often (seconds). ANPR is by far the
+# heaviest pass — a plate detector (and OCR) on every vehicle crop EVERY frame
+# froze the tracking loop to <1 fps in a live run. A plate doesn't change frame
+# to frame and the read is deduped over ANPR_EVENT_COOLDOWN, so a coarse cadence
+# loses nothing. Between runs the pass is skipped entirely.
+ANPR_INTERVAL_S = _env_float("CAMAI_ANPR_INTERVAL_S", 1.0)
 
 # Web Server Settings.
 # The engine exposes unauthenticated camera streams and control endpoints —
