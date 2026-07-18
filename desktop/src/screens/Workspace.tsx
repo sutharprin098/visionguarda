@@ -2,7 +2,7 @@ import { useEffect, useState, useRef, useCallback } from "react";
 import { Video, Bell, Settings2, LogOut, Wifi, WifiOff, Sliders, Activity, AlertTriangle, RotateCw, Maximize2, Minimize2, Lock } from "lucide-react";
 import clsx from "clsx";
 import { startRealtimeSync, DeactivatedError, SyncBundle } from "../lib/sync";
-import { syncAiModelToLocalEngine, syncAiConfidenceToLocalEngine, mjpegStreamUrl, resetLocalEngineState, reportCameraHealth } from "../lib/localEngine";
+import { syncAiModelToLocalEngine, syncAiConfidenceToLocalEngine, mjpegStreamUrl, resetLocalEngineState, reportCameraHealth, reportEvents } from "../lib/localEngine";
 import { MediaShareSession, ShareStatus } from "../lib/mediaShare";
 import { TelemetrySession, TelemetryDetection, CameraTelemetry } from "../lib/telemetry";
 import type { ZoneProfileKey } from "../lib/zoneProfiles";
@@ -150,7 +150,8 @@ export default function Workspace({
     if (!cameraIds) return;
     const ids = cameraIds.split(",");
     void reportCameraHealth(ids);
-    const id = setInterval(() => void reportCameraHealth(ids), 10_000);
+    void reportEvents();
+    const id = setInterval(() => { void reportCameraHealth(ids); void reportEvents(); }, 10_000);
     return () => clearInterval(id);
   }, [cameraIds]);
 

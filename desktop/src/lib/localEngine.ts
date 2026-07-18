@@ -409,11 +409,77 @@ export async function reportCameraHealth(cameraIds: string[]): Promise<void> {
   }
 }
 
+// High-water mark for event sync: the ISO timestamp of the newest engine alert
+// already pushed to Supabase. Only alerts strictly newer than this are sent, so
+// the timer is at-least-once without re-flooding the cloud on every tick. Reset
+// with the rest of the local-engine state on logout/teardown.
+let lastEventSyncTs = "";
+
+/**
+ * Pulls the traffic events the local engine has logged (/api/alerts) and pushes
+ * the new ones to Supabase (report-events edge function) so the portal's event
+ * feed and plate log stay current. The plate number, speed, track id, and
+ * confidence travel in the engine alert's `detail` JSON straight into
+ * alerts.detail. Safe to call on a timer — no-ops if the engine is unreachable,
+ * and only ever sends alerts newer than the last it synced.
+ */
+export async function reportEvents(): Promise<void> {
+  let alerts: Array<{
+    id: string; timestamp: string; camera_id: string; alert_type: string;
+    message: string; screenshot_path?: string | null; detail?: string | null;
+  }>;
+  try {
+    const res = await fetch(`${ENGINE_BASE}/api/alerts?limit=200`, { signal: AbortSignal.timeout(3000) });
+    if (!res.ok) return;
+    alerts = await res.json();
+  } catch {
+    return;
+  }
+  // Newest-first from the engine; keep only what we haven't synced yet.
+  const fresh = alerts.filter((a) => a.timestamp && a.timestamp > lastEventSyncTs && a.camera_id);
+  if (!fresh.length) return;
+
+  // The function takes one camera per call (org scoping is per-camera), so group.
+  const byCamera = new Map<string, typeof fresh>();
+  for (const a of fresh) {
+    (byCamera.get(a.camera_id) ?? byCamera.set(a.camera_id, []).get(a.camera_id)!).push(a);
+  }
+
+  const sb = await getSupabase();
+  let syncedMax = lastEventSyncTs;
+  for (const [camera_id, rows] of byCamera) {
+    const events = rows.map((a) => {
+      let d: Record<string, unknown> = {};
+      try { d = a.detail ? JSON.parse(a.detail) : {}; } catch { /* keep {} */ }
+      return {
+        engine_id: a.id,
+        type: a.alert_type,
+        message: a.message,
+        timestamp: a.timestamp,
+        plate_text: (d.plate_text as string) ?? null,
+        track_id: (d.track_id as number) ?? null,
+        speed_kmh: (d.speed_kmh as number) ?? null,
+        confidence: (d.confidence as number) ?? (d.plate_text_confidence as number) ?? null,
+        snapshot_path: a.screenshot_path ?? null,
+      };
+    });
+    try {
+      const { error } = await sb.functions.invoke("report-events", { body: { camera_id, events } });
+      if (error) continue; // leave the high-water mark; next tick retries this camera
+      for (const a of rows) if (a.timestamp > syncedMax) syncedMax = a.timestamp;
+    } catch {
+      // transient — the next tick retries; do not advance the mark for this camera
+    }
+  }
+  lastEventSyncTs = syncedMax;
+}
+
 export function resetLocalEngineState(): void {
   registered = new Set();
   appliedModel = null;
   lastSyncedConfig = new Map();
   lastUpdatedAt = new Map();
+  lastEventSyncTs = "";
 }
 
 // The engine only ever runs one model process-wide (POST /api/model/select,

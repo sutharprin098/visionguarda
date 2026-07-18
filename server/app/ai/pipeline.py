@@ -1774,10 +1774,20 @@ class PipelineCoordinator:
                                             frame[y1:y2, x1:x2])
                         except Exception as _e:
                             print(f"[Trk-{self.camera_id}] {tag} crop save failed: {_e}", flush=True)
+                    # Structured event fields (plate number, track id, speed,
+                    # direction, confidence) persisted as queryable JSON — not
+                    # just inside the message — and carried straight to the
+                    # Supabase alerts.detail jsonb on sync. The bbox keys are
+                    # evidence geometry, kept out of the synced detail.
+                    detail = {k: alert[k] for k in
+                              ("track_id", "plate_text", "plate_text_confidence",
+                               "speed_kmh", "direction", "confidence")
+                              if k in alert and alert[k] is not None}
                     insert_alert(
                         f"alert_{uuid4().hex[:8]}", self.camera_id,
                         alert["type"], alert["message"],
                         screenshot_path=f"/history/recordings/{snap}",
+                        detail=detail,
                     )
                     self.recorder.trigger_event_start(alert["message"])
                     # Alerts only ever went to storage, so a live dashboard had
