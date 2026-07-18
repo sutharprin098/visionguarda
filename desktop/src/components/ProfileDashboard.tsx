@@ -32,6 +32,17 @@ function alerts(t: CameraTelemetry, ...types: string[]): number {
   return types.reduce((s, k) => s + (a[k] ?? 0), 0);
 }
 
+/** Live count of detections of the given class(es) in the current frame. Reads
+ *  the same t.detections the overlay draws, so a tile never disagrees with the
+ *  boxes on screen. Only classes yolox actually emits are counted — there is no
+ *  "auto-rickshaw" tile because COCO/yolox has no such class (it would read a
+ *  confident 0), same reason the traffic profile has no pedestrian tile: it
+ *  intentionally reports vehicles only, so person is filtered before telemetry. */
+function countClass(t: CameraTelemetry, ...classes: string[]): number {
+  const set = new Set(classes);
+  return (t.detections ?? []).reduce((s, d) => s + (set.has(d.class) ? 1 : 0), 0);
+}
+
 function tilesFor(profile: ZoneProfileKey | null, t: CameraTelemetry): Tile[] {
   const c = t.counters ?? {};
   const fps = { label: "FPS", value: fmt(t.fps) };
@@ -44,15 +55,36 @@ function tilesFor(profile: ZoneProfileKey | null, t: CameraTelemetry): Tile[] {
     const avg = calibrated.length
       ? calibrated.reduce((s, d) => s + (d.speed ?? 0), 0) / calibrated.length
       : null;
+    // Peak (fastest) live vehicle, calibrated or estimated — the number an
+    // operator scans for. Estimated is marked with "~" like the overlay label.
+    const speeds = (t.detections ?? []).filter((d) => d.speed != null);
+    const peak = speeds.length
+      ? speeds.reduce((m, d) => ((d.speed ?? 0) > (m.speed ?? 0) ? d : m))
+      : null;
     return [
       { label: "Vehicles", value: String(t.vehicles ?? 0) },
+      // Per-type live counts, from the same detections the overlay draws. Only
+      // yolox-producible classes get a tile (no auto-rickshaw / pedestrian tile
+      // — see countClass()).
+      { label: "Cars", value: String(countClass(t, "car")) },
+      { label: "Bikes", value: String(countClass(t, "motorcycle")) },
+      { label: "Trucks", value: String(countClass(t, "truck")) },
+      { label: "Buses", value: String(countClass(t, "bus")) },
+      { label: "Cycles", value: String(countClass(t, "bicycle")) },
       { label: "Counted", value: `${c.vehicles_in ?? 0} in / ${c.vehicles_out ?? 0} out` },
       {
         label: "Avg Speed",
         value: avg != null ? fmt(avg, " km/h") : "—",
-        hint: avg == null ? "Needs a calibrated speed gate (two lines + real distance)" : undefined,
+        hint: avg == null ? "Calibrated avg — needs a speed gate (two lines + real distance)" : undefined,
       },
-      { label: "Density", value: t.zone_stats?.length ? `${t.zone_stats.length} zone(s)` : "—" },
+      {
+        label: "Peak Speed",
+        value: peak?.speed != null ? `${peak.speed_calibrated ? "" : "~"}${Math.round(peak.speed)} km/h` : "—",
+        hint: peak && !peak.speed_calibrated ? "Estimated from object height (~±25%)" : undefined,
+      },
+      // Real event tallies (analytics.py raises these; helmet.py / plate.py feed them).
+      { label: "Helmet Violations", value: String(alerts(t, "helmet_violation", "triple_riding")) },
+      { label: "Plates Read", value: String(alerts(t, "number_plate")) },
       // wrong_direction + speed_limit are what analytics actually raises for a
       // traffic camera. stop-line / u-turn / red-light have no alert type yet,
       // so they are not silently folded in as a zero.
