@@ -652,6 +652,39 @@ def resolve_emitted_detections(tracker, tracks_raw, detections, masks,
         })
         out_masks.append([])
 
+    # Final safety net against "N boxes on one object". A single person can end
+    # up under several confirmed tracks — an ID switch leaves the old track
+    # coasting while a new one takes over, and a few of those can stack, each
+    # emitting its own box above. Suppress SAME-CLASS boxes that overlap heavily,
+    # keeping a "tracked" box over a "coasting" one and the higher-confidence of
+    # two. Different classes are never suppressed against each other, so a
+    # rider's person box and motorcycle box both survive, and a face/helmet/plate
+    # box (appended later by the caller, not present here) is unaffected.
+    if len(out_dets) > 1:
+        order = sorted(
+            range(len(out_dets)),
+            key=lambda i: (out_dets[i].get("tracking_status") == "tracked",
+                           out_dets[i].get("confidence", 0.0)),
+            reverse=True,
+        )
+        keep: list[int] = []
+        for i in order:
+            bi = out_dets[i]["bbox"]
+            box_i = [bi["x1"], bi["y1"], bi["x2"], bi["y2"]]
+            dup = False
+            for j in keep:
+                if out_dets[j]["class"] != out_dets[i]["class"]:
+                    continue
+                bj = out_dets[j]["bbox"]
+                if tracker._compute_iou(box_i, [bj["x1"], bj["y1"], bj["x2"], bj["y2"]]) > 0.7:
+                    dup = True
+                    break
+            if not dup:
+                keep.append(i)
+        keep_set = set(keep)
+        out_dets = [d for k, d in enumerate(out_dets) if k in keep_set]
+        out_masks = [m for k, m in enumerate(out_masks) if k in keep_set]
+
     return out_dets, out_masks
 
 
