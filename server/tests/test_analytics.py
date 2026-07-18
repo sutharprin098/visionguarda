@@ -49,6 +49,84 @@ def test_no_alert_when_owner_present():
     assert not fired
 
 
+def undet(cls, x1, y1, x2, y2, conf=0.8):
+    """A detection with NO track_id, as helmet.py / face.py append them."""
+    return {"class": cls, "confidence": conf,
+            "bbox": {"x1": x1, "y1": y1, "x2": x2, "y2": y2}}
+
+
+def test_helmet_violation_fires_once_per_rider():
+    """A no_helmet box on a tracked motorcycle raises exactly ONE
+    helmet_violation across many frames — the dedup that stops a snapshot+clip
+    every ~33ms. The no_helmet box carries no track_id (helmet.py appends it
+    that way); the alert is keyed to the motorcycle it sits on."""
+    a = CameraAnalytics("cam_helmet")
+    moto = det(1, "motorcycle", 300, 300, 360, 400)
+    head = undet("no_helmet", 320, 270, 340, 300)   # centred over the bike, above it
+    count = 0
+    for _ in range(10):
+        alerts, *_ = a.update([moto, head], zones=[], lines=[], frame_w=FW, frame_h=FH)
+        count += sum(1 for al in alerts if al["type"] == "helmet_violation")
+    assert count == 1, f"expected exactly one deduped violation, got {count}"
+
+
+def test_no_helmet_without_a_motorcycle_does_not_alert():
+    """A bare head with no bike under it is not a rider — requiring motorcycle
+    association is what keeps a pedestrian the model fired on from raising a
+    traffic violation."""
+    a = CameraAnalytics("cam_helmet2")
+    head = undet("no_helmet", 320, 270, 340, 300)
+    fired = False
+    for _ in range(6):
+        alerts, *_ = a.update([head], zones=[], lines=[], frame_w=FW, frame_h=FH)
+        fired = fired or any(al["type"] in ("helmet_violation", "triple_riding") for al in alerts)
+    assert not fired
+
+
+def test_triple_riding_escalates_the_violation():
+    a = CameraAnalytics("cam_helmet3")
+    moto = det(1, "motorcycle", 300, 300, 360, 400)
+    head = undet("no_helmet", 320, 270, 340, 300)
+    riders = [det(10 + i, "person", 300 + i * 5, 250, 340 + i * 5, 400) for i in range(3)]
+    types = set()
+    for _ in range(4):
+        alerts, *_ = a.update([moto, head, *riders], zones=[], lines=[], frame_w=FW, frame_h=FH)
+        types |= {al["type"] for al in alerts}
+    assert "triple_riding" in types, f"expected triple_riding, saw {types}"
+
+
+def test_helmet_no_duplicate_alerts_over_1000_frames():
+    """Stress the dedup: 1000 frames of the same helmetless rider on a tracked
+    motorcycle must raise exactly ONE violation (within the cooldown), and the
+    loop must not crash — the 'no duplicate alerts / no crashes' guarantee."""
+    a = CameraAnalytics("cam_stress")
+    moto = det(1, "motorcycle", 300, 300, 360, 400)
+    head = undet("no_helmet", 320, 270, 340, 300)
+    total = 0
+    for _ in range(1000):
+        alerts, *_ = a.update([moto, head], zones=[], lines=[], frame_w=FW, frame_h=FH)
+        total += sum(1 for al in alerts if al["type"] in ("helmet_violation", "triple_riding"))
+    assert total == 1, f"expected exactly one deduped violation over 1000 frames, got {total}"
+
+
+def test_helmet_alert_carries_evidence_bboxes():
+    """The violation must carry rider_bbox + helmet_bbox so the pipeline can save
+    rider and helmet crops as evidence."""
+    a = CameraAnalytics("cam_ev")
+    moto = det(1, "motorcycle", 300, 300, 360, 400)
+    head = undet("no_helmet", 320, 270, 340, 300)
+    found = None
+    for _ in range(3):
+        alerts, *_ = a.update([moto, head], zones=[], lines=[], frame_w=FW, frame_h=FH)
+        for al in alerts:
+            if al["type"] in ("helmet_violation", "triple_riding"):
+                found = al
+    assert found is not None
+    assert "rider_bbox" in found and "helmet_bbox" in found
+    assert found["rider_bbox"]["x1"] == 300 and found["helmet_bbox"]["x1"] == 320
+    assert found["track_id"] == 1
+
+
 def test_zone_occupancy_categorizes_person_vehicle_item_separately():
     a = CameraAnalytics("cam3")
     dets = [det(1, "backpack", 300, 300, 340, 340), det(2, "person", 100, 100, 140, 200), det(3, "car", 400, 400, 460, 440)]

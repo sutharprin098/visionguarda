@@ -40,6 +40,8 @@ const COLORS: Record<string, string> = {
   vehicle: "#06b6d4",
   twowheeler: "#10b981",
   face: "#f59e0b",
+  helmet: "#22c55e",      // compliant rider — green
+  no_helmet: "#ef4444",   // violation — red, reads as an alert
   other: "#8b5cf6",
 };
 
@@ -51,6 +53,10 @@ function colorFor(cls: string): string {
   // Faces sit inside a person box, so they need a colour that reads against
   // the indigo person box they're drawn on top of.
   if (c === "face") return COLORS.face;
+  // Helmet boxes sit on top of a rider; green=compliant, red=violation so the
+  // operator reads the state from colour before reading any label.
+  if (c === "helmet") return COLORS.helmet;
+  if (c === "no_helmet") return COLORS.no_helmet;
   return COLORS.other;
 }
 

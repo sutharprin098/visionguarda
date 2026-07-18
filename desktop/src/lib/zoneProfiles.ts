@@ -347,6 +347,18 @@ const TRAFFIC: ProfileDef = {
       ] }],
     },
     {
+      // A real second network (RT-DETR, Apache-2.0), so — like face_detection —
+      // this toggle genuinely saves inference when off, and even when on it
+      // costs nothing on a frame with no motorcycle (it runs only on rider
+      // crops; see server/app/ai/helmet.py). Default OFF: it needs the RT-DETR
+      // helmet model installed via server/prepare_helmet_model.py, and if it is
+      // absent the engine logs why and emits nothing rather than faking a
+      // violation — the same honesty bar as the removed HSV helmet guess.
+      key: "helmet_detection", label: "Helmet Detection", group: "Events & Violations", defaultEnabled: false,
+      description: "Flags helmetless motorcycle riders (and triple-riding) using an RT-DETR helmet model on rider crops. Raises a helmet_violation event with a snapshot and clip. Requires the helmet model (prepare_helmet_model.py); does nothing, loudly, if it is absent.",
+      params: [confidence(0.35)],
+    },
+    {
       key: "traffic_light_violation", label: "Traffic Light Violation", group: "Events & Violations", requiresGeometry: "line", defaultEnabled: true,
       drawTool: { label: "Traffic Signal ROI", purpose: "signal_roi" },
       description: "Combine signal state and line crossing to flag red-light running.",

@@ -11,6 +11,7 @@ from scipy.optimize import linear_sum_assignment
 
 from app.ai.backend import EngineBackend
 from app.ai import face as face_detect
+from app.ai import helmet as helmet_detect
 from app.storage import insert_alert, insert_history_record
 from app.recorder import CCTVRecorder
 from app.analytics import (
@@ -996,6 +997,11 @@ class PipelineCoordinator:
         _releases_face = not self._wants_faces()
         if _releases_face and face_detect.is_loaded():
             face_detect.unload()
+        # Same treatment for the helmet model — a second network, so its toggle
+        # (unlike vehicle/person, which yolox emits for free) genuinely saves
+        # inference when off. Drop it when the new profile has no use for it.
+        if not self._wants_helmet() and helmet_detect.is_loaded():
+            helmet_detect.unload()
 
     def _wants_faces(self) -> bool:
         """Both gates must pass: the operator's toggle AND a profile whose class
@@ -1005,6 +1011,16 @@ class PipelineCoordinator:
             return False
         allowed = PROFILE_CLASSES.get(self.zone_profile)
         return "face" in allowed if allowed else True
+
+    def _wants_helmet(self) -> bool:
+        """Both gates, same as _wants_faces: the operator's helmet_detection
+        toggle AND a profile that actually reports helmets (only traffic does).
+        A security camera left with the toggle on must not pay for a helmet net
+        whose output the profile filter would then discard."""
+        if not (self.profile_features or {}).get("helmet_detection", {}).get("enabled"):
+            return False
+        allowed = PROFILE_CLASSES.get(self.zone_profile)
+        return "no_helmet" in allowed if allowed else True
 
     def update_display_config(self, max_width: int = None, quality: int = None):
         """Adjust the MJPEG preview encode target at runtime (display only —
@@ -1530,6 +1546,31 @@ class PipelineCoordinator:
                         fd.last_error = None
             t_face = (time.perf_counter() - t_face0) * 1000
 
+            # ── Helmet pass: a THIRD model (YOLOv8), gated exactly like faces ─
+            # Runs only on rider crops (each motorcycle box expanded to include
+            # the person boxes overlapping it), so a frame with no motorcycle
+            # costs zero even when enabled — same "a disabled/idle module costs
+            # nothing" property as the face pass. Appends genuine class==
+            # "helmet"/"no_helmet" boxes into `detections` (and a parallel empty
+            # mask) BEFORE the profile filter and analytics.update(); analytics
+            # turns a no_helmet sitting on a tracked motorcycle into a deduped
+            # helmet_violation / triple_riding alert. If the model file is
+            # absent the detector returns nothing and logs why — it never fakes.
+            t_helmet0 = time.perf_counter()
+            if self._wants_helmet():
+                helmet_cfg = (self.profile_features or {}).get("helmet_detection", {})
+                hd = helmet_detect.get_detector(float(helmet_cfg.get("confidence", 0.35)))
+                if hd is not None:
+                    moto_boxes = [d["bbox"] for d in detections if d.get("class") == "motorcycle"]
+                    person_boxes_h = [d["bbox"] for d in detections if d.get("class") == "person"]
+                    for hdet in hd.detect_on_riders(frame, moto_boxes, person_boxes_h):
+                        detections.append(hdet)
+                        masks.append([])   # stays index-parallel with detections
+                    if hd.last_error:
+                        self._stage_errors["helmet"] = hd.last_error
+                        hd.last_error = None
+            t_helmet = (time.perf_counter() - t_helmet0) * 1000
+
             # ── Apply the zone profile to what this camera reports ──────────
             # Must happen here, not only inside analytics.update(): that method
             # rebinds its own local `detections`, which never affected the list
@@ -1672,6 +1713,24 @@ class PipelineCoordinator:
                 for alert in alerts:
                     snap = f"snap_{self.camera_id}_{uuid4().hex[:8]}.jpg"
                     cv2.imwrite(str(RECORDINGS_DIR / snap), frame)
+                    # Helmet/triple-riding alerts carry rider_bbox + helmet_bbox
+                    # (analytics.py) — save those regions as extra evidence
+                    # alongside the full frame. Named off the same stem so they
+                    # sit next to the snapshot the DB row points at. Best-effort:
+                    # a crop failure must never drop the alert itself.
+                    for tag, key in (("rider", "rider_bbox"), ("helmet", "helmet_bbox")):
+                        box = alert.get(key)
+                        if not box:
+                            continue
+                        try:
+                            x1 = max(0, int(box["x1"])); y1 = max(0, int(box["y1"]))
+                            x2 = min(frame.shape[1], int(box["x2"]))
+                            y2 = min(frame.shape[0], int(box["y2"]))
+                            if x2 - x1 >= 2 and y2 - y1 >= 2:
+                                cv2.imwrite(str(RECORDINGS_DIR / snap.replace(".jpg", f"_{tag}.jpg")),
+                                            frame[y1:y2, x1:x2])
+                        except Exception as _e:
+                            print(f"[Trk-{self.camera_id}] {tag} crop save failed: {_e}", flush=True)
                     insert_alert(
                         f"alert_{uuid4().hex[:8]}", self.camera_id,
                         alert["type"], alert["message"],
@@ -1709,6 +1768,7 @@ class PipelineCoordinator:
                 # Carried separately from trk_lat so the face module's cost is
                 # attributable rather than buried in "tracking".
                 "t_face":         t_face,
+                "t_helmet":       t_helmet,
                 # {alert_type: count} since this camera started. Lets the client
                 # render Violations / Alerts / Falls / Machine Events without
                 # querying storage.
@@ -1810,6 +1870,9 @@ class PipelineCoordinator:
                 # 0.0 whenever face_detection is off — makes the module's real
                 # cost visible instead of it hiding inside total_latency.
                 "face_latency":       round(data.get("t_face", 0.0), 1),
+                # 0.0 whenever helmet_detection is off or no motorcycle is in
+                # frame — same attributability as face_latency.
+                "helmet_latency":     round(data.get("t_helmet", 0.0), 1),
                 "postprocess_latency":round(data["t_post"],   1),
                 "tracking_latency":   round(data["trk_lat"],  1),
                 "rendering_latency":  round(tel_lat,           1),
