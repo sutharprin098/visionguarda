@@ -327,21 +327,18 @@ const TRAFFIC: ProfileDef = {
       params: [{ key: "min_angle", label: "Min Turn Angle", type: "slider", min: 90, max: 180, step: 5, unit: "°", default: 150 }],
     },
     {
-      key: "anpr", label: "ANPR", group: "Recognition", defaultEnabled: false,
-      description: "Automatic number plate recognition on detected vehicles.",
-      status: "coming-soon",
-      // Both halves exist and are licence-clean — LPD-YuNet and CRNN-EN from
-      // OpenCV Zoo, Apache-2.0 — and both were downloaded and run. Not shipped
-      // because the detection could not be validated: on the only footage
-      // available (dtest/bus_pan.mp4) LPD at conf>=0.3 fired on 59/200 frames,
-      // and the highest-scoring "plate" (0.81) was the word "emisiones" painted
-      // on the side of the bus. It latches onto any rectangular text block. The
-      // one plate-sized region found was 58x28 px — too small for CRNN anyway.
-      // Finishing this needs footage with real plates to tune against, plus
-      // aspect/size gating and a vehicle-crop pass (the trick that made face
-      // detection work). Shipping it on the current evidence would put bus
-      // advertising into the plate log.
-      unavailable: "Coming soon. The plate detector and OCR are integrated-ready and licence-clean (Apache-2.0), but on our test footage the detector reads text painted on vehicles as plates, so it is not enabled until it can be validated against real plate footage.",
+      // The failure that kept this "coming soon" — the detector reading painted
+      // vehicle text ("emisiones" on a bus) as a plate — is now fixed in the
+      // engine: server/app/ai/plate.py runs the detector ONLY on vehicle crops
+      // and gates candidates by aspect/size/area, and plate_ocr.py (CRNN) reads
+      // the characters. So this is a real toggle now. Default OFF: it needs the
+      // plate detector + OCR models installed (prepare_plate_model.py) and, like
+      // any per-site ANPR, should be validated on that site's real plate footage
+      // before it is trusted — the default LPD-YuNet is Chinese-trained, so an
+      // India-tuned detector belongs here for the DM pilot. Absent the models
+      // the engine logs why and emits nothing rather than faking a plate.
+      key: "anpr", label: "ANPR (Number Plate)", group: "Events & Violations", defaultEnabled: false,
+      description: "Reads number plates on detected vehicles (plate detector on vehicle crops + CRNN OCR) and logs each plate with a snapshot and crop. Requires the plate + OCR models (prepare_plate_model.py); does nothing, loudly, if they are absent, and should be validated on real plate footage before trusting.",
       params: [confidence(0.5), { key: "region", label: "Plate Region", type: "select", default: "auto", options: [
         { value: "auto", label: "Auto" }, { value: "eu", label: "Europe" }, { value: "us", label: "North America" }, { value: "in", label: "India" }, { value: "me", label: "Middle East" },
       ] }],

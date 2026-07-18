@@ -47,6 +47,9 @@ export interface TelemetryDetection {
   direction?: string;
   /** Seconds this track has been in frame (analytics sets it from first_seen). */
   dwell_time?: number;
+  /** OCR-read plate number, on number_plate detections only. null when the
+   *  plate was localised but not read (no OCR model, or OCR failed). */
+  plate_text?: string | null;
   bbox: { x1: number; y1: number; x2: number; y2: number };
 }
 

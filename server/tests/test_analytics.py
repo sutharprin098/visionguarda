@@ -127,6 +127,50 @@ def test_helmet_alert_carries_evidence_bboxes():
     assert found["track_id"] == 1
 
 
+def plate_det(x1, y1, x2, y2, text="MH12AB1234", conf=0.8):
+    """A number_plate detection as plate.py appends it (no track_id)."""
+    return {"class": "number_plate", "confidence": conf,
+            "bbox": {"x1": x1, "y1": y1, "x2": x2, "y2": y2}, "plate_text": text}
+
+
+def test_number_plate_event_logged_once_per_vehicle():
+    a = CameraAnalytics("cam_plate")
+    veh = det(1, "car", 300, 300, 460, 440)
+    plate = plate_det(360, 410, 430, 435)          # centre inside the car
+    count, found = 0, None
+    for _ in range(5):
+        alerts, *_ = a.update([veh, plate], zones=[], lines=[], frame_w=FW, frame_h=FH)
+        for al in alerts:
+            if al["type"] == "number_plate":
+                count += 1
+                found = al
+    assert count == 1, f"plate should log once per vehicle (cooldown), got {count}"
+    assert found["plate_text"] == "MH12AB1234"
+    assert found["track_id"] == 1
+    assert "plate_bbox" in found
+
+
+def test_localised_plate_without_text_raises_no_event():
+    a = CameraAnalytics("cam_plate2")
+    veh = det(1, "car", 300, 300, 460, 440)
+    plate = plate_det(360, 410, 430, 435, text=None)   # localised but unread
+    fired = False
+    for _ in range(3):
+        alerts, *_ = a.update([veh, plate], zones=[], lines=[], frame_w=FW, frame_h=FH)
+        fired = fired or any(al["type"] == "number_plate" for al in alerts)
+    assert not fired
+
+
+def test_number_plate_needs_a_vehicle_to_attach_to():
+    a = CameraAnalytics("cam_plate3")
+    plate = plate_det(360, 410, 430, 435)              # no vehicle in frame
+    fired = False
+    for _ in range(3):
+        alerts, *_ = a.update([plate], zones=[], lines=[], frame_w=FW, frame_h=FH)
+        fired = fired or any(al["type"] == "number_plate" for al in alerts)
+    assert not fired
+
+
 def test_zone_occupancy_categorizes_person_vehicle_item_separately():
     a = CameraAnalytics("cam3")
     dets = [det(1, "backpack", 300, 300, 340, 340), det(2, "person", 100, 100, 140, 200), det(3, "car", 400, 400, 460, 440)]

@@ -73,6 +73,16 @@ def test_helmet_detection_toggle_gates_helmet_classes():
     assert "no_helmet" in on_out and "helmet" in on_out
 
 
+def test_traffic_reports_number_plate_and_toggle_gates_it():
+    scene = SCENE + [det("number_plate"), det("car")]
+    assert "number_plate" in classes_of(filter_by_profile(scene, "traffic"))
+    assert "number_plate" not in classes_of(filter_by_profile(scene, "security"))
+    off_out = classes_of(filter_by_features(scene, off("anpr")))
+    assert "number_plate" not in off_out and "car" in off_out
+    on_out = classes_of(filter_by_features(scene, on("anpr")))
+    assert "number_plate" in on_out
+
+
 def test_security_reports_people_and_drops_vehicles():
     out = classes_of(filter_by_profile(SCENE, "security"))
     assert "person" in out and "handbag" in out and "face" in out
@@ -99,8 +109,9 @@ def test_custom_and_unset_do_not_narrow(profile):
 # Classes produced by a model OTHER than yolox/COCO. Each must have a real
 # producer or it does not belong here — that is the entire point of this guard.
 #   face                  -> app/ai/face.py   (YuNet, MIT)
-#   helmet / no_helmet    -> app/ai/helmet.py (YOLOv8 helmet model)
-NON_COCO_PRODUCIBLE = {"face", "helmet", "no_helmet"}
+#   helmet / no_helmet    -> app/ai/helmet.py (RT-DETR helmet model)
+#   number_plate          -> app/ai/plate.py  (plate detector + CRNN OCR)
+NON_COCO_PRODUCIBLE = {"face", "helmet", "no_helmet", "number_plate"}
 
 
 def test_profiles_only_promise_classes_something_can_produce():
