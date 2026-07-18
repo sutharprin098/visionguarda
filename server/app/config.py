@@ -124,6 +124,9 @@ ANPR_OCR_CHARSET = os.getenv("CAMAI_ANPR_OCR_CHARSET", "charset.txt")
 # Reject OCR output shorter than this — a plate has several characters, and a
 # 1-2 char read is noise, not a plate number.
 ANPR_OCR_MIN_LEN = _env_int("CAMAI_ANPR_OCR_MIN_LEN", 4)
+# Log a read plate at most once per this many seconds per vehicle track — the
+# same dedup idea as helmet violations, keyed to the vehicle it sits on.
+ANPR_EVENT_COOLDOWN = _env_float("CAMAI_ANPR_EVENT_COOLDOWN", 30.0)
 
 # Web Server Settings.
 # The engine exposes unauthenticated camera streams and control endpoints —

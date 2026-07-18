@@ -12,6 +12,8 @@ from scipy.optimize import linear_sum_assignment
 from app.ai.backend import EngineBackend
 from app.ai import face as face_detect
 from app.ai import helmet as helmet_detect
+from app.ai import plate as plate_detect
+from app.ai import plate_ocr
 from app.storage import insert_alert, insert_history_record
 from app.recorder import CCTVRecorder
 from app.analytics import (
@@ -1002,6 +1004,12 @@ class PipelineCoordinator:
         # inference when off. Drop it when the new profile has no use for it.
         if not self._wants_helmet() and helmet_detect.is_loaded():
             helmet_detect.unload()
+        # Same for the ANPR plate detector + its OCR — both separate networks.
+        if not self._wants_anpr():
+            if plate_detect.is_loaded():
+                plate_detect.unload()
+            if plate_ocr.is_loaded():
+                plate_ocr.unload()
 
     def _wants_faces(self) -> bool:
         """Both gates must pass: the operator's toggle AND a profile whose class
@@ -1021,6 +1029,16 @@ class PipelineCoordinator:
             return False
         allowed = PROFILE_CLASSES.get(self.zone_profile)
         return "no_helmet" in allowed if allowed else True
+
+    def _wants_anpr(self) -> bool:
+        """Both gates, same as _wants_helmet: the operator's anpr toggle AND a
+        profile that reports plates (only traffic does). The plate detector +
+        OCR are separate networks, so keeping them off a non-traffic camera is a
+        real inference saving, not just a display filter."""
+        if not (self.profile_features or {}).get("anpr", {}).get("enabled"):
+            return False
+        allowed = PROFILE_CLASSES.get(self.zone_profile)
+        return "number_plate" in allowed if allowed else True
 
     def update_display_config(self, max_width: int = None, quality: int = None):
         """Adjust the MJPEG preview encode target at runtime (display only —
@@ -1571,6 +1589,27 @@ class PipelineCoordinator:
                         hd.last_error = None
             t_helmet = (time.perf_counter() - t_helmet0) * 1000
 
+            # ── ANPR pass: plate detector (+ optional CRNN OCR) on vehicle ───
+            # crops only, gated like the helmet pass. Appends class=="number_
+            # plate" boxes (with plate_text when OCR read one) into `detections`
+            # before analytics, which associates a read plate to the vehicle
+            # track it sits on and logs a deduped number_plate event. A frame
+            # with no vehicle costs zero; a missing model disables ANPR only.
+            t_anpr0 = time.perf_counter()
+            if self._wants_anpr():
+                anpr_cfg = (self.profile_features or {}).get("anpr", {})
+                pd = plate_detect.get_detector(float(anpr_cfg.get("confidence", 0.5)))
+                if pd is not None:
+                    vehicle_boxes = [d["bbox"] for d in detections
+                                     if d.get("class") in plate_detect.PLATE_VEHICLES]
+                    for pdet in pd.detect_on_vehicles(frame, vehicle_boxes):
+                        detections.append(pdet)
+                        masks.append([])   # stays index-parallel with detections
+                    if pd.last_error:
+                        self._stage_errors["anpr"] = pd.last_error
+                        pd.last_error = None
+            t_anpr = (time.perf_counter() - t_anpr0) * 1000
+
             # ── Apply the zone profile to what this camera reports ──────────
             # Must happen here, not only inside analytics.update(): that method
             # rebinds its own local `detections`, which never affected the list
@@ -1688,6 +1727,9 @@ class PipelineCoordinator:
                     "tracking_status": det.get("tracking_status", "tracked"),
                     "direction":  det.get("direction", "stationary"),
                     "lane":       det.get("lane"),
+                    # Present only on number_plate dets that OCR could read; None
+                    # otherwise (localised-but-unread, or a non-plate class).
+                    "plate_text": det.get("plate_text"),
                     "bbox": {
                         "x1": round(float(bbox["x1"]) / orig_w, 4),
                         "y1": round(float(bbox["y1"]) / orig_h, 4),
@@ -1718,7 +1760,8 @@ class PipelineCoordinator:
                     # alongside the full frame. Named off the same stem so they
                     # sit next to the snapshot the DB row points at. Best-effort:
                     # a crop failure must never drop the alert itself.
-                    for tag, key in (("rider", "rider_bbox"), ("helmet", "helmet_bbox")):
+                    for tag, key in (("rider", "rider_bbox"), ("helmet", "helmet_bbox"),
+                                     ("plate", "plate_bbox")):
                         box = alert.get(key)
                         if not box:
                             continue
@@ -1769,6 +1812,7 @@ class PipelineCoordinator:
                 # attributable rather than buried in "tracking".
                 "t_face":         t_face,
                 "t_helmet":       t_helmet,
+                "t_anpr":         t_anpr,
                 # {alert_type: count} since this camera started. Lets the client
                 # render Violations / Alerts / Falls / Machine Events without
                 # querying storage.
@@ -1873,6 +1917,8 @@ class PipelineCoordinator:
                 # 0.0 whenever helmet_detection is off or no motorcycle is in
                 # frame — same attributability as face_latency.
                 "helmet_latency":     round(data.get("t_helmet", 0.0), 1),
+                # 0.0 whenever ANPR is off or no vehicle is in frame.
+                "anpr_latency":       round(data.get("t_anpr", 0.0), 1),
                 "postprocess_latency":round(data["t_post"],   1),
                 "tracking_latency":   round(data["trk_lat"],  1),
                 "rendering_latency":  round(tel_lat,           1),

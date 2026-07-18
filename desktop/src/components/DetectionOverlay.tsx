@@ -42,6 +42,7 @@ const COLORS: Record<string, string> = {
   face: "#f59e0b",
   helmet: "#22c55e",      // compliant rider — green
   no_helmet: "#ef4444",   // violation — red, reads as an alert
+  number_plate: "#eab308", // amber — reads against vehicle cyan
   other: "#8b5cf6",
 };
 
@@ -57,6 +58,7 @@ function colorFor(cls: string): string {
   // operator reads the state from colour before reading any label.
   if (c === "helmet") return COLORS.helmet;
   if (c === "no_helmet") return COLORS.no_helmet;
+  if (c === "number_plate") return COLORS.number_plate;
   return COLORS.other;
 }
 
@@ -76,6 +78,11 @@ function labelFor(det: TelemetryDetection): string {
   let speed = "";
   if (det.speed != null) {
     speed = det.speed_calibrated ? `  ${det.speed.toFixed(0)} km/h` : `  ~${det.speed.toFixed(0)}`;
+  }
+  // A read plate shows its number instead of the generic class label; an
+  // unread plate (plate_text null) falls back to "NUMBER_PLATE".
+  if (det.class === "number_plate" && det.plate_text) {
+    return `${det.plate_text}${conf}`;
   }
   return `${det.class.toUpperCase()}${id}${conf}${speed}`;
 }

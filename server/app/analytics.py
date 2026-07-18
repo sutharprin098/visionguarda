@@ -54,6 +54,9 @@ def _object_category(class_name: str) -> str:
 #     is absent the module emits nothing (and logs why), so the class simply
 #     doesn't appear rather than being faked — the profile still only ever
 #     advertises a capability something can actually produce.
+#   - "number_plate" IS listed for traffic: app/ai/plate.py runs a real plate
+#     detector on vehicle crops (with OCR in plate_ocr.py). Same rule — absent
+#     the model it emits nothing and logs why, never a faked plate.
 #   - "dog"/"cat"/"bear"/"gloves"/"shoes" are NOT listed: never in
 #     COCO_CLASS_MAP, so the detector cannot emit them.
 #   - "face" IS listed for security and factory: YuNet genuinely produces it.
@@ -65,7 +68,7 @@ PROFILE_CLASSES = {
     # this module was cleaned up to remove. Only traffic_light and stop_sign
     # are real (backend.py ids 9 and 11).
     # tests/test_zone_profiles.py asserts every class here is producible.
-    "traffic": set(VEHICLE_CLASSES) | {"traffic_light", "stop_sign", "helmet", "no_helmet"},
+    "traffic": set(VEHICLE_CLASSES) | {"traffic_light", "stop_sign", "helmet", "no_helmet", "number_plate"},
     "security": {"person", "backpack", "handbag", "suitcase", "umbrella", "face"},
     "factory": {"person", "face"},
     # "custom" and None mean "operator decides" — no profile-level narrowing.
@@ -93,6 +96,7 @@ FEATURE_CLASSES = {
     "vehicle_counting": set(VEHICLE_CLASSES),
     "face_detection": {"face"},
     "helmet_detection": {"helmet", "no_helmet"},
+    "anpr": {"number_plate"},
     "object_left_behind": set(ITEM_CLASSES),
     "object_removed": set(ITEM_CLASSES),
     "traffic_light_violation": {"traffic_light"},
@@ -958,6 +962,54 @@ class CameraAnalytics:
                         "track_id": tid,
                         "rider_bbox": dict(moto["bbox"]),
                         "helmet_bbox": dict(nh["bbox"]),
+                    })
+                    self.alert_cooldowns[alert_key] = now
+
+        # --- ANPR: log a read plate to the vehicle it sits on --------------
+        # plate.py appends class=="number_plate" boxes (on vehicle crops) with a
+        # plate_text filled by OCR (or None if unread). Like the helmet block,
+        # the boxes carry no track_id, so we associate a READ plate to the
+        # tracked vehicle whose box contains it and log once per vehicle within
+        # a cooldown — a plate log, not a per-frame spam. Localised-but-unread
+        # plates (plate_text is None) still render as boxes but raise no event:
+        # a plate log with no number is not worth an event or a clip.
+        plate_dets = [d for d in detections
+                      if d.get("class") == "number_plate" and d.get("plate_text")]
+        if plate_dets:
+            veh_tracks = [d for d in detections
+                          if d.get("class") in VEHICLE_CLASSES and d.get("track_id") is not None]
+
+            def _pcx(b):
+                return (b["x1"] + b["x2"]) / 2.0
+
+            def _pcy(b):
+                return (b["y1"] + b["y2"]) / 2.0
+
+            for pl in plate_dets:
+                pb = pl["bbox"]
+                cx, cy = _pcx(pb), _pcy(pb)
+                # the vehicle track whose box contains the plate centre; if
+                # several, the smallest (the plate's own vehicle, not a bus
+                # behind it).
+                best, best_area = None, None
+                for v in veh_tracks:
+                    vb = v["bbox"]
+                    if vb["x1"] <= cx <= vb["x2"] and vb["y1"] <= cy <= vb["y2"]:
+                        area = (vb["x2"] - vb["x1"]) * (vb["y2"] - vb["y1"])
+                        if best_area is None or area < best_area:
+                            best, best_area = v, area
+                if best is None:
+                    continue
+                tid = best["track_id"]
+                text = pl["plate_text"]
+                alert_key = f"number_plate_{tid}"
+                if now - self.alert_cooldowns.get(alert_key, 0) > config.ANPR_EVENT_COOLDOWN:
+                    alerts.append({
+                        "type": "number_plate",
+                        "message": f"Plate {text} — {best.get('class', 'vehicle')} (ID: {tid})",
+                        "track_id": tid,
+                        "plate_text": text,
+                        "plate_bbox": dict(pb),
                     })
                     self.alert_cooldowns[alert_key] = now
 
