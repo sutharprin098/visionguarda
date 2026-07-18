@@ -11,8 +11,10 @@ a long time looking fine:
   2. feature toggles did nothing. person_detection / vehicle_detection /
      worker_detection appeared nowhere in the engine at all, so turning Vehicle
      Detection off left every car boxed.
-  3. profiles listed classes nothing could produce (fire, smoke, helmet), which
-     is how the UI came to advertise detectors that did not exist.
+  3. profiles listed classes nothing could produce (fire, smoke, and once
+     helmet), which is how the UI came to advertise detectors that did not
+     exist. helmet/no_helmet are now legitimate — app/ai/helmet.py runs a real
+     YOLOv8 helmet model — so they ARE listed; fire/smoke still are not.
 
 So the assertions here are mostly "this class does NOT come out" — absence is
 the whole point, and absence is what silently regresses.
@@ -51,6 +53,26 @@ def test_traffic_reports_vehicles_and_drops_people():
     assert "face" not in out
 
 
+def test_traffic_reports_helmet_violations():
+    scene = SCENE + [det("no_helmet"), det("helmet"), det("motorcycle")]
+    out = classes_of(filter_by_profile(scene, "traffic"))
+    assert "no_helmet" in out and "helmet" in out, (
+        "traffic must report helmet/no_helmet now that helmet.py produces them"
+    )
+    # security still must not — it has no use for helmets and no producer runs
+    sec = classes_of(filter_by_profile(scene, "security"))
+    assert "no_helmet" not in sec and "helmet" not in sec
+
+
+def test_helmet_detection_toggle_gates_helmet_classes():
+    scene = [det("no_helmet"), det("helmet"), det("car")]
+    off_out = classes_of(filter_by_features(scene, off("helmet_detection")))
+    assert "no_helmet" not in off_out and "helmet" not in off_out
+    assert "car" in off_out
+    on_out = classes_of(filter_by_features(scene, on("helmet_detection")))
+    assert "no_helmet" in on_out and "helmet" in on_out
+
+
 def test_security_reports_people_and_drops_vehicles():
     out = classes_of(filter_by_profile(SCENE, "security"))
     assert "person" in out and "handbag" in out and "face" in out
@@ -70,11 +92,19 @@ def test_custom_and_unset_do_not_narrow(profile):
 # 2. Every class a profile promises must be producible
 #
 # This is the guard against the UI advertising a detector that does not exist.
-# "fire"/"smoke"/"helmet" were once listed here while nothing could emit them.
+# "fire"/"smoke" were once listed here while nothing could emit them; "helmet"
+# was too, until app/ai/helmet.py gave it a real producer.
 # --------------------------------------------------------------------------
 
+# Classes produced by a model OTHER than yolox/COCO. Each must have a real
+# producer or it does not belong here — that is the entire point of this guard.
+#   face                  -> app/ai/face.py   (YuNet, MIT)
+#   helmet / no_helmet    -> app/ai/helmet.py (YOLOv8 helmet model)
+NON_COCO_PRODUCIBLE = {"face", "helmet", "no_helmet"}
+
+
 def test_profiles_only_promise_classes_something_can_produce():
-    producible = set(COCO_CLASS_MAP.values()) | {"face"}  # face comes from YuNet
+    producible = set(COCO_CLASS_MAP.values()) | NON_COCO_PRODUCIBLE
     for profile, allowed in PROFILE_CLASSES.items():
         unproducible = set(allowed) - producible
         assert not unproducible, (
@@ -84,7 +114,7 @@ def test_profiles_only_promise_classes_something_can_produce():
 
 
 def test_feature_class_map_only_references_producible_classes():
-    producible = set(COCO_CLASS_MAP.values()) | {"face"}
+    producible = set(COCO_CLASS_MAP.values()) | NON_COCO_PRODUCIBLE
     for feature, owned in FEATURE_CLASSES.items():
         unproducible = set(owned) - producible
         assert not unproducible, f"feature {feature!r} claims {sorted(unproducible)}"

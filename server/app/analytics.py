@@ -2,6 +2,8 @@ import time
 import cv2
 import numpy as np
 
+from app import config
+
 # Classes treated as "items" for abandoned-object detection — anything that
 # isn't a person or vehicle and can plausibly be left behind. Must stay in
 # sync with the classes enabled in app/ai/backend.py's COCO_CLASS_MAP.
@@ -43,8 +45,15 @@ def _object_category(class_name: str) -> str:
 #   - "fire"/"smoke" are NOT listed: the colour-threshold code that invented
 #     them was removed (it read concrete as smoke on 100% of frames). No
 #     producer exists until a real model ships.
-#   - "helmet"/"vest"/"no_helmet"/"no_vest" are NOT listed: same reason — the
-#     HSV heuristic that invented them (16%/22% false-positive) was removed.
+#   - "vest"/"no_vest" are NOT listed: the HSV heuristic that invented them
+#     (22% false-positive) was removed and no real vest model ships yet.
+#   - "helmet"/"no_helmet" ARE listed for traffic now: unlike the removed HSV
+#     guess, a real trained producer exists — app/ai/helmet.py runs a YOLOv8
+#     helmet model on rider crops and appends genuine detections before this
+#     method sees them, exactly as face.py does for "face". If that model file
+#     is absent the module emits nothing (and logs why), so the class simply
+#     doesn't appear rather than being faked — the profile still only ever
+#     advertises a capability something can actually produce.
 #   - "dog"/"cat"/"bear"/"gloves"/"shoes" are NOT listed: never in
 #     COCO_CLASS_MAP, so the detector cannot emit them.
 #   - "face" IS listed for security and factory: YuNet genuinely produces it.
@@ -56,7 +65,7 @@ PROFILE_CLASSES = {
     # this module was cleaned up to remove. Only traffic_light and stop_sign
     # are real (backend.py ids 9 and 11).
     # tests/test_zone_profiles.py asserts every class here is producible.
-    "traffic": set(VEHICLE_CLASSES) | {"traffic_light", "stop_sign"},
+    "traffic": set(VEHICLE_CLASSES) | {"traffic_light", "stop_sign", "helmet", "no_helmet"},
     "security": {"person", "backpack", "handbag", "suitcase", "umbrella", "face"},
     "factory": {"person", "face"},
     # "custom" and None mean "operator decides" — no profile-level narrowing.
@@ -83,6 +92,7 @@ FEATURE_CLASSES = {
     "vehicle_classification": set(VEHICLE_CLASSES),
     "vehicle_counting": set(VEHICLE_CLASSES),
     "face_detection": {"face"},
+    "helmet_detection": {"helmet", "no_helmet"},
     "object_left_behind": set(ITEM_CLASSES),
     "object_removed": set(ITEM_CLASSES),
     "traffic_light_violation": {"traffic_light"},
@@ -880,6 +890,76 @@ class CameraAnalytics:
                     "message": f"{cls_name.capitalize()} (ID: {tid}) left unattended for {int(stationary_for)}s",
                 })
                 self.alert_cooldowns[alert_key] = now
+
+        # --- Helmet / triple-riding violations (traffic) -------------------
+        # helmet.py appends genuine class=="no_helmet"/"helmet" boxes (on rider
+        # crops) before this method runs — same contract as face.py. Those boxes
+        # carry NO track_id, so alerting on them directly would fire once PER
+        # FRAME per bare head: a snapshot + 20s clip + DB row every ~33ms. We
+        # instead associate each violation to the tracked MOTORCYCLE it sits on
+        # and dedup by that stable track id (exactly how the zone/abandoned
+        # alerts above dedup via alert_cooldowns), so one rider = one event.
+        no_helmet_dets = [d for d in detections if d.get("class") == "no_helmet"]
+        if no_helmet_dets:
+            motos = [d for d in detections
+                     if d.get("class") == "motorcycle" and d.get("track_id") is not None]
+            persons = [d for d in detections if d.get("class") == "person"]
+
+            def _cx(b):
+                return (b["x1"] + b["x2"]) / 2.0
+
+            def _assoc_moto(box):
+                """The tracked motorcycle a rider-region box belongs to: its
+                horizontal centre falls within the bike's x-span (padded) and it
+                sits at/above the bike. Returns the closest such motorcycle det."""
+                bx = _cx(box["bbox"])
+                best, best_dx = None, None
+                for m in motos:
+                    mb = m["bbox"]
+                    pad = (mb["x2"] - mb["x1"]) * 0.25
+                    if not (mb["x1"] - pad <= bx <= mb["x2"] + pad):
+                        continue
+                    if (box["bbox"]["y1"] + box["bbox"]["y2"]) / 2.0 > mb["y2"]:
+                        continue  # box is below the bike — not a rider on it
+                    dx = abs(bx - _cx(mb))
+                    if best_dx is None or dx < best_dx:
+                        best, best_dx = m, dx
+                return best
+
+            for nh in no_helmet_dets:
+                moto = _assoc_moto(nh)
+                if moto is None:
+                    continue  # a bare head with no bike under it is not a rider
+                tid = moto["track_id"]
+                alert_key = f"helmet_violation_{tid}"
+                # Cooldown is operator-configurable (config.HELMET_COOLDOWN) so a
+                # site can trade duplicate-suppression against missing a second
+                # genuine pass of the same rider. Still keyed to the motorcycle
+                # track, so it dedups per rider, not per frame.
+                if now - self.alert_cooldowns.get(alert_key, 0) > config.HELMET_COOLDOWN:
+                    riders = sum(
+                        1 for p in persons
+                        if moto["bbox"]["x1"] - (moto["bbox"]["x2"] - moto["bbox"]["x1"]) * 0.25
+                        <= _cx(p["bbox"])
+                        <= moto["bbox"]["x2"] + (moto["bbox"]["x2"] - moto["bbox"]["x1"]) * 0.25
+                        and p["bbox"]["y2"] >= moto["bbox"]["y1"]
+                    )
+                    triple = riders >= 3
+                    msg = (f"No-helmet rider on motorcycle (ID: {tid}) "
+                           f"[conf {nh['confidence']:.2f}]")
+                    if triple:
+                        msg += f" — triple riding ({riders} on one bike)"
+                    # rider_bbox / helmet_bbox let the pipeline crop and save the
+                    # rider and helmet regions as evidence alongside the full
+                    # frame (pipeline.py evidence block). Absolute pixel coords.
+                    alerts.append({
+                        "type": "triple_riding" if triple else "helmet_violation",
+                        "message": msg,
+                        "track_id": tid,
+                        "rider_bbox": dict(moto["bbox"]),
+                        "helmet_bbox": dict(nh["bbox"]),
+                    })
+                    self.alert_cooldowns[alert_key] = now
 
         parking_slots = []
 

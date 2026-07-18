@@ -55,6 +55,41 @@ SEGMENT_DURATION_SECS = 600  # 10 minute segments for continuous recording
 PRE_EVENT_BUFFER_SECS = 5    # seconds to keep in pre-event circular buffer
 POST_EVENT_RECORD_SECS = 5   # seconds to keep recording after event ends
 
+# --- Helmet detection (RT-DETR, Apache-2.0) --------------------------------
+# All knobs are env-overridable with safe defaults; no absolute path is baked
+# in. The model + its classes.txt live under MODELS_DIR/helmet by default
+# (e.g. %APPDATA%/CamAI/models/helmet/rtdetr_helmet.onnx), which is writable and
+# per-user. HELMET_ENABLED is a global kill-switch independent of the per-camera
+# zone-profile toggle — both must be on (and the model present) for helmet
+# inference to run.
+def _env_bool(name: str, default: bool) -> bool:
+    v = os.getenv(name)
+    if v is None:
+        return default
+    return v.strip().lower() in ("1", "true", "yes", "on")
+
+def _env_float(name: str, default: float) -> float:
+    try:
+        return float(os.getenv(name, "")) if os.getenv(name) else default
+    except ValueError:
+        return default
+
+def _env_int(name: str, default: int) -> int:
+    try:
+        return int(os.getenv(name, "")) if os.getenv(name) else default
+    except ValueError:
+        return default
+
+HELMET_ENABLED = _env_bool("CAMAI_HELMET_ENABLED", True)
+HELMET_MODEL_DIR = Path(os.getenv("CAMAI_HELMET_MODEL_DIR", str(MODELS_DIR / "helmet")))
+# Filename resolved under HELMET_MODEL_DIR, or an absolute path if given.
+HELMET_MODEL = os.getenv("CAMAI_HELMET_MODEL", "rtdetr_helmet.onnx")
+HELMET_CLASSES_FILE = os.getenv("CAMAI_HELMET_CLASSES", "classes.txt")
+HELMET_THRESHOLD = _env_float("CAMAI_HELMET_THRESHOLD", 0.35)
+HELMET_NMS = _env_float("CAMAI_HELMET_NMS", 0.45)
+HELMET_INPUT_SIZE = _env_int("CAMAI_HELMET_INPUT_SIZE", 640)
+HELMET_COOLDOWN = _env_float("CAMAI_HELMET_COOLDOWN", 15.0)
+
 # Web Server Settings.
 # The engine exposes unauthenticated camera streams and control endpoints —
 # it is designed to sit on loopback behind the desktop app / local viewer.
