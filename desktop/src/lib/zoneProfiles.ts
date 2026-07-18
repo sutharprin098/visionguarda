@@ -295,9 +295,11 @@ const TRAFFIC: ProfileDef = {
       ],
     },
     {
-      key: "queue_length", label: "Queue Length", group: "Analytics", requiresGeometry: "zone", defaultEnabled: true,
+      key: "queue_length", label: "Queue Length", group: "Analytics", requiresGeometry: "zone", defaultEnabled: false,
       drawTool: { label: "Road ROI", purpose: "road_roi" },
       description: "Measure standing queue length inside a zone.",
+      status: "coming-soon",
+      unavailable: "Coming soon. The analytics engine does not compute standing-queue length yet — vehicle density in a zone is available today via Traffic Density.",
       params: [seconds("stationary_seconds", "Stationary Time", 5, "How long a vehicle must be still to join the queue."),
         { key: "alert_count", label: "Alert Above", type: "number", min: 1, max: 200, step: 1, unit: "veh", default: 10 }],
     },
@@ -314,16 +316,20 @@ const TRAFFIC: ProfileDef = {
       params: [seconds("grace_seconds", "Grace Period", 60)],
     },
     {
-      key: "stop_line_violation", label: "Stop Line Violation", group: "Events & Violations", requiresGeometry: "line", defaultEnabled: true,
+      key: "stop_line_violation", label: "Stop Line Violation", group: "Events & Violations", requiresGeometry: "line", defaultEnabled: false,
       drawTool: { label: "Stop Line", purpose: "stop_line" },
       description: "Flag vehicles crossing the stop line on red.",
+      status: "coming-soon",
+      unavailable: "Coming soon. Flagging a stop-line crossing 'on red' needs a traffic-light STATE (colour) detector. The engine detects the light as an object but not whether it is red, so the violation cannot be raised yet.",
       params: [{ key: "signal_source", label: "Signal State Source", type: "select", default: "detector", options: [
         { value: "detector", label: "On-frame light detector" }, { value: "manual", label: "External signal input" },
       ] }],
     },
     {
-      key: "u_turn_detection", label: "U-Turn Detection", group: "Events & Violations", defaultEnabled: true,
+      key: "u_turn_detection", label: "U-Turn Detection", group: "Events & Violations", defaultEnabled: false,
       description: "Detect vehicles performing a U-turn.",
+      status: "coming-soon",
+      unavailable: "Coming soon. U-turn detection needs per-track trajectory-angle analysis, which the analytics engine does not implement yet. Wrong-Way Detection is available today.",
       params: [{ key: "min_angle", label: "Min Turn Angle", type: "slider", min: 90, max: 180, step: 5, unit: "°", default: 150 }],
     },
     {
@@ -356,9 +362,11 @@ const TRAFFIC: ProfileDef = {
       params: [confidence(0.35)],
     },
     {
-      key: "traffic_light_violation", label: "Traffic Light Violation", group: "Events & Violations", requiresGeometry: "line", defaultEnabled: true,
+      key: "traffic_light_violation", label: "Traffic Light Violation", group: "Events & Violations", requiresGeometry: "line", defaultEnabled: false,
       drawTool: { label: "Traffic Signal ROI", purpose: "signal_roi" },
       description: "Combine signal state and line crossing to flag red-light running.",
+      status: "coming-soon",
+      unavailable: "Coming soon. Red-light running needs the traffic-light STATE (colour). The engine detects the light as an object but not its signal, so the crossing cannot be judged red vs green yet.",
       params: [seconds("grace_seconds", "Amber Grace", 2)],
     },
     roiEditor,
