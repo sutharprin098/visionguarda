@@ -298,7 +298,12 @@ class HelmetDetector:
         return [d for d in out if d]
 
     def _decode_single(self, out, scale, cx1, cy1) -> List[Dict[str, Any]]:
-        """Fused export: [1,N,4+nc], row = cx,cy,w,h (normalised 0-1) + scores."""
+        """Fused export: [1,N,4+nc] or [1,4+nc,N], row = cx,cy,w,h + class scores,
+        no objectness. Handles BOTH coordinate conventions: a plain YOLOv8 detect
+        export gives cx,cy,w,h in INPUT PIXELS (0..S), while some fused exports
+        give them normalised (0..1). We detect which from the value range rather
+        than assume — assuming normalised on a pixel export scaled every box by S
+        and produced nothing."""
         arr = np.asarray(out)
         if arr.ndim == 3:
             arr = arr[0]
@@ -314,14 +319,16 @@ class HelmetDetector:
         cls_ids = np.argmax(scores_all, axis=1)
         cls_conf = scores_all[np.arange(scores_all.shape[0]), cls_ids]
         keep = cls_conf >= self.conf
+        cxcywh = cxcywh[keep]; cls_ids = cls_ids[keep]; cls_conf = cls_conf[keep]
+        # normalised if every coord sits in [0,~1]; else already input pixels.
+        coord_scale = S if (cxcywh.size and float(cxcywh.max()) <= 1.5) else 1.0
         results: List[Dict[str, Any]] = []
-        for (cx, cy, w, h), cid, sc in zip(cxcywh[keep], cls_ids[keep], cls_conf[keep]):
+        for (cx, cy, w, h), cid, sc in zip(cxcywh, cls_ids, cls_conf):
             canon = self.class_map.get(int(cid))
             if canon is None:
                 continue
-            # normalised (0-1) -> SxS px
-            x1 = (cx - w / 2) * S; y1 = (cy - h / 2) * S
-            x2 = (cx + w / 2) * S; y2 = (cy + h / 2) * S
+            x1 = (cx - w / 2) * coord_scale; y1 = (cy - h / 2) * coord_scale
+            x2 = (cx + w / 2) * coord_scale; y2 = (cy + h / 2) * coord_scale
             d = self._to_frame(x1, y1, x2, y2, float(sc), canon, scale, cx1, cy1, S)
             if d:
                 results.append(d)

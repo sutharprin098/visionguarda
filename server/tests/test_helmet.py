@@ -109,6 +109,21 @@ def test_decode_single_fused_contract():
     assert (b["x1"], b["x2"]) == pytest.approx((280, 360))
 
 
+def test_decode_single_pixel_coords_yolov8_export():
+    """A plain YOLOv8 detect export gives cx,cy,w,h in INPUT PIXELS and a
+    transposed [1,4+nc,N] layout — the common real case. Coords must NOT be
+    re-scaled by S (that was the bug that made a real helmet model emit nothing);
+    they are already pixels."""
+    d = _bare_detector({0: "helmet", 1: "no_helmet"}, "single")
+    arr = np.zeros((1, 6, 300), np.float32)     # [1, 4+nc, N] (transposed)
+    arr[0, :4, 0] = [320, 320, 80, 80]          # pixels in 640 space -> 280..360
+    arr[0, 4:, 0] = [0.9, 0.1]                  # argmax=0 helmet
+    dets = d._nms(d._decode_single(arr, scale=1.0, cx1=0, cy1=0))
+    assert len(dets) == 1 and dets[0]["class"] == "helmet"
+    b = dets[0]["bbox"]
+    assert (b["x1"], b["y1"], b["x2"], b["y2"]) == pytest.approx((280, 280, 360, 360))
+
+
 def test_nms_drops_overlapping_helmet_and_no_helmet_on_one_head():
     d = _bare_detector({0: "helmet", 1: "no_helmet"}, "triple")
     boxes = np.zeros((1, 300, 4), np.float32)
