@@ -13,6 +13,15 @@ type AlertRow = Alert & {
   ack_profile: { full_name: string } | null;
 };
 
+function AlertField({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
+  return (
+    <div>
+      <dt className="text-xs text-ink-3">{label}</dt>
+      <dd className={`text-ink-1 ${mono ? "font-mono text-xs break-all" : "capitalize"}`}>{value}</dd>
+    </div>
+  );
+}
+
 export default function AlertsPage() {
   const qc = useQueryClient();
   const { profile } = useAuth();
@@ -113,7 +122,28 @@ export default function AlertsPage() {
               <Badge>{viewing.kind.replaceAll("_", " ")}</Badge>
               <span className="text-xs text-ink-3">{fmtDateTime(viewing.created_at)}</span>
             </div>
-            {viewing.cameras && <p className="text-sm text-ink-2">Camera: {viewing.cameras.name}</p>}
+            {/* The same fields the Telegram notification carries, rendered from
+                the same row — detection name (the AI module's own output),
+                confidence, tracking id, and priority. Kept in sync with
+                notify-telegram so dashboard and Telegram show one identical alert. */}
+            <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
+              <AlertField label="Detection" value={String((viewing.detail as any)?.detection_name ?? viewing.kind).replaceAll("_", " ")} />
+              <AlertField label="Priority" value={viewing.severity} />
+              <AlertField label="Camera" value={viewing.cameras?.name ?? "—"} />
+              <AlertField label="Camera ID" value={viewing.camera_id ?? "—"} mono />
+              {(viewing.detail as any)?.confidence != null && (
+                <AlertField label="Confidence" value={`${Math.round(Number((viewing.detail as any).confidence) * 100)}%`} />
+              )}
+              {(viewing.detail as any)?.track_id != null && (
+                <AlertField label="Tracking ID" value={String((viewing.detail as any).track_id)} />
+              )}
+              {(viewing.detail as any)?.plate_text && (
+                <AlertField label="Plate" value={String((viewing.detail as any).plate_text)} />
+              )}
+              {(viewing.detail as any)?.speed_kmh != null && (
+                <AlertField label="Speed" value={`${(viewing.detail as any).speed_kmh} km/h`} />
+              )}
+            </dl>
             {snapshotUrl && (
               <img src={snapshotUrl} alt="Alert snapshot"
                    className="w-full rounded-md border border-line" />

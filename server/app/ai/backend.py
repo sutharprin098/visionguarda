@@ -160,6 +160,16 @@ class EngineBackend:
         self.is_yolox = "yolox" in os.path.basename(model_name).lower()
         self.backend_type = None  # 'openvino', 'onnx'
         self.backend_device = None  # 'GPU', 'CPU', 'CUDA', etc.
+        # When non-None, this backend is compiled for ONE fixed input side S and
+        # every inference MUST run at [1,3,S,S]. Set only for OpenVINO GPU
+        # devices (Intel iGPU/Arc), where per-shape kernel recompiles are the
+        # crash-loop cause (see config.IGPU_STATIC_IMGSZ). preprocess/postprocess
+        # force this size regardless of the caller's requested imgsz, so the
+        # pipeline's adaptive resolution and the tile engine can never feed the
+        # static model a shape it was not compiled for. None = dynamic shape
+        # (CPU / CUDA / TensorRT), where adaptive resolution stays enabled.
+        self.static_imgsz = None
+        self.is_igpu = False
         # Logged-once diagnostics so the (frozen) engine log confirms the model
         # is actually producing output tensors of the expected shape, without
         # spamming a line per frame.
@@ -183,8 +193,23 @@ class EngineBackend:
 
         # ONNX specific
         self.ort_session = None
+        self._ort_input_name: str | None = None   # cached once after load
 
         self.preferred_backends = preferred_backends or ["openvino", "onnx"]
+
+        # Per-imgsz YOLOX grid cache: computing np.meshgrid + concatenate every
+        # frame costs 2–4 ms at 320×320 and more at 640+. Cache by (imgsz,) so
+        # each unique inference size pays the cost exactly once.
+        self._yolox_grid_cache: dict = {}
+
+        # Per-thread YOLOX letterbox pad buffer to prevent multi-thread mutation races.
+        self._local = threading.local()
+
+        # Lock for YOLOX grid cache population
+        self._grid_cache_lock = threading.Lock()
+
+        # Lock for inference execution to guarantee GPU driver thread safety during dynamic compilation
+        self._infer_lock = threading.Lock()
 
         # Load and configure the backend
         self._initialize_backend()
@@ -207,6 +232,8 @@ class EngineBackend:
                 return 100  # TensorRT: fused FP16 engine, fastest available
             if "CUDAExecutionProvider" in providers:
                 return 90   # plain CUDA EP
+            if "DmlExecutionProvider" in providers:
+                return 75   # DirectML GPU acceleration (Windows DirectX 12)
             return 10        # CPU-only ONNX Runtime build
         if backend_type == "openvino" and HAS_OPENVINO:
             try:
@@ -329,6 +356,16 @@ class EngineBackend:
                 print(f"[AI Backend] [OK] MODEL LOADED: '{self.model_name}' via "
                       f"{self.backend_type.upper()} on {self.backend_device} "
                       f"(runtime={'GPU' if self.backend_device not in ('CPU', 'cpu') else 'CPU'})", flush=True)
+                # Fail loud (and, under CAMAI_REQUIRE_GPU, abort) if the primary
+                # detector silently landed on CPU while an accelerator exists.
+                try:
+                    from app.ai.accelerator import guard_cpu_fallback
+                    guard_cpu_fallback(f"primary detector ({self.model_name})",
+                                       f"{self.backend_type}:{self.backend_device}")
+                except RuntimeError:
+                    raise
+                except Exception:
+                    pass
                 return
             except Exception as e:
                 last_errors.append(f"{backend_type}: {e}")
@@ -348,6 +385,35 @@ class EngineBackend:
         force_cpu = os.environ.get("CAMAI_FORCE_CPU", "").lower() in ("1", "true", "yes")
         target_device = "CPU" if force_cpu else ("GPU" if "GPU" in devices else "CPU")
         model = self.ov_core.read_model(model_path)
+
+        # ── Intel GPU: pin ONE static input shape ────────────────────────────
+        # An Intel GPU (iGPU or Arc) recompiles kernels for every distinct input
+        # shape it sees, each compile costing many seconds and emitting IGC
+        # "CISA" errors on some shapes. Left dynamic, the engine's adaptive imgsz
+        # plus the multi-resolution tile ladder trigger a runtime compile storm
+        # that stalls the watchdog into a restart/recompile crash loop. Reshaping
+        # the graph to a single fixed [1,3,S,S] here makes the GPU plugin compile
+        # exactly one kernel (disk-cached via CACHE_DIR below), which also runs
+        # faster than the dynamic-shape kernel. S is clamped to a multiple of 32
+        # for the YOLOX detection head. CPU keeps dynamic shapes (it compiles per
+        # shape cheaply and benefits from adaptive resolution).
+        if target_device == "GPU":
+            try:
+                from app.config import IGPU_STATIC_IMGSZ
+                s = max(320, (int(IGPU_STATIC_IMGSZ) // 32) * 32)
+                model.reshape([1, 3, s, s])
+                self.static_imgsz = s
+                self.is_igpu = True
+                print(f"[AI Backend] Intel GPU detected — pinning static input "
+                      f"shape [1,3,{s},{s}] (one cached kernel, no runtime "
+                      f"recompiles).", flush=True)
+            except Exception as e:
+                # A reshape failure must not block model load — fall back to the
+                # dynamic-shape compile (slower/riskier on iGPU, but functional).
+                self.static_imgsz = None
+                self.is_igpu = False
+                print(f"[AI Backend] Warning: static reshape failed ({e}); "
+                      f"falling back to dynamic input shape.", flush=True)
 
         # Persist compiled kernels to disk. Without this, GPU in particular
         # re-runs shape-specific kernel JIT compilation (documented
@@ -447,11 +513,12 @@ class EngineBackend:
                     "trt_engine_cache_path": trt_cache_dir,
                 }),
                 "CUDAExecutionProvider",
+                "DmlExecutionProvider",
                 "CPUExecutionProvider",
             ]
             device = "TensorRT"
         elif "CUDAExecutionProvider" in providers:
-            provider_list = ["CUDAExecutionProvider"]
+            provider_list = ["CUDAExecutionProvider", "DmlExecutionProvider", "CPUExecutionProvider"]
             device = "CUDA"
             # The CUDA EP (unlike TensorRT above) has no runtime fp16-cast
             # option — it just runs whatever precision the graph's weights
@@ -463,11 +530,14 @@ class EngineBackend:
             if os.path.exists(fp16_path):
                 model_path = fp16_path
                 device = "CUDA-FP16"
+        elif "DmlExecutionProvider" in providers:
+            provider_list = ["DmlExecutionProvider", "CPUExecutionProvider"]
+            device = "DirectML"
         elif "CPUExecutionProvider" in providers:
             provider_list = ["CPUExecutionProvider"]
             device = "CPU"
         else:
-            raise RuntimeError("ONNX Runtime does not expose TensorRT, CUDA, or CPU provider.")
+            raise RuntimeError("ONNX Runtime does not expose TensorRT, CUDA, DirectML, or CPU provider.")
 
         try:
             self.ort_session = ort.InferenceSession(model_path, sess_options=sess_opts, providers=provider_list)
@@ -482,38 +552,21 @@ class EngineBackend:
         self.has_seg_output = len(self.ort_session.get_outputs()) > 1
         self.backend_type = "onnx"
         self.backend_device = device
+        self._ort_input_name = self.ort_session.get_inputs()[0].name  # cache once
         print(f"[AI Backend] Successfully initialized ONNX Runtime engine on {device}.")
 
     def _get_ov_infer_request(self):
-        """Return this thread's dedicated InferRequest, creating it on first use.
-
-        Multiple InferRequest objects backed by one CompiledModel run concurrently
-        without contention — OpenVINO's own scheduler (stream pool) handles the
-        actual hardware queuing, which is both safer and far more fair than an
-        external Python lock.
-        """
-        tid = threading.get_ident()
-        req = self._ov_requests.get(tid)
+        """Returns a thread-local InferRequest object for lock-free parallel GPU inference."""
+        req = getattr(self._local, "ov_infer_req", None)
         if req is None:
             with self._ov_requests_lock:
-                req = self._ov_requests.get(tid)
-                if req is None:
-                    req = self.ov_compiled.create_infer_request()
-                    self._ov_requests[tid] = req
+                req = self.ov_compiled.create_infer_request()
+                self._local.ov_infer_req = req
         return req
 
     def release_thread_request(self):
-        """Drop the calling thread's cached InferRequest, if any.
-
-        Call this when a camera pipeline thread is shutting down so a
-        restarted camera (new thread, new thread-id) doesn't leave the old
-        InferRequest's device buffers cached forever on the shared backend.
-        No-op for backends other than OpenVINO (ONNX Runtime keeps no
-        per-thread state here).
-        """
-        tid = threading.get_ident()
-        with self._ov_requests_lock:
-            self._ov_requests.pop(tid, None)
+        if hasattr(self._local, "ov_infer_req"):
+            delattr(self._local, "ov_infer_req")
 
     def run_inference(self, img_tensor):
         t0 = time.time()
@@ -521,24 +574,18 @@ class EngineBackend:
         try:
             if self.backend_type == "openvino":
                 req = self._get_ov_infer_request()
-                res = req.infer([img_tensor])
+                ov_tensor = ov.Tensor(img_tensor)
+                res = req.infer({self.ov_compiled.inputs[0]: ov_tensor})
                 output0 = res[self.ov_output0]
                 output1 = res[self.ov_output1] if self.has_seg_output else None
             elif self.backend_type == "onnx":
-                # ONNX Runtime sessions are documented thread-safe for concurrent
-                # Run() calls from multiple threads — no external lock needed.
-                input_name = self.ort_session.get_inputs()[0].name
-                res = self.ort_session.run(None, {input_name: img_tensor})
+                res = self.ort_session.run(None, {self._ort_input_name: img_tensor})
                 output0 = res[0]
                 output1 = res[1] if self.has_seg_output else None
             else:
                 raise RuntimeError("Backend not initialized.")
         except Exception as e:
             self._infer_error_count += 1
-            # Surface the first few inference errors loudly (then stay quiet to
-            # avoid flooding) — the pipeline's AI loop catches+recovers, but the
-            # engine log must show WHY inference is failing rather than silently
-            # producing zero detections.
             if self._infer_error_count <= 5:
                 print(f"[AI Backend] [FAIL] INFERENCE ERROR #{self._infer_error_count} "
                       f"({self.backend_type}/{self.backend_device}): {e}", flush=True)
@@ -549,8 +596,8 @@ class EngineBackend:
             _shape0 = getattr(output0, "shape", "?")
             _shape1 = getattr(output1, "shape", None) if output1 is not None else None
             print(f"[AI Backend] First inference OK ({self.backend_type}/{self.backend_device}). "
-                  f"Input tensor {getattr(img_tensor, 'shape', '?')} -> "
-                  f"output0 shape {_shape0}"
+                  f"Input tensor {getattr(img_tensor, 'shape', '?')} ->"
+                  f" output0 shape {_shape0}"
                   + (f", output1(proto) shape {_shape1}" if _shape1 is not None else "")
                   + ".", flush=True)
 
@@ -581,6 +628,12 @@ class EngineBackend:
     def preprocess(self, frame, target_size=320):
         t0 = time.time()
 
+        # A statically-compiled GPU model accepts ONLY its pinned size; ignore
+        # whatever imgsz the caller asked for so no adaptive/tile pass can ever
+        # feed it a shape it was not compiled for.
+        if self.static_imgsz is not None:
+            target_size = self.static_imgsz
+
         if self.is_yolox:
             # YOLOX letterboxes to preserve aspect ratio, pads the unused right
             # and bottom edges with 114, and consumes raw BGR in 0-255 — it has
@@ -589,35 +642,59 @@ class EngineBackend:
             orig_h, orig_w = frame.shape[:2]
             r = self._yolox_scale(orig_h, orig_w, target_size)
             new_h, new_w = int(round(orig_h * r)), int(round(orig_w * r))
-            padded = np.full((target_size, target_size, 3), _YOLOX_PAD_VALUE, dtype=np.uint8)
-            padded[:new_h, :new_w] = cv2.resize(
-                frame, (new_w, new_h), interpolation=cv2.INTER_LINEAR
-            )
-            img_data = padded.transpose(2, 0, 1).astype(np.float32)
+            # Thread-local letterbox pad buffer eliminates multi-thread race conditions
+            # when adaptive tiling/concurrent camera pipelines infer at different resolutions.
+            pad_buf = getattr(self._local, "pad_buf", None)
+            pad_buf_size = getattr(self._local, "pad_buf_size", 0)
+            if pad_buf_size != target_size or pad_buf is None:
+                pad_buf = np.full((target_size, target_size, 3), _YOLOX_PAD_VALUE, dtype=np.uint8)
+                self._local.pad_buf = pad_buf
+                self._local.pad_buf_size = target_size
+            else:
+                if new_h < target_size:
+                    pad_buf[new_h:, :] = _YOLOX_PAD_VALUE
+                if new_w < target_size:
+                    pad_buf[:new_h, new_w:] = _YOLOX_PAD_VALUE
+            cv2.resize(frame, (new_w, new_h), dst=pad_buf[:new_h, :new_w],
+                       interpolation=cv2.INTER_LINEAR)
+            img_data = pad_buf.transpose(2, 0, 1).astype(np.float32)
         else:
             resized = cv2.resize(frame, (target_size, target_size), interpolation=cv2.INTER_LINEAR)
             rgb = cv2.cvtColor(resized, cv2.COLOR_BGR2RGB)
             img_data = rgb.astype(np.float32) / 255.0
             img_data = np.transpose(img_data, (2, 0, 1))
 
-        img_tensor = np.expand_dims(img_data, axis=0)
-        img_tensor = np.ascontiguousarray(img_tensor)
+        img_tensor = np.ascontiguousarray(np.expand_dims(img_data, axis=0))
 
         t_preprocess = (time.time() - t0) * 1000
         return img_tensor, t_preprocess
 
     def _yolox_grid(self, target_imgsz):
-        """Per-anchor (grid_x, grid_y) and stride columns for this imgsz."""
-        grids, strides = [], []
-        for s in _YOLOX_STRIDES:
-            gh = gw = target_imgsz // s
-            xv, yv = np.meshgrid(np.arange(gw), np.arange(gh))
-            grids.append(np.stack((xv, yv), 2).reshape(-1, 2))
-            strides.append(np.full((gh * gw, 1), s, dtype=np.float32))
-        return np.concatenate(grids, 0).astype(np.float32), np.concatenate(strides, 0)
+        """Per-anchor (grid_x, grid_y) and stride columns for this imgsz.
+
+        Cached by target_imgsz: the result is identical for every frame at the
+        same resolution, and recomputing meshgrid + concatenate on every
+        postprocess call costs 2–4 ms for no reason.
+        """
+        cached = self._yolox_grid_cache.get(target_imgsz)
+        if cached is not None:
+            return cached
+        with self._grid_cache_lock:
+            cached = self._yolox_grid_cache.get(target_imgsz)
+            if cached is not None:
+                return cached
+            grids, strides = [], []
+            for s in _YOLOX_STRIDES:
+                gh = gw = target_imgsz // s
+                xv, yv = np.meshgrid(np.arange(gw), np.arange(gh))
+                grids.append(np.stack((xv, yv), 2).reshape(-1, 2))
+                strides.append(np.full((gh * gw, 1), s, dtype=np.float32))
+            result = np.concatenate(grids, 0).astype(np.float32), np.concatenate(strides, 0)
+            self._yolox_grid_cache[target_imgsz] = result
+            return result
 
     def _postprocess_yolox(self, model_outputs, orig_shape, conf_threshold, iou_threshold,
-                           target_imgsz, t0):
+                           target_imgsz, t0, geometry_shape=None):
         output0, _ = model_outputs
         out = np.squeeze(output0, axis=0)
 
@@ -660,6 +737,7 @@ class EngineBackend:
         class_ids = class_ids[nms_keep]
 
         orig_h, orig_w = orig_shape
+        geom_h, geom_w = geometry_shape if geometry_shape else (orig_h, orig_w)
         # Undo the letterbox. Padding only ever sits on the right/bottom edges,
         # so the scale divides out and there is no offset to subtract.
         r = self._yolox_scale(orig_h, orig_w, target_imgsz)
@@ -675,7 +753,7 @@ class EngineBackend:
                 continue
 
             class_name = COCO_CLASS_MAP.get(class_ids[idx], "unknown")
-            if not _passes_geometry_filter(class_name, ox1, oy1, ox2, oy2, orig_w, orig_h):
+            if not _passes_geometry_filter(class_name, ox1, oy1, ox2, oy2, geom_w, geom_h):
                 continue
             detections.append({
                 "class": class_name,
@@ -688,12 +766,36 @@ class EngineBackend:
         # detections, so return an empty polygon per detection rather than [].
         return detections, [[] for _ in detections], (time.time() - t0) * 1000
 
-    def postprocess(self, model_outputs, orig_shape, conf_threshold=0.25, iou_threshold=0.45, target_imgsz=320):
+    def postprocess(self, model_outputs, orig_shape, conf_threshold=0.25, iou_threshold=0.45,
+                    target_imgsz=320, geometry_shape=None):
+        """Decode model output into detections in `orig_shape` pixel coordinates.
+
+        `geometry_shape` overrides the reference frame used by the
+        degenerate-shape filter ONLY (see _passes_geometry_filter); boxes are
+        still returned in `orig_shape` coordinates. Callers that infer on a CROP
+        of a larger frame — the ROI pre-crop in the pipeline's AI loop, and every
+        tile pass in app.ai.tiling — pass the full frame's shape here. Both are
+        pure translations of full-frame pixel coordinates, so a box's absolute
+        size is identical in either system and the filter's "is this a plausible
+        size for a person" test only means what it says when measured against the
+        whole frame. Judged against a 1/9 crop instead, a pedestrian standing
+        near the camera reads as a >90%-of-image blowup and is thrown away.
+
+        Defaults to None (= use orig_shape), which is the original behaviour for
+        every caller inferring on a whole frame.
+        """
         t0 = time.time()
+
+        # The tensor was run at the pinned static size regardless of the caller's
+        # target_imgsz (see preprocess); the grid decode must use that same size
+        # or every box lands in the wrong place.
+        if self.static_imgsz is not None:
+            target_imgsz = self.static_imgsz
 
         if self.is_yolox:
             return self._postprocess_yolox(
-                model_outputs, orig_shape, conf_threshold, iou_threshold, target_imgsz, t0
+                model_outputs, orig_shape, conf_threshold, iou_threshold, target_imgsz, t0,
+                geometry_shape=geometry_shape,
             )
 
         output0, output1 = model_outputs
@@ -755,6 +857,7 @@ class EngineBackend:
         detections = []
         masks_polygons = []
         orig_h, orig_w = orig_shape
+        geom_h, geom_w = geometry_shape if geometry_shape else (orig_h, orig_w)
 
         scale_x = orig_w / target_imgsz
         scale_y = orig_h / target_imgsz
@@ -772,7 +875,7 @@ class EngineBackend:
                 continue
 
             class_name = COCO_CLASS_MAP.get(cls_id, "unknown")
-            if not _passes_geometry_filter(class_name, ox1, oy1, ox2, oy2, orig_w, orig_h):
+            if not _passes_geometry_filter(class_name, ox1, oy1, ox2, oy2, geom_w, geom_h):
                 continue
             detections.append({
                 "class": class_name,

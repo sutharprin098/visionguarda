@@ -1,15 +1,42 @@
 // Bridges Supabase-assigned cameras to the local AI engine (server/, a
-// FastAPI process on 127.0.0.1:8000 per server/app/config.py). It is
-// unauthenticated on localhost by design (see server/app/main.py) — this
-// module is the only thing standing between it and the cloud: connection
-// strings are AES-256-GCM encrypted at rest and only ever decrypted
-// server-side (decrypt-camera edge function), never shipped to the desktop
-// as plaintext until this point, and only for cameras the signed-in user is
-// actually assigned to (RLS-enforced inside that function).
+// FastAPI process on 127.0.0.1:8000 per server/app/config.py). This module is
+// the only thing standing between it and the cloud: connection strings are
+// AES-256-GCM encrypted at rest and only ever decrypted server-side
+// (decrypt-camera edge function), never shipped to the desktop as plaintext
+// until this point, and only for cameras the signed-in user is actually
+// assigned to (RLS-enforced inside that function).
+//
+// Direction of travel matters for anything AI-mode related: this file only ever
+// pushes DB → engine. Nothing here lets a user choose a mode; it replays what an
+// admin already stored in cameras.zone_profile, which RLS would not have
+// accepted without cameras.manage. The engine's config endpoints now require the
+// token below, so that replay is also the ONLY way a mode reaches the pipeline.
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { getSupabase } from "./session";
 
 const ENGINE_BASE = "http://127.0.0.1:8000";
 let registered = new Set<string>();
+
+// Proves to the engine that a configuration write came from this app rather
+// than from some other local process (see server/app/config.py:API_TOKEN).
+// Cached because every camera sync would otherwise cross the IPC bridge, and
+// the value cannot change while the app is running — it is persisted in
+// userData by the supervisor.
+let controlTokenCache: string | null = null;
+
+async function controlHeaders(): Promise<Record<string, string>> {
+  const base = { "Content-Type": "application/json" };
+  if (controlTokenCache === null) {
+    try {
+      controlTokenCache = (await (window as any).camai?.engine?.getToken?.()) ?? "";
+    } catch {
+      controlTokenCache = "";
+    }
+  }
+  // Empty means an engine nobody tokenised (hand-started dev engine), which
+  // accepts the write anyway — sending the header regardless keeps one path.
+  return controlTokenCache ? { ...base, "X-CamAI-Token": controlTokenCache } : base;
+}
 
 export function mjpegStreamUrl(cameraId: string): string {
   return `${ENGINE_BASE}/api/cameras/${cameraId}/stream`;
@@ -175,7 +202,7 @@ async function doSyncCamerasToLocalEngine(
   const wanted = new Set(cameras.map((c) => c.id));
   for (const staleId of registered) {
     if (!wanted.has(staleId)) {
-      try { await fetch(`${ENGINE_BASE}/api/cameras/${staleId}`, { method: "DELETE" }); } catch { /* engine may have restarted */ }
+      try { await fetch(`${ENGINE_BASE}/api/cameras/${staleId}`, { method: "DELETE", headers: await controlHeaders() }); } catch { /* engine may have restarted */ }
       registered.delete(staleId);
       lastSyncedConfig.delete(staleId);
       lastUpdatedAt.delete(staleId);
@@ -201,7 +228,7 @@ async function doSyncCamerasToLocalEngine(
     // start_camera_thread() stops+restarts an existing camera on re-POST, so
     // detection resumes automatically on the new stream with no app restart.
     if (registered.has(cam.id) && lastUpdatedAt.get(cam.id) !== camUpdatedAt) {
-      try { await fetch(`${ENGINE_BASE}/api/cameras/${cam.id}`, { method: "DELETE" }); } catch { /* engine may have restarted */ }
+      try { await fetch(`${ENGINE_BASE}/api/cameras/${cam.id}`, { method: "DELETE", headers: await controlHeaders() }); } catch { /* engine may have restarted */ }
       registered.delete(cam.id);
       lastSyncedConfig.delete(cam.id);
       // `live` is a snapshot taken at the top of this call and has just gone
@@ -264,7 +291,7 @@ async function doSyncCamerasToLocalEngine(
         try {
           const res = await fetch(`${ENGINE_BASE}/api/cameras/${cam.id}/config`, {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
+            headers: await controlHeaders(),
             body: JSON.stringify({
               zones: zonesStr,
               lines: linesStr,
@@ -293,7 +320,7 @@ async function doSyncCamerasToLocalEngine(
       try {
         const res = await fetch(`${ENGINE_BASE}/api/cameras`, {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: await controlHeaders(),
           body: JSON.stringify({
             id: cam.id, name: cam.name, type: "screenshare",
             source: "push", is_active: true,
@@ -328,7 +355,7 @@ async function doSyncCamerasToLocalEngine(
       if (error || !data?.connection) continue;
       const res = await fetch(`${ENGINE_BASE}/api/cameras`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: await controlHeaders(),
         body: JSON.stringify({
           id: cam.id, name: cam.name, type: engineType(cam.source_type),
           source: data.connection, is_active: true,
@@ -415,6 +442,72 @@ export async function reportCameraHealth(cameraIds: string[]): Promise<void> {
 // with the rest of the local-engine state on logout/teardown.
 let lastEventSyncTs = "";
 
+// On the FIRST sync after activation/restart the engine already holds its full
+// persisted alert history (SQLite survives restarts). Treating all of it as
+// "new" would re-push hundreds of old alerts to the cloud — and re-fire the
+// Telegram notifier for each — every time the app launches. Instead the first
+// poll only PRIMES the high-water mark to the newest alert the engine already
+// has, and sends nothing; steady-state sync then delivers alerts raised from
+// that point on.
+let eventCursorPrimed = false;
+
+// Per-session dedup set: engine_ids already sent to Telegram this run.
+// Prevents re-sending on engine restart or when the SQLite history grows:
+// the high-water mark advances correctly, but a race on startup could still
+// land the same alert twice without this hard guard.
+let telegramSentIds = new Set<string>();
+
+// Camera-id → camera name map, populated from the bundle on each sync call.
+let cameraNames = new Map<string, string>();
+export function updateCameraNames(cameras: { id: string; name: string }[]) {
+  cameraNames = new Map(cameras.map((c) => [c.id, c.name]));
+}
+
+// Snapshot upload → cloud Telegram image. The local engine writes one JPEG per
+// alert (server/app/ai/pipeline.py) and serves it at ENGINE_BASE + screenshot_path.
+// We upload that image to the private `snapshots` bucket under the org's folder
+// so the cloud notify-telegram function can attach it to the Telegram alert via
+// the shared bot. Safe against the old photo-loop: report-events dedups by
+// engine_id, so one engine alert → one alerts row → exactly one notify-telegram
+// send (no re-upsert re-firing the trigger).
+let cachedOrgId: string | null = null;
+
+async function getOrgId(sb: SupabaseClient): Promise<string | null> {
+  if (cachedOrgId) return cachedOrgId;
+  try {
+    const { data: { user } } = await sb.auth.getUser();
+    if (!user) return null;
+    const { data } = await sb.from("profiles").select("org_id").eq("id", user.id).maybeSingle();
+    cachedOrgId = data?.org_id ?? null;
+    return cachedOrgId;
+  } catch {
+    return null;
+  }
+}
+
+// Fetch the engine's local snapshot JPEG and upload it to snapshots/{org}/{file}.
+// Returns the storage object path (what notify-telegram signs) or null on any
+// failure — image delivery is best-effort and must never break event sync. The
+// org-scoped storage policy (storage_org_write) requires the first path segment
+// to be the caller's org id.
+async function uploadSnapshot(
+  sb: SupabaseClient, orgId: string, screenshotPath: string,
+): Promise<string | null> {
+  try {
+    const imgRes = await fetch(`${ENGINE_BASE}${screenshotPath}`, { signal: AbortSignal.timeout(4000) });
+    if (!imgRes.ok) return null;
+    const blob = await imgRes.blob();
+    const file = screenshotPath.split("/").pop() || `snap_${Date.now()}.jpg`;
+    const objectPath = `${orgId}/${file}`;
+    const { error } = await sb.storage.from("snapshots").upload(objectPath, blob, {
+      contentType: "image/jpeg", upsert: true,
+    });
+    return error ? null : objectPath;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Pulls the traffic events the local engine has logged (/api/alerts) and pushes
  * the new ones to Supabase (report-events edge function) so the portal's event
@@ -435,23 +528,53 @@ export async function reportEvents(): Promise<void> {
   } catch {
     return;
   }
-  // Newest-first from the engine; keep only what we haven't synced yet.
-  const fresh = alerts.filter((a) => a.timestamp && a.timestamp > lastEventSyncTs && a.camera_id);
+
+  // First poll: prime the cursor so a fresh launch never re-floods Telegram
+  // with the engine's full persisted history. Add all existing IDs to the
+  // sent-set so they are never re-sent even if the cursor races.
+  if (!eventCursorPrimed) {
+    for (const a of alerts) {
+      if (a.timestamp && a.timestamp > lastEventSyncTs) lastEventSyncTs = a.timestamp;
+      telegramSentIds.add(a.id);
+    }
+    eventCursorPrimed = true;
+    return;
+  }
+
+  // Only alerts strictly newer than the last synced timestamp.
+  const fresh = alerts.filter(
+    (a) => a.timestamp && a.timestamp > lastEventSyncTs && a.camera_id,
+  );
   if (!fresh.length) return;
 
-  // The function takes one camera per call (org scoping is per-camera), so group.
+  // Group by camera for report-events (cloud feed / portal).
   const byCamera = new Map<string, typeof fresh>();
   for (const a of fresh) {
     (byCamera.get(a.camera_id) ?? byCamera.set(a.camera_id, []).get(a.camera_id)!).push(a);
   }
 
   const sb = await getSupabase();
+  const orgId = await getOrgId(sb);
   let syncedMax = lastEventSyncTs;
+
   for (const [camera_id, rows] of byCamera) {
-    const events = rows.map((a) => {
+    // Build the payload, uploading each alert's engine snapshot to the
+    // `snapshots` bucket so the cloud notifier can attach the image. Best-effort:
+    // if the upload fails, snapshot_path stays null and the alert is delivered as
+    // text — the event itself is never dropped.
+    const events: Array<{
+      engine_id: string; type: string; message: string; timestamp: string;
+      plate_text: string | null; track_id: number | null; speed_kmh: number | null;
+      confidence: number | null; snapshot_path: string | null;
+    }> = [];
+    for (const a of rows) {
       let d: Record<string, unknown> = {};
       try { d = a.detail ? JSON.parse(a.detail) : {}; } catch { /* keep {} */ }
-      return {
+      let snapshot_path: string | null = null;
+      if (orgId && a.screenshot_path) {
+        snapshot_path = await uploadSnapshot(sb, orgId, a.screenshot_path);
+      }
+      events.push({
         engine_id: a.id,
         type: a.alert_type,
         message: a.message,
@@ -460,17 +583,26 @@ export async function reportEvents(): Promise<void> {
         track_id: (d.track_id as number) ?? null,
         speed_kmh: (d.speed_kmh as number) ?? null,
         confidence: (d.confidence as number) ?? (d.plate_text_confidence as number) ?? null,
-        snapshot_path: a.screenshot_path ?? null,
-      };
-    });
+        snapshot_path,
+      });
+    }
+
+    // One push to report-events: it writes the alerts row (idempotent by
+    // engine_id) and the AFTER INSERT trigger fans out to Telegram via
+    // notify-telegram — WITH the snapshot image when the upload succeeded. There
+    // is no separate desktop-side Telegram send, so each alert arrives exactly
+    // once (no text+image duplicate).
     try {
-      const { error } = await sb.functions.invoke("report-events", { body: { camera_id, events } });
-      if (error) continue; // leave the high-water mark; next tick retries this camera
-      for (const a of rows) if (a.timestamp > syncedMax) syncedMax = a.timestamp;
+      await sb.functions.invoke("report-events", { body: { camera_id, events } });
     } catch {
-      // transient — the next tick retries; do not advance the mark for this camera
+      // transient — the next tick retries (idempotent via engine_id)
+    }
+
+    for (const a of rows) {
+      if (a.timestamp > syncedMax) syncedMax = a.timestamp;
     }
   }
+
   lastEventSyncTs = syncedMax;
 }
 
@@ -480,6 +612,10 @@ export function resetLocalEngineState(): void {
   lastSyncedConfig = new Map();
   lastUpdatedAt = new Map();
   lastEventSyncTs = "";
+  eventCursorPrimed = false;
+  telegramSentIds = new Set();
+  cameraNames = new Map();
+  cachedOrgId = null;
 }
 
 // The engine only ever runs one model process-wide (POST /api/model/select,
@@ -513,7 +649,7 @@ export async function syncAiModelToLocalEngine(dbModelName: string | undefined):
   try {
     const res = await fetch(`${ENGINE_BASE}/api/model/select`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: await controlHeaders(),
       body: JSON.stringify({ model_name: modelName }),
     });
     if (res.ok) appliedModel = modelName;
@@ -570,7 +706,7 @@ export async function syncAiConfidenceToLocalEngine(dbConfidence: unknown): Prom
     // engine state must mean "push", never "assume it's already right".
     await fetch(`${ENGINE_BASE}/api/detection/confidence`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: await controlHeaders(),
       body: JSON.stringify({ confidence: wanted }),
     });
   } catch {

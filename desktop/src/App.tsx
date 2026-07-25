@@ -4,7 +4,7 @@ import Workspace from "./screens/Workspace";
 import AdminStudio from "./screens/AdminStudio"; // configuration drawings & rule studio
 import { restoreSession } from "./lib/session";
 import { startRealtimeSync, SyncBundle } from "./lib/sync";
-import { resetLocalEngineState, syncCamerasToLocalEngine } from "./lib/localEngine";
+import { resetLocalEngineState, syncCamerasToLocalEngine, updateCameraNames } from "./lib/localEngine";
 import { canConfigure } from "./lib/rbac";
 
 type Phase = "booting" | "needs-activation" | "ready";
@@ -16,12 +16,35 @@ export default function App() {
   const [bundle, setBundle] = useState<SyncBundle | null>(null);
 
   useEffect(() => {
-    // No login screen, ever: try encrypted-vault auto-login; only fall back
-    // to the license prompt on first run (or after admin deactivation).
-    window.camai.getConfig().then((cfg) => {
+    // No login screen, ever: try encrypted-vault auto-login; only fall back to
+    // the license prompt on first run or after a DEFINITIVE token rejection.
+    // A transient failure (offline at launch, DNS not up) must never demand the
+    // license key again — the key is already saved; we retry with backoff until
+    // the network is back, holding on the "Starting…" splash meanwhile.
+    let cancelled = false;
+    let attempt = 0;
+
+    async function boot() {
+      const cfg = await window.camai.getConfig();
+      if (cancelled) return;
       setAppType(cfg.appType);
-      restoreSession().then((ok) => setPhase(ok ? "ready" : "needs-activation"));
-    });
+
+      const tryRestore = async () => {
+        if (cancelled) return;
+        const result = await restoreSession();
+        if (cancelled) return;
+        if (result === "ready") { setPhase("ready"); return; }
+        if (result === "no-creds") { setPhase("needs-activation"); return; }
+        // "retry": keep the saved key, back off (max 15s) and try again.
+        attempt += 1;
+        const delay = Math.min(1000 * 2 ** attempt, 15_000);
+        setTimeout(tryRestore, delay);
+      };
+      void tryRestore();
+    }
+
+    void boot();
+    return () => { cancelled = true; };
   }, []);
 
   useEffect(() => {
@@ -64,6 +87,8 @@ export default function App() {
   // until something unrelated refetched the bundle.
   useEffect(() => {
     if (phase !== "ready" || !bundle) return;
+    // Keep camera name map synced for local Telegram alerts.
+    updateCameraNames(bundle.cameras);
     const sync = () => void syncCamerasToLocalEngine(
       bundle.cameras, bundle.rule_engine_rules || [], bundle.zone_profile_configs || [],
     );

@@ -142,6 +142,13 @@ class PlateOCR:
         self.providers = _select_providers()
         self.session = ort.InferenceSession(model_path, sess_options=so, providers=self.providers)
         self.active_provider = self.session.get_providers()[0]
+        try:
+            from app.ai.accelerator import guard_cpu_fallback
+            guard_cpu_fallback("ANPR OCR", self.active_provider)
+        except RuntimeError:
+            raise
+        except Exception:
+            pass
         self._in_name = self.session.get_inputs()[0].name
         # BGR CN models keep 3 channels; EN uses grayscale. Follow the model.
         self._channels = 3 if self.session.get_inputs()[0].shape[1] == 3 else 1

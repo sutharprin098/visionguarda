@@ -223,7 +223,26 @@ def main() -> None:
         import uvicorn
         from app.main import app
         log(f"Serving. force_cpu={os.getenv('CAMAI_FORCE_CPU', '')!r}")
-        uvicorn.run(app, host=host, port=port, log_level="info", workers=1)
+
+        # Production-grade uvicorn config:
+        #   access_log=False  — eliminates per-request I/O that fires at camera
+        #                       FPS (MJPEG multipart chunks) and at WebSocket
+        #                       telemetry rate. On 4 cameras at 20 Hz this is
+        #                       80+ log writes/sec into the process's event loop.
+        #   h11_max_incomplete_event_size — allows large MJPEG chunk headers
+        #     without h11 raising ProtocolError on high-res streams.
+        #   timeout_keep_alive — holds TCP connections open so MJPEG clients
+        #                        don't re-handshake on every frame boundary.
+        uvicorn.run(
+            app,
+            host=host,
+            port=port,
+            log_level="warning",    # suppress INFO/access noise
+            access_log=False,       # no per-request logging (MJPEG hammers this)
+            workers=1,              # FastAPI state is process-local; 1 worker
+            timeout_keep_alive=30,  # hold MJPEG HTTP connections alive
+            h11_max_incomplete_event_size=16 * 1024 * 1024,  # 16MB chunks
+        )
     except SystemExit:
         raise
     except BaseException:

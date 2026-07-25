@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef, useCallback } from "react";
-import { Video, Bell, Settings2, LogOut, Wifi, WifiOff, Sliders, Activity, AlertTriangle, RotateCw, Maximize2, Minimize2, Lock } from "lucide-react";
+import { Video, Bell, Settings2, LogOut, Wifi, WifiOff, Sliders, Activity, AlertTriangle, RotateCw, Maximize2, Minimize2, Lock, Send, Check, Loader2, MessageCircle, ChevronDown, ChevronRight, Copy } from "lucide-react";
 import clsx from "clsx";
 import { startRealtimeSync, DeactivatedError, SyncBundle } from "../lib/sync";
 import { syncAiModelToLocalEngine, syncAiConfidenceToLocalEngine, mjpegStreamUrl, resetLocalEngineState, reportCameraHealth, reportEvents } from "../lib/localEngine";
@@ -14,9 +14,9 @@ import { lockReason } from "../lib/rbac";
 import { getSupabase } from "../lib/session";
 import type { CaptureSource } from "../lib/bridge";
 import {
-  AI_MODULES, ModuleKey, ModuleState,
-  loadModules, saveModules, filterDetections,
+  ModuleState, loadModules, filterDetections,
 } from "../lib/aiModules";
+import { getTelegramConfig, invalidateTelegramConfig, sendTelegramTest } from "../lib/localTelegram";
 
 // Remembered across launches by name, not id — see startSharing().
 const LAST_SOURCE_KEY = "camai.lastCaptureSource";
@@ -366,14 +366,8 @@ export default function Workspace({
             paused={fullscreenCamId !== null}
           />
         </div>
-        <div style={{ display: tab === "alerts" ? "block" : "none" }} className="space-y-2">
-          {!bundle.notifications.length && <Panel title="Alerts">No unread alerts.</Panel>}
-          {bundle.notifications.map((n: any) => (
-            <div key={n.id} className="card p-3">
-              <div className="text-sm font-medium text-zinc-100">{n.title}</div>
-              {n.body && <div className="mt-0.5 text-sm text-zinc-500">{n.body}</div>}
-            </div>
-          ))}
+        <div style={{ display: tab === "alerts" ? "block" : "none" }}>
+          <AlertsTab orgId={bundle.organization?.id ?? null} notifications={bundle.notifications} hasPermission={hasPermission} />
         </div>
         <div style={{ display: tab === "settings" ? "block" : "none" }} className="space-y-6">
           <Panel title="AI Profile & Rules">
@@ -790,7 +784,10 @@ function CameraTile({ camera: c, engineOnline, onFullscreen, paused }: { camera:
   const [telemetry, setTelemetry] = useState<CameraTelemetry | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [sourceName, setSourceName] = useState<string | null>(null);
-  const [modules, setModules] = useState<ModuleState>(() => loadModules(c.id));
+  // Overlay class filter, kept at its saved defaults (all on). No per-user toggle
+  // UI — which classes the camera detects is an admin decision (zone profile),
+  // so a normal user simply sees every detection the engine reports.
+  const [modules] = useState<ModuleState>(() => loadModules(c.id));
   // Which tile a keyboard shortcut applies to when several are on screen.
   const [isHovered, setIsHovered] = useState(false);
   const tileRef = useRef<HTMLDivElement>(null);
@@ -832,14 +829,6 @@ function CameraTile({ camera: c, engineOnline, onFullscreen, paused }: { camera:
   // an explicit "Stop Share" click, never on a dropped socket or a paused
   // display (see lib/mediaShare.ts for the reconnect/re-acquire logic).
   useEffect(() => () => { sessionRef.current?.stop(); sessionRef.current = null; }, []);
-
-  const toggleModule = (key: ModuleKey) => {
-    setModules((prev) => {
-      const next = { ...prev, [key]: !prev[key] };
-      saveModules(c.id, next);
-      return next;
-    });
-  };
 
   // ---- Fullscreen ----
   // The tile no longer fullscreens itself. It used to call
@@ -938,7 +927,14 @@ function CameraTile({ camera: c, engineOnline, onFullscreen, paused }: { camera:
             src={mjpegStreamUrl(c.id)}
             alt={c.name}
             className={mediaClass}
-            onError={() => setStreamFailed(true)}
+            onError={(e) => {
+              const target = e.currentTarget;
+              setTimeout(() => {
+                if (target) {
+                  target.src = mjpegStreamUrl(c.id);
+                }
+              }, 1000);
+            }}
           />
         ) : isScreenShareCam ? (
           <div className="flex flex-col items-center gap-3 p-4 text-center">
@@ -1023,51 +1019,15 @@ function CameraTile({ camera: c, engineOnline, onFullscreen, paused }: { camera:
           />
         )}
       </div>
-      {/* Active AI — lists only modules backed by a class the detector actually
-          emits (backend.py COCO_CLASS_MAP). Deliberately does NOT list
-          face/fire/smoke: those toggles exist in the zone-profile editor but
-          match on classes yolox_tiny never produces, so advertising them here
-          as "active" would tell an operator a safety detector is running when
-          nothing is. */}
-      {/* Per-profile dashboard — a traffic operator and a security operator want
-          different numbers. Every tile reads a field the engine actually emits. */}
+      {/* Per-profile dashboard — detection counters / FPS the engine emits. This
+          is the ONLY per-camera AI surface a normal user sees; it is read-only
+          telemetry, never configuration. All AI-MODE configuration (the camera's
+          zone profile) lives in Admin Studio → the camera's settings, is stored
+          on cameras.zone_profile (RLS: cameras.manage), applied engine-side
+          (analytics.PROFILE_CLASSES), and propagates to every client via the
+          cameras realtime sync. No mode buttons are rendered below the feed. */}
       {showingMedia && telemetry && (
         <ProfileDashboard profile={(c.zone_profile as ZoneProfileKey) ?? null} t={telemetry} />
-      )}
-      {showingMedia && (
-        <div className="flex flex-wrap items-center gap-1.5 border-t border-line bg-surface-2 px-3 py-2">
-          {/* The profile is set per camera in Admin Studio and enforced engine-side
-              (analytics.PROFILE_CLASSES): a traffic camera does not report people.
-              Surfaced here so an operator can see why a class is absent instead of
-              assuming detection is broken. */}
-          <span
-            className={clsx(
-              "mr-1 rounded px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider",
-              c.zone_profile ? "bg-accent/20 text-accent" : "bg-surface-3 text-zinc-500",
-            )}
-            title={c.zone_profile
-              ? `Zone profile: ${c.zone_profile} — this camera only reports classes this profile covers`
-              : "No zone profile set — this camera reports every detected class"}
-          >
-            {c.zone_profile ?? "no profile"}
-          </span>
-          <span className="mr-0.5 text-[10px] font-semibold uppercase tracking-wider text-zinc-500">Active AI</span>
-          {AI_MODULES.map((m) => (
-            <button
-              key={m.key}
-              onClick={() => toggleModule(m.key)}
-              title={modules[m.key] ? `Hide ${m.label}` : `Show ${m.label}`}
-              className={clsx(
-                "rounded-full px-2 py-0.5 text-[10px] font-medium transition",
-                modules[m.key]
-                  ? "bg-accent/20 text-accent"
-                  : "bg-surface-3 text-zinc-600 line-through",
-              )}
-            >
-              {modules[m.key] ? "✓ " : ""}{m.label}
-            </button>
-          ))}
-        </div>
       )}
       <div className="flex items-center justify-between px-3 py-2 bg-surface-1">
         <span className="text-sm text-zinc-200">{c.name}</span>
@@ -1104,3 +1064,469 @@ function Panel({ title, children }: { title: string; children: React.ReactNode }
     </div>
   );
 }
+
+// ---------------------------------------------------------------------------
+// AlertsTab — Telegram connect (one-time connection code) + live alert feed
+// ---------------------------------------------------------------------------
+const SEVERITY_COLORS: Record<string, string> = {
+  critical: "bg-red-500/15 border-red-500/40 text-red-400",
+  warning:  "bg-amber-500/15 border-amber-500/40 text-amber-400",
+  info:     "bg-sky-500/15 border-sky-500/40 text-sky-400",
+};
+const SEVERITY_ICON: Record<string, string> = { critical: "🔴", warning: "🟠", info: "🔵" };
+
+type TgConnState =
+  | { phase: "idle" }
+  | { phase: "loading" }
+  | { phase: "connected"; chatName: string; username?: string; connectedAt?: string }
+  | { phase: "code"; code: string; expiresAt: string; botUsername: string; deepLink: string }
+  | { phase: "error"; msg: string };
+
+/**
+ * supabase-js collapses any non-2xx edge-function response into the opaque
+ * "Edge Function returned a non-2xx status code". The real, actionable reason
+ * lives in the Response it stashes on error.context — read it and translate it
+ * into something an operator can act on (no raw stack traces / secret names in
+ * the UI). Falls back to the raw message only when nothing better is available.
+ */
+async function friendlyConnectError(error: any, data: any): Promise<string> {
+  let status = 0;
+  let bodyErr = "";
+  // FunctionsHttpError carries the actual Response on .context.
+  const ctx = error?.context;
+  if (ctx && typeof ctx.status === "number") {
+    status = ctx.status;
+    try {
+      const j = await ctx.clone().json();
+      bodyErr = String(j?.error ?? j?.message ?? "");
+    } catch { /* non-JSON body — leave blank */ }
+  }
+  if (!bodyErr && typeof data?.error === "string") bodyErr = data.error;
+  const hay = `${bodyErr} ${error?.message ?? ""}`.toLowerCase();
+
+  if (status === 404 || hay.includes("not_found") || hay.includes("not be found"))
+    return "Telegram linking service isn't deployed yet. Deploy the 'telegram-link-code' edge function (deploy_supabase.ps1), then try again.";
+  if (hay.includes("telegram_bot_username"))
+    return "The Telegram bot isn't configured on the server (missing TELEGRAM_BOT_USERNAME). Ask your administrator to set it.";
+  if (status === 401 || hay.includes("unauth"))
+    return "Your session expired. Sign out and back in, then try again.";
+  if (hay.includes("no org"))
+    return "Your account isn't linked to an organization yet.";
+  if (hay.includes("relation") && hay.includes("telegram_connections"))
+    return "The Telegram database tables aren't set up. Apply the latest migrations (supabase db push), then try again.";
+  if (status >= 500 || status === 0)
+    return bodyErr
+      ? `Telegram server error: ${bodyErr}`
+      : "Unable to contact the Telegram server. Check your connection and try again.";
+  return bodyErr || error?.message || "Could not generate a linking code. Please try again.";
+}
+
+/** Live mm:ss countdown to an ISO expiry — ticks every second, no polling. */
+function LinkCodeCountdown({ expiresAt }: { expiresAt: string }) {
+  const [remaining, setRemaining] = useState(() =>
+    Math.max(0, Math.round((new Date(expiresAt).getTime() - Date.now()) / 1000)));
+  useEffect(() => {
+    const tick = () => setRemaining(Math.max(0, Math.round((new Date(expiresAt).getTime() - Date.now()) / 1000)));
+    tick();
+    const id = setInterval(tick, 1000);
+    return () => clearInterval(id);
+  }, [expiresAt]);
+  if (remaining <= 0) return <span className="text-danger">expired — tap Generate New Code</span>;
+  const mm = String(Math.floor(remaining / 60)).padStart(2, "0");
+  const ss = String(remaining % 60).padStart(2, "0");
+  return <span>{mm}:{ss}</span>;
+}
+
+function AlertsTab({ orgId, notifications, hasPermission }: { orgId: string | null; notifications: any[]; hasPermission: (perm: string) => boolean }) {
+  const isAdmin = hasPermission("org.manage");
+  const [connState, setConnState] = useState<TgConnState>({ phase: "loading" });
+  const [generating, setGenerating] = useState(false);
+  const [copied, setCopied] = useState(false);
+
+  // Engine alerts (local)
+  const [engineAlerts, setEngineAlerts] = useState<any[]>([]);
+  const [alertsLoading, setAlertsLoading] = useState(true);
+
+  // Load connection status once, then keep it live via Supabase realtime (no polling)
+  useEffect(() => {
+    let active = true;
+    async function checkConnection() {
+      try {
+        const sb = await getSupabase();
+        // Only safe display fields — never select chat_id / telegram_user_id.
+        const { data } = await sb
+          .from("telegram_connections")
+          .select("connected, chat_name, tg_username, connected_at")
+          .maybeSingle();
+        if (!active) return;
+        if (data?.connected) {
+          setConnState({
+            phase: "connected",
+            chatName: data.chat_name ?? data.tg_username ?? "Telegram",
+            username: data.tg_username ?? undefined,
+            connectedAt: data.connected_at ?? undefined,
+          });
+        } else {
+          setConnState({ phase: "idle" });
+        }
+      } catch {
+        if (active) setConnState({ phase: "idle" });
+      }
+    }
+    checkConnection();
+
+    // Realtime: flip to "connected" immediately when the bot processes the /start
+    let channel: any;
+    (async () => {
+      const sb = await getSupabase();
+      channel = sb
+        .channel("tg-conn-watch")
+        .on(
+          // INSERT *and* UPDATE: the bot upserts the connection when a code is
+          // redeemed, so a first-ever link arrives as an INSERT, a re-link as
+          // an UPDATE. Listening only for UPDATE would miss the first connect.
+          "postgres_changes" as any,
+          { event: "*", schema: "public", table: "telegram_connections" },
+          (payload: any) => {
+            if (!active) return;
+            const row = payload.new;
+            if (row?.connected) {
+              // Linked (or re-linked) — flip to Connected with no refresh.
+              setConnState({
+                phase: "connected",
+                chatName: row.chat_name ?? row.tg_username ?? "Telegram",
+                username: row.tg_username ?? undefined,
+                connectedAt: row.connected_at ?? undefined,
+              });
+            } else if (row && !row.connected) {
+              // Unlinked elsewhere (e.g. the bot's /disconnect) — reflect it live.
+              setConnState((prev) => (prev.phase === "connected" ? { phase: "idle" } : prev));
+            }
+          }
+        )
+        .subscribe();
+    })();
+
+    return () => {
+      active = false;
+      (async () => {
+        const sb = await getSupabase();
+        if (channel) sb.removeChannel(channel);
+      })();
+    };
+  }, [orgId]);
+
+  // Load engine alerts directly from local engine (no Supabase)
+  useEffect(() => {
+    let active = true;
+    async function fetchAlerts() {
+      try {
+        const res = await fetch("http://127.0.0.1:8000/api/alerts?limit=50", {
+          signal: AbortSignal.timeout(3000),
+        });
+        if (!res.ok) return;
+        const data = await res.json();
+        if (active) setEngineAlerts(Array.isArray(data) ? data.slice(0, 50) : []);
+      } catch { /* engine offline */ } finally {
+        if (active) setAlertsLoading(false);
+      }
+    }
+    fetchAlerts();
+    const id = setInterval(fetchAlerts, 5000);
+    return () => { active = false; clearInterval(id); };
+  }, []);
+
+  // Mint a fresh, single-use connection code (server-side, cryptographically
+  // random). "Generate New Code" invalidates the previous one automatically.
+  async function getCode() {
+    setGenerating(true);
+    try {
+      const sb = await getSupabase();
+      const { data, error } = await sb.functions.invoke<{
+        ok: boolean; code: string; expires_at: string; bot_username: string; deep_link?: string;
+      }>("telegram-link-code", { body: {} });
+      if (error || !data?.ok) {
+        setConnState({ phase: "error", msg: await friendlyConnectError(error, data) });
+        return;
+      }
+      const botUsername = data.bot_username || "CamAiAdmin_bot";
+      setConnState({
+        phase: "code",
+        code: data.code,
+        expiresAt: data.expires_at,
+        botUsername,
+        // Prefer the server-built deep link; fall back to constructing it so an
+        // older backend (no deep_link field) still gets one-tap connect.
+        deepLink: data.deep_link || `https://t.me/${botUsername}?start=${data.code}`,
+      });
+    } catch (e) {
+      setConnState({ phase: "error", msg: e instanceof Error ? e.message : "Unable to contact the Telegram server. Check your connection and try again." });
+    } finally {
+      setGenerating(false);
+    }
+  }
+
+  async function disconnect() {
+    const sb = await getSupabase();
+    await sb.from("telegram_connections").update({
+      connected: false,
+      chat_id: null,
+      chat_name: null,
+      updated_at: new Date().toISOString(),
+    });
+    setConnState({ phase: "idle" });
+  }
+
+  async function copyCode(code: string) {
+    try {
+      await navigator.clipboard.writeText(code);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch { /* clipboard blocked — user can still read the code */ }
+  }
+
+  return (
+    <div className="space-y-5">
+      {/* Telegram Connect Card */}
+      <div className="rounded-xl border border-line bg-surface-1 overflow-hidden">
+        <div className="flex items-center gap-3 px-4 py-3 border-b border-line">
+          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-sky-500/15 text-sky-400">
+            <MessageCircle size={16} />
+          </div>
+          <div className="flex-1 min-w-0">
+            <div className="text-sm font-semibold text-zinc-100">Telegram Alerts</div>
+            <div className="text-[10px] text-zinc-500">
+              {connState.phase === "connected"
+                ? `Connected · ${connState.chatName}`
+                : "Send a one-time code to connect Telegram"}
+            </div>
+          </div>
+          {connState.phase === "connected" && (
+            <span className="flex items-center gap-1 rounded-full bg-ok/15 px-2 py-0.5 text-[10px] font-semibold text-ok">
+              <span className="h-1.5 w-1.5 rounded-full bg-ok inline-block" />
+              LIVE
+            </span>
+          )}
+        </div>
+
+        <div className="px-4 py-4">
+          {connState.phase === "loading" && (
+            <div className="flex items-center gap-2 py-4 text-sm text-zinc-500">
+              <Loader2 size={14} className="animate-spin" /> Checking…
+            </div>
+          )}
+
+          {!isAdmin && connState.phase !== "loading" && connState.phase !== "connected" && (
+            <div className="flex flex-col items-center justify-center py-6 text-center">
+              <div className="flex h-10 w-10 items-center justify-center rounded-full bg-zinc-800/50 text-zinc-500 mb-3 border border-line">
+                <Lock size={16} />
+              </div>
+              <div className="text-sm font-semibold text-zinc-300">Configuration Locked</div>
+              <p className="text-xs text-zinc-500 max-w-sm mt-1 leading-relaxed">
+                Telegram alerts are not connected. Only organization admins with <code className="bg-black/30 px-1 rounded text-accent">org.manage</code> permission can link a Telegram account.
+              </p>
+            </div>
+          )}
+
+          {connState.phase === "connected" && (
+            <div className="space-y-3">
+              <div className="rounded-lg border border-ok/30 bg-ok/5 p-3">
+                <div className="flex items-center gap-2 text-sm font-semibold text-ok">
+                  <Check size={16} /> Telegram Connected
+                </div>
+                <dl className="mt-2 space-y-1 text-xs">
+                  <div className="flex gap-2">
+                    <dt className="w-32 shrink-0 text-zinc-500">Connected Account</dt>
+                    <dd className="font-medium text-zinc-200">
+                      {connState.username ? `@${connState.username}` : connState.chatName}
+                    </dd>
+                  </div>
+                  <div className="flex gap-2">
+                    <dt className="w-32 shrink-0 text-zinc-500">Connected At</dt>
+                    <dd className="font-medium text-zinc-200">
+                      {connState.connectedAt ? new Date(connState.connectedAt).toLocaleString() : "—"}
+                    </dd>
+                  </div>
+                </dl>
+                <p className="mt-2 text-[11px] text-zinc-400">
+                  AI alerts are delivered to this chat automatically — no commands needed.
+                </p>
+              </div>
+              {isAdmin ? (
+                <button
+                  onClick={disconnect}
+                  className="text-xs text-zinc-500 hover:text-danger hover:underline"
+                >
+                  Disconnect this chat
+                </button>
+              ) : (
+                <div className="flex items-center gap-1.5 text-xs text-zinc-500">
+                  <Lock size={12} />
+                  <span>Only admins can disconnect this chat</span>
+                </div>
+              )}
+            </div>
+          )}
+
+          {isAdmin && (connState.phase === "idle" || connState.phase === "error") && (
+            <div className="space-y-3">
+              <div className="rounded-lg border border-sky-500/20 bg-sky-500/5 p-3 text-[11px] text-sky-300 leading-relaxed">
+                <div className="font-semibold mb-1">How it works:</div>
+                <ol className="list-decimal list-inside space-y-0.5 text-zinc-400">
+                  <li>Click <strong className="text-zinc-200">Connect Telegram</strong> to get a one-time code.</li>
+                  <li>Tap <strong className="text-zinc-200">Open in Telegram &amp; Connect</strong> — it sends the code for you (or send <code className="bg-black/30 px-1 rounded text-accent">/start YOUR_CODE</code> to <strong className="text-zinc-200">@CamAiAdmin_bot</strong> manually).</li>
+                  <li>This app flips to <strong className="text-zinc-200">Connected ✅</strong> instantly — no refresh.</li>
+                </ol>
+              </div>
+              {connState.phase === "error" && (
+                <p className="text-[11px] text-danger">{connState.msg}</p>
+              )}
+              <button
+                onClick={getCode}
+                disabled={generating}
+                className="inline-flex items-center gap-2 rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent/80 disabled:opacity-60"
+              >
+                {generating ? <Loader2 size={14} className="animate-spin" /> : <MessageCircle size={14} />}
+                Connect Telegram
+              </button>
+            </div>
+          )}
+
+          {connState.phase === "code" && (
+            <div className="space-y-3">
+              <div className="rounded-lg border border-line bg-surface-0 p-4 space-y-3">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-xs text-zinc-500">Telegram Bot</span>
+                  <a
+                    href={`https://t.me/${connState.botUsername}`}
+                    target="_blank" rel="noreferrer"
+                    className="inline-flex items-center gap-1 text-sm font-medium text-sky-400 hover:underline"
+                  >
+                    <MessageCircle size={13} /> @{connState.botUsername}
+                  </a>
+                </div>
+
+                <div>
+                  <div className="text-xs text-zinc-500 mb-1">Connection Code</div>
+                  <button
+                    onClick={() => copyCode(connState.code)}
+                    title="Click to copy"
+                    className="group w-full rounded-lg border-2 border-sky-500/30 bg-sky-500/5 px-4 py-3 text-center shadow-lg transition hover:border-sky-500/60"
+                  >
+                    <span className="font-mono text-3xl font-bold tracking-[0.3em] text-zinc-100 pl-[0.3em]">
+                      {connState.code}
+                    </span>
+                  </button>
+                </div>
+
+                {/* One-tap connect: opening the deep link sends "/start CODE" to
+                    the bot automatically — no typing. This app flips to
+                    Connected the moment the bot redeems the code. */}
+                <a
+                  href={connState.deepLink}
+                  target="_blank" rel="noreferrer"
+                  className="flex w-full items-center justify-center gap-2 rounded-lg bg-sky-500 px-4 py-2.5 text-sm font-semibold text-white shadow-lg transition hover:bg-sky-400"
+                >
+                  <Send size={15} /> Open in Telegram &amp; Connect
+                </a>
+
+                <div className="flex items-center justify-between text-xs">
+                  <span className="text-zinc-500">Expires in</span>
+                  <span className="font-mono font-semibold text-zinc-200">
+                    <LinkCodeCountdown expiresAt={connState.expiresAt} />
+                  </span>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2 pt-1">
+                  <button
+                    onClick={() => copyCode(connState.code)}
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-line px-3 py-1.5 text-xs text-zinc-300 hover:bg-surface-2"
+                  >
+                    {copied ? <Check size={13} className="text-ok" /> : <Copy size={13} />}
+                    {copied ? "Copied" : "Copy"}
+                  </button>
+                  <button
+                    onClick={getCode}
+                    disabled={generating}
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-line px-3 py-1.5 text-xs text-zinc-400 hover:bg-surface-2 disabled:opacity-50"
+                  >
+                    <RotateCw size={13} className={generating ? "animate-spin" : ""} /> Generate New Code
+                  </button>
+                </div>
+              </div>
+
+              <div className="rounded-lg border border-sky-500/20 bg-sky-500/5 p-3 text-[11px] leading-relaxed text-zinc-400">
+                Tap <strong className="text-zinc-200">Open in Telegram &amp; Connect</strong> above — it sends the code for you.
+                Or open <strong className="text-zinc-200">@{connState.botUsername}</strong> manually and send{" "}
+                <code className="bg-black/30 px-1 rounded text-sky-300">/start {connState.code}</code>.
+                This app connects automatically.
+              </div>
+
+              <div className="text-center text-[10px] text-zinc-600">
+                Waiting for you to connect… this app updates automatically
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Live Alert Feed */}
+      <div>
+        <div className="mb-3 flex items-center justify-between">
+          <h3 className="text-sm font-semibold text-zinc-100">Recent Detections</h3>
+          <span className="text-[10px] text-zinc-600">Local engine · refreshes every 5s</span>
+        </div>
+
+        {alertsLoading ? (
+          <div className="flex items-center gap-2 py-6 text-sm text-zinc-500">
+            <Loader2 size={14} className="animate-spin" /> Loading alerts…
+          </div>
+        ) : engineAlerts.length === 0 ? (
+          <div className="rounded-xl border border-line bg-surface-1 px-4 py-8 text-center">
+            <Bell size={28} className="mx-auto mb-2 text-zinc-600" />
+            <div className="text-sm text-zinc-500">No detections yet.</div>
+            <div className="mt-1 text-xs text-zinc-600">Alerts appear here when a camera detects something in a zone.</div>
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {engineAlerts.map((a) => {
+              let d: Record<string, unknown> = {};
+              try { d = a.detail ? JSON.parse(a.detail) : (a.detail ?? {}); } catch { /* */ }
+              const severity = (d.severity as string) || "info";
+              const colorClass = SEVERITY_COLORS[severity] ?? SEVERITY_COLORS.info;
+              const icon = SEVERITY_ICON[severity] ?? "🔔";
+              const name = (d.detection_name as string) || a.alert_type?.replace(/_/g, " ") || "Detection";
+              return (
+                <div key={a.id} className={`rounded-lg border px-3 py-2.5 ${colorClass}`}>
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <div className="text-xs font-semibold capitalize">{icon} {name}</div>
+                      <div className="mt-0.5 text-[10px] opacity-80 truncate">{a.message}</div>
+                    </div>
+                    <div className="shrink-0 text-right">
+                      <div className="text-[10px] opacity-70">{new Date(a.timestamp).toLocaleTimeString()}</div>
+                      {typeof d.confidence === "number" && (
+                        <div className="text-[10px] opacity-70">{Math.round((d.confidence as number) * 100)}%</div>
+                      )}
+                    </div>
+                  </div>
+                  {a.screenshot_path && (
+                    <div className="mt-2">
+                      <img
+                        src={`http://127.0.0.1:8000${a.screenshot_path}`}
+                        alt="Snapshot"
+                        className="w-full max-h-40 object-contain rounded border border-black/30 bg-black/20"
+                        onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
+                      />
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+

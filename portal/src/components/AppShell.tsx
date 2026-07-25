@@ -13,7 +13,7 @@ export default function AppShell() {
   const nav = useNavigate();
 
   return (
-    <div className="flex h-screen">
+    <div className="app-shell flex h-screen bg-surface-0 text-ink-1">
       <aside className="flex w-60 shrink-0 flex-col border-r border-line bg-surface-1">
         <div className="flex items-center gap-2.5 px-4 py-4">
           <img src="/favicon.svg" alt="CamAI" className="h-8 w-8 rounded-md" />

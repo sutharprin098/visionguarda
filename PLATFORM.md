@@ -58,7 +58,7 @@ cd supabase
 npx supabase init            # if linking fresh
 npx supabase link --project-ref <your-ref>
 npx supabase db push         # applies migrations 0001–0014
-npx supabase functions deploy activate-license my-keys desktop-sync invite-user add-camera update-camera admin-users github-releases download-release test-camera send-email decrypt-camera
+npx supabase functions deploy activate-license my-keys desktop-sync invite-user add-camera update-camera admin-users github-releases download-release test-camera send-email decrypt-camera notify-telegram telegram-test
 npx supabase secrets set CAMAI_AES_KEY=$(openssl rand -hex 32)
 npx supabase secrets set GITHUB_RELEASES_REPO=<owner>/<repo>   # powers the Downloads page
 npx supabase secrets set GITHUB_TOKEN=<pat-with-public-repo-read>  # optional, raises the GitHub API rate limit
@@ -81,6 +81,54 @@ This lets `app.dispatch_pending_emails()` (run every minute by pg_cron) call the
 offline-camera notifications, using each org's own SMTP settings. Orgs that
 haven't filled in Settings → SMTP simply don't get email — everything still
 lands in the in-app notification center either way.
+
+**Telegram notifications** use the same `app.integration_config` row (`edge_base_url`),
+plus a dedicated shared secret so the trigger can authenticate to the function
+independently of the service-role key (projects on Supabase's new API-key system
+inject `sb_secret_…` into the function's `SUPABASE_SERVICE_ROLE_KEY`, which won't
+match a legacy service-role JWT). Set it once per deployment:
+
+```bash
+# generate a random secret and set it as the function secret
+SECRET=$(openssl rand -hex 32)
+npx supabase secrets set TELEGRAM_WEBHOOK_SECRET=$SECRET
+```
+```sql
+-- store the SAME secret so the alert trigger sends it as the bearer
+update app.integration_config set telegram_bearer = '<the-same-secret>' where id = true;
+-- (edge_base_url must be set too — the configure_email_dispatch call above does that)
+```
+
+**Interactive bot commands** (`/status`, `/alerts`, `/critical`, `/cameras`,
+`/health`, `/snapshot`, `/help`) are handled by the `telegram-bot` edge function
+(the webhook target). It's gated by Telegram's own `X-Telegram-Bot-Api-Secret-Token`
+header (set to the SAME `TELEGRAM_WEBHOOK_SECRET`) and only answers chat IDs that a
+`telegram_settings` row has enabled. Wire it once per bot:
+
+```bash
+BOT=<bot-token>; SECRET=<TELEGRAM_WEBHOOK_SECRET>
+FN=https://<project-ref>.functions.supabase.co/telegram-bot
+# point Telegram at the function
+curl -s -X POST "https://api.telegram.org/bot$BOT/setWebhook" -H "Content-Type: application/json" \
+  -d "{\"url\":\"$FN\",\"secret_token\":\"$SECRET\",\"allowed_updates\":[\"message\"]}"
+# register the command menu shown in Telegram's / button
+curl -s -X POST "https://api.telegram.org/bot$BOT/setMyCommands" -H "Content-Type: application/json" \
+  -d '{"commands":[{"command":"status","description":"Camera status"},{"command":"alerts","description":"Recent alerts"},{"command":"critical","description":"Critical alerts"},{"command":"cameras","description":"Camera list"},{"command":"health","description":"System health"},{"command":"snapshot","description":"Latest camera snapshot"},{"command":"help","description":"Show help"}]}'
+```
+
+The `supabase/deploy_telegram.ps1` script automates all of this. Migration 0037 hangs an `AFTER INSERT` trigger
+on `public.alerts` that fans **every** alert (from whatever detection model is
+running — human, vehicle, helmet, ANPR, speed, intrusion, face, or any future
+detector) out to the `notify-telegram` edge function via `pg_net`. It is fully
+model-agnostic: the trigger never inspects the alert `kind`, so a new detector is
+delivered with zero config changes. Telegram is **off by default** and enabled
+per org in **Settings → Telegram** with just three inputs — Enable, Bot Token,
+Chat ID — plus a Test Connection button (the `telegram-test` function). There are
+deliberately no per-detection toggles: the dashboard and Telegram both render the
+same `public.alerts` row, so what you see in the portal is exactly what arrives in
+Telegram. Snapshots ride along automatically — the desktop uploads each alert's
+image to the org-scoped `snapshots` bucket during event sync, and `notify-telegram`
+attaches it via `sendPhoto` (falling back to a text message when there is no image).
 
 Notes:
 - `activate-license` has `verify_jwt = false` (it runs before a session exists) and is

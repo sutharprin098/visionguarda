@@ -46,7 +46,7 @@ def run_benchmark(n_cameras: int, seconds: float, backend: EngineBackend):
             camera_id=f"bench_cam_{i}", name=f"Bench Cam {i}",
             source_type="screenshare", source="",
             zones_json="[]", lines_json="[]",
-            backend_model=backend,
+            backend_getter=lambda: backend,
         )
         coords.append(c)
     for c in coords:
@@ -56,9 +56,14 @@ def run_benchmark(n_cameras: int, seconds: float, backend: EngineBackend):
 
     def feed(idx, coord):
         t0 = time.time()
-        while not stop_evt.is_set():
-            coord.push_frame(make_frame(idx, time.time() - t0))
-            time.sleep(1 / 60)  # feed faster than any realistic camera FPS ceiling
+        try:
+            while not stop_evt.is_set():
+                coord.push_frame(make_frame(idx, time.time() - t0))
+                time.sleep(1 / 60)  # feed faster than any realistic camera FPS ceiling
+        except Exception as e:
+            import traceback
+            print(f"Error in feeder {idx}: {e}")
+            traceback.print_exc()
 
     feeders = [threading.Thread(target=feed, args=(i, coords[i]), daemon=True) for i in range(n_cameras)]
     for f in feeders:

@@ -46,6 +46,9 @@ export interface TelemetryDetection {
   speed_status?: "calibrated" | "estimated" | "unavailable" | "disabled";
   direction?: string;
   /** Seconds this track has been in frame (analytics sets it from first_seen). */
+  track_label?: string;
+  speed_limit?: number;
+  overspeed?: boolean;
   dwell_time?: number;
   /** OCR-read plate number, on number_plate detections only. null when the
    *  plate was localised but not read (no OCR model, or OCR failed). */

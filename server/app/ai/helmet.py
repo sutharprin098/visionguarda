@@ -198,6 +198,13 @@ class HelmetDetector:
         self.providers = _select_providers()
         self.session = ort.InferenceSession(model_path, sess_options=so, providers=self.providers)
         self.active_provider = self.session.get_providers()[0]
+        try:
+            from app.ai.accelerator import guard_cpu_fallback
+            guard_cpu_fallback("helmet detector", self.active_provider)
+        except RuntimeError:
+            raise
+        except Exception:
+            pass
 
         # Inspect the REAL model I/O rather than assuming a contract.
         ins = self.session.get_inputs()

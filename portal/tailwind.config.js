@@ -13,7 +13,11 @@ export default {
         },
         line: "var(--line)",
         ink: { 1: "var(--ink1)", 2: "var(--ink2)", 3: "var(--ink3)" },
-        accent: { DEFAULT: "#5b8cff", hover: "#729aff", dim: "#243350" },
+        accent: {
+          DEFAULT: "rgb(var(--accent-rgb) / <alpha-value>)",
+          hover: "rgb(var(--accent-hover-rgb) / <alpha-value>)",
+          dim: "rgb(var(--accent-dim-rgb) / <alpha-value>)",
+        },
         ok: "#3fb96b",
         warn: "#e0a83e",
         danger: "#e5534b",

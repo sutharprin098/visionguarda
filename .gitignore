@@ -61,3 +61,7 @@ Thumbs.db
 server/.venv-build/
 server/build/
 kernel.errors.txt
+
+# Large demo videos — host via CDN/Vercel, not git
+portal/public/demo.mp4
+portal/public/features-demo.mp4

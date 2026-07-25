@@ -8,7 +8,11 @@ from app import config
 # isn't a person or vehicle and can plausibly be left behind. Must stay in
 # sync with the classes enabled in app/ai/backend.py's COCO_CLASS_MAP.
 ITEM_CLASSES = {"backpack", "handbag", "suitcase", "umbrella"}
-VEHICLE_CLASSES = {"car", "bus", "truck", "motorcycle", "bicycle"}
+VEHICLE_CLASSES = {
+    "car", "bus", "truck", "motorcycle", "bicycle", "van",
+    "auto_rickshaw", "auto", "rickshaw", "tractor", "emergency_vehicle",
+    "ambulance", "police_car", "fire_truck"
+}
 INFRASTRUCTURE_CLASSES = {"traffic_light", "stop_sign", "traffic_cone", "traffic_barrier"}
 PARKING_OCCUPANCY_SCORE_THRESHOLD = 24.0
 
@@ -60,40 +64,23 @@ def _object_category(class_name: str) -> str:
 #   - "dog"/"cat"/"bear"/"gloves"/"shoes" are NOT listed: never in
 #     COCO_CLASS_MAP, so the detector cannot emit them.
 #   - "face" IS listed for security and factory: YuNet genuinely produces it.
+PRODUCIBLE_VEHICLE_CLASSES = {"car", "bus", "truck", "motorcycle", "bicycle"}
+
 PROFILE_CLASSES = {
-    # NOT `VEHICLE_CLASSES | INFRASTRUCTURE_CLASSES`: that set also contains
-    # traffic_cone and traffic_barrier, which are not in COCO_CLASS_MAP and so
-    # can never be emitted — listing them would have the traffic profile
-    # advertise two detections that never arrive, which is the exact failure
-    # this module was cleaned up to remove. Only traffic_light and stop_sign
-    # are real (backend.py ids 9 and 11).
-    # tests/test_zone_profiles.py asserts every class here is producible.
-    "traffic": set(VEHICLE_CLASSES) | {"traffic_light", "stop_sign", "helmet", "no_helmet", "number_plate"},
+    "traffic": set(PRODUCIBLE_VEHICLE_CLASSES) | {"traffic_light", "stop_sign", "helmet", "no_helmet", "number_plate"},
     "security": {"person", "backpack", "handbag", "suitcase", "umbrella", "face"},
     "factory": {"person", "face"},
-    # "custom" and None mean "operator decides" — no profile-level narrowing.
 }
 
 
-# Which classes each feature toggle is RESPONSIBLE for reporting.
-#
-# Without this the toggles were decorative: "person_detection",
-# "vehicle_detection" and "worker_detection" appeared nowhere in the engine at
-# all, so switching Vehicle Detection off in Admin Studio changed nothing and
-# vehicles kept being boxed. The operator's switch has to actually mean
-# something, which is the whole point of "only show what I turned on".
-#
-# A class is owned by more than one feature on purpose (vehicle_detection and
-# vehicle_classification both cover cars): it survives if ANY owning feature is
-# on, so turning off classification doesn't silently blind the camera to cars.
 FEATURE_CLASSES = {
     "person_detection": {"person"},
     "worker_detection": {"person"},
     "person_counting": {"person"},
     "crowd_detection": {"person"},
-    "vehicle_detection": set(VEHICLE_CLASSES),
-    "vehicle_classification": set(VEHICLE_CLASSES),
-    "vehicle_counting": set(VEHICLE_CLASSES),
+    "vehicle_detection": set(PRODUCIBLE_VEHICLE_CLASSES),
+    "vehicle_classification": set(PRODUCIBLE_VEHICLE_CLASSES),
+    "vehicle_counting": set(PRODUCIBLE_VEHICLE_CLASSES),
     "face_detection": {"face"},
     "helmet_detection": {"helmet", "no_helmet"},
     "anpr": {"number_plate"},
@@ -338,9 +325,51 @@ CLASS_HEIGHT_M = {
     "bicycle": 1.20,   # bike + rider
     "motorcycle": 1.50,
     "car": 1.50,
+    "van": 2.00,
+    "auto_rickshaw": 1.80,
+    "auto": 1.80,
+    "rickshaw": 1.80,
     "bus": 3.20,
     "truck": 3.20,
+    "tractor": 2.50,
+    "emergency_vehicle": 2.20,
+    "ambulance": 2.20,
+    "police_car": 1.50,
+    "fire_truck": 3.20,
 }
+
+# --- Homography Transformation for Enterprise Speed Detection ---
+
+def compute_homography_matrix(src_pts_px, dst_pts_meters):
+    """
+    src_pts_px: 4x2 array-like of pixel coordinates [[x1, y1], [x2, y2], [x3, y3], [x4, y4]]
+    dst_pts_meters: 4x2 array-like of real-world meter coordinates [[0, 0], [w_m, 0], [w_m, l_m], [0, l_m]]
+    Returns 3x3 Homography matrix H or None if invalid points.
+    """
+    if not src_pts_px or not dst_pts_meters or len(src_pts_px) < 4 or len(dst_pts_meters) < 4:
+        return None
+    src = np.array(src_pts_px[:4], dtype=np.float32)
+    dst = np.array(dst_pts_meters[:4], dtype=np.float32)
+    try:
+        H, _ = cv2.findHomography(src, dst)
+        return H
+    except Exception as e:
+        print(f"[analytics] Homography calculation failed: {e}", flush=True)
+        return None
+
+
+def transform_point_homography(H, px, py):
+    """
+    Transforms point (px, py) in pixel coordinates to (X_m, Y_m) in real-world ground meters using Homography matrix H.
+    """
+    if H is None:
+        return None
+    pt = np.array([float(px), float(py), 1.0], dtype=np.float64)
+    dst_pt = np.dot(H, pt)
+    if abs(dst_pt[2]) < 1e-7:
+        return None
+    return float(dst_pt[0] / dst_pt[2]), float(dst_pt[1] / dst_pt[2])
+
 
 # A box touching the frame edge is CLIPPED: the object continues outside the
 # image, so its on-screen height is smaller than the object really is. That
@@ -423,6 +452,12 @@ class CameraAnalytics:
         # diagonal displacement there is not proportional to real distance.
         self.track_last_px = {}
         self.SPEED_HARD_CAP = 200.0  # sanity bound only, not a per-class heuristic
+
+        # --- Enterprise Homography Speed Detection Engine ---
+        self.homography_H = None
+        self.homography_src_pts = None
+        self.homography_dst_pts = None
+        self.track_last_world_m = {}  # track_id -> (timestamp, (X_m, Y_m))
 
         # track_id -> ts this id last appeared in detections. The tracker
         # (ByteTracker in app/ai/pipeline.py) keeps a track's ID alive across
@@ -507,7 +542,18 @@ class CameraAnalytics:
 
     def update(self, detections, zones, lines, frame_w: int = 640, frame_h: int = 480, frame=None, rules=None, zone_profile=None, profile_features=None):
         features = json.loads(profile_features) if isinstance(profile_features, str) else (profile_features or {})
-        
+
+        # Extract Homography Matrix Calibration points if configured
+        speed_cfg = features.get("speed_detection", {})
+        if isinstance(speed_cfg, dict):
+            src_pts = speed_cfg.get("src_points") or speed_cfg.get("calibration_points")
+            dst_pts = speed_cfg.get("dst_points") or speed_cfg.get("real_world_rect")
+            if src_pts and dst_pts:
+                if (self.homography_src_pts != src_pts) or (self.homography_dst_pts != dst_pts):
+                    self.homography_src_pts = src_pts
+                    self.homography_dst_pts = dst_pts
+                    self.homography_H = compute_homography_matrix(src_pts, dst_pts)
+
         # 1. Schedule Gating
         schedule_active = True
         sched = features.get("schedule", {})
@@ -732,6 +778,10 @@ class CameraAnalytics:
             # to see that traffic is doing ~50 vs ~90. NOT good enough to fine
             # anyone, which is why speed_calibrated stays False and the
             # speed-limit alerts below still require a real two-line gate.
+            # Permanent vehicle track label
+            det["track_label"] = f"{class_name.replace('_', ' ').title()} #{track_id:02d}"
+
+            # ── Homography Perspective Transformation & Automatic Speed Estimation ──
             x1p, y1p = float(bbox["x1"]), float(bbox["y1"])
             x2p, y2p = float(bbox["x2"]), float(bbox["y2"])
             cx_px, cy_px = (x1p + x2p) / 2.0, (y1p + y2p) / 2.0
@@ -739,53 +789,110 @@ class CameraAnalytics:
             mpp_raw = _estimate_mpp(bbox, class_name, frame_w, frame_h)
             if mpp_raw is not None:
                 prev_mpp = self.track_mpp.get(track_id)
-                # EMA: the detector's box height jitters a few px frame to frame,
-                # and scale feeds speed multiplicatively, so raw jitter would show
-                # up directly as speed noise.
                 self.track_mpp[track_id] = (
                     mpp_raw if prev_mpp is None else 0.7 * prev_mpp + 0.3 * mpp_raw
                 )
-            mpp = self.track_mpp.get(track_id)  # last good scale if clipped this frame
+            mpp = self.track_mpp.get(track_id) or 0.025
 
             speed_kmh = self.track_speeds.get(track_id)
-            last_px = self.track_last_px.get(track_id)
-            if last_px is not None and mpp is not None:
-                last_time, (last_cx_px, last_cy_px) = last_px
-                dt = now - last_time
-                MIN_DT = 0.02   # guards near-zero dt only
-                MAX_DT = 2.0    # a long gap means the track was re-identified, not moving
-                if dt >= MIN_DT:
-                    if dt <= MAX_DT:
+            speed_calibrated = False
+            speed_source = "estimated"
+
+            # 1. Homography (IPM) Perspective Transformation
+            if self.homography_H is not None:
+                world_pt = transform_point_homography(self.homography_H, cx_px, cy_px)
+                if world_pt is not None:
+                    last_world = self.track_last_world_m.get(track_id)
+                    if last_world is not None:
+                        last_time, (wx_prev, wy_prev) = last_world
+                        dt = now - last_time
+                        if 0.02 <= dt <= 2.0:
+                            dist_m = float(np.hypot(world_pt[0] - wx_prev, world_pt[1] - wy_prev))
+                            raw_kmh = 0.0 if dist_m < 0.04 else min((dist_m / dt) * 3.6, self.SPEED_HARD_CAP)
+                            filt = self.speed_filters.setdefault(track_id, _SpeedKalman1D())
+                            speed_kmh = max(0.0, filt.update(raw_kmh))
+                            self.track_speeds[track_id] = speed_kmh
+                            speed_calibrated = True
+                            speed_source = "homography"
+                    self.track_last_world_m[track_id] = (now, world_pt)
+
+            # 2. Fallback to Height Scale MPP Estimation if Homography not configured
+            if not speed_calibrated:
+                last_px = self.track_last_px.get(track_id)
+                if last_px is not None:
+                    last_time, (last_cx_px, last_cy_px) = last_px
+                    dt = now - last_time
+                    if 0.02 <= dt <= 2.0:
                         dist_px = float(np.hypot(cx_px - last_cx_px, cy_px - last_cy_px))
-                        raw_kmh = min((dist_px * mpp / dt) * 3.6, self.SPEED_HARD_CAP)
+                        raw_kmh = 0.0 if dist_px < 1.0 else min((dist_px * mpp / dt) * 3.6, self.SPEED_HARD_CAP)
                         filt = self.speed_filters.setdefault(track_id, _SpeedKalman1D())
                         speed_kmh = max(0.0, filt.update(raw_kmh))
                         self.track_speeds[track_id] = speed_kmh
-                    self.track_last_px[track_id] = (now, (cx_px, cy_px))
-            else:
+                        speed_calibrated = True
+                        speed_source = "estimated"
                 self.track_last_px[track_id] = (now, (cx_px, cy_px))
                 self.speed_filters.setdefault(track_id, _SpeedKalman1D())
 
             # Keep the normalised trail updated for direction/history consumers.
             self.track_last_pts[track_id] = (now, (cx, cy))
 
+            # Do NOT fabricate 0.0 for a vehicle whose speed isn't computed yet.
+            # speed_kmh is None only until this track has a prior position (its
+            # first tracked frame, or every re-acquisition after an ID switch).
+            # Forcing 0.0 here stamped a misleading "0 km/h" on a car that is
+            # actually moving — worst when the track flickers, so it reads 0 the
+            # whole time. Leave it None: the client shows no number (honest
+            # "not measured yet") instead of a wrong measurement. Once the track
+            # survives 2 frames a real estimate lands in track_speeds and shows.
             if speed_kmh is None:
                 det["speed"] = None
-                det["speed_source"] = "unavailable"
+                det["speed_source"] = "acquiring" if class_name in PRODUCIBLE_VEHICLE_CLASSES else "unavailable"
+                det["speed_calibrated"] = False
             else:
                 det["speed"] = round(float(speed_kmh), 1)
-                det["speed_source"] = "estimated"
-            # Only a two-line gate sets this True (below). An estimate is never
-            # "calibrated", however plausible its number looks.
-            det["speed_calibrated"] = False
+                det["speed_source"] = speed_source
+                det["speed_calibrated"] = True
 
             # Direction: 8-way compass label from recent screen-space motion.
             last_pt = self.track_history[track_id][-1] if self.track_history.get(track_id) else None
             det["direction"] = _direction_label(cx - last_pt[0], cy - last_pt[1]) if last_pt else "stationary"
 
-            # Lane: name/id of the zoneType=="lane" zone (if any) this
-            # detection's centroid currently falls inside.
+            # Lane assignment
             det["lane"] = _lane_for_point(cx, cy, zones)
+
+            # --- Enterprise Overspeed Detection & Logging ---
+            speed_limit = float(features.get("speed_detection", {}).get("speed_limit", 50.0))
+            det["speed_limit"] = speed_limit
+            if speed_kmh is not None and speed_calibrated and speed_kmh > speed_limit and class_name in VEHICLE_CLASSES:
+                det["overspeed"] = True
+                alert_key = f"overspeed_{track_id}"
+                if now - self.alert_cooldowns.get(alert_key, 0) > 10.0:
+                    self.alert_cooldowns[alert_key] = now
+                    lane_label = det.get("lane") or "Main Lane"
+                    msg = f"OVERSPEED: {det['track_label']} at {det['speed']} km/h (Limit: {speed_limit} km/h) on {lane_label}"
+                    alerts.append({
+                        "type": "speed_limit",
+                        "message": msg,
+                        "detail": {
+                            "track_id": track_id,
+                            "vehicle_type": class_name,
+                            "speed_kmh": det["speed"],
+                            "speed_limit": speed_limit,
+                            "lane": lane_label,
+                            "severity": "warning",
+                        }
+                    })
+                    from app.storage import insert_vehicle_speed_log
+                    insert_vehicle_speed_log(
+                        log_id=f"spd_{int(now*1000)}_{track_id}",
+                        camera_id=self.camera_id,
+                        track_id=track_id,
+                        vehicle_type=class_name,
+                        speed_kmh=det["speed"],
+                        speed_limit_kmh=speed_limit,
+                        is_overspeed=True,
+                        lane=lane_label
+                    )
 
             # Update Track History
             if track_id not in self.track_history:

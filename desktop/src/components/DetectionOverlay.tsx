@@ -46,45 +46,61 @@ const COLORS: Record<string, string> = {
   other: "#8b5cf6",
 };
 
-function colorFor(cls: string): string {
-  const c = cls.toLowerCase();
-  if (["car", "truck", "bus"].includes(c)) return COLORS.vehicle;
+const VEHICLE_CLS_SET = new Set([
+  "car", "bus", "truck", "motorcycle", "bicycle", "van",
+  "auto_rickshaw", "auto", "rickshaw", "tractor", "emergency_vehicle",
+  "ambulance", "police_car", "fire_truck"
+]);
+
+function colorFor(det: TelemetryDetection): string {
+  const c = det.class.toLowerCase();
+  
+  // Color coding by speed for vehicle classes:
+  // Green: 0 to 40 km/h
+  // Yellow: 41 to 60 km/h
+  // Orange: 61 to 80 km/h
+  // Red: Above speed limit / overspeed
+  if (VEHICLE_CLS_SET.has(c) && det.speed != null) {
+    const spd = det.speed;
+    const limit = det.speed_limit || 50;
+    if (det.overspeed || spd > limit) return "#ef4444"; // Red for overspeed
+    if (spd <= 40) return "#22c55e"; // Green (0-40 km/h)
+    if (spd <= 60) return "#eab308"; // Yellow (41-60 km/h)
+    if (spd <= 80) return "#f97316"; // Orange (61-80 km/h)
+    return "#ef4444";               // Red (> 80 km/h)
+  }
+
+  if (["car", "truck", "bus", "van", "auto_rickshaw", "tractor", "emergency_vehicle"].includes(c)) return COLORS.vehicle;
   if (["motorcycle", "bicycle"].includes(c)) return COLORS.twowheeler;
   if (c === "person") return COLORS.person;
-  // Faces sit inside a person box, so they need a colour that reads against
-  // the indigo person box they're drawn on top of.
   if (c === "face") return COLORS.face;
-  // Helmet boxes sit on top of a rider; green=compliant, red=violation so the
-  // operator reads the state from colour before reading any label.
   if (c === "helmet") return COLORS.helmet;
   if (c === "no_helmet") return COLORS.no_helmet;
   if (c === "number_plate") return COLORS.number_plate;
   return COLORS.other;
 }
 
-/** Label for one detection: CLASS #ID  CONF%  [SPEED].
- *
- *  Speed is automatic — the engine derives metres-per-pixel from the object's
- *  own height, so a number appears with no calibration lines drawn. The "~"
- *  prefix is load-bearing, not decoration: it marks an ESTIMATE (~+/-20-30%,
- *  class-average height prior) as distinct from a gate-MEASURED reading. An
- *  operator glancing at a wall of boxes has to be able to tell which numbers
- *  they can act on, and the moment a number like this is used to justify a fine
- *  that distinction is the whole ballgame. Calibrated readings get the clean
- *  "62 km/h"; estimates get "~62". */
+/** Label for one detection: CLASS #ID  [SPEED km/h]. */
 function labelFor(det: TelemetryDetection): string {
-  const id = det.track_id != null ? ` #${det.track_id}` : "";
-  const conf = `  ${Math.round(det.confidence * 100)}%`;
-  let speed = "";
-  if (det.speed != null) {
-    speed = det.speed_calibrated ? `  ${det.speed.toFixed(0)} km/h` : `  ~${det.speed.toFixed(0)}`;
-  }
-  // A read plate shows its number instead of the generic class label; an
-  // unread plate (plate_text null) falls back to "NUMBER_PLATE".
   if (det.class === "number_plate" && det.plate_text) {
-    return `${det.plate_text}${conf}`;
+    return `${det.plate_text} ${Math.round(det.confidence * 100)}%`;
   }
-  return `${det.class.toUpperCase()}${id}${conf}${speed}`;
+
+  const titleClass = (det.class || "Vehicle").replace("_", " ").toUpperCase();
+  const idStr = det.track_id != null ? ` #${String(det.track_id).padStart(2, '0')}` : "";
+  const confStr = ` ${Math.round(det.confidence * 100)}%`;
+
+  let speedStr = "";
+  if (det.speed != null) {
+    const overBadge = det.overspeed ? " 🚨 OVERSPEED" : "";
+    speedStr = ` | ${det.speed.toFixed(0)} km/h${overBadge}`;
+  }
+  // No fabricated "0 km/h" fallback: a vehicle whose speed isn't measured yet
+  // (just (re)acquired, clipped by the frame edge, or estimation disabled) shows
+  // no speed label rather than a misleading 0. A real km/h appears once the
+  // track is stable for 2+ frames.
+
+  return `${titleClass}${idStr}${confStr}${speedStr}`;
 }
 
 export default function DetectionOverlay({ detections, mediaRef, fit = "cover" }: Props) {
@@ -134,7 +150,7 @@ export default function DetectionOverlay({ detections, mediaRef, fit = "cover" }
       const h = (det.bbox.y2 - det.bbox.y1) * dh;
       if (w <= 0 || h <= 0) continue;
 
-      const color = colorFor(det.class);
+      const color = colorFor(det);
 
       // One solid rectangle. Never dashed, and never a second outline: the
       // dashed/solid pair operators used to see was one object arriving as two

@@ -47,7 +47,7 @@ export default function SettingsPage() {
   }
 
   const tabs = hasOrgManage
-    ? ["My Profile", "Organization", "Branding", "AI Profiles", "SMTP", "Retention", "Webhook", "API Keys", "About"]
+    ? ["My Profile", "Organization", "Branding", "AI Profiles", "SMTP", "Telegram", "Retention", "Webhook", "API Keys", "About"]
     : ["My Profile", "About"];
 
   return (
@@ -60,6 +60,7 @@ export default function SettingsPage() {
         {tab === "Branding" && settings && <BrandingTab settings={settings} onSave={save} />}
         {tab === "AI Profiles" && <AiTab canConfigure={can("ai.configure")} />}
         {tab === "SMTP" && settings && <SmtpTab settings={settings} onSave={save} />}
+        {tab === "Telegram" && <TelegramTab />}
         {tab === "Retention" && settings && <RetentionTab settings={settings} onSave={save} />}
         {tab === "Webhook" && settings && <WebhookTab settings={settings} onSave={save} />}
         {tab === "API Keys" && <ApiKeysTab />}
@@ -876,6 +877,35 @@ function SmtpTab({ settings, onSave }: { settings: OrgSettings; onSave: (p: Part
     </div>
   );
 }
+
+// --------------------------------------------------------------- Telegram
+// The ENTIRE Telegram configuration surface: enable, bot token, chat id,
+// test. Deliberately no detection selectors — alerts from whatever models
+// are running are delivered automatically by the alert-insert trigger
+// (migration 0037 -> notify-telegram). Adding per-detection toggles here
+// would break that "send whatever the active model produces" contract.
+function TelegramTab() {
+  return (
+    <div className="space-y-4">
+      <div className="card p-5">
+        <h3 className="text-base font-semibold text-ink-1 mb-2">Connect Telegram Alerts</h3>
+        <p className="text-sm text-ink-3 leading-relaxed mb-4">
+          CamAI uses a simple, secure one-time linking code. You do not need to create your own bot or copy bot tokens.
+        </p>
+        <div className="rounded-lg bg-[#5b8cff]/10 border border-[#5b8cff]/20 p-4 text-sm text-[#5b8cff] leading-relaxed">
+          <span className="font-semibold block mb-1">To link your account:</span>
+          <ol className="list-decimal list-inside space-y-1 text-ink-2">
+            <li>Open the <strong>CamAI Desktop Application</strong>.</li>
+            <li>Navigate to the <strong>Alerts</strong> tab on the sidebar.</li>
+            <li>Click <strong>Connect Telegram</strong> to generate an 8-character code (valid for 5 minutes).</li>
+            <li>Tap <strong>Open in Telegram &amp; Connect</strong> — it sends the code to <strong>@CamAiAdmin_bot</strong> for you and your connection goes live automatically (or send <code>/start YOUR_CODE</code> manually).</li>
+          </ol>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 
 // --------------------------------------------------------------- Retention
 function RetentionTab({ settings, onSave }: { settings: OrgSettings; onSave: (p: Partial<OrgSettings>, a: string) => Promise<any> }) {

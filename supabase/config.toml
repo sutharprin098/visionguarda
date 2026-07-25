@@ -67,3 +67,16 @@ verify_jwt = true
 
 [functions.github-releases]
 verify_jwt = false   # public release metadata; still rate-limited per-IP in the function
+
+[functions.notify-telegram]
+verify_jwt = false   # called only by Postgres (pg_net); auth via TELEGRAM_WEBHOOK_SECRET (or service-role key), checked by hand in the function
+
+[functions.telegram-test]
+verify_jwt = true    # the portal "Test Connection" button; also gated on org.manage inside the function
+
+[functions.telegram-bot]
+verify_jwt = false   # Telegram webhook target; gated by the X-Telegram-Bot-Api-Secret-Token header set in setWebhook
+
+[functions.telegram-link-code]
+verify_jwt = true    # mints a one-time 6-digit linking code; requires JWT auth + org.manage
+

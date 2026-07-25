@@ -127,6 +127,10 @@ const ACCENT: Record<string, { text: string; bg: string; border: string; ring: s
 
 export default function AdminStudio({ onDeactivated }: { onDeactivated: () => void }) {
   const [cameras, setCameras] = useState<Camera[]>([]);
+  // Load state for the camera list so an empty sidebar is never a silent
+  // mystery: distinguishes "still loading", "failed with an error", and
+  // "genuinely no cameras yet" — the last three were all just a blank list.
+  const [camsLoad, setCamsLoad] = useState<{ loading: boolean; error: string | null }>({ loading: true, error: null });
   const [selectedCam, setSelectedCam] = useState<Camera | null>(null);
   const [drawings, setDrawings] = useState<Drawing[]>([]);
   const [rules, setRules] = useState<Rule[]>([]);
@@ -202,8 +206,17 @@ export default function AdminStudio({ onDeactivated }: { onDeactivated: () => vo
       if (profErr) console.error("[AdminStudio] org lookup failed", profErr);
       if (profile?.org_id) setOrgId(profile.org_id);
 
-      const { data: cams } = await sb.from("cameras").select("*");
+      // .error is checked, not just .data — a blank camera list here used to be
+      // indistinguishable between "RLS/network error" and "no cameras yet",
+      // which is exactly how "cameras don't show in Admin Studio" reads.
+      const { data: cams, error: camErr } = await sb.from("cameras").select("*");
       if (!active) return;
+      if (camErr) {
+        console.error("[AdminStudio] cameras load failed", camErr);
+        setCamsLoad({ loading: false, error: camErr.message || "Could not load cameras." });
+      } else {
+        setCamsLoad({ loading: false, error: null });
+      }
       if (cams) {
         setCameras(cams);
         setSelectedCam((prev) => {
@@ -982,11 +995,10 @@ export default function AdminStudio({ onDeactivated }: { onDeactivated: () => vo
     // it did go green — and answered with a colour threshold that read concrete
     // as smoke on every frame. See FeatureDef.unavailable.
     const blocked = !!f.unavailable;
-    // Two different messages to a buyer: "coming soon" is scheduled work with a
-    // licence-clean model already evaluated; "no model" is an open problem with
-    // nothing suitable to build from. Collapsing them would overstate one and
-    // understate the other.
-    const soon = f.status === "coming-soon";
+    // Any feature the engine cannot deliver yet is presented uniformly as
+    // "coming soon" to operators — a public-facing product never advertises
+    // that something has "no model". The internal status is still tracked on
+    // FeatureDef for engineering, but the badge never surfaces that distinction.
 
     return (
       <div key={f.key} className={clsx("rounded border p-2.5 transition",
@@ -996,17 +1008,14 @@ export default function AdminStudio({ onDeactivated }: { onDeactivated: () => vo
             <div className="flex items-center gap-1.5">
               <span className={clsx("text-xs font-semibold", blocked ? "text-zinc-500" : "text-zinc-200")}>{f.label}</span>
               {blocked && (
-                <span className={clsx(
-                  "rounded px-1 py-px text-[9px] font-bold uppercase tracking-wide",
-                  soon ? "bg-sky-500/15 text-sky-400" : "bg-warn/15 text-warn",
-                )}>
-                  {soon ? "coming soon" : "no model"}
+                <span className="rounded bg-sky-500/15 px-1 py-px text-[9px] font-bold uppercase tracking-wide text-sky-400">
+                  coming soon
                 </span>
               )}
             </div>
             <p className="text-[10px] text-zinc-500 leading-snug mt-0.5">{f.description}</p>
             {blocked && (
-              <p className={clsx("mt-1 text-[10px] leading-snug", soon ? "text-sky-400/80" : "text-warn/80")}>
+              <p className="mt-1 text-[10px] leading-snug text-sky-400/80">
                 {f.unavailable}
               </p>
             )}
@@ -1207,6 +1216,22 @@ export default function AdminStudio({ onDeactivated }: { onDeactivated: () => vo
                   </button>
                 );
               })}
+
+              {/* Never leave the list silently blank — say which state it is. */}
+              {cameras.length === 0 && camsLoad.loading && (
+                <div className="px-2.5 py-2 text-[11px] text-zinc-500">Loading cameras…</div>
+              )}
+              {cameras.length === 0 && !camsLoad.loading && camsLoad.error && (
+                <div className="px-2.5 py-2 text-[11px] leading-snug text-danger">
+                  Couldn't load cameras: {camsLoad.error}
+                </div>
+              )}
+              {cameras.length === 0 && !camsLoad.loading && !camsLoad.error && (
+                <div className="px-2.5 py-2 text-[11px] leading-snug text-zinc-500">
+                  No cameras yet. Add cameras in the web portal (Cameras) and assign them to this
+                  organization — they'll appear here automatically.
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -1247,7 +1272,7 @@ export default function AdminStudio({ onDeactivated }: { onDeactivated: () => vo
         {/* Profile selector */}
         <div className="border-b border-line bg-surface-1 px-4 py-2.5 shrink-0">
           <div className="flex items-center gap-2">
-            <span className="text-[10px] uppercase font-bold tracking-wider text-zinc-500 mr-1">Zone Profile</span>
+            <span className="text-[10px] uppercase font-bold tracking-wider text-zinc-500 mr-1">AI Mode</span>
             {PROFILE_ORDER.map((key) => {
               const def = ZONE_PROFILES[key];
               const Icon = PROFILE_ICON[key];
@@ -1333,8 +1358,8 @@ export default function AdminStudio({ onDeactivated }: { onDeactivated: () => vo
             !activeProfile ? (
               <div className="text-center max-w-sm">
                 <Boxes size={40} className="mx-auto text-zinc-600 mb-3" />
-                <div className="text-sm font-semibold text-zinc-300 mb-1">Choose a Zone Profile</div>
-                <p className="text-xs text-zinc-500">Pick Traffic, Security, Factory or Custom above to load its AI features for <b>{selectedCam.name}</b>.</p>
+                <div className="text-sm font-semibold text-zinc-300 mb-1">Choose an AI Mode</div>
+                <p className="text-xs text-zinc-500">Pick Traffic, Security, Factory or Custom above to load its AI features for <b>{selectedCam.name}</b>. This is saved to the camera and applied automatically.</p>
               </div>
             ) : (
               <div className="relative aspect-video max-h-full max-w-full rounded border border-line overflow-hidden shadow-2xl bg-zinc-950">
@@ -1435,7 +1460,7 @@ export default function AdminStudio({ onDeactivated }: { onDeactivated: () => vo
         ) : (
           <div className="p-6 text-center text-xs text-zinc-500 flex-1 flex flex-col items-center justify-center gap-2">
             <AlertCircle size={20} className="text-zinc-600" />
-            {selectedCam ? "Select a Zone Profile to configure this camera." : "Select a camera to begin."}
+            {selectedCam ? "Select an AI Mode to configure this camera." : "Select a camera to begin."}
           </div>
         )}
       </aside>

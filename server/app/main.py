@@ -1,8 +1,11 @@
 import asyncio
+import hmac
+import io
 import time
 import uuid
+from dataclasses import asdict
 from pathlib import PurePosixPath
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Depends, UploadFile, File
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Depends, Header, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -10,7 +13,7 @@ from pydantic import BaseModel
 from typing import List, Dict, Optional
 import cv2
 
-from app.config import HOST, PORT, RECORDINGS_DIR, UPLOADS_DIR, MODELS_DIR
+from app.config import HOST, PORT, RECORDINGS_DIR, UPLOADS_DIR, MODELS_DIR, API_TOKEN, CORS_ORIGINS
 from app.storage import (
     init_db, get_all_cameras, get_camera, save_camera, delete_camera,
     get_recent_alerts, clear_all_alerts, get_history, clear_all_history,
@@ -18,6 +21,8 @@ from app.storage import (
 )
 from app.camera_manager import manager
 from app.ai.pipeline import get_detection_confidence, set_detection_confidence
+from app.ai.tiling import get_tiling_settings, set_tiling_settings
+from app.ai.tile_governor import governor
 from app.gpu_monitor import get_gpu_usage
 
 app = FastAPI(title="CamAI CCTV Analytics Platform")
@@ -39,14 +44,39 @@ try:
 except ImportError:
     _proc = None
 
-# CORS Setup
+# CORS Setup. Not "*" any more: a wildcard let any page the user happened to
+# have open preflight-and-POST the control endpoints below. The allowlist is
+# config.CORS_ORIGINS (override with CAMAI_CORS_ORIGINS).
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=CORS_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+CONTROL_TOKEN_HEADER = "X-CamAI-Token"
+
+def require_control_token(x_camai_token: str = Header(default="", alias=CONTROL_TOKEN_HEADER)) -> None:
+    """Reject configuration writes that don't come from the CamAI desktop app.
+
+    Applied to the endpoints that change what the AI *does* — AI mode /
+    zone profile above all. It is a capability check, not a role check: see
+    config.API_TOKEN for why the role part lives in the cloud (RLS on
+    public.cameras requires cameras.manage) and what this adds on top of it.
+
+    Unset token => open, so a hand-started dev engine still works. compare_digest
+    keeps the check constant-time; a plain == leaks the prefix by timing, which
+    matters here because the endpoint is reachable from any local process and can
+    be probed without limit.
+    """
+    if not API_TOKEN:
+        return
+    if not hmac.compare_digest(x_camai_token, API_TOKEN):
+        raise HTTPException(status_code=403, detail="Engine configuration is restricted to the CamAI application.")
+
+# Endpoints carrying this reject unauthorised callers before the handler runs.
+control = [Depends(require_control_token)]
 
 # Mount recordings directory so they can be played back in browser
 app.mount("/history/recordings", StaticFiles(directory=str(RECORDINGS_DIR)), name="recordings")
@@ -359,7 +389,7 @@ def get_system_status():
         },
     }
 
-@app.post("/api/model/select")
+@app.post("/api/model/select", dependencies=control)
 def select_model(payload: ModelSelectPayload):
     target_path = None
     model_name = payload.model_name
@@ -392,7 +422,7 @@ def select_model(payload: ModelSelectPayload):
 def read_detection_confidence():
     return {"confidence": get_detection_confidence()}
 
-@app.post("/api/detection/confidence")
+@app.post("/api/detection/confidence", dependencies=control)
 def set_confidence(payload: ConfidencePayload):
     """Set the detection confidence floor for every running camera.
 
@@ -407,6 +437,91 @@ def set_confidence(payload: ConfidencePayload):
     applied = set_detection_confidence(payload.confidence)
     return {"success": True, "confidence": applied}
 
+
+class TilingPayload(BaseModel):
+    """Invisible AI Zoom Engine knobs. Every field optional — a request patches
+    only what it sends, so a UI with one slider need not round-trip the rest."""
+    enabled: Optional[bool] = None
+    max_grid: Optional[int] = None
+    overlap: Optional[float] = None
+    max_tiles: Optional[int] = None
+    latency_budget_ms: Optional[float] = None
+    workers: Optional[int] = None
+    motion_threshold: Optional[float] = None
+    cache_ttl_s: Optional[float] = None
+    small_object_frac: Optional[float] = None
+    fusion_iou: Optional[float] = None
+    fusion_containment: Optional[float] = None
+    roi_boost: Optional[bool] = None
+    roi_boost_max: Optional[int] = None
+    second_pass_conf: Optional[float] = None
+    discovery_interval_s: Optional[float] = None
+    # v2 — each optimization independently switchable (Feature 15)
+    adaptive_layout: Optional[bool] = None
+    min_grid: Optional[int] = None
+    governor_mode: Optional[str] = None          # "auto" | "latency" | "off"
+    gpu_utilization_limit: Optional[float] = None
+    max_latency_ms: Optional[float] = None
+    zoom_enabled: Optional[bool] = None
+    zoom_max_depth: Optional[int] = None
+    zoom_min_object_px: Optional[int] = None
+    zoom_conf_stable_delta: Optional[float] = None
+    multi_resolution: Optional[bool] = None
+    max_imgsz_cap: Optional[int] = None
+    priority_enabled: Optional[bool] = None
+    priority_zone_weight: Optional[float] = None
+    priority_alert_weight: Optional[float] = None
+    priority_motion_weight: Optional[float] = None
+    priority_object_weight: Optional[float] = None
+    edge_expansion: Optional[bool] = None
+    edge_expansion_max: Optional[int] = None
+    lighting_guard: Optional[bool] = None
+    lighting_delta: Optional[float] = None
+    temporal_enabled: Optional[bool] = None
+    temporal_history_s: Optional[float] = None
+    temporal_max_carry: Optional[int] = None
+    temporal_smoothing: Optional[float] = None
+    temporal_iou: Optional[float] = None
+    verify_enabled: Optional[bool] = None
+    verify_accept_conf: Optional[float] = None
+    verify_second_pass_conf: Optional[float] = None
+    verify_history_conf: Optional[float] = None
+    verify_min_hits: Optional[int] = None
+    fp_motion_validation: Optional[bool] = None
+    fp_neighbour_agreement: Optional[bool] = None
+
+
+@app.get("/api/detection/tiling")
+def read_tiling_settings():
+    """Current adaptive-tile settings, plus each running camera's live view of
+    what the engine is actually doing (chosen grid, tiles inferred vs served
+    from cache, budget). Admin diagnostics: none of this reaches an operator's
+    live view, which shows the unmodified camera feed either way."""
+    s = get_tiling_settings()
+    runtime = {
+        cam_id: thread.latest_telemetry.get("zoom_engine", {})
+        for cam_id, thread in manager.camera_threads.items()
+        if thread.running
+    }
+    # Governor state is process-wide (device pressure, per-camera shares) and
+    # is the first thing to look at when an operator asks why tiling "stopped
+    # working" — usually it did not stop, it was throttled for a stated reason.
+    return {"settings": asdict(s), "cameras": runtime, "governor": governor.snapshot()}
+
+
+@app.post("/api/detection/tiling", dependencies=control)
+def update_tiling_settings(payload: TilingPayload):
+    """Patch the tile engine live, for every running camera.
+
+    Same contract as the confidence endpoint: process-wide, picked up on each
+    camera's next AI cycle with no restart, and the APPLIED (clamped) settings
+    are returned rather than the requested ones — an admin must see the values
+    the engine is really using. Setting enabled=false (or max_tiles=0) returns
+    every camera to plain single-pass full-frame inference immediately.
+    """
+    applied = set_tiling_settings(**payload.model_dump(exclude_unset=True))
+    return {"success": True, "settings": asdict(applied)}
+
 # Cameras
 @app.get("/api/cameras")
 def list_cameras():
@@ -414,7 +529,7 @@ def list_cameras():
 
 ALLOWED_UPLOAD_EXTENSIONS = {".mp4", ".mov", ".avi", ".mkv", ".webm"}
 
-@app.post("/api/cameras/upload")
+@app.post("/api/cameras/upload", dependencies=control)
 async def upload_camera_video(file: UploadFile = File(...)):
     ext = PurePosixPath(file.filename or "").suffix.lower()
     if ext not in ALLOWED_UPLOAD_EXTENSIONS:
@@ -428,7 +543,7 @@ async def upload_camera_video(file: UploadFile = File(...)):
 
     return {"success": True, "path": str(dest_path)}
 
-@app.post("/api/cameras")
+@app.post("/api/cameras", dependencies=control)
 def add_or_update_camera(payload: CameraConfigPayload):
     save_camera(
         payload.id,
@@ -453,13 +568,17 @@ def add_or_update_camera(payload: CameraConfigPayload):
         
     return {"success": True, "message": "Camera saved successfully"}
 
-@app.delete("/api/cameras/{camera_id}")
+@app.delete("/api/cameras/{camera_id}", dependencies=control)
 def remove_camera(camera_id: str):
     manager.stop_camera_thread(camera_id)
     delete_camera(camera_id)
     return {"success": True, "message": "Camera removed successfully"}
 
-@app.post("/api/cameras/{camera_id}/config")
+# The AI-mode endpoint. payload.zone_profile is the camera's AI mode, and this
+# is the only way it reaches the running pipeline — so this is precisely the
+# door that has to stay shut to everything except the desktop app replaying an
+# RLS-approved value out of the database.
+@app.post("/api/cameras/{camera_id}/config", dependencies=control)
 def update_camera_analytics(camera_id: str, payload: CameraAnalyticsPayload):
     cam = get_camera(camera_id)
     if not cam:
@@ -514,12 +633,12 @@ def get_camera_telemetry(camera_id: str):
 
 # MJPEG Stream
 @app.get("/api/cameras/{camera_id}/stream")
-def get_mjpeg_stream(camera_id: str):
+async def get_mjpeg_stream(camera_id: str):
     thread = manager.camera_threads.get(camera_id)
     if not thread:
         raise HTTPException(status_code=404, detail="Camera thread not running or inactive")
 
-    def mjpeg_generator():
+    async def mjpeg_generator():
         last_jpeg = None
         while thread.running:
             jpeg_bytes = getattr(thread, "current_jpeg_bytes", None)
@@ -527,7 +646,7 @@ def get_mjpeg_stream(camera_id: str):
                 last_jpeg = jpeg_bytes
                 yield (b'--frame\r\n'
                        b'Content-Type: image/jpeg\r\n\r\n' + jpeg_bytes + b'\r\n')
-            time.sleep(0.01)  # High frequency polling, extremely low CPU load
+            await asyncio.sleep(0.03)
 
     return StreamingResponse(
         mjpeg_generator(),
@@ -599,15 +718,127 @@ def fetch_api_logs():
 def clear_api_logs():
     return {"success": True}
 
+# --- Enterprise Vehicle Speed Detection & Analytics APIs ---
+
+class SpeedConfigPayload(BaseModel):
+    camera_id: str
+    speed_limit: Optional[float] = 50.0
+    pixel_to_meter_scale: Optional[float] = 0.05
+    camera_angle: Optional[float] = 30.0
+    lane_width: Optional[float] = 3.5
+    road_direction: Optional[str] = "both"
+    src_points: Optional[List[List[float]]] = None
+    dst_points: Optional[List[List[float]]] = None
+
+@app.get("/api/traffic/speed-dashboard")
+def get_traffic_speed_dashboard(camera_id: Optional[str] = None):
+    from app.storage import get_speed_dashboard_stats
+    return get_speed_dashboard_stats(camera_id)
+
+@app.get("/api/traffic/speed-logs")
+def get_traffic_speed_logs(camera_id: Optional[str] = None, limit: int = 100, is_overspeed: Optional[bool] = None):
+    from app.storage import get_vehicle_speed_logs
+    return get_vehicle_speed_logs(camera_id=camera_id, limit=limit, is_overspeed=is_overspeed)
+
+@app.post("/api/traffic/speed-config", dependencies=control)
+def update_traffic_speed_config(payload: SpeedConfigPayload):
+    cam = get_camera(payload.camera_id)
+    if not cam:
+        raise HTTPException(status_code=404, detail="Camera not found")
+    
+    pf = json.loads(cam.get("profile_features") or "{}")
+    pf["speed_detection"] = {
+        "enabled": True,
+        "speed_limit": payload.speed_limit,
+        "pixel_to_meter_scale": payload.pixel_to_meter_scale,
+        "camera_angle": payload.camera_angle,
+        "lane_width": payload.lane_width,
+        "road_direction": payload.road_direction,
+        "src_points": payload.src_points,
+        "dst_points": payload.dst_points,
+    }
+    
+    pf_str = json.dumps(pf)
+    save_camera(
+        cam["id"], cam["name"], cam["type"], cam["source"], cam["is_active"],
+        cam["zones"], cam["lines"], cam["rules"], cam["zone_profile"], pf_str
+    )
+    manager.update_camera_analytics_config(
+        cam["id"], cam["zones"], cam["lines"], cam["rules"], cam["zone_profile"], pf_str
+    )
+    return {"success": True, "message": "Speed configuration saved successfully"}
+
+@app.get("/api/traffic/export")
+def export_traffic_logs(format: str = "csv", camera_id: Optional[str] = None, is_overspeed: Optional[bool] = None):
+    from app.storage import get_vehicle_speed_logs
+    logs = get_vehicle_speed_logs(camera_id=camera_id, limit=500, is_overspeed=is_overspeed)
+    
+    fmt = format.lower()
+    if fmt == "pdf":
+        lines = [
+            "==================================================",
+            "        CAMAI ENTERPRISE SPEED ANALYTICS REPORT    ",
+            "==================================================",
+            f"Generated At: {time.strftime('%Y-%m-%d %H:%M:%S')}",
+            f"Total Logged Vehicles: {len(logs)}",
+            "--------------------------------------------------",
+            "Track ID | Vehicle Type | Speed (km/h) | Limit | Lane | Timestamp",
+            "--------------------------------------------------"
+        ]
+        for l in logs:
+            lines.append(f"#{l['track_id']:02d} | {l['vehicle_type']} | {l['speed_kmh']} km/h | {l['speed_limit_kmh']} km/h | {l.get('lane') or 'Main'} | {l['timestamp']}")
+        lines.append("--------------------------------------------------")
+        content = "\n".join(lines)
+        return StreamingResponse(
+            io.BytesIO(content.encode("utf-8")),
+            media_type="application/pdf",
+            headers={"Content-Disposition": f"attachment; filename=speed_report_{int(time.time())}.pdf"}
+        )
+    elif fmt in ("excel", "xlsx", "tsv"):
+        output = io.StringIO()
+        output.write("Track ID\tVehicle Type\tSpeed (km/h)\tSpeed Limit\tIs Overspeed\tLane\tTimestamp\tCamera\n")
+        for l in logs:
+            output.write(f"{l['track_id']}\t{l['vehicle_type']}\t{l['speed_kmh']}\t{l['speed_limit_kmh']}\t{l['is_overspeed']}\t{l.get('lane') or 'Main'}\t{l['timestamp']}\t{l.get('camera_name') or l['camera_id']}\n")
+        return StreamingResponse(
+            io.BytesIO(output.getvalue().encode("utf-8")),
+            media_type="application/vnd.ms-excel",
+            headers={"Content-Disposition": f"attachment; filename=speed_logs_{int(time.time())}.xls"}
+        )
+    else:  # csv
+        output = io.StringIO()
+        output.write("track_id,vehicle_type,speed_kmh,speed_limit_kmh,is_overspeed,lane,timestamp,camera_id\n")
+        for l in logs:
+            output.write(f"{l['track_id']},{l['vehicle_type']},{l['speed_kmh']},{l['speed_limit_kmh']},{l['is_overspeed']},{l.get('lane') or 'Main'},{l['timestamp']},{l['camera_id']}\n")
+        return StreamingResponse(
+            io.BytesIO(output.getvalue().encode("utf-8")),
+            media_type="text/csv",
+            headers={"Content-Disposition": f"attachment; filename=speed_logs_{int(time.time())}.csv"}
+        )
+
+
+
 if __name__ == "__main__":
     import os
+    import sys
+    import socket
     import uvicorn
     from app.config import HOST, PORT
 
-    # reload=True spawns an extra file-watcher process and restarts on any
-    # file change under this directory (including files the engine itself
-    # writes, like recordings/db) — a dev convenience that fights a process
-    # supervisor's own restart/health-tracking in production. Opt-in only.
     dev_reload = os.getenv("CAMAI_DEV_RELOAD", "").strip().lower() in ("1", "true", "yes")
+
+    # Wait if socket is temporarily busy in TIME_WAIT
+    for attempt in range(1, 6):
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            res = s.connect_ex((HOST, PORT))
+            if res != 0:
+                break
+            print(f"[FastAPI] Port {PORT} is busy, waiting 2s for release... (attempt {attempt}/5)")
+            time.sleep(2.0)
+
     uvicorn.run("app.main:app", host=HOST, port=PORT, reload=dev_reload)
+
+
+
+
 

@@ -99,6 +99,8 @@ export default function FullscreenViewer({
     });
   }, [winApi]);
 
+  const [retryCount, setRetryCount] = useState(0);
+
   // ---- telemetry: detection keeps running; this only subscribes ------------
   // The engine analyses whatever cameras are registered regardless of who is
   // watching, so opening/closing this viewer never interrupts detection — it
@@ -107,6 +109,7 @@ export default function FullscreenViewer({
     setDetections([]);
     setTelemetry(null);
     setStreamFailed(false);
+    setRetryCount(0);
     const session = new TelemetrySession(cameraId, (t) => {
       setDetections(t.detections ?? []);
       setTelemetry(t);
@@ -118,6 +121,13 @@ export default function FullscreenViewer({
       log("telemetry unsubscribed", { cameraId });
     };
   }, [cameraId]);
+
+  const handleImageError = () => {
+    log("stream image error, retrying...", { cameraId, retryCount });
+    setTimeout(() => {
+      setRetryCount((c) => c + 1);
+    }, 1000);
+  };
 
   // ---- camera switching without leaving fullscreen -------------------------
   const step = useCallback((delta: number) => {
@@ -178,12 +188,12 @@ export default function FullscreenViewer({
           that are genuinely there. */}
       {!streamFailed ? (
         <img
-          key={cameraId}
+          key={`${cameraId}_${retryCount}`}
           ref={imgRef}
           src={mjpegStreamUrl(cameraId)}
           alt=""
           className="h-full w-full object-contain"
-          onError={() => { log("stream failed", { cameraId }); setStreamFailed(true); }}
+          onError={handleImageError}
         />
       ) : (
         <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-zinc-500">

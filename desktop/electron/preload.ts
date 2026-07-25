@@ -29,6 +29,7 @@ contextBridge.exposeInMainWorld("camai", {
     getStatus: () => ipcRenderer.invoke("engine-get-status"),
     getLogs: () => ipcRenderer.invoke("engine-get-logs"),
     getPath: () => ipcRenderer.invoke("engine-get-path"),
+    getToken: () => ipcRenderer.invoke("engine-get-token"),
     setPath: (args: { pythonPath: string; engineDir: string }) => ipcRenderer.invoke("engine-set-path", args),
     onLog: (cb: (line: string) => void) => {
       const listener = (_evt: any, line: string) => cb(line);

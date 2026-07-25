@@ -6,6 +6,7 @@
 // exposes its logs/status to the renderer for the Engine Health panel.
 import { spawn, execFile, ChildProcess } from "node:child_process";
 import { app, BrowserWindow } from "electron";
+import { randomBytes } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { request } from "node:http";
@@ -23,6 +24,8 @@ export type EngineProcessState =
 interface EngineConfig {
   pythonPath?: string;
   engineDir?: string;
+  /** Shared secret for the engine's configuration endpoints — see controlToken(). */
+  apiToken?: string;
 }
 
 interface ResolvedEngine {
@@ -108,6 +111,34 @@ function loadConfig(): EngineConfig {
 function saveConfig(cfg: EngineConfig): void {
   mkdirSync(dirname(configPath()), { recursive: true });
   writeFileSync(configPath(), JSON.stringify(cfg, null, 2));
+}
+
+/**
+ * Shared secret the engine requires on its configuration endpoints — the ones
+ * that set a camera's AI mode (zone_profile), model and confidence. See
+ * server/app/config.py:API_TOKEN for the threat model; in short it proves the
+ * caller is this app, while WHO may change a mode stays an RLS decision in the
+ * cloud (cameras.manage).
+ *
+ * PERSISTED, not per-launch, because of adoption: startEngine() will adopt an
+ * engine already listening on 8000 — typically an orphan of a previous run,
+ * which was spawned with whatever token was current THEN. A fresh random token
+ * each launch would therefore not match the engine we adopt, and every config
+ * push (including every AI-mode change) would 403 until the orphan was killed.
+ * It lives in userData alongside the rest of the engine config, so it is
+ * readable only by this OS user — which is exactly the trust boundary.
+ */
+function controlToken(): string {
+  const cfg = loadConfig();
+  if (cfg.apiToken) return cfg.apiToken;
+  const token = randomBytes(32).toString("hex");
+  saveConfig({ ...cfg, apiToken: token });
+  return token;
+}
+
+/** Renderer-side callers (lib/localEngine.ts) need this to talk to the engine. */
+export function getControlToken(): string {
+  return controlToken();
 }
 
 function looksLikeEngineDir(dir: string): boolean {
@@ -268,6 +299,9 @@ async function launch(): Promise<void> {
       // Escalated recovery: once repeated crashes suggest the GPU path is at
       // fault, force CPU inference so the engine comes up instead of looping.
       CAMAI_FORCE_CPU: forceCpu ? "1" : "",
+      // Locks the engine's configuration endpoints (AI mode / model /
+      // confidence) to this app. See controlToken().
+      CAMAI_API_TOKEN: controlToken(),
     },
     windowsHide: true,
   });

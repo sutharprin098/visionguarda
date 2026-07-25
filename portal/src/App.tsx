@@ -1,7 +1,12 @@
 import { Routes, Route, Navigate } from "react-router-dom";
 import { useAuth } from "./contexts/AuthContext";
 import AppShell from "./components/AppShell";
-import Landing from "./pages/Landing";
+import MarketingLayout from "./components/MarketingLayout";
+import Home from "./pages/marketing/Home";
+import Features from "./pages/marketing/Features";
+import Pricing from "./pages/marketing/Pricing";
+import About from "./pages/marketing/About";
+import Contact from "./pages/marketing/Contact";
 import SignIn from "./pages/SignIn";
 import SignUp from "./pages/SignUp";
 import ForgotPassword from "./pages/ForgotPassword";
@@ -38,7 +43,13 @@ function Protected({ children }: { children: JSX.Element }) {
 export default function App() {
   return (
     <Routes>
-      <Route path="/" element={<Landing />} />
+      <Route element={<MarketingLayout />}>
+        <Route path="/" element={<Home />} />
+        <Route path="/features" element={<Features />} />
+        <Route path="/pricing" element={<Pricing />} />
+        <Route path="/about" element={<About />} />
+        <Route path="/contact" element={<Contact />} />
+      </Route>
       <Route path="/signin" element={<SignIn />} />
       <Route path="/signup" element={<SignUp />} />
       <Route path="/forgot-password" element={<ForgotPassword />} />

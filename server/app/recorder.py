@@ -109,13 +109,18 @@ class CCTVRecorder:
         self.thread.start()
 
     def push_frame(self, frame):
-        """Buffers the latest frame and queues a write task."""
+        """Push the latest frame into the recording queue.
+
+        No copy needed here: the recording thread is the sole consumer of the
+        queue and processes the frame synchronously before touching any other
+        frame reference. The frame numpy array is not modified by the pipeline
+        after this call (Module 2 has already finished encoding the MJPEG JPEG
+        and will not reuse the same buffer), so passing by reference is safe.
+        """
         if frame is None or not self.running:
             return
-        
-        # Queue the frame copy for asynchronous processing
         try:
-            self.queue.put_nowait(("FRAME", frame.copy()))
+            self.queue.put_nowait(("FRAME", frame))
         except queue.Full:
             pass
 

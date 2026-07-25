@@ -6,7 +6,7 @@ import { saveCredentials, loadCredentials, clearCredentials } from "./secureStor
 import {
   startEngine, stopEngine, restartEngine, shutdownEngine,
   getStatus as getEngineStatus, getLogs as getEngineLogs,
-  setEnginePath, getEnginePath,
+  setEnginePath, getEnginePath, getControlToken,
 } from "./engineSupervisor";
 import { setupDownloadHandlers } from "./downloadManager";
 import { safeSend } from "./safeSend";
@@ -285,6 +285,11 @@ if (!gotTheLock) {
   ipcMain.handle("engine-get-status", () => getEngineStatus());
   ipcMain.handle("engine-get-logs", () => getEngineLogs());
   ipcMain.handle("engine-get-path", () => getEnginePath());
+  // The engine's configuration endpoints (AI mode above all) require this. Safe
+  // to hand the renderer: it is a local capability, and every renderer here is
+  // our own page — the check that decides who may CHANGE a mode is RLS in the
+  // cloud, which the renderer cannot influence by holding this.
+  ipcMain.handle("engine-get-token", () => getControlToken());
   ipcMain.handle("engine-set-path", (_evt, { pythonPath, engineDir }: { pythonPath: string; engineDir: string }) =>
     setEnginePath(pythonPath, engineDir));
 

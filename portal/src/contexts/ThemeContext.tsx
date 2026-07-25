@@ -6,7 +6,7 @@ export const useTheme = () => useContext(Ctx);
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
   const [theme, setTheme] = useState<Theme>(
-    () => (localStorage.getItem("camai-theme") as Theme) ?? "dark",
+    () => (localStorage.getItem("camai-theme") as Theme) ?? "light",
   );
 
   useEffect(() => {

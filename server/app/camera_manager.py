@@ -38,6 +38,37 @@ class CameraManager:
         return self.yolo_backend
 
 
+    def _apply_hardware_profile(self, backend):
+        """Adapt process-wide inference settings to the loaded backend's device.
+
+        On an Intel GPU the backend compiles a single STATIC input shape (see
+        EngineBackend.static_imgsz). The multi-resolution tile ladder and its
+        background prewarm both deliberately compile SEVERAL extra shapes — on a
+        static-shape iGPU those extra shapes are exactly the per-shape recompile
+        storm that caused the crash loop, and the iGPU has no spare compute for
+        extra passes anyway (it is no faster than the CPU here). So on a static
+        iGPU we drop tiling to a single full-frame pass at the pinned size:
+        detection keeps working, the crash loop is gone, and the CPU stops
+        contending with a dozen tile passes. Tiling stays fully enabled on
+        CPU/CUDA/TensorRT, where it was designed to run. Override with
+        CAMAI_TILING_ENABLED / CAMAI_TILING_MULTI_RESOLUTION if desired.
+        """
+        try:
+            if getattr(backend, "static_imgsz", None) is not None:
+                from app.ai.tiling import set_tiling_settings
+                set_tiling_settings(enabled=False, multi_resolution=False, prewarm=False)
+                print(f"[CameraManager] Hardware profile: Intel GPU (static "
+                      f"imgsz={backend.static_imgsz}). Tiling multi-resolution "
+                      f"disabled; single-pass detection for stable 24/7 runtime.",
+                      flush=True)
+            else:
+                dev = getattr(backend, "backend_device", "?")
+                print(f"[CameraManager] Hardware profile: dynamic-shape device "
+                      f"({dev}). Adaptive resolution + tiling remain enabled.",
+                      flush=True)
+        except Exception as e:
+            print(f"[CameraManager] Hardware-profile setup skipped: {e}", flush=True)
+
     def load_initial_model(self):
         """Load initial model backend synchronously so server starts up instantly."""
         if self.yolo_backend is None:
@@ -47,9 +78,14 @@ class CameraManager:
             try:
                 print(f"[CameraManager] Loading initial AI backend: {self.selected_model_name}...", flush=True)
                 self.yolo_backend = EngineBackend(self.selected_model_name)
-                # Warm up
-                dummy_img = np.zeros((320, 320, 3), dtype=np.uint8)
-                tensor, _ = self.yolo_backend.preprocess(dummy_img, 320)
+                self._apply_hardware_profile(self.yolo_backend)
+                # Warm up at the backend's real inference size (the pinned static
+                # size on an iGPU, else the default). This pays the one-time GPU
+                # kernel compile here, inside the startup grace window, rather
+                # than on the first camera frame.
+                warm = getattr(self.yolo_backend, "static_imgsz", None) or 320
+                dummy_img = np.zeros((warm, warm, 3), dtype=np.uint8)
+                tensor, _ = self.yolo_backend.preprocess(dummy_img, warm)
                 self.yolo_backend.run_inference(tensor)
                 print(f"[CameraManager] Initial AI backend {self.selected_model_name} loaded successfully.", flush=True)
                 self.startup_status = "ready"
@@ -197,9 +233,12 @@ class CameraManager:
             
             # Load new model backend
             new_backend = EngineBackend(model_name)
-            # Warm up
-            dummy_img = np.zeros((320, 320, 3), dtype=np.uint8)
-            tensor, _ = new_backend.preprocess(dummy_img, 320)
+            self._apply_hardware_profile(new_backend)
+            # Warm up at the backend's real inference size (pinned static size on
+            # an iGPU, else default) so the one-time GPU compile happens here.
+            warm = getattr(new_backend, "static_imgsz", None) or 320
+            dummy_img = np.zeros((warm, warm, 3), dtype=np.uint8)
+            tensor, _ = new_backend.preprocess(dummy_img, warm)
             new_backend.run_inference(tensor)
             
             # Swap active reference under thread-safe lock

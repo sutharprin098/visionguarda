@@ -1,86 +1,390 @@
-@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap");
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600&family=Silkscreen:wght@400;700&family=Press+Start+2P&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
-/* Theme tokens — light is :root, dark under .dark (toggled on <html>) */
-:root {
-  --s0: #f6f7f9;
-  --s1: #ffffff;
-  --s2: #f1f3f6;
-  --s3: #e8ecf1;
-  --line: #e3e7ec;
-  --ink1: #16202b;
-  --ink2: #4a5568;
-  --ink3: #8a94a3;
-  --grid: #eceff3;
-  /* validated categorical chart series (dataviz palette, light on #ffffff) */
-  --c1: #2a78d6;
-  --c2: #1baf7a;
-  --c3: #eda100;
-  --c4: #008300;
-}
-.dark {
-  --s0: #0b0d10;
-  --s1: #111418;
-  --s2: #171b21;
-  --s3: #1f242c;
-  --line: #262c35;
-  --ink1: #e8eaed;
-  --ink2: #a7b0ba;
-  --ink3: #6b7684;
-  --grid: #1d2229;
-  /* same hues re-stepped for the dark surface (#111418), validated */
-  --c1: #3987e5;
-  --c2: #199e70;
-  --c3: #c98500;
-  --c4: #008300;
-}
-
 @layer base {
-  html {
-    @apply bg-surface-0 text-ink-1 antialiased;
+  :root {
+    --font-sans: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+    --font-mono: 'JetBrains Mono', monospace;
+
+    /* Architectural Premium Light Palette */
+    --surface-0: #ffffff;
+    --surface-1: #f8fafc;
+    --surface-2: #f1f5f9;
+    --surface-3: #e2e8f0;
+
+    --ink-1: #0f172a;
+    --ink-2: #334155;
+    --ink-3: #64748b;
+    --ink-4: #94a3b8;
+
+    --line-light: #e2e8f0;
+    --line-subtle: #f1f5f9;
+
+    --brand-primary: #0284c7;
+    --brand-hover: #0369a1;
+    --brand-light: #e0f2fe;
+
+    --accent-emerald: #059669;
+    --accent-amber: #d97706;
+    --accent-rose: #e11d48;
   }
+
+  body {
+    background-color: var(--surface-0);
+    color: var(--ink-1);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+  }
+
   ::selection {
-    @apply bg-accent/30;
-  }
-  * {
-    scrollbar-width: thin;
-    scrollbar-color: var(--s3) transparent;
+    background-color: #e0f2fe;
+    color: #0369a1;
   }
 }
 
 @layer components {
-  .card {
-    @apply rounded-lg border border-line bg-surface-1;
+  /* Architectural Light Glass & Card Containers */
+  .architectural-card {
+    background-color: #ffffff;
+    border: 1px solid #e2e8f0;
+    border-radius: 24px;
+    box-shadow: 0 4px 20px -2px rgba(15, 23, 42, 0.04), 0 2px 6px -1px rgba(15, 23, 42, 0.02);
+    transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
   }
-  .input {
-    @apply w-full rounded-md border border-line bg-surface-1 px-3 py-2 text-sm text-ink-1
-           placeholder-ink-3 outline-none transition focus:border-accent/70 focus:ring-1 focus:ring-accent/40;
+
+  .architectural-card:hover {
+    border-color: #cbd5e1;
+    box-shadow: 0 12px 32px -4px rgba(15, 23, 42, 0.08), 0 4px 12px -2px rgba(15, 23, 42, 0.03);
+    transform: translateY(-2px);
   }
-  .btn {
-    @apply inline-flex items-center justify-center gap-2 rounded-md px-3.5 py-2 text-sm font-medium
-           transition disabled:cursor-not-allowed disabled:opacity-50;
+
+  .architectural-glass {
+    background: rgba(255, 255, 255, 0.85);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid rgba(226, 232, 240, 0.8);
   }
-  .btn-primary {
-    @apply btn bg-accent text-white hover:bg-accent-hover;
+
+  .btn-light-primary {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 12px 24px;
+    border-radius: 14px;
+    background-color: #0f172a;
+    color: #ffffff;
+    font-weight: 700;
+    font-size: 14px;
+    box-shadow: 0 4px 14px rgba(15, 23, 42, 0.15);
+    transition: all 0.2s ease;
   }
-  .btn-ghost {
-    @apply btn border border-line bg-transparent text-ink-2 hover:bg-surface-2;
+
+  .btn-light-primary:hover {
+    background-color: #1e293b;
+    box-shadow: 0 6px 20px rgba(15, 23, 42, 0.22);
+    transform: translateY(-1px);
   }
-  .btn-danger {
-    @apply btn bg-danger/15 text-danger hover:bg-danger/25;
+
+  .btn-light-secondary {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 12px 24px;
+    border-radius: 14px;
+    background-color: #ffffff;
+    color: #0f172a;
+    border: 1px solid #cbd5e1;
+    font-weight: 600;
+    font-size: 14px;
+    box-shadow: 0 2px 6px rgba(15, 23, 42, 0.04);
+    transition: all 0.2s ease;
   }
-  .th {
-    @apply px-4 py-2.5 text-left text-xs font-semibold uppercase tracking-wider text-ink-3;
+
+  .btn-light-secondary:hover {
+    background-color: #f8fafc;
+    border-color: #94a3b8;
+    transform: translateY(-1px);
   }
-  .td {
-    @apply border-t border-line px-4 py-2.5 text-sm;
+}
+
+/* Subtle architectural grid pattern */
+.bg-grid-architectural {
+  background-size: 40px 40px;
+  background-image:
+    linear-gradient(to right, rgba(226, 232, 240, 0.6) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(226, 232, 240, 0.6) 1px, transparent 1px);
+}
+
+/* ============================================================
+   ARCTIC PEARL — premium enterprise design language
+   Pixel-accent typography over a clean, glacial light surface.
+   ============================================================ */
+:root {
+  --ap-bg:        #F7FBFD;  /* primary background   */
+  --ap-surface:   #FFFFFF;  /* raised surface       */
+  --ap-surface-2: #F3F7FA;  /* secondary surface    */
+  --ap-border:    #D6E6EF;  /* hairline border      */
+  --ap-accent:    #7FA6B8;  /* primary accent       */
+  --ap-dark:      #2A3E4B;  /* dark accent          */
+  --ap-ink:       #1E2933;  /* primary text         */
+  --ap-ink-2:     #5B6B75;  /* secondary text       */
+
+  --ap-accent-soft: rgba(127, 166, 184, 0.14);
+  --ap-accent-line: rgba(127, 166, 184, 0.34);
+  --ap-shadow-sm: 0 1px 2px rgba(42, 62, 75, 0.05);
+  --ap-shadow-md: 0 8px 30px -12px rgba(42, 62, 75, 0.18), 0 2px 8px -3px rgba(42, 62, 75, 0.08);
+  --ap-shadow-lg: 0 30px 60px -24px rgba(42, 62, 75, 0.28), 0 8px 20px -8px rgba(42, 62, 75, 0.12);
+
+  --font-pixel: 'Silkscreen', 'Press Start 2P', monospace;
+
+  /* App-shell tokens (admin portal) — Arctic Pearl light.
+     Tailwind surface / ink / line colors map to these. Font stays normal (Inter). */
+  --s0: #F7FBFD;
+  --s1: #FFFFFF;
+  --s2: #F3F7FA;
+  --s3: #E7EFF4;
+  --line: #D6E6EF;
+  --ink1: #1E2933;
+  --ink2: #5B6B75;
+  --ink3: #8A9AA4;
+
+  /* Tailwind `accent` reads these RGB channels (so bg-accent/15 opacity works).
+     Default = Arctic-Pearl blue-grey; marketing + auth pages keep this. The
+     admin panel (.app-shell) overrides them to its own theme below. */
+  --accent-rgb: 127 166 184;        /* #7FA6B8 */
+  --accent-hover-rgb: 108 151 171;  /* #6C97AB */
+  --accent-dim-rgb: 42 62 75;       /* #2A3E4B */
+}
+
+/* Admin portal dark theme — glacial Arctic */
+.dark {
+  --s0: #0D1519;
+  --s1: #132029;
+  --s2: #1B2B34;
+  --s3: #24373F;
+  --line: #223540;
+  --ink1: #EAF3F7;
+  --ink2: #A6BAC4;
+  --ink3: #6E828C;
+}
+.dark body { background-color: var(--s0); color: var(--ink1); }
+
+/* ============================================================
+   /app admin panel — "Warm Cream + Amber" theme.
+   Scoped to .app-shell so marketing + auth pages are untouched.
+   Overrides the surface/ink/line/accent tokens the panel consumes.
+   ============================================================ */
+.app-shell {
+  --s0: #FBF8F2;   /* cream page background   */
+  --s1: #FFFFFF;   /* raised surface / cards / sidebar */
+  --s2: #F4EEE3;   /* secondary surface / hover        */
+  --s3: #EBE3D4;   /* elevated / inputs                */
+  --line: #E7DECB; /* warm hairline border   */
+  --ink1: #2B2622; /* warm near-black text   */
+  --ink2: #5C534A; /* warm slate text        */
+  --ink3: #938A7C; /* warm muted text        */
+
+  --accent-rgb: 217 119 6;        /* #d97706 amber */
+  --accent-hover-rgb: 180 83 9;   /* #b45309       */
+  --accent-dim-rgb: 251 230 207;  /* #fbe6cf soft amber tint */
+
+  background-color: var(--s0);
+  color: var(--ink1);
+}
+
+/* Warm-dark (espresso) variant for the panel when dark mode is on */
+.dark .app-shell {
+  --s0: #1A1611;
+  --s1: #221D16;
+  --s2: #2B241B;
+  --s3: #362E22;
+  --line: #3A3226;
+  --ink1: #F5EFE4;
+  --ink2: #C3B8A6;
+  --ink3: #8A8073;
+
+  --accent-rgb: 245 158 11;       /* #f59e0b brighter amber for dark */
+  --accent-hover-rgb: 251 191 36; /* #fbbf24 */
+  --accent-dim-rgb: 60 45 20;
+}
+
+/* Pixel-font accent — labels, wordmark, stat numerals, kickers */
+.ap-pixel {
+  font-family: var(--font-pixel);
+  font-weight: 400;
+  letter-spacing: 0.02em;
+  -webkit-font-smoothing: none;          /* keep pixels crisp */
+  font-smooth: never;
+  image-rendering: pixelated;
+}
+.ap-pixel-bold { font-family: var(--font-pixel); font-weight: 700; }
+
+/* Eyebrow / section kicker */
+.ap-eyebrow {
+  font-family: var(--font-pixel);
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ap-accent);
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.ap-eyebrow::before {
+  content: "";
+  width: 18px; height: 2px;
+  background: var(--ap-accent);
+  display: inline-block;
+}
+
+/* Surfaces */
+.ap-page { background: var(--ap-bg); color: var(--ap-ink); }
+
+.ap-card {
+  background: var(--ap-surface);
+  border: 1px solid var(--ap-border);
+  border-radius: 20px;
+  box-shadow: var(--ap-shadow-sm);
+  transition: transform .4s cubic-bezier(.16,1,.3,1), box-shadow .4s cubic-bezier(.16,1,.3,1), border-color .4s;
+}
+.ap-card:hover {
+  transform: translateY(-4px);
+  border-color: var(--ap-accent-line);
+  box-shadow: var(--ap-shadow-md);
+}
+
+.ap-glass {
+  background: rgba(247, 251, 253, 0.72);
+  backdrop-filter: blur(16px) saturate(140%);
+  -webkit-backdrop-filter: blur(16px) saturate(140%);
+  border-bottom: 1px solid var(--ap-border);
+}
+
+/* Buttons */
+.ap-btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 9px;
+  font-family: var(--font-pixel); font-size: 11px; letter-spacing: 0.04em;
+  padding: 13px 22px; border-radius: 12px; text-transform: uppercase;
+  transition: transform .25s cubic-bezier(.16,1,.3,1), box-shadow .25s, background .25s;
+  white-space: nowrap; cursor: pointer;
+}
+.ap-btn-primary {
+  background: var(--ap-dark); color: #EAF3F7;
+  box-shadow: 0 8px 20px -8px rgba(42,62,75,.5);
+}
+.ap-btn-primary:hover { transform: translateY(-2px); box-shadow: 0 14px 30px -10px rgba(42,62,75,.55); }
+.ap-btn-ghost {
+  background: var(--ap-surface); color: var(--ap-dark);
+  border: 1px solid var(--ap-border); box-shadow: var(--ap-shadow-sm);
+}
+.ap-btn-ghost:hover { transform: translateY(-2px); border-color: var(--ap-accent); background: var(--ap-surface-2); }
+
+/* Chips / pills */
+.ap-chip {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 6px 12px; border-radius: 999px;
+  background: var(--ap-surface); border: 1px solid var(--ap-border);
+  box-shadow: var(--ap-shadow-sm);
+  font-family: var(--font-pixel); font-size: 10px; letter-spacing: 0.06em;
+  color: var(--ap-ink-2);
+}
+
+/* Layered glacial backdrops */
+.ap-grid-bg {
+  background-size: 46px 46px;
+  background-image:
+    linear-gradient(to right, rgba(127,166,184,0.10) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(127,166,184,0.10) 1px, transparent 1px);
+  -webkit-mask-image: radial-gradient(ellipse 80% 60% at 50% 0%, #000 55%, transparent 100%);
+  mask-image: radial-gradient(ellipse 80% 60% at 50% 0%, #000 55%, transparent 100%);
+}
+.ap-aurora {
+  background:
+    radial-gradient(60% 55% at 15% 0%, rgba(127,166,184,0.22), transparent 60%),
+    radial-gradient(55% 50% at 90% 10%, rgba(214,230,239,0.55), transparent 62%),
+    radial-gradient(50% 60% at 55% 100%, rgba(127,166,184,0.10), transparent 60%);
+}
+
+.ap-auth-bg {
+  background-color: #f8fafc !important;
+  color: #0f172a !important;
+  background-image: 
+    radial-gradient(at 10% 10%, rgba(56, 189, 248, 0.20) 0px, transparent 50%),
+    radial-gradient(at 90% 15%, rgba(99, 102, 241, 0.16) 0px, transparent 50%),
+    radial-gradient(at 50% 85%, rgba(20, 184, 166, 0.15) 0px, transparent 50%),
+    radial-gradient(at 80% 80%, rgba(14, 165, 233, 0.18) 0px, transparent 50%);
+}
+
+/* Pixel divider — dotted glacial rule */
+.ap-pixel-rule {
+  height: 4px; width: 100%;
+  background-image: linear-gradient(90deg, var(--ap-accent) 4px, transparent 4px);
+  background-size: 8px 4px;
+  opacity: 0.5;
+}
+
+/* ---------- Animations ---------- */
+@keyframes ap-fade-up {
+  from { opacity: 0; transform: translateY(22px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.ap-reveal { opacity: 0; animation: ap-fade-up .8s cubic-bezier(.16,1,.3,1) forwards; }
+.ap-d1 { animation-delay: .08s; } .ap-d2 { animation-delay: .18s; }
+.ap-d3 { animation-delay: .30s; } .ap-d4 { animation-delay: .44s; }
+.ap-d5 { animation-delay: .58s; } .ap-d6 { animation-delay: .72s; }
+
+@keyframes ap-float {
+  0%,100% { transform: translateY(0); }
+  50%     { transform: translateY(-10px); }
+}
+.ap-float { animation: ap-float 6s ease-in-out infinite; }
+
+@keyframes ap-blink { 0%,49% { opacity: 1; } 50%,100% { opacity: 0.25; } }
+.ap-blink { animation: ap-blink 1.1s steps(1) infinite; }
+
+@keyframes ap-scan {
+  0%   { transform: translateY(-100%); opacity: 0; }
+  8%   { opacity: 1; }
+  92%  { opacity: 1; }
+  100% { transform: translateY(1400%); opacity: 0; }
+}
+.ap-scanline {
+  position: absolute; left: 0; right: 0; height: 2px;
+  background: linear-gradient(90deg, transparent, var(--ap-accent), transparent);
+  animation: ap-scan 4.5s linear infinite;
+}
+
+@keyframes ap-marquee { from { transform: translateX(0); } to { transform: translateX(-50%); } }
+.ap-marquee { display: flex; width: max-content; animation: ap-marquee 32s linear infinite; }
+
+@keyframes ap-sheen {
+  0% { background-position: -160% 0; }
+  100% { background-position: 260% 0; }
+}
+.ap-gradient-text {
+  background: linear-gradient(100deg, var(--ap-dark) 20%, var(--ap-accent) 45%, var(--ap-dark) 70%);
+  background-size: 220% auto;
+  -webkit-background-clip: text; background-clip: text;
+  -webkit-text-fill-color: transparent; color: transparent;
+  animation: ap-sheen 6s linear infinite;
+}
+
+/* Live bar-graph pulse used in telemetry visuals */
+@keyframes ap-bars {
+  0%,100% { transform: scaleY(0.35); }
+  50%     { transform: scaleY(1); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ap-reveal, .ap-float, .ap-blink, .ap-scanline, .ap-marquee, .ap-gradient-text {
+    animation: none !important; opacity: 1 !important;
   }
-  .keychip {
-    @apply rounded bg-surface-3 px-2 py-0.5 font-mono text-xs text-ink-2;
-  }
-  .link-action {
-    @apply text-xs text-accent hover:underline;
-  }
+  .ap-reveal { transform: none !important; }
 }

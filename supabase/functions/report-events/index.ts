@@ -57,7 +57,13 @@ Deno.serve(async (req) => {
     .filter((e) => e && typeof e.type === "string")
     .map((e) => {
       const kind = KIND.has(e.type!) ? e.type! : "custom";
-      const detail: Record<string, unknown> = { engine_id: e.engine_id ?? null };
+      // Preserve the engine's raw detection type verbatim. `kind` is bucketed
+      // to satisfy the alerts CHECK constraint (unknown types collapse to
+      // 'custom'), but the model-agnostic notification path (notify-telegram)
+      // and the dashboard must be able to show the ACTUAL detection the active
+      // AI module produced — human, vehicle, fire, or a detector added later —
+      // without a hardcoded mapping. So the real name always rides in detail.
+      const detail: Record<string, unknown> = { engine_id: e.engine_id ?? null, detection_name: e.type };
       // Only carry fields that are actually present, so the plate log stays clean.
       for (const k of ["plate_text", "track_id", "speed_kmh", "confidence"] as const) {
         if (e[k] !== undefined && e[k] !== null) detail[k] = e[k];
@@ -76,8 +82,41 @@ Deno.serve(async (req) => {
     });
   if (!rows.length) return json({ ok: true, inserted: 0 });
 
-  const { error } = await adminClient().from("alerts").insert(rows);
+  const db = adminClient();
+
+  // IDEMPOTENCY — the loop killer. Every engine alert carries a stable, unique
+  // engine_id in detail.engine_id. The desktop re-sends alerts on a timer and,
+  // on restart, re-scans the engine's persisted history from scratch, so the
+  // SAME engine alert legitimately arrives here many times. Without this guard
+  // each arrival created a NEW alerts row, and the AFTER INSERT trigger fired
+  // notify-telegram again → the same snapshot delivered to Telegram in a loop.
+  // We drop any incoming event whose engine_id already exists for this camera,
+  // so re-sends are no-ops: one engine alert → exactly one row → one Telegram.
+  const engineIds = rows
+    .map((r) => (r.detail as { engine_id?: unknown }).engine_id)
+    .filter((v): v is string => typeof v === "string" && v.length > 0);
+
+  let fresh = rows;
+  if (engineIds.length) {
+    const { data: existing } = await db
+      .from("alerts")
+      .select("detail")
+      .eq("camera_id", cam.id)
+      .in("detail->>engine_id", engineIds);
+    const seen = new Set(
+      (existing ?? [])
+        .map((r) => (r.detail as { engine_id?: unknown } | null)?.engine_id)
+        .filter((v): v is string => typeof v === "string"),
+    );
+    fresh = rows.filter((r) => {
+      const id = (r.detail as { engine_id?: unknown }).engine_id;
+      return !(typeof id === "string" && seen.has(id));
+    });
+  }
+  if (!fresh.length) return json({ ok: true, inserted: 0, deduped: rows.length });
+
+  const { error } = await db.from("alerts").insert(fresh);
   if (error) return json({ error: error.message }, 500);
 
-  return json({ ok: true, inserted: rows.length });
+  return json({ ok: true, inserted: fresh.length, deduped: rows.length - fresh.length });
 });

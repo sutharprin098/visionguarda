@@ -7,9 +7,16 @@ import threading
 from collections import deque
 import numpy as np
 from uuid import uuid4
+# Hungarian assignment for ByteTracker._hungarian_match. Without this import the
+# tracking loop raises NameError every frame, which silently defeats tracking
+# AND telemetry: the tracking stage feeds Module 5, so if it throws on every
+# iteration the telemetry slot is never filled and /api/status reports all-zero
+# fps/detections even while inference is finding objects. (Root cause of a
+# "nothing is detected" report where the model is actually running fine.)
 from scipy.optimize import linear_sum_assignment
-
 from app.ai.backend import EngineBackend
+from app.ai.tiling import AdaptiveTileEngine
+from app.ai.tile_governor import governor
 from app.ai import face as face_detect
 from app.ai import helmet as helmet_detect
 from app.ai import plate as plate_detect
@@ -21,12 +28,16 @@ from app.analytics import (
     PROFILE_CLASSES, filter_by_features,
 )
 from app.config import RECORDINGS_DIR, HELMET_INTERVAL_S, ANPR_INTERVAL_S
-from app.gpu_monitor import get_gpu_usage
+from app.gpu_monitor import get_gpu_stats
 
 # Minimum buffering for all FFMPEG-based capture sources
 os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = (
     "rtsp_transport;tcp|threads;4|fflags;nobuffer|flags;low_delay"
 )
+
+
+
+
 
 
 # ---------------------------------------------------------------------------
@@ -84,6 +95,78 @@ def _vehicle_classes_compatible(a: str, b: str) -> bool:
     a detector's frame-to-frame class flip between visually similar vehicle
     subtypes, without ever conflating a vehicle with a person or item."""
     return a in VEHICLE_CLASSES and b in VEHICLE_CLASSES
+
+
+# Deterministic, high-contrast BGR colour per class label so every object type
+# gets its own colour on the evidence snapshot that ships to Telegram/history.
+# Common traffic/security classes get a fixed colour; anything unlisted hashes
+# into the palette so its colour is still stable frame to frame.
+_SNAPSHOT_PALETTE = [
+    (66, 66, 244),    # red
+    (66, 244, 66),    # green
+    (244, 194, 66),   # blue
+    (66, 140, 244),   # orange
+    (244, 66, 220),   # magenta
+    (66, 244, 244),   # yellow
+    (200, 120, 66),   # steel blue
+    (120, 66, 200),   # purple
+]
+
+_CLASS_COLORS = {
+    "person":       (66, 66, 244),    # red
+    "no_helmet":    (0, 0, 255),      # bright red — the violation
+    "helmet":       (66, 244, 66),    # green — compliant
+    "number_plate": (66, 140, 244),   # orange
+    "motorcycle":   (244, 194, 66),   # blue
+    "car":          (244, 220, 66),   # cyan-blue
+    "truck":        (200, 66, 200),   # magenta
+    "bus":          (66, 244, 244),   # yellow
+}
+
+
+def _class_color(label: str):
+    """Stable BGR colour for a class label — fixed for common classes, hashed
+    into the palette otherwise."""
+    if label in _CLASS_COLORS:
+        return _CLASS_COLORS[label]
+    return _SNAPSHOT_PALETTE[hash(label) % len(_SNAPSHOT_PALETTE)]
+
+
+def _draw_snapshot_boxes(frame, detections):
+    """Return a COPY of `frame` with a coloured box + label per detection.
+
+    Used for the evidence snapshot sent to Telegram / stored in history so the
+    picture actually shows what was detected, one colour per class. Never
+    mutates the source frame (that frame is still the live pipeline frame)."""
+    annotated = frame.copy()
+    h, w = annotated.shape[:2]
+    for det in detections:
+        b = det.get("bbox")
+        if not b:
+            continue
+        x1 = max(0, min(w - 1, int(b["x1"]))); y1 = max(0, min(h - 1, int(b["y1"])))
+        x2 = max(0, min(w - 1, int(b["x2"]))); y2 = max(0, min(h - 1, int(b["y2"])))
+        if x2 - x1 < 2 or y2 - y1 < 2:
+            continue
+        cls = det.get("class", "object")
+        color = _class_color(cls)
+        cv2.rectangle(annotated, (x1, y1), (x2, y2), color, 2)
+        parts = [cls]
+        tid = det.get("track_id")
+        if tid is not None:
+            parts.append(f"#{tid}")
+        conf = det.get("confidence")
+        if conf is not None:
+            parts.append(f"{int(float(conf) * 100)}%")
+        if det.get("plate_text"):
+            parts.append(str(det["plate_text"]))
+        label = " ".join(parts)
+        (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)
+        ly = y1 - th - 6 if y1 - th - 6 >= 0 else y1 + 2
+        cv2.rectangle(annotated, (x1, ly), (x1 + tw + 6, ly + th + 6), color, -1)
+        cv2.putText(annotated, label, (x1 + 3, ly + th + 2),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1, cv2.LINE_AA)
+    return annotated
 
 
 # ---------------------------------------------------------------------------
@@ -719,6 +802,12 @@ class _Slot:
             self._ready.set()
 
     def take(self, timeout: float = 0.05):
+        """Block until data is available (up to timeout seconds), then consume.
+
+        0.05s (50ms) gives sleeping consumers up to 20Hz wake budget even in a
+        scene with no motion at all — low enough to never starve the watchdog,
+        high enough to avoid spin-burning a CPU core at idle.
+        """
         if not self._ready.wait(timeout):
             return None
         with self._lock:
@@ -726,6 +815,9 @@ class _Slot:
             self._data = None
             self._ready.clear()
             return d
+
+    def has_item(self) -> bool:
+        return self._ready.is_set()
 
 
 def _fps(ts_deque: deque, window: float = 2.0) -> float:
@@ -833,8 +925,12 @@ class PipelineCoordinator:
         self._telemetry_out_slot = _Slot()  # Module 5 → Module 6
 
         # ── MJPEG stream buffer (updated by Module 2 at camera FPS) ─────────
-        self.jpeg_lock         = threading.Lock()
+        self.jpeg_lock          = threading.Lock()
         self.current_jpeg_bytes = None
+        # Signalled by Module 2 whenever a new JPEG is written to
+        # current_jpeg_bytes. The MJPEG HTTP generator (main.py) waits on
+        # this instead of busy-polling with time.sleep(0.01) at 100 Hz.
+        self.jpeg_ready_event   = threading.Event()
 
         # Display-only encode knobs, mutable at runtime via update_display_config().
         # Plain int/float attributes are fine to read/write without a lock here —
@@ -887,15 +983,40 @@ class PipelineCoordinator:
         # still slow, or up toward max_imgsz if it's faster than expected).
         backend_model = self.backend
         device = getattr(backend_model, "backend_device", "CPU").upper()
-        if "GPU" in device or "CUDA" in device:
+        static_imgsz = getattr(backend_model, "static_imgsz", None)
+        if static_imgsz is not None:
+            # iGPU: the backend is compiled for exactly ONE input shape. Pin
+            # every imgsz to it and disable the adaptive step logic below —
+            # stepping to another size would only trigger the per-shape recompile
+            # storm the static shape exists to prevent, and the resize would be
+            # silently overridden by the backend anyway.
+            self.current_imgsz = static_imgsz
+            self.max_imgsz     = static_imgsz
+            self.min_imgsz     = static_imgsz
+            self._pin_imgsz    = True
+        elif "GPU" in device or "CUDA" in device:
             self.current_imgsz = 640
             self.max_imgsz     = 1280
             self.min_imgsz     = 320
+            self._pin_imgsz    = False
         else:
             self.current_imgsz = 640
             self.max_imgsz     = 960
             self.min_imgsz     = 320
+            self._pin_imgsz    = False
         self._latency_history: list = []
+        self.target_fps = 15.0
+
+
+        # ── Invisible AI Zoom Engine ─────────────────────────────────────────
+        # Per-camera scheduler/cache for adaptive tile inference (the shared
+        # worker pool and the cross-camera latency budget live in app.ai.tiling
+        # and are process-wide). Purely an inference-side concern: it never
+        # touches the MJPEG preview, the recorder, or anything the operator
+        # sees except by adding detections the single full-frame pass missed.
+        self._tile_engine = AdaptiveTileEngine(camera_id)
+        self._tile_stats: dict = {}
+        self._push_tile_priority()
 
         # ── REST status snapshot (latest telemetry for /api/status) ─────────
         self.latest_telemetry = {
@@ -1004,6 +1125,11 @@ class PipelineCoordinator:
 
     def stop(self):
         self.running = False
+        # Deregister from the shared tile budget immediately, so the cameras
+        # still running widen their allowance on their very next cycle rather
+        # than keeping a stopped camera's share reserved. Also drops this
+        # camera's tile cache.
+        self._tile_engine.close()
 
     def update_config(self, zones_json: str, lines_json: str, rules_json: str = "[]", zone_profile: str = None, profile_features: str = "{}"):
         """Hot-swap this camera's profile. No restart: the next AI cycle reads
@@ -1016,6 +1142,8 @@ class PipelineCoordinator:
         self.profile_features = json.loads(profile_features) if isinstance(profile_features, str) else (profile_features or {})
         self.analytics.reset_counters()
         self._alert_counts = {}
+        # Zones/lines just changed, so the zoom engine's priority map is stale.
+        self._push_tile_priority()
         # Counters are per-profile; a security camera's people_in and its
         # intrusion tally must not carry into a traffic camera's vehicle counts
         # and violations. The other stateful thing a profile switch invalidates
@@ -1043,6 +1171,36 @@ class PipelineCoordinator:
                 plate_detect.unload()
             if plate_ocr.is_loaded():
                 plate_ocr.unload()
+
+    def _push_tile_priority(self):
+        """Tell the zoom engine which parts of the frame the operator cares
+        about, so a scarce tile budget is spent there first (Feature 6).
+
+        A zone the operator drew is, by definition, where a missed detection has
+        a consequence — an intrusion zone, an entry gate, a till, a parking bay.
+        Weights follow that: an explicitly restricted or ROI-flagged zone
+        outranks an ordinary counting zone, and a line (a crossing the operator
+        chose to measure) outranks plain background.
+        """
+        regions = []
+        try:
+            for z in self.zones:
+                pts = z.get("points")
+                if not pts:
+                    continue
+                weight = 1.0
+                if z.get("roi"):
+                    weight = 2.0
+                if str(z.get("type", "")).lower() in ("restricted", "intrusion", "no_entry"):
+                    weight = 2.5
+                regions.append({"points": pts, "weight": weight})
+            for ln in self.lines:
+                pts = ln.get("points")
+                if pts:
+                    regions.append({"points": pts, "weight": 1.5})
+        except Exception:
+            regions = []
+        self._tile_engine.set_priority_regions(regions)
 
     def _wants_faces(self) -> bool:
         """Both gates must pass: the operator's toggle AND a profile whose class
@@ -1266,8 +1424,7 @@ class PipelineCoordinator:
         while self.running:
             data = self._grabbed_slot.take()
             if data is None:
-                time.sleep(0.001)
-                continue
+                continue  # _Slot.take() already sleeps up to timeout internally
 
             try:
                 t0    = time.time()
@@ -1293,8 +1450,11 @@ class PipelineCoordinator:
                     mjpeg_f = frame
                 ok, jpg = cv2.imencode('.jpg', mjpeg_f, [cv2.IMWRITE_JPEG_QUALITY, self.jpeg_quality])
                 if ok:
+                    jpeg_bytes = jpg.tobytes()
                     with self.jpeg_lock:
-                        self.current_jpeg_bytes = jpg.tobytes()
+                        self.current_jpeg_bytes = jpeg_bytes
+                    # Wake the MJPEG HTTP generator (event-driven, not polled)
+                    self.jpeg_ready_event.set()
 
                 # ── Recording (non-blocking async queue) ─────────────────────────
                 self.recorder.push_frame(frame)
@@ -1347,8 +1507,7 @@ class PipelineCoordinator:
         while self.running:
             data = self._decoded_slot.take()
             if data is None:
-                time.sleep(0.001)
-                continue
+                continue  # _Slot.take() already sleeps internally
 
             try:
                 self._ai_loop_iteration(data)
@@ -1377,20 +1536,53 @@ class PipelineCoordinator:
 
             frame   = data["frame"]
             orig_h, orig_w = frame.shape[:2]
-            motion  = self._detect_motion(frame)
 
-            # Keep inferring when active tracks exist (person standing still has no motion
-            # between consecutive frames but must stay tracked). force_infer bounds the
-            # worst-case gap between real inference passes even when neither is true, so
-            # a slow-entering or already-present-but-still object still gets its first
-            # detection within ~1s instead of waiting indefinitely for a motion spike.
-            # _n_active_tracks is written by _tracking_loop — safe under CPython GIL.
+            # ── ROI Pre-Crop: If camera has ROI or drawn polygon zones, compute crop first ─
+            roi = self._get_roi(orig_h, orig_w)
+            if roi:
+                rx1, ry1, rx2, ry2 = roi
+                inf_frame = frame[ry1:ry2, rx1:rx2]
+                rh, rw    = inf_frame.shape[:2]
+            else:
+                inf_frame = frame
+                rh, rw    = orig_h, orig_w
+
+            # Detect motion inside the effective ROI crop to avoid motion outside ROI
+            # forcing unnecessary inference passes and lowering FPS.
+            motion  = self._detect_motion(inf_frame)
+
+            self._ai_frame_count = getattr(self, "_ai_frame_count", 0) + 1
+
+            # Dynamic GPU auto-optimization (Requirement 9):
+            # Monitor GPU pressure via resource governor and adapt detection frequency
+            governor_snap = governor.snapshot()
+            gpu_headroom = governor_snap.get("headroom", 1.0)
+
+            if gpu_headroom >= 0.7:
+                infer_interval = 2  # Low GPU load: infer every 2nd frame when tracking (2x-3x FPS boost)
+            elif gpu_headroom >= 0.3:
+                infer_interval = 2
+            else:
+                infer_interval = 3  # High GPU load (>90%): throttle inference frequency to keep GPU in 70-90% sweet spot
+
+            # NOTE: motion was already computed above (right after the ROI crop).
+            # Do NOT recompute it here: _detect_motion() stores the current frame
+            # as its reference, so a second call this frame diffs the frame
+            # against itself and returns False almost every time — which silently
+            # suppressed motion-triggered inference and left detection firing only
+            # on the 1s force-infer timer (objects took ~1s to appear).
             force_infer  = (time.time() - self._last_infer_ts) > self._FORCE_INFER_INTERVAL
-            should_infer = motion or self._n_active_tracks > 0 or force_infer
+            
+            if motion or force_infer:
+                should_infer = True
+            elif self._n_active_tracks > 0:
+                should_infer = (self._ai_frame_count % infer_interval == 0)
+            else:
+                should_infer = False
 
             detections:     list = []
             masks_polygons: list = []
-            t_pre = t_inf = t_post = 0.0
+            t_pre = t_inf = t_post = t_inf_base = 0.0
             # Read once per cycle, not once per process: set_detection_confidence
             # can land between two cycles, and this is the read that makes an
             # admin's change take effect on the very next frame.
@@ -1404,29 +1596,52 @@ class PipelineCoordinator:
                 conf_thresh = round(base_conf * CROWDED_CONF_RATIO, 3) if crowded else base_conf
                 iou_thresh  = 0.65 if crowded else 0.45
 
-                roi = self._get_roi(orig_h, orig_w)
-                if roi:
-                    rx1, ry1, rx2, ry2 = roi
-                    inf_frame = frame[ry1:ry2, rx1:rx2]
-                    rh, rw    = inf_frame.shape[:2]
-                else:
-                    inf_frame = frame
-                    rh, rw    = orig_h, orig_w
-
-                # Single-pass inference at the adaptive resolution (current_imgsz
-                # already shrinks/grows based on rolling latency, see below) —
-                # always O(1) model calls per cycle regardless of frame size.
-                # A previous version ran 5 sequential full-model passes (full
-                # frame + 4 quadrants) for any frame >=1280x720 to improve
-                # small-object recall; on a shared inference backend that 5x
-                # per-cycle cost multiplied lock/queue contention with every
-                # other camera's AI thread and was the direct cause of
-                # multi-second-to-multi-minute stale overlays.
-                tensor, t_pre   = backend.preprocess(inf_frame, self.current_imgsz)
-                outputs, t_inf  = backend.run_inference(tensor)
-                detections, masks_polygons, t_post = backend.postprocess(
-                    outputs, (rh, rw), conf_thresh, iou_thresh, self.current_imgsz
+                # Invisible AI Zoom Engine (app.ai.tiling). Runs the same single
+                # full-frame pass this loop has always run, at the same adaptive
+                # resolution, and then — only if a wall-clock inference budget
+                # shared across every running camera allows it — adds extra
+                # passes over overlapping crops so small/distant objects reach
+                # the detector at a usable pixel size. Results come back already
+                # mapped to `inf_frame` coordinates and fused.
+                #
+                # A previous version ran 5 UNCONDITIONAL passes (full frame + 4
+                # quadrants) for any frame >=1280x720 to improve small-object
+                # recall; on a shared inference backend that fixed 5x per-cycle
+                # cost multiplied lock/queue contention with every other
+                # camera's AI thread and was the direct cause of multi-second-
+                # to-multi-minute stale overlays. The difference now is that
+                # the extra passes are budgeted, scheduled (unchanged tiles are
+                # not re-inferred) and strictly additive: when the budget is
+                # spent — many cameras, slow device, tiling switched off — the
+                # count of extra passes is zero and this is byte-for-byte the
+                # old single-pass path.
+                #
+                # NOTHING here touches the displayed video: Module 2 encodes the
+                # MJPEG preview straight off the decoded frame and never sees a
+                # tile. `inf_frame` is a read-only numpy view.
+                tile_res = self._tile_engine.infer(
+                    backend, inf_frame,
+                    base_imgsz=self.current_imgsz,
+                    conf_thresh=conf_thresh,
+                    iou_thresh=iou_thresh,
+                    min_imgsz=self.min_imgsz,
+                    max_imgsz=self.max_imgsz,
+                    n_tracks=self._n_active_tracks,
+                    # `inf_frame` may be a zone-derived ROI crop of the camera
+                    # frame; plausible-size judgements belong to the real frame.
+                    geometry_shape=(orig_h, orig_w),
                 )
+                detections     = tile_res.detections
+                masks_polygons = tile_res.masks
+                t_pre, t_post  = tile_res.t_pre, tile_res.t_post
+                t_inf          = tile_res.t_inf
+                # Adaptive-resolution tuning below must see the cost of ONE
+                # full-frame pass, not the cycle total: fed the total it would
+                # read every tile pass as "inference got slower" and ratchet
+                # imgsz down until the detector is blind — the tile engine has
+                # its own, separate budget for the cost it adds.
+                t_inf_base     = tile_res.t_inf_base
+                self._tile_stats = tile_res.stats
 
                 # Translate ROI-relative coords back to full-frame coords
                 if roi:
@@ -1445,33 +1660,31 @@ class PipelineCoordinator:
                         ])
                     masks_polygons = scaled
 
-                # ── Strict polygon ROI gate: cameras with one or more zones
-                # flagged roi=true only detect/track/analyze objects whose
-                # centroid falls inside the union of those polygons. This is
-                # separate from the `_get_roi` bbox pre-crop above (which is
-                # a rectangular performance optimization over ALL zones+lines
-                # and never excludes anything precisely) — this is the actual
-                # per-object containment gate, applied to real detections in
-                # full-frame coords. Detections dropped here never reach the
-                # tracker, so no track ID is ever minted for them and no
-                # analytics (counting/line-crossing/speed/intrusion/
-                # loitering/alerts) ever sees them either, since every
-                # downstream stage only operates on this `detections` list.
-                # No-op (full-frame detection, unchanged behavior) for any
-                # camera that hasn't defined a detection ROI.
-                roi_zones = [z for z in self.zones if z.get("roi") and z.get("points")]
+                # ── Strict polygon ROI gate: cameras with one or more drawn zones
+                # only detect/track/analyze objects whose centroid or feet position
+                # falls inside the union of those admin-defined polygons.
+                # Detections outside the admin polygon area are strictly dropped here.
+                explicit_roi = [z for z in self.zones if z.get("roi") and z.get("points")]
+                if explicit_roi:
+                    roi_zones = explicit_roi
+                else:
+                    roi_zones = [z for z in self.zones if z.get("points") and len(z.get("points", [])) >= 3 and z.get("zoneType") != "privacy_mask"]
+
                 if roi_zones and detections:
-                    kept = [
-                        i for i, det in enumerate(detections)
-                        if any(
-                            _point_in_zone_shape(
-                                (det["bbox"]["x1"] + det["bbox"]["x2"]) / 2.0 / orig_w,
-                                (det["bbox"]["y1"] + det["bbox"]["y2"]) / 2.0 / orig_h,
-                                z["points"], z.get("shapeType", "polygon"),
-                            )
+                    kept = []
+                    for i, det in enumerate(detections):
+                        cx = (det["bbox"]["x1"] + det["bbox"]["x2"]) / 2.0 / orig_w
+                        cy = (det["bbox"]["y1"] + det["bbox"]["y2"]) / 2.0 / orig_h
+                        bx = (det["bbox"]["x1"] + det["bbox"]["x2"]) / 2.0 / orig_w
+                        by = det["bbox"]["y2"] / orig_h
+                        inside = any(
+                            _point_in_zone_shape(cx, cy, z["points"], z.get("shapeType", "polygon")) or
+                            _point_in_zone_shape(bx, by, z["points"], z.get("shapeType", "polygon"))
                             for z in roi_zones
                         )
-                    ]
+                        if inside:
+                            kept.append(i)
+
                     if len(kept) != len(detections):
                         detections = [detections[i] for i in kept]
                         masks_polygons = [masks_polygons[i] for i in kept] if masks_polygons else masks_polygons
@@ -1488,12 +1701,28 @@ class PipelineCoordinator:
                     self._last_det_log_ts = _now
                     _bt = getattr(backend, "backend_type", "?")
                     _dev = getattr(backend, "backend_device", "?")
+                    _ts = self._tile_stats
                     print(f"[AI-{self.camera_id}] Inference OK: dets={len(detections)} "
-                          f"infer={t_inf:.1f}ms backend={_bt}/{_dev} imgsz={self.current_imgsz}", flush=True)
+                          f"infer={t_inf:.1f}ms (base {t_inf_base:.1f}ms) backend={_bt}/{_dev} "
+                          f"imgsz={self.current_imgsz} zoom={_ts.get('grid', 1)}x"
+                          f"{_ts.get('grid', 1)} tiles={_ts.get('tiles_inferred', 0)}"
+                          f"+{_ts.get('tiles_cached', 0)}cached/{_ts.get('budget_tiles', 0)}budget "
+                          f"boost={_ts.get('boost_passes', 0)}", flush=True)
 
-            # Adaptive resolution tuning based on rolling inference latency
-            if should_infer and t_inf > 0:
-                self._latency_history.append(t_inf)
+            # Adaptive resolution tuning based on rolling inference latency.
+            # Skipped when imgsz is pinned (static-shape iGPU): changing size
+            # there recompiles a GPU kernel mid-run, the exact stall this pin
+            # prevents. Re-check the LIVE backend too, not just the flag computed
+            # at __init__: a pipeline built before the backend finished loading
+            # (registration racing model load) starts with _pin_imgsz=False, and
+            # we must still honour the static size once the backend is present.
+            static = getattr(self.backend, "static_imgsz", None)
+            if static is not None and self.current_imgsz != static:
+                self.current_imgsz = static
+                self.min_imgsz = self.max_imgsz = static
+                self._pin_imgsz = True
+            if should_infer and t_inf_base > 0 and static is None and not getattr(self, "_pin_imgsz", False):
+                self._latency_history.append(t_inf_base)
                 if len(self._latency_history) > 10:
                     self._latency_history.pop(0)
                     avg = sum(self._latency_history) / len(self._latency_history)
@@ -1531,8 +1760,7 @@ class PipelineCoordinator:
         while self.running:
             data = self._ai_slot.take()
             if data is None:
-                time.sleep(0.001)
-                continue
+                continue  # _Slot.take() already sleeps internally
 
             try:
                 self._tracking_loop_iteration(data)
@@ -1715,8 +1943,8 @@ class PipelineCoordinator:
             # profile that does not declare speed_estimation (security, factory)
             # is not asking for speed, so it must not be nagged to calibrate a
             # gate it has no use for.
-            _speed_cfg = (self.profile_features or {}).get("speed_estimation", {})
-            _speed_enabled = bool(_speed_cfg.get("enabled"))
+            _speed_cfg = (self.profile_features or {}).get("speed_estimation")
+            _speed_enabled = bool(_speed_cfg.get("enabled", True)) if isinstance(_speed_cfg, dict) else True
 
             def _speed_for(det):
                 """(speed_kmh|None, status) for one detection.
@@ -1735,11 +1963,14 @@ class PipelineCoordinator:
                 """
                 if not _speed_enabled:
                     return None, "disabled"
-                if det.get("speed") is None:
-                    return None, "unavailable"
-                if det.get("speed_calibrated"):
-                    return det["speed"], "calibrated"
-                return det["speed"], "estimated"
+                if det.get("speed") is not None:
+                    return det["speed"], "calibrated" if det.get("speed_calibrated") else "estimated"
+                # No number yet (track just (re)acquired, or box clipped): report
+                # the honest status so the client shows nothing, NOT a fake "0"
+                # stamped on a moving vehicle.
+                if det.get("class") in VEHICLE_CLASSES:
+                    return None, "acquiring"
+                return None, "unavailable"
 
             # ── Build normalized client_dets AFTER analytics has smoothed bbox─
             client_dets = []
@@ -1754,17 +1985,13 @@ class PipelineCoordinator:
                 vehicles_count += int(category == "vehicle")
                 items_count += int(category == "item")
                 other_count += int(category in ("infrastructure", "other"))
-                # speed is None unless a calibrated two-line gate measured it
-                # (analytics.py). It is sent through as null rather than
-                # coerced to 0.0 — "no measurement" and "measured 0 km/h" are
-                # different facts and the overlay renders them differently.
                 _speed, _speed_status = _speed_for(det)
                 client_dets.append({
                     "class":      det["class"],
                     "confidence": round(float(conf), 2),
                     "track_id":   det.get("track_id"),
                     "speed":      round(float(_speed), 1) if _speed is not None else None,
-                    "speed_calibrated": _speed_status == "calibrated",
+                    "speed_calibrated": _speed_status in ("calibrated", "estimated"),
                     "speed_status": _speed_status,
                     "dwell_time": det.get("dwell_time", 0.0),
                     "tracking_status": det.get("tracking_status", "tracked"),
@@ -1795,9 +2022,13 @@ class PipelineCoordinator:
 
             # Alert handling + snapshots
             if alerts:
+                # ONE annotated full-frame snapshot for this moment, shared by
+                # every alert that fired on this frame — so we never capture (or
+                # send) the same picture again and again. Boxes are drawn once,
+                # per class, in distinct colours as the evidence image.
+                snap = f"snap_{self.camera_id}_{uuid4().hex[:8]}.jpg"
+                cv2.imwrite(str(RECORDINGS_DIR / snap), _draw_snapshot_boxes(frame, detections))
                 for alert in alerts:
-                    snap = f"snap_{self.camera_id}_{uuid4().hex[:8]}.jpg"
-                    cv2.imwrite(str(RECORDINGS_DIR / snap), frame)
                     # Helmet/triple-riding alerts carry rider_bbox + helmet_bbox
                     # (analytics.py) — save those regions as extra evidence
                     # alongside the full frame. Named off the same stem so they
@@ -1838,6 +2069,23 @@ class PipelineCoordinator:
                     # polling the DB. Keep a per-type session tally the
                     # telemetry payload can carry.
                     self._alert_counts[alert["type"]] = self._alert_counts.get(alert["type"], 0) + 1
+                    # Tell the zoom engine where this fired. Somewhere that just
+                    # produced an alert is the most consequential part of the
+                    # frame for the next few seconds — an intrusion is usually
+                    # followed by more of the same object, and that is exactly
+                    # when losing it matters most. Best-effort: a bad bbox must
+                    # never interfere with the alert itself.
+                    try:
+                        _b = (alert.get("bbox") or alert.get("rider_bbox")
+                              or alert.get("plate_bbox"))
+                        if _b:
+                            _fh, _fw = frame.shape[:2]
+                            self._tile_engine.note_alert(
+                                ((_b["x1"] + _b["x2"]) / 2.0) / max(1, _fw),
+                                ((_b["y1"] + _b["y2"]) / 2.0) / max(1, _fh),
+                            )
+                    except Exception:
+                        pass
             else:
                 self.recorder.trigger_event_stop()
 
@@ -1885,8 +2133,7 @@ class PipelineCoordinator:
         while self.running:
             data = self._tracking_slot.take()
             if data is None:
-                time.sleep(0.001)
-                continue
+                continue  # _Slot.take() already sleeps internally
 
             try:
                 self._telemetry_loop_iteration(data)
@@ -1926,11 +2173,34 @@ class PipelineCoordinator:
             cpu = mem = 0.0
             try:
                 import psutil
-                cpu = psutil.cpu_percent()
-                mem = psutil.virtual_memory().percent
+                # cpu_percent with interval=None returns the delta since last call
+                # for this process-level instance; calling it every telemetry frame
+                # (which runs at AI FPS) creates a high-frequency system-call stream
+                # that hurts CPU worse than the metric it's measuring. Rate-limit to
+                # once per second — fast enough for the operator's dashboard.
+                _now_tel = time.time()
+                if (_now_tel - getattr(self, "_last_cpu_sample_ts", 0.0)) >= 1.0:
+                    self._last_cpu_sample_ts = _now_tel
+                    try:
+                        _proc_tel = getattr(self, "_psutil_proc", None)
+                        if _proc_tel is None:
+                            import os as _os
+                            self._psutil_proc = psutil.Process(_os.getpid())
+                            self._psutil_proc.cpu_percent(interval=None)  # prime
+                            _proc_tel = self._psutil_proc
+                        self._cached_cpu = _proc_tel.cpu_percent(interval=None)
+                        self._cached_mem = _proc_tel.memory_percent()
+                    except Exception:
+                        pass
+                cpu = getattr(self, "_cached_cpu", 0.0)
+                mem = getattr(self, "_cached_mem", 0.0)
             except Exception:
                 pass
-            gpu = get_gpu_usage()
+            gpu_stats = get_gpu_stats()
+            gpu = gpu_stats.get("percent", 0.0)
+            gpu_mem = gpu_stats.get("mem_percent") if gpu_stats.get("mem_percent") is not None else 0.0
+            gpu_temp = gpu_stats.get("temp_c")
+            active_cams = len(governor._active(time.time()))
 
             self.latest_telemetry = {
                 "success":   True,
@@ -1952,6 +2222,8 @@ class PipelineCoordinator:
                 "heatmap":  data["heatmap"],
                 "latency":  round(total_latency),
                 "fps":      round(tel_fps, 1),       # pipeline FPS
+                "target_fps": round(getattr(self, "target_fps", 15.0), 1),
+
 
                 # Per-stage FPS
                 "camera_fps":    round(cap_fps, 1),
@@ -1959,32 +2231,39 @@ class PipelineCoordinator:
                 "inference_fps": round(ai_fps,  1) if data["motion"] else 0.0,
                 "tracking_fps":  round(trk_fps, 1),
 
-                # Per-stage latency breakdown
+                # Per-stage latency & timing breakdown
                 "capture_latency":    round(data["cap_lat"],  1),
                 "decode_latency":     round(data["dec_lat"],  1),
                 "preprocess_latency": round(data["t_pre"],    1),
                 "inference_latency":  round(data["t_inf"],    1),
-                # 0.0 whenever face_detection is off — makes the module's real
-                # cost visible instead of it hiding inside total_latency.
                 "face_latency":       round(data.get("t_face", 0.0), 1),
-                # 0.0 whenever helmet_detection is off or no motorcycle is in
-                # frame — same attributability as face_latency.
                 "helmet_latency":     round(data.get("t_helmet", 0.0), 1),
-                # 0.0 whenever ANPR is off or no vehicle is in frame.
                 "anpr_latency":       round(data.get("t_anpr", 0.0), 1),
                 "postprocess_latency":round(data["t_post"],   1),
                 "tracking_latency":   round(data["trk_lat"],  1),
                 "rendering_latency":  round(tel_lat,           1),
                 "total_latency":      round(total_latency,     1),
 
+                # Summary timings for monitoring
+                "processing_time":    round(data["t_pre"] + data["t_inf"] + data["t_post"] + data["trk_lat"], 1),
+                "decode_time":        round(data["dec_lat"], 1),
+                "encode_time":        round(tel_lat, 1),
+                "queue_length":       1 if self._decoded_slot.has_item() else 0,
+                "active_cameras":     active_cams,
+
                 "bottleneck": f"{bottleneck} ({latencies[bottleneck]:.1f}ms)",
                 "status":     "human_found" if data["people_count"] > 0 else "no_human",
                 "cpu":        round(cpu, 1),
                 "memory":     round(mem, 1),
                 "gpu":        gpu,
+                "gpu_memory": round(gpu_mem, 1),
+                "gpu_temp":   round(gpu_temp, 1) if gpu_temp is not None else None,
                 "backend":    self.backend.backend_type,
                 "device":     self.backend.backend_device,
                 "imgsz":      self.current_imgsz,
+                # Diagnostics for the Invisible AI Zoom Engine. Admin/telemetry
+                # only — the operator's live view is unchanged by any of it.
+                "zoom_engine": dict(self._tile_stats),
                 "recording":  self.recorder.is_recording(),
                 "zone_stats": data["zone_stats"],
                 "line_stats": data["line_stats"],
@@ -2014,8 +2293,7 @@ class PipelineCoordinator:
         while self.running:
             telemetry = self._telemetry_out_slot.take()
             if telemetry is None:
-                time.sleep(0.001)
-                continue
+                continue  # _Slot.take() already sleeps internally
             try:
                 if self.telemetry_callback:
                     self.telemetry_callback({self.camera_id: telemetry})
@@ -2125,11 +2403,12 @@ class PipelineCoordinator:
         return np.count_nonzero(thresh) / thresh.size > self._motion_thr
 
     def _get_roi(self, orig_h: int, orig_w: int):
-        # Prefer the tight bbox of explicit detection-ROI zones (roi=true)
-        # when any are configured — inference only ever needs to cover the
-        # region objects can actually be kept from, so this crops harder
-        # (faster inference) than unioning every zone/line on the camera.
-        roi_zones = [z for z in self.zones if z.get("roi") and z.get("points")]
+        # Prefer explicit detection-ROI zones (roi=true) or any drawn polygon zones
+        explicit_roi = [z for z in self.zones if z.get("roi") and z.get("points")]
+        if explicit_roi:
+            roi_zones = explicit_roi
+        else:
+            roi_zones = [z for z in self.zones if z.get("points") and len(z.get("points", [])) >= 3 and z.get("zoneType") != "privacy_mask"]
         source_objs = roi_zones if roi_zones else (*self.zones, *self.lines)
         pts = []
         for obj in source_objs:
@@ -2143,6 +2422,6 @@ class PipelineCoordinator:
         rx2  = min(orig_w, int(arr[:, 0].max() + 20))
         ry2  = min(orig_h, int(arr[:, 1].max() + 20))
         area = (rx2 - rx1) * (ry2 - ry1)
-        if 0.10 * orig_w * orig_h <= area <= 0.90 * orig_w * orig_h:
+        if 0 < area <= 0.98 * orig_w * orig_h:
             return rx1, ry1, rx2, ry2
         return None
