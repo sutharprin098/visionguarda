@@ -36,7 +36,7 @@ export default function Features() {
         <div className="mx-auto max-w-5xl px-4 sm:px-6 lg:px-8">
           <div className="ap-card p-3 sm:p-5" style={{ boxShadow: "var(--ap-shadow-lg)" }}>
             <VideoDetections
-              src="/features-demo.mp4"
+              src="https://kuqyhceykvisqfyghiot.supabase.co/storage/v1/object/public/marketing/features-demo.mp4"
               dataSrc="/features-detections.json"
               hudLabel="TRAFFIC INTERSECTION"
               caption="CAMAI · YOLOX ON REAL CCTV"

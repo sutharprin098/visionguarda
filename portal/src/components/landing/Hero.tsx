@@ -91,7 +91,7 @@ export default function Hero() {
 
             <div className="mt-4">
               <VideoDetections
-                src="/features-demo.mp4"
+                src="https://kuqyhceykvisqfyghiot.supabase.co/storage/v1/object/public/marketing/features-demo.mp4"
                 dataSrc="/features-detections.json"
                 hudLabel="LIVE DETECT · SPEED"
                 caption="CAMAI · YOLOX ON REAL CCTV"

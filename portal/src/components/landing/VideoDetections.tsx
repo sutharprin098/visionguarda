@@ -28,7 +28,7 @@ type Props = {
 };
 
 export default function VideoDetections({
-  src = "/demo.mp4",
+  src = "https://kuqyhceykvisqfyghiot.supabase.co/storage/v1/object/public/marketing/demo.mp4",
   dataSrc = "/demo-detections.json",
   hudLabel = "LIVE DETECT",
   caption = "CAMAI · REAL FOOTAGE",
