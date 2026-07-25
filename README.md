@@ -1,27 +1,48 @@
 # CamAI Enterprise - AI Vision & Video Analytics Platform
 
+[![Download v1.0.0](https://img.shields.io/badge/⬇%20Download-Windows%20v1.0.0-0b7285?style=for-the-badge)](https://github.com/sutharprin098/visionguarda/releases/tag/v1.0.0)
+[![Release notes](https://img.shields.io/badge/Release%20README-v1.0.0-informational?style=for-the-badge)](RELEASE_v1.0.0.md)
+
 [![License: Enterprise](https://img.shields.io/badge/License-Enterprise-blue.svg)](LICENSE)
 [![Python: 3.11](https://img.shields.io/badge/Python-3.11-green.svg)](server/)
 [![React: 18](https://img.shields.io/badge/React-18-blue.svg)](client/)
-[![Electron: Enterprise](https://img.shields.io/badge/Electron-Desktop-purple.svg)](desktop/)
-[![Tests: Passing](https://img.shields.io/badge/Tests-211%20Passed-brightgreen.svg)](server/tests)
+[![Electron: Desktop](https://img.shields.io/badge/Electron-Desktop-purple.svg)](desktop/)
+[![Models: Apache/MIT](https://img.shields.io/badge/Models-Apache%202.0%20%2F%20MIT-brightgreen.svg)](LICENSING.md)
 
-**CamAI Enterprise** is a complete, production-ready, edge-first AI Vision and Video Analytics System designed for high-density multi-camera deployment. It processes live RTSP/MJPEG IP camera streams, executes multi-model AI inference (detection, tracking, ANPR, helmet detection, face recognition, speed estimation), and delivers real-time telemetry over WebSockets in under 50ms.
+**CamAI Enterprise** is an edge-first AI Vision and Video Analytics system for multi-camera deployment. It processes live RTSP/USB/NVR streams, runs multi-model AI inference on-device (detection, tracking, ANPR, rider-helmet detection, face detection, calibrated speed estimation), and delivers real-time telemetry over WebSockets. **No frame ever leaves the machine.**
+
+---
+
+## ⬇️ Download the Windows app — v1.0.0
+
+| Asset | Size | For |
+| :--- | ---: | :--- |
+| **[`CamAI-Desktop-Setup-1.0.0.exe`](https://github.com/sutharprin098/visionguarda/releases/download/v1.0.0/CamAI-Desktop-Setup-1.0.0.exe)** | 414 MB | Everyone — desktop app **+ AI engine + models**, all bundled |
+| [`camai-engine-v1.0.0-win64.zip`](https://github.com/sutharprin098/visionguarda/releases/download/v1.0.0/camai-engine-v1.0.0-win64.zip) | 319 MB | Headless server/edge box — API only, no GUI |
+
+> **📖 Read [`RELEASE_v1.0.0.md`](RELEASE_v1.0.0.md) first** — install steps, checksums, system
+> requirements, what works vs what is deliberately still locked, honest performance
+> numbers, and troubleshooting.
+>
+> The installer is **unsigned**, so SmartScreen will warn on first run. Verify the
+> SHA-256 (`df4a97c5…de798dc5`) and choose *More info → Run anyway*.
 
 ---
 
 ## Key Features
 
 - **GPU First AI Engine**: Native acceleration via **NVIDIA TensorRT (FP16)**, **CUDA FP16**, **Intel OpenVINO GPU**, **Windows DirectML (DirectX 12)**, and CPU fallback.
-- **High-FPS Interleaved Tracking**: Blends YOLOX/YOLO11 deep object detection with ByteTrack Kalman filter predictions to achieve 25–60 FPS per stream.
+- **High-FPS Interleaved Tracking**: Blends YOLOX object detection with ByteTrack (Hungarian matching + appearance ReID) so track IDs survive occlusion. Throughput is hardware-bound — 57 FPS on a mid GPU, ~10 FPS on an Intel iGPU running the full traffic stack. See [`RELEASE_v1.0.0.md`](RELEASE_v1.0.0.md#-performance-honest-numbers).
 - **Adaptive GPU Tile Governor**: Dynamically scales inference resolution (320px–1280px) and tile allocations to maintain GPU utilization between 70% and 90%.
-- **Comprehensive Analytics Suite**:
-  - Vehicle speed estimation (km/h) with noise-filtered 1D Kalman tracking.
-  - Automatic Number Plate Recognition (ANPR) & OCR.
-  - Worker helmet and PPE compliance monitoring.
-  - Facial recognition and perimeter intrusion alerts.
-  - Unattended object / abandoned luggage detection.
-  - Heatmap generation, directional line crossing, and zone entry/exit counters.
+- **Analytics Suite** (each with a verified producer in the engine):
+  - Vehicle speed estimation (km/h) — real, and requires two-line distance calibration.
+  - Automatic Number Plate Recognition (ANPR) & OCR, throttled per track.
+  - Rider-helmet detection (traffic), proven on real footage.
+  - Face **detection** (YuNet, MIT). *Face recognition — identifying who — is not in v1.0.0.*
+  - Intrusion, restricted area, perimeter crossing, loitering, dwell time, crowd.
+  - Unattended object / object-removed detection.
+  - Directional line crossing, zone entry/exit counters, traffic density.
+- **Honest capability gating**: PPE, fire/smoke, red-light and stop-line violation, queue length and face recognition ship **locked, with the reason shown in the UI**, rather than as switches that emit nothing. See the [Coming soon](RELEASE_v1.0.0.md#-coming-soon--deliberately-not-enabled) table.
 - **Enterprise Application Suite**:
   - **Desktop Application** (Electron + React): Multi-grid monitor, fullscreen viewer, low-latency overlay, system resource gauges.
   - **SaaS Web Portal** (React + Tailwind + Supabase/PostgreSQL): Multi-tenant management, zone editor, incident logs, historical reporting.
@@ -88,7 +109,7 @@ npm run dev
 ---
 
 ## Test Verification
-Run the backend automated test suite (211+ tests):
+Run the backend automated test suite (206 tests across 13 files in `server/tests/`):
 ```bash
 cd server
 pytest
