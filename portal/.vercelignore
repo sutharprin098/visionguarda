@@ -1,0 +1,6 @@
+# Local build output — Vercel rebuilds on its own servers
+dist
+
+# Large demo videos — host via CDN, not the deploy upload (slow-link safe)
+public/demo.mp4
+public/features-demo.mp4
