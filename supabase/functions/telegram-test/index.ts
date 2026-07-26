@@ -47,6 +47,17 @@ Deno.serve(async (req) => {
   if (!botToken || !chatId) {
     return json({ error: "bot token and chat id are required" }, 400);
   }
+  // botToken is interpolated straight into the request PATH. Telegram's own
+  // format is <digits>:<base64url>, and anything outside it (a "/" or "..")
+  // would re-point the call at a different api.telegram.org endpoint than
+  // sendMessage. chat_id travels in the JSON body, but pin its shape too so a
+  // malformed value fails here with a clear message instead of at Telegram.
+  if (!/^\d{5,20}:[A-Za-z0-9_-]{20,100}$/.test(botToken)) {
+    return json({ error: "bot token format looks wrong — expected 123456789:AA…" }, 400);
+  }
+  if (!/^-?\d{1,20}$|^@[A-Za-z0-9_]{3,64}$/.test(chatId)) {
+    return json({ error: "chat id format looks wrong — expected a numeric id or @channelname" }, 400);
+  }
 
   try {
     const res = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {

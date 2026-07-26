@@ -11,7 +11,7 @@
 // detector adds all travel the same code. The message it sends is built from
 // the same row the Admin Dashboard renders, so the two are identical by
 // construction (no mapping table, no per-model formatting).
-import { adminClient, json, corsHeaders } from "../_shared/util.ts";
+import { adminClient, json, corsHeaders, safeEqual } from "../_shared/util.ts";
 
 // Priority marker from the alert's own severity — not from the detection type.
 const SEVERITY_MARK: Record<string, string> = {
@@ -93,9 +93,11 @@ Deno.serve(async (req) => {
   const authHeader = req.headers.get("Authorization") ?? "";
   const webhookSecret = Deno.env.get("TELEGRAM_WEBHOOK_SECRET") ?? "";
   const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
+  // Constant-time compares: verify_jwt is off here, so this bearer check is the
+  // only gate, and an unauthenticated caller can probe it without limit.
   const authorized =
-    (webhookSecret && authHeader === `Bearer ${webhookSecret}`) ||
-    (serviceKey && authHeader === `Bearer ${serviceKey}`);
+    (!!webhookSecret && safeEqual(authHeader, `Bearer ${webhookSecret}`)) ||
+    (!!serviceKey && safeEqual(authHeader, `Bearer ${serviceKey}`));
   if (!authorized) {
     return json({ error: "forbidden — service role only" }, 403);
   }

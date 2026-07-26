@@ -42,6 +42,22 @@ Deno.serve(async (req) => {
     const { email, full_name, role_id } = await req.json();
     if (!email || !full_name) return json({ error: "email and full_name required" }, 400);
 
+    // role_id is caller-supplied and was inserted into user_roles as-is, with
+    // no check that the role even belongs to the caller's organization. Roles
+    // are org-scoped rows (public.roles.org_id), and app.has_perm() resolves a
+    // user's permissions through user_roles → role_permissions WITHOUT
+    // re-checking the role's org — so granting a foreign org's "Organization
+    // Owner" role handed the new account that org's permission set. Resolve the
+    // role through the service client and require it to be in the caller's own
+    // org (a super admin may grant any role, matching every other check here).
+    if (role_id) {
+      const { data: role } = await db
+        .from("roles").select("id, org_id").eq("id", role_id).maybeSingle();
+      if (!role || (!callerProf.is_super_admin && role.org_id !== callerProf.org_id)) {
+        return json({ error: "role not found in your organization" }, 400);
+      }
+    }
+
     // 1. create auth user with metadata marking it as an org member — the
     //    handle_new_user trigger sees account_type 'member' and must not create a new org
     const tempPassword = crypto.randomUUID() + "-Aa1";
@@ -87,6 +103,6 @@ Deno.serve(async (req) => {
     return json({ user_id: uid, user_code: keys?.user_code, license_key: keys?.license_key });
   } catch (e) {
     console.error("invite-user failed", e);
-    return json({ error: e instanceof Error ? e.message : "unexpected error" }, 500);
+    return json({ error: "unexpected error" }, 500);  // details stay in the function log, not the response
   }
 });

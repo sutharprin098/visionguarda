@@ -20,6 +20,26 @@ export interface CaptureSource {
   appIcon: string | null;
 }
 
+export interface AppConfig {
+  supabaseUrl: string;
+  anonKey: string;
+  appType: "desktop" | "admin";
+  isPackaged: boolean;
+}
+
+/** Whatever supabase-js persists for a session. Opaque to us — stored and
+ *  returned verbatim through the DPAPI vault. */
+export interface CachedSession {
+  access_token?: string;
+  refresh_token?: string;
+  expires_at?: number;
+  [k: string]: unknown;
+}
+
+export type WarmSession =
+  | { ok: true; session: CachedSession }
+  | { ok: false; reason: "no-creds" | "retry" };
+
 export interface CamaiBridge {
   activate(licenseKey: string): Promise<{ ok: boolean; error?: string; access_token?: string; refresh_token?: string }>;
   capture: {
@@ -30,7 +50,23 @@ export interface CamaiBridge {
   getStoredSession(): Promise<{ ok: boolean; refresh_token?: string; device_id?: string }>;
   updateRefreshToken(token: string): Promise<{ ok: boolean }>;
   deactivate(): Promise<{ ok: boolean }>;
-  getConfig(): Promise<{ supabaseUrl: string; anonKey: string; appType: "desktop" | "admin"; isPackaged: boolean }>;
+  /** Resolved in preload — readable before the first render, no await needed. */
+  config: AppConfig;
+  getConfig(): Promise<AppConfig>;
+  /** The session the main process prefetched at app start, in parallel with
+   *  window creation. Pass true to force a fresh refresh. */
+  getWarmSession(force?: boolean): Promise<WarmSession>;
+  /** DPAPI-backed storage for the supabase-js auth client. */
+  sessionStore: {
+    get(): Promise<CachedSession | null>;
+    set(session: CachedSession | null): Promise<{ ok: boolean }>;
+    remove(): Promise<{ ok: boolean }>;
+  };
+  /** Encrypted cache of the last good desktop-sync bundle. */
+  bundleCache: {
+    get(): Promise<unknown | null>;
+    set(bundle: unknown): Promise<{ ok: boolean }>;
+  };
   engine: {
     start(): Promise<{ ok: boolean }>;
     stop(): Promise<{ ok: boolean }>;

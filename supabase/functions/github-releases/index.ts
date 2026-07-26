@@ -57,7 +57,10 @@ Deno.serve(async (req) => {
   // error response, which has no CORS headers at all. The browser then
   // reports a misleading "CORS error" instead of the real failure.
   try {
-    const ip = req.headers.get("x-forwarded-for") ?? "unknown";
+    // Last X-Forwarded-For hop, not the first: the first is whatever the caller
+    // typed, so a per-IP limit keyed on it is bypassed by varying the header.
+    const _xff = (req.headers.get("x-forwarded-for") ?? "").split(",").map((s) => s.trim()).filter(Boolean);
+    const ip = _xff.length ? _xff[_xff.length - 1] : "unknown";
     if (!(await rateLimit(`gh-releases:${ip}`, 30, 60_000))) {
       return json({ error: "too many requests, retry later" }, 429);
     }
@@ -141,6 +144,6 @@ Deno.serve(async (req) => {
     return json(data);
   } catch (e) {
     console.error("github-releases failed", e);
-    return json({ releases: [], error: e instanceof Error ? e.message : "unexpected error" }, 500);
+    return json({ releases: [], error: "unexpected error" }, 500);  // details stay in the function log
   }
 });

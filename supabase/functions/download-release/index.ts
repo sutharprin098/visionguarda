@@ -53,6 +53,6 @@ Deno.serve(async (req) => {
     return json({ url: location });
   } catch (e) {
     console.error("download-release failed", e);
-    return json({ error: e instanceof Error ? e.message : "unexpected error" }, 500);
+    return json({ error: "unexpected error" }, 500);  // details stay in the function log, not the response
   }
 });

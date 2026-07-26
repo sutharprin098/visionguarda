@@ -83,6 +83,6 @@ Deno.serve(async (req) => {
     return json({ ok: true, code, expires_at: expiresAt, bot_username: botUsername, deep_link: deepLink });
   } catch (e) {
     console.error("[telegram-link-code] error:", e);
-    return json({ error: e instanceof Error ? e.message : "internal error" }, 500);
+    return json({ error: "internal error" }, 500);  // details stay in the function log, not the response
   }
 });

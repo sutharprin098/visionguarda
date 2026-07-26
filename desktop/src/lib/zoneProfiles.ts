@@ -345,7 +345,14 @@ const TRAFFIC: ProfileDef = {
       // the engine logs why and emits nothing rather than faking a plate.
       key: "anpr", label: "ANPR (Number Plate)", group: "Events & Violations", defaultEnabled: false,
       description: "Reads number plates on detected vehicles (plate detector on vehicle crops + CRNN OCR) and logs each plate with a snapshot and crop. Requires the plate + OCR models (prepare_plate_model.py); does nothing, loudly, if they are absent, and should be validated on real plate footage before trusting.",
-      params: [confidence(0.5), { key: "region", label: "Plate Region", type: "select", default: "auto", options: [
+      // Default 0.15, NOT the usual 0.5. This is a plate-detector score, not a
+      // yolox class score, and the two are not on the same scale: measured over
+      // 145 vehicle crops of real CCTV footage the plate model's single highest
+      // score was 0.35, so a 0.5 gate discarded ~97% of genuine plates before
+      // anything else could look at them (see docs/ANPR.md). False positives are
+      // rejected downstream by geometry gating and plate-format validation, not
+      // by this number — raise it only if you are seeing spurious plate boxes.
+      params: [confidence(0.15), { key: "region", label: "Plate Region", type: "select", default: "auto", options: [
         { value: "auto", label: "Auto" }, { value: "eu", label: "Europe" }, { value: "us", label: "North America" }, { value: "in", label: "India" }, { value: "me", label: "Middle East" },
       ] }],
     },

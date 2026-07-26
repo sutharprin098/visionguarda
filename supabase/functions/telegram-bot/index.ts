@@ -18,7 +18,7 @@
 //
 // verify_jwt is off (config.toml) — the caller is Telegram, not a Supabase user.
 // The TELEGRAM_WEBHOOK_SECRET header guards against non-Telegram callers.
-import { adminClient, json } from "../_shared/util.ts";
+import { adminClient, json, safeEqual } from "../_shared/util.ts";
 
 function esc(s: unknown): string {
   return String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -247,8 +247,23 @@ Deno.serve(async (req) => {
   if (req.method !== "POST") return json({ ok: true });
 
   // Only Telegram (which knows the secret set in setWebhook) may call this.
+  //
+  // FAIL CLOSED. This was `if (secret && ...)`: with TELEGRAM_WEBHOOK_SECRET
+  // unset, the check was skipped entirely — and verify_jwt is off for this
+  // function (config.toml), so that left a public, unauthenticated endpoint
+  // that accepts a forged Telegram update. Every identity downstream (chat_id,
+  // telegram_user_id, username) is read straight out of that body, so a forged
+  // update means attacker-chosen identity: connection-code guessing with a
+  // fresh chat_id per attempt (which resets telegram_connect_attempts, the
+  // only brute-force guard codes have), and /disconnect against a live chat.
+  // An unset secret is a deployment error, not a reason to trust the caller.
   const secret = Deno.env.get("TELEGRAM_WEBHOOK_SECRET") ?? "";
-  if (secret && req.headers.get("X-Telegram-Bot-Api-Secret-Token") !== secret) {
+  if (!secret) {
+    console.error("[telegram-bot] TELEGRAM_WEBHOOK_SECRET is not set — refusing every webhook call");
+    return json({ ok: true }); // 200 so Telegram doesn't retry-storm
+  }
+  // Constant-time: this endpoint is unauthenticated and probeable without limit.
+  if (!safeEqual(req.headers.get("X-Telegram-Bot-Api-Secret-Token") ?? "", secret)) {
     return json({ ok: true }); // silently ignore
   }
 
