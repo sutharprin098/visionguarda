@@ -41,6 +41,25 @@ export function userClient(req: Request) {
   );
 }
 
+/** Constant-time string compare for shared secrets / bearer tokens.
+ *
+ * `a === b` on a secret short-circuits at the first differing byte, which is
+ * measurable across enough requests and lets a caller recover the secret one
+ * character at a time. These endpoints (notify-telegram, send-email, the
+ * telegram webhook) are unauthenticated by design and can be probed without
+ * limit, so the compare has to be length-independent.
+ */
+export function safeEqual(a: string, b: string): boolean {
+  const enc = new TextEncoder();
+  const ab = enc.encode(a);
+  const bb = enc.encode(b);
+  // Fold the length difference into the result instead of returning early.
+  let diff = ab.length ^ bb.length;
+  const n = Math.max(ab.length, bb.length);
+  for (let i = 0; i < n; i++) diff |= (ab[i] ?? 0) ^ (bb[i] ?? 0);
+  return diff === 0;
+}
+
 export async function sha256hex(text: string): Promise<string> {
   const data = new TextEncoder().encode(text);
   const hash = await crypto.subtle.digest("SHA-256", data);
@@ -86,18 +105,23 @@ export async function decryptSecret(b64: string): Promise<string> {
 // off, firewall/port-forwarding not set up. USB sources are opened locally
 // by the desktop's AI engine and can't be probed from the cloud at all.
 export interface CameraFields {
-  source_type: "rtsp" | "onvif" | "usb" | "ip" | "nvr" | "dvr" | "screen_share";
+  source_type: "rtsp" | "onvif" | "usb" | "ip" | "nvr" | "dvr" | "screen_share" | "stream_url";
   host?: string;
   port?: number;
   username?: string;
   password?: string;
   path?: string; // e.g. /Streaming/Channels/101, or a USB device index
+  url?: string;  // stream_url only: the whole address, stored verbatim
 }
 
 const DEFAULT_PORTS: Record<string, number> = { rtsp: 554, nvr: 554, dvr: 554, onvif: 80, ip: 80 };
 
 export function buildConnectionUri(f: CameraFields): string {
   if (f.source_type === "usb") return f.path ?? "0";
+  // Stored verbatim. Re-assembling it from parts would drop the query string
+  // an HLS playlist URL carries its signature in, and re-encode characters the
+  // origin signed over.
+  if (f.source_type === "stream_url") return (f.url ?? "").trim();
   const port = f.port ?? DEFAULT_PORTS[f.source_type] ?? 554;
   const scheme = f.source_type === "onvif" || f.source_type === "ip" ? "http" : "rtsp";
   const auth = f.username ? `${encodeURIComponent(f.username)}:${encodeURIComponent(f.password ?? "")}@` : "";
@@ -114,6 +138,113 @@ async function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
     return await Promise.race([p, timeout]);
   } finally {
     clearTimeout(timer!);
+  }
+}
+
+// ---- SSRF guard for caller-supplied camera hosts ----------------------------
+// test-camera / add-camera / update-camera all dial a host:port the CALLER
+// chooses, from inside the edge runtime. Without a guard that is a server-side
+// request forgery primitive: the caller picks the destination, and the reply
+// ("port open", "RTSP 401", ONVIF XML) comes back as the response body, which
+// makes it a working internal port scanner as well.
+//
+// The original check covered 127.0.0.1 / 10./192.168./172.16-31./169.254. and
+// nothing else, so every one of these reached Deno.connect() unfiltered:
+//   • 169.254.169.254 spelled any other way — 0xA9FEA9FE, 2852039166, 0251.0376.0251.0376
+//   • the rest of loopback (127.0.0.2, 127.1) and 0.0.0.0 / 0
+//   • IPv6 loopback in brackets, link-local fe80::, unique-local fc00::/7,
+//     and IPv4-mapped ::ffff:169.254.169.254
+//   • carrier-grade NAT (100.64/10) and the 192.0.0/24 IETF block
+//   • ANY hostname resolving to one of the above (rebinding, or simply an
+//     attacker-owned A record pointing at the metadata service)
+//
+// Everything below is a pure destination filter: a genuine public camera host
+// is unaffected, and a private one short-circuits to the same "the desktop app
+// will connect to it locally" answer verifyCameraConnection already returned.
+
+/** Expand the shorthand IPv4 forms inet_aton() accepts into dotted-quad. */
+function normalizeIpv4(host: string): string | null {
+  const h = host.trim();
+  if (!/^[0-9a-fx.]+$/i.test(h)) return null;
+  const parts = h.split(".");
+  if (parts.length > 4 || parts.some((p) => p === "")) return null;
+  const nums: number[] = [];
+  for (const p of parts) {
+    let n: number;
+    if (/^0x[0-9a-f]+$/i.test(p)) n = parseInt(p, 16);
+    else if (/^0[0-7]+$/.test(p)) n = parseInt(p, 8);
+    else if (/^\d+$/.test(p)) n = parseInt(p, 10);
+    else return null;
+    if (!Number.isFinite(n) || n < 0) return null;
+    nums.push(n);
+  }
+  // 1-3 part forms pack the remaining bytes into the last number (127.1, 2130706433).
+  let value: number;
+  if (nums.length === 4) {
+    if (nums.some((n) => n > 255)) return null;
+    value = ((nums[0] << 24) >>> 0) + (nums[1] << 16) + (nums[2] << 8) + nums[3];
+  } else {
+    const last = nums[nums.length - 1];
+    const head = nums.slice(0, -1);
+    if (head.some((n) => n > 255)) return null;
+    const maxLast = 2 ** (8 * (4 - head.length));
+    if (last >= maxLast) return null;
+    value = last;
+    head.forEach((n, i) => { value += n * 2 ** (8 * (3 - i)); });
+  }
+  value = value >>> 0;
+  return [(value >>> 24) & 255, (value >>> 16) & 255, (value >>> 8) & 255, value & 255].join(".");
+}
+
+/** True for any address that must never be dialled from the cloud runtime. */
+export function isPrivateHost(host: string): boolean {
+  let h = host.trim().toLowerCase();
+  if (!h) return true;
+  if (h.startsWith("[") && h.endsWith("]")) h = h.slice(1, -1);
+  if (h === "localhost" || h.endsWith(".localhost") || h.endsWith(".local") ||
+      h === "metadata.google.internal" || h.endsWith(".internal")) return true;
+
+  // IPv6 (including the IPv4-mapped form, which is re-checked as IPv4).
+  if (h.includes(":")) {
+    const mapped = h.match(/^::ffff:([0-9.]+)$/);
+    if (mapped) return isPrivateHost(mapped[1]);
+    if (h === "::" || h === "::1") return true;
+    if (/^f[cd][0-9a-f]{2}:/.test(h)) return true;   // fc00::/7 unique-local
+    if (/^fe[89ab][0-9a-f]:/.test(h)) return true;   // fe80::/10 link-local
+    return false;
+  }
+
+  const dotted = normalizeIpv4(h);
+  if (!dotted) return false; // a name — resolvesToPrivate() handles those
+  const [a, b] = dotted.split(".").map(Number);
+  if (a === 0 || a === 127) return true;             // this-host / loopback
+  if (a === 10) return true;                          // RFC1918
+  if (a === 172 && b >= 16 && b <= 31) return true;   // RFC1918
+  if (a === 192 && b === 168) return true;            // RFC1918
+  if (a === 169 && b === 254) return true;            // link-local + metadata
+  if (a === 100 && b >= 64 && b <= 127) return true;  // RFC6598 CGNAT
+  if (a === 192 && b === 0) return true;              // 192.0.0/24 + TEST-NET-1
+  if (a === 198 && (b === 18 || b === 19)) return true; // benchmarking
+  if (a >= 224) return true;                          // multicast + reserved
+  return false;
+}
+
+/** Resolve a hostname and report whether ANY answer is a private address. */
+export async function resolvesToPrivate(host: string): Promise<boolean> {
+  const h = host.trim().replace(/^\[|\]$/g, "");
+  if (normalizeIpv4(h) || h.includes(":")) return false; // literal, already checked
+  try {
+    const answers = await Promise.allSettled([
+      Deno.resolveDns(h, "A"),
+      Deno.resolveDns(h, "AAAA"),
+    ]);
+    const addrs = answers.flatMap((r) => (r.status === "fulfilled" ? r.value : []));
+    // No answer at all: let the connect attempt fail naturally with its own
+    // "could not reach" message rather than inventing a different verdict.
+    if (!addrs.length) return false;
+    return addrs.some((addr) => isPrivateHost(addr));
+  } catch {
+    return false;
   }
 }
 
@@ -204,6 +335,9 @@ async function probeOnvifDevice(host: string, port: number): Promise<{ manufactu
   }
 }
 
+/** Schemes cv2.VideoCapture/CAP_FFMPEG can actually open as a live stream. */
+const STREAM_URL_SCHEMES = ["http:", "https:", "rtsp:", "rtsps:", "rtmp:", "rtmps:"];
+
 export async function verifyCameraConnection(f: CameraFields): Promise<CameraVerifyResult> {
   if (f.source_type === "usb" || f.source_type === "screen_share") {
     return {
@@ -213,24 +347,41 @@ export async function verifyCameraConnection(f: CameraFields): Promise<CameraVer
         : "Screen sharing is virtual and active on the desktop client."
     };
   }
+
+  // Deliberately NOT dialled from here. Every other branch below connects to a
+  // caller-chosen host:port, which is why isPrivateHost() guards them — but
+  // those are assembled from separate fields we control the shape of. A whole
+  // caller-supplied URL is a strictly worse SSRF primitive (redirects, embedded
+  // credentials, non-HTTP schemes), and the edge runtime has no business
+  // fetching it. Validate the scheme, then let the desktop app open it locally
+  // — exactly the answer the private-IP branch below already gives.
+  if (f.source_type === "stream_url") {
+    const raw = (f.url ?? "").trim();
+    if (!raw) return { ok: false, message: "stream URL is required" };
+    let parsed: URL;
+    try {
+      parsed = new URL(raw);
+    } catch {
+      return { ok: false, message: "That is not a valid URL — include the scheme, e.g. https://…/playlist.m3u8" };
+    }
+    if (!STREAM_URL_SCHEMES.includes(parsed.protocol)) {
+      return { ok: false, message: `Unsupported scheme "${parsed.protocol}" — use one of ${STREAM_URL_SCHEMES.join(", ")}` };
+    }
+    return {
+      ok: true,
+      message: "Stream URL saved. The desktop app opens and verifies it locally when the camera starts.",
+    };
+  }
   if (!f.host) return { ok: false, message: "camera IP / host is required" };
 
-  const isPrivateIp = (host: string): boolean => {
-    const h = host.trim().toLowerCase();
-    if (h === "localhost" || h === "127.0.0.1" || h === "::1") return true;
-    const parts = h.split(".").map(Number);
-    if (parts.length === 4 && !parts.some(isNaN)) {
-      const [a, b] = parts;
-      if (a === 10) return true;
-      if (a === 192 && b === 168) return true;
-      if (a === 172 && b >= 16 && b <= 31) return true;
-      if (a === 169 && b === 254) return true;
-    }
-    return false;
-  };
-
-  if (isPrivateIp(f.host)) {
+  if (isPrivateHost(f.host)) {
     return { ok: true, message: `Local/private IP address (${f.host}) bypassed cloud verification. The desktop app will connect to it locally.` };
+  }
+
+  // A hostname that RESOLVES to a private/loopback/link-local address is the
+  // same request as typing that address in — see resolvesToPrivate().
+  if (await resolvesToPrivate(f.host)) {
+    return { ok: true, message: `Local/private address (${f.host}) bypassed cloud verification. The desktop app will connect to it locally.` };
   }
 
   const port = f.port ?? DEFAULT_PORTS[f.source_type] ?? 554;
