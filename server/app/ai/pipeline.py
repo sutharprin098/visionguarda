@@ -1,4 +1,5 @@
 import os
+import re
 import cv2
 import time
 import json
@@ -21,6 +22,8 @@ from app.ai import face as face_detect
 from app.ai import helmet as helmet_detect
 from app.ai import plate as plate_detect
 from app.ai import plate_ocr
+from app.ai import plate_worker
+from app import config
 from app.storage import insert_alert, insert_history_record
 from app.recorder import CCTVRecorder
 from app.analytics import (
@@ -30,10 +33,26 @@ from app.analytics import (
 from app.config import RECORDINGS_DIR, HELMET_INTERVAL_S, ANPR_INTERVAL_S
 from app.gpu_monitor import get_gpu_stats
 
-# Minimum buffering for all FFMPEG-based capture sources
+# Minimum buffering for all FFMPEG-based capture sources.
+#
+# Note for anyone tempted to add stimeout/timeout/rw_timeout here to bound a
+# dead RTSP host: it does not work on this build. All of them were measured at
+# exactly 30 s, identical to setting nothing at all — see the option matrix in
+# PipelineCoordinator._preflight_network_source, which is where that problem is
+# actually solved.
 os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = (
     "rtsp_transport;tcp|threads;4|fflags;nobuffer|flags;low_delay"
 )
+
+
+def mask_source(src: str) -> str:
+    """rtsp://admin:hunter2@10.0.0.5/s1 -> rtsp://admin:***@10.0.0.5/s1
+
+    Capture logs are read by operators, shipped in support bundles and printed
+    to the desktop's engine-log panel; a camera's password travels in the
+    userinfo of its RTSP URL, so it never goes to stdout in the clear.
+    """
+    return re.sub(r"://([^:/@]+):([^@]*)@", r"://\1:***@", str(src))
 
 
 
@@ -1076,6 +1095,69 @@ class PipelineCoordinator:
     def backend(self, val):
         self._backend_override = val
 
+    def _preflight_network_source(self) -> bool:
+        """Can we even reach this source? Answered in ~3s instead of ~60s.
+
+        WHY THIS EXISTS
+        ---------------
+        cv2.VideoCapture against an unreachable RTSP host does not fail fast.
+        Measured on this build (OpenCV 4.8.1, Windows) against an unroutable
+        TEST-NET address, one _open_capture() attempt cost 60.4 s: CAP_FFMPEG
+        blocked 30.3 s and the default backend (also FFmpeg for a URL) another
+        30.1 s. That is not tunable from here — every documented FFmpeg knob was
+        measured and NONE of them moved it:
+
+            none                30.1s     stimeout;2000000    30.0s
+            current engine opts 30.0s     timeout;2000000     30.1s
+            rw_timeout;2000000  30.1s     rtsp_transport;udp  30.0s
+
+        The user-visible consequence, reproduced end to end against the running
+        engine: a camera with a wrong IP or a powered-off camera reported
+        health_status "connecting" for over three minutes with no reason ever
+        surfaced, because _update_health_on_failure only runs AFTER the blocking
+        open returns, and then needs six such cycles before it will say
+        "offline". The operator sees "Connecting..." forever and is told nothing.
+
+        A TCP connect that fails in 3 s is proof the blocking open cannot
+        succeed — nothing listens there — so skipping it loses no capability and
+        costs no correctness. The inverse is deliberately NOT assumed: a
+        reachable host always falls through to the real open, because only the
+        decoder can say whether a stream is actually usable.
+
+        Returns True to proceed with the open, False to skip this cycle.
+        """
+        # Device indices, files and pushed screenshare frames have no host to
+        # dial; probing them is meaningless and must never gate them.
+        if self.source_type in ("usb", "webcam", "screenshare") or self._is_video_file:
+            return True
+        src = str(self.source)
+        if "://" not in src:
+            return True
+
+        from app.health_probe import probe_connection
+        try:
+            result = probe_connection(src, timeout=3.0)
+        except Exception:
+            # A broken probe must never be the reason a good camera is refused.
+            return True
+
+        if result == "network_error":
+            self._health_status = "network_error"
+            # ASCII only: this goes to a Windows console whose code page mangles
+            # non-ASCII punctuation into mojibake in the shipped log panel.
+            print(f"[Cap-{self.camera_id}] Preflight: {mask_source(src)} is unreachable "
+                  f"(TCP connect failed) - skipping the blocking decoder open.", flush=True)
+            return False
+
+        # auth_failed is reported for visibility but NOT used to skip the open.
+        # probe_connection sends OPTIONS with no credentials, and cameras that
+        # challenge OPTIONS answer 401 even when the credentials embedded in the
+        # URL are perfectly correct — refusing to open on that would break
+        # working cameras, which is the opposite of the bug being fixed here.
+        if result == "auth_failed":
+            self._health_status = "auth_failed"
+        return True
+
     def _update_health_on_failure(self):
         """Classifies a capture failure as connecting/offline/auth_failed/
         network_error. Probing (a real socket round-trip) is rate-limited —
@@ -1167,6 +1249,13 @@ class PipelineCoordinator:
             helmet_detect.unload()
         # Same for the ANPR plate detector + its OCR — both separate networks.
         if not self._wants_anpr():
+            # Stop the async worker before unloading the models it calls into,
+            # or an in-flight pass would run against a detector that has just
+            # been dropped.
+            w = getattr(self, "_anpr_worker", None)
+            if w is not None:
+                w.stop()
+                self._anpr_worker = None
             if plate_detect.is_loaded():
                 plate_detect.unload()
             if plate_ocr.is_loaded():
@@ -1272,13 +1361,19 @@ class PipelineCoordinator:
             src = (int(self.source)
                    if self.source_type in ("webcam", "usb") and str(self.source).isdigit()
                    else self.source)
-            self.cap = self._open_capture(src, hw_accel=self._cap_hw_accel)
-            if self.cap.isOpened():
-                self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-                self.cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
-                print(f"[Cap-{self.camera_id}] Opened source: {src}", flush=True)
+            if self._preflight_network_source():
+                self.cap = self._open_capture(src, hw_accel=self._cap_hw_accel)
+                if self.cap.isOpened():
+                    self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+                    self.cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
+                    print(f"[Cap-{self.camera_id}] Opened source: {mask_source(src)}", flush=True)
+                else:
+                    print(f"[Cap-{self.camera_id}] Cannot open source: {mask_source(src)}", flush=True)
             else:
-                print(f"[Cap-{self.camera_id}] Cannot open source: {src}", flush=True)
+                # Unreachable on the first try. Leave self.cap as None so the
+                # loop below takes its normal reconnect path (with backoff)
+                # rather than treating this as an opened capture.
+                self._cap_consecutive_failures += 1
 
         last_good_frame_ts = time.time()
         # Counts consecutive failed reconnect cycles; drives exponential
@@ -1306,6 +1401,16 @@ class PipelineCoordinator:
                             self.cap.release()
                         backoff = min(30.0, 2.0 * (1.5 ** min(self._cap_consecutive_failures, 12)))
                         time.sleep(backoff)
+                        # Reachability first. Without this the reconnect cycle
+                        # spends ~60s per attempt inside a blocking open on a
+                        # host that is simply not there, which is what made a
+                        # misconfigured camera sit on "connecting" indefinitely
+                        # instead of reporting why.
+                        if not self._preflight_network_source():
+                            self.cap = None
+                            self._cap_consecutive_failures += 1
+                            last_good_frame_ts = time.time()
+                            continue
                         self.cap = self._open_capture(src, hw_accel=self._cap_hw_accel)
                         if self.cap.isOpened():
                             self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
@@ -1855,30 +1960,60 @@ class PipelineCoordinator:
                         hd.last_error = None
             t_helmet = (time.perf_counter() - t_helmet0) * 1000
 
-            # ── ANPR pass: plate detector (+ optional CRNN OCR) on vehicle ───
-            # crops only, gated like the helmet pass. Appends class=="number_
-            # plate" boxes (with plate_text when OCR read one) into `detections`
-            # before analytics, which associates a read plate to the vehicle
-            # track it sits on and logs a deduped number_plate event. A frame
-            # with no vehicle costs zero; a missing model disables ANPR only.
-            # Throttled hard: ANPR is the heaviest pass (a plate detector + OCR
-            # on every vehicle crop). Running it every frame froze the loop to
-            # <1 fps in a live run. Coarse cadence loses nothing — the plate is
-            # deduped over ANPR_EVENT_COOLDOWN. Skipped entirely between runs.
+            # ── ANPR pass: plate detector (+ CRNN OCR) on vehicle crops ─────
+            # Appends class=="number_plate" boxes (with plate_text when OCR read
+            # one) into `detections` before analytics, which associates a read
+            # plate to the vehicle track it sits on and logs a deduped
+            # number_plate event. A frame with no vehicle costs zero; a missing
+            # model disables ANPR only.
+            #
+            # This pass is now ASYNCHRONOUS (app/ai/plate_worker.py). It used to
+            # run inline, which made it the heaviest thing in the loop — a plate
+            # detector plus OCR on every vehicle crop, every pass — and forced a
+            # once-per-second throttle just to keep tracking alive. Now the loop
+            # SUBMITS a frame and immediately overlays whatever the worker has
+            # already published, so ANPR cost cannot affect FPS: a slow pass
+            # lowers ANPR cadence and nothing else. The submit is still rate-
+            # limited to ANPR_INTERVAL_S because a plate does not change between
+            # frames, and the worker's queue drops stale frames anyway.
             t_anpr0 = time.perf_counter()
-            if self._wants_anpr() and (_now_sec - getattr(self, "_anpr_last", 0.0)) >= ANPR_INTERVAL_S:
-                self._anpr_last = _now_sec
-                anpr_cfg = (self.profile_features or {}).get("anpr", {})
-                pd = plate_detect.get_detector(float(anpr_cfg.get("confidence", 0.5)))
-                if pd is not None:
-                    vehicle_boxes = [d["bbox"] for d in detections
-                                     if d.get("class") in plate_detect.PLATE_VEHICLES]
-                    for pdet in pd.detect_on_vehicles(frame, vehicle_boxes):
-                        detections.append(pdet)
-                        masks.append([])   # stays index-parallel with detections
-                    if pd.last_error:
-                        self._stage_errors["anpr"] = pd.last_error
-                        pd.last_error = None
+            if self._wants_anpr():
+                worker = getattr(self, "_anpr_worker", None)
+                if worker is None:
+                    worker = plate_worker.AnprWorker(self.camera_id)
+                    worker.start()
+                    self._anpr_worker = worker
+
+                if (_now_sec - getattr(self, "_anpr_last", 0.0)) >= ANPR_INTERVAL_S:
+                    self._anpr_last = _now_sec
+                    anpr_cfg = (self.profile_features or {}).get("anpr", {})
+                    vehicles = [d for d in detections
+                                if d.get("class") in plate_detect.PLATE_VEHICLES]
+                    if vehicles:
+                        if config.ANPR_ASYNC:
+                            worker.submit(
+                                frame,
+                                [d["bbox"] for d in vehicles],
+                                [d.get("track_id") for d in vehicles],
+                                float(anpr_cfg.get("confidence", config.ANPR_THRESHOLD)),
+                            )
+                        else:
+                            # Synchronous fallback (CAMAI_ANPR_ASYNC=0) — same
+                            # code path, useful for deterministic benchmarking.
+                            worker._process({
+                                "frame": frame,
+                                "boxes": [d["bbox"] for d in vehicles],
+                                "track_ids": [d.get("track_id") for d in vehicles],
+                                "conf": float(anpr_cfg.get("confidence",
+                                                           config.ANPR_THRESHOLD)),
+                            })
+
+                for pdet in worker.latest():
+                    detections.append(pdet)
+                    masks.append([])   # stays index-parallel with detections
+                if worker.last_error:
+                    self._stage_errors["anpr"] = worker.last_error
+                    worker.last_error = None
             t_anpr = (time.perf_counter() - t_anpr0) * 1000
 
             # ── Apply the zone profile to what this camera reports ──────────
@@ -1999,7 +2134,18 @@ class PipelineCoordinator:
                     "lane":       det.get("lane"),
                     # Present only on number_plate dets that OCR could read; None
                     # otherwise (localised-but-unread, or a non-plate class).
+                    # plate_text_confidence is the OCR's own confidence and is
+                    # deliberately SEPARATE from `confidence` above, which is the
+                    # plate DETECTOR's score — an operator needs to see "the box
+                    # is certainly a plate, the reading of it is not" as the two
+                    # different facts they are. plate_failure says why a visible
+                    # plate produced no text (blurry / too small / low confidence
+                    # / invalid format), so an empty read is explainable instead
+                    # of silent.
                     "plate_text": det.get("plate_text"),
+                    "plate_text_confidence": det.get("plate_text_confidence"),
+                    "plate_reads": det.get("plate_reads"),
+                    "plate_failure": det.get("plate_failure"),
                     "bbox": {
                         "x1": round(float(bbox["x1"]) / orig_w, 4),
                         "y1": round(float(bbox["y1"]) / orig_h, 4),
@@ -2238,7 +2384,12 @@ class PipelineCoordinator:
                 "inference_latency":  round(data["t_inf"],    1),
                 "face_latency":       round(data.get("t_face", 0.0), 1),
                 "helmet_latency":     round(data.get("t_helmet", 0.0), 1),
+                # With the async worker this is the SUBMIT cost, i.e. the frame
+                # copy — not the cost of detection+OCR, which no longer happens
+                # on this thread. `anpr` below reports the worker's own timing.
                 "anpr_latency":       round(data.get("t_anpr", 0.0), 1),
+                "anpr":               (self._anpr_worker.stats()
+                                       if getattr(self, "_anpr_worker", None) else None),
                 "postprocess_latency":round(data["t_post"],   1),
                 "tracking_latency":   round(data["trk_lat"],  1),
                 "rendering_latency":  round(tel_lat,           1),
@@ -2381,7 +2532,32 @@ class PipelineCoordinator:
         # when it shares a GPU with concurrent AI compute on that device.
         accel_mode = cv2.VIDEO_ACCELERATION_ANY if hw_accel else cv2.VIDEO_ACCELERATION_NONE
         params = [cv2.CAP_PROP_HW_ACCELERATION, accel_mode]
-        for backend in [cv2.CAP_FFMPEG, None, cv2.CAP_DSHOW, cv2.CAP_MSMF]:
+
+        # Try only the backends that can actually serve this kind of source.
+        # The old list ran all four for everything, which cost real time in
+        # both directions (measured on this machine, OpenCV 4.8.1):
+        #
+        #  * URL/file source: DSHOW and MSMF open cameras BY NAME and cannot
+        #    take a URL at all — they refuse instantly with
+        #    "backend is generally available but can't be used to capture by
+        #    name". They were never going to open an RTSP stream, so the only
+        #    thing they contributed was log noise.
+        #  * Device index: CAP_FFMPEG cannot open a webcam either, but unlike
+        #    the above it does not fail fast — putting it first made opening
+        #    the local webcam take 2.00 s instead of the 0.47 s it takes when
+        #    the platform backend is tried first.
+        #
+        # What this does NOT fix is the dominant cost for an unreachable RTSP
+        # host: CAP_FFMPEG and the default backend (which is also FFmpeg for a
+        # URL) each block ~30 s before giving up, and no capture option changes
+        # that — see the option matrix in _preflight_network_source, which is
+        # what actually keeps us out of this path.
+        if isinstance(src, int):
+            backends = [None, cv2.CAP_DSHOW, cv2.CAP_MSMF]
+        else:
+            backends = [cv2.CAP_FFMPEG, None]
+
+        for backend in backends:
             try:
                 cap = cv2.VideoCapture(src, backend, params) if backend else cv2.VideoCapture(src)
                 if cap.isOpened():

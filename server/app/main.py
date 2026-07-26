@@ -47,13 +47,54 @@ except ImportError:
 # CORS Setup. Not "*" any more: a wildcard let any page the user happened to
 # have open preflight-and-POST the control endpoints below. The allowlist is
 # config.CORS_ORIGINS (override with CAMAI_CORS_ORIGINS).
+#
+# allow_credentials is False: this engine has no cookies and no session — the
+# only credential it understands is the X-CamAI-Token header, which a
+# cross-origin page cannot obtain. Advertising credential support only widened
+# what a browser would attach to (and read back from) a cross-origin call.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=CORS_ORIGINS,
-    allow_credentials=True,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+# --- DNS-rebinding guard ----------------------------------------------------
+import os as _os_mod
+_os_env_hosts = _os_mod.getenv("CAMAI_ALLOWED_HOSTS", "")
+# The engine binds loopback, which stops remote packets but NOT a browser: any
+# page the operator visits can point a hostname it controls at 127.0.0.1 and
+# then talk to this API as a same-origin peer, which sidesteps the CORS
+# allowlist above entirely (the origin is the attacker's own domain, and after
+# rebinding the request really is same-origin). Requiring the Host header to
+# name loopback closes that: the desktop app, the local viewer and every
+# documented client address the engine as 127.0.0.1/localhost, while a rebound
+# attacker.example page arrives carrying its own hostname and is refused.
+#
+# "testserver" is Starlette's TestClient hostname and is accepted deliberately:
+# a browser derives Host from the URL it was given and cannot be scripted into
+# sending a different one, so a name that resolves nowhere on the public
+# internet is not an attack path — while rejecting it would mean the guard
+# could only be exercised by not testing it. CAMAI_ALLOWED_HOSTS (comma
+# separated) covers deployments fronted by a reverse proxy under a real name.
+_ALLOWED_HOST_NAMES = {"127.0.0.1", "localhost", "::1", "[::1]", "0.0.0.0", "testserver"} | {
+    h.strip().lower() for h in _os_env_hosts.split(",") if h.strip()
+}
+
+
+@app.middleware("http")
+async def _reject_foreign_host_header(request, call_next):
+    host = (request.headers.get("host") or "").split(",")[0].strip().lower()
+    name = host.rsplit(":", 1)[0] if (":" in host and not host.startswith("[")) else host
+    # A deployment that deliberately binds a routable interface
+    # (CAMAI_HOST=0.0.0.0 / a LAN ip, per config.py) must keep working, so the
+    # configured bind address is always accepted alongside loopback.
+    if name and name not in _ALLOWED_HOST_NAMES and name != HOST.lower():
+        from fastapi.responses import JSONResponse
+        return JSONResponse({"detail": "Invalid Host header."}, status_code=421)
+    return await call_next(request)
 
 CONTROL_TOKEN_HEADER = "X-CamAI-Token"
 
@@ -214,8 +255,37 @@ ws_manager = ConnectionManager()
 # looks open but is actually dead.
 WS_IDLE_TIMEOUT_SECS = 30.0
 
+def _ws_origin_allowed(websocket: WebSocket) -> bool:
+    """Same allowlist the HTTP CORS middleware enforces, applied by hand.
+
+    WebSockets are NOT covered by CORS: a browser will happily open
+    ws://127.0.0.1:8000/ws from any page, no preflight, no Origin check unless
+    the server does it itself. Without this, every site the operator visits
+    could (a) subscribe to a camera and receive its live telemetry — detections,
+    tracks, plate reads — and (b) send `screen_frame`, which decodes
+    caller-supplied base64 into a real frame and pushes it into the running
+    camera thread, i.e. inject arbitrary imagery into someone's analytics and
+    recordings. That is CWE-1385 (cross-site WebSocket hijacking).
+
+    A non-browser client (the desktop's own Node/Electron main process, curl,
+    a test harness) sends no Origin at all; that stays allowed, exactly as
+    before, because it was never the attacker path — a local process can talk
+    to loopback regardless.
+    """
+    origin = websocket.headers.get("origin")
+    if origin is None:
+        return True
+    if "*" in CORS_ORIGINS:
+        return True
+    return origin in CORS_ORIGINS
+
+
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
+    if not _ws_origin_allowed(websocket):
+        print(f"[WS] Rejected connection from disallowed origin: {websocket.headers.get('origin')!r}", flush=True)
+        await websocket.close(code=1008)
+        return
     await ws_manager.connect(websocket)
     try:
         while True:
@@ -293,6 +363,20 @@ class CameraDisplayPayload(BaseModel):
 
 class CameraRecordingPayload(BaseModel):
     enabled: bool
+
+class CameraTestPayload(BaseModel):
+    """Everything app.camera_test.run_test accepts. Either a full `url` or the
+    host/port/path parts — the portal sends parts, an operator pasting a URL
+    from their camera's manual sends `url`, and run_test prefers `url`."""
+    source_type: str
+    host: Optional[str] = None
+    port: Optional[int] = None
+    username: Optional[str] = None
+    password: Optional[str] = None
+    path: Optional[str] = None
+    url: Optional[str] = None
+    frame_count: Optional[int] = 15
+    frame_timeout: Optional[float] = 12.0
 
 # --- REST APIs ---
 
@@ -527,7 +611,48 @@ def update_tiling_settings(payload: TilingPayload):
 def list_cameras():
     return get_all_cameras()
 
+@app.post("/api/cameras/test", dependencies=control)
+async def test_camera_connection(payload: CameraTestPayload):
+    """Diagnose a camera connection from the LAN, before it is ever added.
+
+    app/camera_test.py has implemented this since it was written and nothing
+    ever called it — there was no route to it and no import of it anywhere in
+    the server, so every "Test Connection" in the product went to the
+    `test-camera` Supabase edge function instead. That function runs in
+    Deno on Supabase's cloud, and for any private address it returns:
+
+        ok: true, "Local/private IP address (...) bypassed cloud verification"
+
+    ...having opened no socket at all (supabase/functions/_shared/util.ts).
+    10/8, 192.168/16 and 172.16-31/12 cover essentially every CCTV camera ever
+    installed, so in real deployments the test passed unconditionally and the
+    operator learned nothing until the camera silently failed to stream later.
+    The engine is on the camera's LAN and is the only vantage point that can
+    answer the question, which is what this route finally exposes.
+
+    Runs in a worker thread: run_test does blocking socket and decoder work for
+    up to ~20s, and on the event loop that would stall every other request the
+    desktop makes (status polling, MJPEG, telemetry) for its whole duration.
+    """
+    from app.camera_test import run_test
+
+    kwargs = payload.model_dump(exclude_none=True)
+    try:
+        result = await asyncio.to_thread(run_test, **kwargs)
+    except TypeError as e:
+        # Unknown source_type etc. reach run_test as a normal failed result;
+        # this only catches a genuinely malformed call.
+        raise HTTPException(status_code=400, detail=str(e))
+    return asdict(result)
+
 ALLOWED_UPLOAD_EXTENSIONS = {".mp4", ".mov", ".avi", ".mkv", ".webm"}
+
+# Ceiling on a single uploaded clip (default 4 GB). See upload_camera_video().
+import os as _os
+try:
+    MAX_UPLOAD_BYTES = int(_os.getenv("CAMAI_MAX_UPLOAD_MB", "4096")) * 1024 * 1024
+except ValueError:
+    MAX_UPLOAD_BYTES = 4096 * 1024 * 1024
 
 @app.post("/api/cameras/upload", dependencies=control)
 async def upload_camera_video(file: UploadFile = File(...)):
@@ -537,9 +662,29 @@ async def upload_camera_video(file: UploadFile = File(...)):
 
     safe_name = f"{uuid.uuid4().hex}{ext}"
     dest_path = UPLOADS_DIR / safe_name
-    with open(dest_path, "wb") as out:
-        while chunk := await file.read(1024 * 1024):
-            out.write(chunk)
+    # Bounded write. The loop had no size limit at all, so one request could
+    # fill the disk the recordings, the SQLite history and the OS itself live
+    # on — the engine and everything it is recording stop with it. The cap is
+    # deliberately far above any real demo clip and is env-tunable, so no
+    # legitimate upload changes behaviour; a partial file is removed rather
+    # than left behind for the pipeline to open.
+    written = 0
+    try:
+        with open(dest_path, "wb") as out:
+            while chunk := await file.read(1024 * 1024):
+                written += len(chunk)
+                if written > MAX_UPLOAD_BYTES:
+                    raise HTTPException(
+                        status_code=413,
+                        detail=f"Upload exceeds the {MAX_UPLOAD_BYTES // (1024 * 1024)} MB limit.",
+                    )
+                out.write(chunk)
+    except Exception:
+        try:
+            dest_path.unlink(missing_ok=True)
+        except Exception:
+            pass
+        raise
 
     return {"success": True, "path": str(dest_path)}
 
@@ -609,14 +754,25 @@ def update_camera_analytics(camera_id: str, payload: CameraAnalyticsPayload):
     )
     return {"success": True, "message": "Analytics config updated"}
 
-@app.post("/api/cameras/{camera_id}/display")
+# Every state-changing endpoint below now carries the control-token dependency.
+# They were open: `dependencies=control` had been applied only to the endpoints
+# that change what the AI *does*, leaving the ones that change what it *keeps*
+# (recording on/off, stream quality, and the DELETEs that wipe the local alert
+# and history log) reachable by any other local process — and, because a
+# sandboxed frame reports `Origin: null` which this engine's CORS allowlist
+# accepts for the Electron renderer, by any web page the operator has open.
+# Erasing the evidence log of a CCTV system is exactly the action that must not
+# be available to a drive-by caller. No shipped client calls these without the
+# token (desktop/src/lib/localEngine.ts sends it on every write), and an engine
+# started by hand with no CAMAI_API_TOKEN stays open exactly as before.
+@app.post("/api/cameras/{camera_id}/display", dependencies=control)
 def update_camera_display(camera_id: str, payload: CameraDisplayPayload):
     if camera_id not in manager.camera_threads:
         raise HTTPException(status_code=404, detail="Camera thread not running")
     manager.update_camera_display_config(camera_id, payload.max_width, payload.quality)
     return {"success": True, "message": "Display settings updated"}
 
-@app.post("/api/cameras/{camera_id}/recording")
+@app.post("/api/cameras/{camera_id}/recording", dependencies=control)
 def set_camera_recording(camera_id: str, payload: CameraRecordingPayload):
     ok = manager.set_camera_recording(camera_id, payload.enabled)
     if not ok:
@@ -658,12 +814,12 @@ async def get_mjpeg_stream(camera_id: str):
 def fetch_alerts(limit: int = 50):
     return get_recent_alerts(limit)
 
-@app.delete("/api/alerts")
+@app.delete("/api/alerts", dependencies=control)
 def clear_alerts():
     clear_all_alerts()
     return {"success": True}
 
-@app.delete("/api/alerts/{alert_id}")
+@app.delete("/api/alerts/{alert_id}", dependencies=control)
 def remove_single_alert(alert_id: str):
     from app.storage import delete_single_alert
     delete_single_alert(alert_id)
@@ -674,7 +830,7 @@ def remove_single_alert(alert_id: str):
 def fetch_history_records(limit: int = 100):
     return get_history(limit)
 
-@app.delete("/api/history")
+@app.delete("/api/history", dependencies=control)
 def clear_history_records():
     clear_all_history()
     return {"success": True}
@@ -686,7 +842,7 @@ def fetch_recordings():
 
 # Temporary debug endpoint for tracking down the pipeline memory-growth
 # investigation — counts live Python objects by type, most common first.
-@app.get("/api/debug/gc")
+@app.get("/api/debug/gc", dependencies=control)
 def debug_gc_counts(top: int = 25):
     import gc
     import collections
@@ -714,7 +870,7 @@ def debug_gc_counts(top: int = 25):
 def fetch_api_logs():
     return {"count": 0, "logs": []}
 
-@app.delete("/api/history/logs")
+@app.delete("/api/history/logs", dependencies=control)
 def clear_api_logs():
     return {"success": True}
 

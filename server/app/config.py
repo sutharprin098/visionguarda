@@ -137,7 +137,14 @@ ANPR_ENABLED = _env_bool("CAMAI_ANPR_ENABLED", True)
 ANPR_MODEL_DIR = Path(os.getenv("CAMAI_ANPR_MODEL_DIR", str(MODELS_DIR / "plate")))
 ANPR_MODEL = os.getenv("CAMAI_ANPR_MODEL", "plate_detector.onnx")
 ANPR_CLASSES_FILE = os.getenv("CAMAI_ANPR_CLASSES", "classes.txt")
-ANPR_THRESHOLD = _env_float("CAMAI_ANPR_THRESHOLD", 0.5)
+# Detector score floor. 0.5 was measured to be far above the shipped plate
+# model's real operating range on CCTV imagery: over 145 vehicle crops from the
+# test footage the model's TOP score was 0.35, so 0.5 rejected ~97% of genuine
+# plates before gating ever ran (docs/ANPR.md). The geometry gates below —
+# aspect, size, area fraction — plus format validation downstream are what
+# reject false positives; the score threshold is deliberately permissive so
+# real plates survive to be judged on their shape.
+ANPR_THRESHOLD = _env_float("CAMAI_ANPR_THRESHOLD", 0.15)
 ANPR_NMS = _env_float("CAMAI_ANPR_NMS", 0.3)
 # Aspect band accepts BOTH single-row (~3-6:1) and two-row plates (~1.3-2.5:1) —
 # Indian two-wheeler plates are commonly two-row, so a wide-only band would miss
@@ -145,7 +152,18 @@ ANPR_NMS = _env_float("CAMAI_ANPR_NMS", 0.3)
 ANPR_ASPECT_MIN = _env_float("CAMAI_ANPR_ASPECT_MIN", 1.2)
 ANPR_ASPECT_MAX = _env_float("CAMAI_ANPR_ASPECT_MAX", 6.5)
 # A plate narrower than this (px) carries too few characters to OCR reliably.
-ANPR_MIN_PLATE_W = _env_int("CAMAI_ANPR_MIN_PLATE_W", 40)
+# Measured against the *upscaled* crop (see ANPR_UPSCALE_TO_W): small plates are
+# enlarged before this gate, so distant vehicles are no longer discarded on
+# source resolution alone.
+ANPR_MIN_PLATE_W = _env_int("CAMAI_ANPR_MIN_PLATE_W", 24)
+# Vehicle crops narrower than this are upscaled to it before plate detection.
+# The detector letterboxes to 640 anyway, so feeding it a larger, sharper crop
+# costs nothing extra and materially improves small-plate recall. 0 disables.
+ANPR_UPSCALE_TO_W = _env_int("CAMAI_ANPR_UPSCALE_TO_W", 320)
+# Grow the plate box by this fraction of its size before OCR. Plate detectors
+# produce tight boxes that clip the first and last glyph; a small margin
+# recovers them.
+ANPR_PLATE_PAD_FRAC = _env_float("CAMAI_ANPR_PLATE_PAD_FRAC", 0.08)
 # A real plate is a small fraction of the vehicle it's on; a "plate" covering
 # most of the vehicle crop is painted text or a mis-detection.
 ANPR_MAX_AREA_FRAC = _env_float("CAMAI_ANPR_MAX_AREA_FRAC", 0.35)
@@ -160,6 +178,81 @@ ANPR_OCR_CHARSET = os.getenv("CAMAI_ANPR_OCR_CHARSET", "charset.txt")
 # Reject OCR output shorter than this — a plate has several characters, and a
 # 1-2 char read is noise, not a plate number.
 ANPR_OCR_MIN_LEN = _env_int("CAMAI_ANPR_OCR_MIN_LEN", 4)
+
+# Country plate grammar (app/ai/plate_format.py). "IN" = India; "GENERIC"
+# disables structural constraints for deployments we don't model. The grammar
+# is the single biggest accuracy lever downstream of the recogniser: on
+# rendered plates it took exact matches from 1.0% to 13.5% (docs/ANPR.md),
+# because the recogniser's errors are letter-vs-digit class errors that the
+# format resolves positionally.
+ANPR_COUNTRY = os.getenv("CAMAI_ANPR_COUNTRY", "IN")
+# Reject a read below this confidence. Previously there was NO floor at all:
+# any text the recogniser emitted was published as the plate number, which is
+# why wrong plates appeared with no way to tell them from right ones.
+ANPR_OCR_MIN_CONF = _env_float("CAMAI_ANPR_OCR_MIN_CONF", 0.35)
+# Publish only reads that satisfy the country grammar. On by default: a string
+# that cannot be a plate is worse than no read, because downstream it becomes a
+# logged event and a Telegram alert.
+ANPR_REQUIRE_VALID_FORMAT = _env_bool("CAMAI_ANPR_REQUIRE_VALID_FORMAT", True)
+# Constrained-beam width. 8-16 is the useful range; above that the extra beams
+# are duplicates of the top hypothesis and only cost latency.
+ANPR_OCR_BEAM_WIDTH = _env_int("CAMAI_ANPR_OCR_BEAM_WIDTH", 12)
+# How many preprocessing variants to try per plate, and the confidence at which
+# a grammar-valid read is good enough to stop. Together these bound the cost of
+# the retry ensemble: an easy daytime plate runs ONE inference.
+ANPR_OCR_MAX_VARIANTS = _env_int("CAMAI_ANPR_OCR_MAX_VARIANTS", 4)
+ANPR_OCR_EARLY_EXIT_CONF = _env_float("CAMAI_ANPR_OCR_EARLY_EXIT_CONF", 0.80)
+# Preprocessing toggles — all measured to help on their target condition and to
+# cost nothing when they don't fire.
+ANPR_OCR_DESKEW = _env_bool("CAMAI_ANPR_OCR_DESKEW", True)
+ANPR_OCR_RECTIFY = _env_bool("CAMAI_ANPR_OCR_RECTIFY", True)
+ANPR_OCR_TWO_ROW = _env_bool("CAMAI_ANPR_OCR_TWO_ROW", True)
+# Crops wider:taller than this are single-row; below it, try a two-row split.
+# Indian two-wheeler plates — the DM pilot's target — are commonly two-row, and
+# a single-line recogniser reads straight across both rows and returns nonsense.
+ANPR_TWO_ROW_ASPECT = _env_float("CAMAI_ANPR_TWO_ROW_ASPECT", 2.6)
+# Smallest plate crop worth attempting, and the focus floor (variance of the
+# Laplacian) below which the crop is motion-blurred or defocused past reading.
+ANPR_OCR_MIN_CROP_W = _env_int("CAMAI_ANPR_OCR_MIN_CROP_W", 24)
+ANPR_OCR_MIN_CROP_H = _env_int("CAMAI_ANPR_OCR_MIN_CROP_H", 8)
+ANPR_BLUR_MIN = _env_float("CAMAI_ANPR_BLUR_MIN", 12.0)
+
+# --- ANPR temporal aggregation (app/ai/plate_track.py) ---------------------
+# A plate is read many times as a vehicle crosses the frame. Voting across
+# those reads is far more reliable than any single frame, and it is also what
+# stops duplicate events: a track publishes its plate once and only re-publishes
+# if the winning candidate actually changes.
+ANPR_TRACK_MIN_READS = _env_int("CAMAI_ANPR_TRACK_MIN_READS", 2)
+# Once a track's winner has this many votes AND clears this confidence, the
+# track is "settled" and OCR is skipped for it entirely — the main saving that
+# keeps ANPR affordable on busy scenes.
+ANPR_TRACK_SETTLE_VOTES = _env_int("CAMAI_ANPR_TRACK_SETTLE_VOTES", 3)
+ANPR_TRACK_SETTLE_CONF = _env_float("CAMAI_ANPR_TRACK_SETTLE_CONF", 0.65)
+# Forget a track this long after it was last seen.
+ANPR_TRACK_TTL_S = _env_float("CAMAI_ANPR_TRACK_TTL_S", 60.0)
+
+# --- ANPR async worker -----------------------------------------------------
+# Run plate detection + OCR off the capture/tracking thread. The pipeline hands
+# over a frame reference and reads whatever the worker has published; it never
+# waits. A bounded, drop-oldest queue means a slow OCR pass degrades ANPR
+# cadence and nothing else — video FPS is unaffected by construction.
+ANPR_ASYNC = _env_bool("CAMAI_ANPR_ASYNC", True)
+ANPR_QUEUE_MAX = _env_int("CAMAI_ANPR_QUEUE_MAX", 2)
+# How long a published ANPR result keeps being overlaid before it goes stale.
+# Slightly longer than ANPR_INTERVAL_S so boxes don't flicker between passes.
+ANPR_RESULT_TTL_S = _env_float("CAMAI_ANPR_RESULT_TTL_S", 2.0)
+
+# --- ANPR debug mode -------------------------------------------------------
+# Writes the full evidence chain per attempt — original frame, vehicle crop,
+# plate crop, every enhanced variant fed to the recogniser, plus a JSONL row
+# with the text, confidence and failure reason. Off by default: it writes a lot
+# of images. This is the tool for answering "why was THAT plate not read".
+ANPR_DEBUG = _env_bool("CAMAI_ANPR_DEBUG", False)
+ANPR_DEBUG_DIR = Path(os.getenv("CAMAI_ANPR_DEBUG_DIR", str(RECORDINGS_DIR / "anpr_debug")))
+# Cap the debug directory so a session left in debug mode cannot fill the disk.
+ANPR_DEBUG_MAX_ATTEMPTS = _env_int("CAMAI_ANPR_DEBUG_MAX_ATTEMPTS", 500)
+# Save artefacts only for failures (the useful case) unless this is on.
+ANPR_DEBUG_SAVE_SUCCESS = _env_bool("CAMAI_ANPR_DEBUG_SAVE_SUCCESS", False)
 # Log a read plate at most once per this many seconds per vehicle track — the
 # same dedup idea as helmet violations, keyed to the vehicle it sits on.
 ANPR_EVENT_COOLDOWN = _env_float("CAMAI_ANPR_EVENT_COOLDOWN", 30.0)

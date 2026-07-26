@@ -4,11 +4,12 @@ app/ai/helmet.py.
 
 Scope of THIS module
 --------------------
-It finds plate REGIONS on vehicles and gates them; reading the characters (OCR)
-is a separate stage (app/ai/plate_ocr.py, next). Emits detections shaped like
-the yolox ones with class "number_plate" and a "plate_text" slot that OCR fills
-later:
-    {"class":"number_plate","confidence":float,"bbox":{...},"plate_text":None}
+It finds plate REGIONS on vehicles, gates them, and hands each survivor to the
+OCR stage (app/ai/plate_ocr.py). Emits detections shaped like the yolox ones
+with class "number_plate":
+    {"class":"number_plate","confidence":float,"bbox":{...},
+     "plate_text":str|None,"plate_text_confidence":float|None,
+     "plate_failure":str|None}
 
 Why vehicle crops + gating (the reason ANPR was stuck at "coming soon")
 ----------------------------------------------------------------------
@@ -23,6 +24,22 @@ The aspect band deliberately admits two-row plates (~1.3-2.5:1), because Indian
 two-wheeler plates — the DM pilot's target — are commonly two-row, not the wide
 single-row a Western-tuned band would assume.
 
+Recall fixes measured on the test footage (docs/ANPR.md)
+--------------------------------------------------------
+Instrumenting this path on real video found the plate loss was almost entirely
+BEFORE OCR, not in it — OCR was never even reaching most plates:
+  * The score floor was 0.5 while the model's top score over 145 vehicle crops
+    was 0.35. Roughly 97% of genuine plates were discarded on score alone.
+    `ANPR_THRESHOLD` now defaults to 0.15 and the geometry gates plus format
+    validation do the false-positive rejection instead.
+  * Survivors were then failed by a 40px minimum width measured on the SOURCE
+    crop. Small vehicle crops are now upscaled before detection
+    (`ANPR_UPSCALE_TO_W`), so a distant plate gets a fair chance.
+  * Detector boxes clip the outer glyphs; the crop handed to OCR is padded by
+    `ANPR_PLATE_PAD_FRAC` before reading.
+  * Overlapping vehicle boxes produced duplicate crops of the same car, and so
+    duplicate plate reads. Vehicle boxes are deduplicated first.
+
 Model
 -----
 Pluggable ONNX plate detector (config.ANPR_MODEL under config.ANPR_MODEL_DIR).
@@ -30,8 +47,6 @@ Two ONNX contracts are auto-detected from the real model I/O:
   * generic single-output box detector ([1,N,4+nc] cxcywh, or [N,>=5] xyxy+score)
     — what a YOLO-family plate model exports; the practical India path.
   * LPD-YuNet (OpenCV Zoo, Apache-2.0): three outputs loc/conf/iou, SSD priors.
-    NOTE it is trained on Chinese plates, so treat it as a starting detector and
-    swap an India-tuned model in via config — one file, no pipeline change.
 Fail-safe: a missing/bad model disables ANPR only and logs why; CamAI never
 crashes and never invents a plate.
 """
@@ -42,13 +57,13 @@ import os
 import sys
 import threading
 import time
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import cv2
 import numpy as np
 
 from app import config
-from app.ai import plate_ocr
+from app.ai import plate_debug, plate_ocr
 
 try:
     import onnxruntime as ort
@@ -59,8 +74,15 @@ except Exception:  # pragma: no cover
 # Plates only exist on these; bicycles have none, so they are excluded.
 PLATE_VEHICLES = ("car", "truck", "bus", "motorcycle")
 _VEHICLE_PAD = 0.02          # a hair of context; the crop is already the vehicle
-_MIN_VEHICLE_PX = 48         # a vehicle smaller than this shows no legible plate
+_MIN_VEHICLE_PX = 32         # below this a vehicle shows no plate at any upscale
 CANON_PLATE = "number_plate"
+
+# Failure reasons surfaced to telemetry / the debug log.
+FAIL_NO_VEHICLE = "no_vehicle"
+FAIL_NO_PLATE = "no_plate"
+FAIL_TOO_SMALL = "plate_too_small"
+FAIL_ASPECT = "plate_bad_aspect"
+FAIL_AREA = "plate_too_large"
 
 _PROVIDER_PREF = ["CUDAExecutionProvider", "DmlExecutionProvider", "CPUExecutionProvider"]
 
@@ -125,22 +147,54 @@ def _letterbox(img: np.ndarray, size: int) -> Tuple[np.ndarray, float]:
     return canvas, s
 
 
-def gate_plate(bx1: float, by1: float, bx2: float, by2: float,
-               crop_w: int, crop_h: int) -> bool:
-    """True if a candidate box is plausibly a plate. This is the anti-false-
-    positive core: reject wrong aspect (painted banners are very wide, logos are
-    square-ish and large), too-small-to-read, or too-large-to-be-a-plate."""
+def gate_reason(bx1: float, by1: float, bx2: float, by2: float,
+                crop_w: int, crop_h: int) -> Optional[str]:
+    """None if the candidate is plausibly a plate, else WHY it was rejected.
+
+    This is the anti-false-positive core: reject wrong aspect (painted banners
+    are very wide, logos are square-ish and large), too-small-to-read, or
+    too-large-to-be-a-plate. Returning the reason rather than a bare bool is
+    what lets telemetry distinguish "nothing looked like a plate" from "a plate
+    was found but it was 12px wide".
+    """
     w = bx2 - bx1
     h = by2 - by1
-    if w < config.ANPR_MIN_PLATE_W or h < 8:
-        return False
+    if w < config.ANPR_MIN_PLATE_W or h < 6:
+        return FAIL_TOO_SMALL
     aspect = w / h if h > 0 else 0.0
     if not (config.ANPR_ASPECT_MIN <= aspect <= config.ANPR_ASPECT_MAX):
-        return False
+        return FAIL_ASPECT
     crop_area = max(1.0, float(crop_w) * float(crop_h))
     if (w * h) / crop_area > config.ANPR_MAX_AREA_FRAC:
-        return False
-    return True
+        return FAIL_AREA
+    return None
+
+
+def gate_plate(bx1: float, by1: float, bx2: float, by2: float,
+               crop_w: int, crop_h: int) -> bool:
+    """Boolean form of `gate_reason`, kept for existing callers and tests."""
+    return gate_reason(bx1, by1, bx2, by2, crop_w, crop_h) is None
+
+
+def dedupe_vehicles(boxes: Sequence[Dict[str, float]], iou_thresh: float = 0.75
+                    ) -> List[int]:
+    """Indices of vehicle boxes to actually run the plate detector on.
+
+    Two heavily-overlapping vehicle detections (a car detected as both "car"
+    and "truck", or a tracker box beside a fresh detection) describe the same
+    physical vehicle. Cropping both ran the detector and OCR twice on the same
+    plate and produced two identical detections in the payload — wasted compute
+    and a duplicate box on the overlay.
+    """
+    order = sorted(range(len(boxes)),
+                   key=lambda i: (boxes[i]["x2"] - boxes[i]["x1"]) *
+                                 (boxes[i]["y2"] - boxes[i]["y1"]),
+                   reverse=True)
+    keep: List[int] = []
+    for i in order:
+        if all(_iou(boxes[i], boxes[j]) <= iou_thresh for j in keep):
+            keep.append(i)
+    return keep
 
 
 class PlateDetector:
@@ -152,7 +206,9 @@ class PlateDetector:
         self.nms = float(nms)
         self.last_error: Optional[str] = None
         self.last_infer_ms: float = 0.0
+        self.last_reason: Optional[str] = None
         self._lock = threading.Lock()
+        self._layout: Optional[str] = None      # "xyxy" | "cxcywh", decided once
 
         t0 = time.time()
         so = ort.SessionOptions()
@@ -174,7 +230,6 @@ class PlateDetector:
         outs = self.session.get_outputs()
         self._in_name = ins[0].name
         out_names = [o.name.lower() for o in outs]
-        # LPD-YuNet: exactly the loc/conf/iou triad.
         if len(outs) == 3 and any("loc" in n for n in out_names) and any("conf" in n for n in out_names):
             self._contract = "lpd_yunet"
             self._out_loc = next(o.name for o in outs if "loc" in o.name.lower())
@@ -185,7 +240,6 @@ class PlateDetector:
         else:
             self._contract = "generic"
             self._out_single = outs[0].name
-            # Fixed square input if the model declares one, else default 640.
             shp = ins[0].shape
             s = shp[2] if isinstance(shp[2], int) and isinstance(shp[3], int) else 640
             self.input_size = (int(s), int(s))
@@ -193,15 +247,13 @@ class PlateDetector:
         load_ms = (time.time() - t0) * 1000
         print(f"[anpr] plate detector loaded from {model_path} in {load_ms:.0f}ms "
               f"| provider={self.active_provider} | contract={self._contract} "
-              f"| input={self.input_size}", flush=True)
+              f"| input={self.input_size} | conf={self.conf}", flush=True)
 
     def set_confidence(self, conf: float) -> None:
         self.conf = float(conf)
 
     # -- LPD-YuNet SSD priors + decode ------------------------------------
     def _make_lpd_priors(self) -> np.ndarray:
-        """SSD prior boxes [cx,cy,sw,sh] normalised to input, matching the
-        OpenCV Zoo LPD-YuNet PriorBox (strides 8/16/32/64)."""
         priors = []
         for stride in _LPD_STRIDES:
             fh = int(math.ceil(_LPD_H / stride))
@@ -228,7 +280,6 @@ class PlateDetector:
         if not np.any(keep):
             return []
         pri = pri[keep]; loc = loc[keep]; scores = scores[keep]
-        # Four corner offsets live at channels [4:6],[6:8],[10:12],[12:14].
         corner_ch = [(4, 6), (6, 8), (10, 12), (12, 14)]
         out: List[Dict[str, Any]] = []
         for p, l, sc in zip(pri, loc, scores):
@@ -245,81 +296,122 @@ class PlateDetector:
         return out
 
     # -- generic single-output decode -------------------------------------
+    def _decide_layout(self, arr: np.ndarray) -> str:
+        """Decide ONCE whether the model emits xyxy or cxcywh, from the whole
+        tensor rather than per row.
+
+        The previous implementation asked, for each row, "is col2 > col0 and
+        col3 > col1?" and read the row as xyxy when so. For a cx,cy,w,h box
+        that test is true whenever the box is near the left/top edge and wider
+        than its centre offset — so plates at the edge of a vehicle crop were
+        silently decoded with the wrong formula and produced boxes in the wrong
+        place. Deciding globally from the majority removes that whole class of
+        error: a real detector emits one layout for every row.
+        """
+        if self._layout is not None:
+            return self._layout
+        sample = arr[arr[:, 4] >= max(0.05, self.conf * 0.5)] if arr.shape[0] else arr
+        if sample.shape[0] < 3:
+            sample = arr[np.argsort(-arr[:, 4])[:32]] if arr.shape[0] else arr
+        if sample.shape[0] == 0:
+            return "cxcywh"
+        looks_xyxy = np.mean((sample[:, 2] > sample[:, 0]) & (sample[:, 3] > sample[:, 1]))
+        self._layout = "xyxy" if looks_xyxy >= 0.95 else "cxcywh"
+        print(f"[anpr] plate model box layout detected: {self._layout} "
+              f"(xyxy-consistent rows: {looks_xyxy:.0%})", flush=True)
+        return self._layout
+
     def _decode_generic(self, out, scale, crop_w, crop_h) -> List[Dict[str, Any]]:
-        arr = np.asarray(out)
+        """Vectorised decode of a YOLO-family single-output plate model.
+
+        The old row-by-row Python loop ran over every one of the 8400 anchors
+        for every vehicle crop on every ANPR pass. Filtering with numpy first
+        and only materialising the survivors keeps this off the critical path.
+        """
+        arr = np.asarray(out, dtype=np.float32)
         if arr.ndim == 3:
             arr = arr[0]
         if arr.ndim != 2:
             self.last_error = f"unexpected plate model output shape {np.asarray(out).shape}"
             return []
-        # A YOLOv8 detect export is [4+nc, N] (channels-first, N≈8400 anchors);
+        # A YOLOv8 detect export is [4+nc, N] (channels-first, N~8400 anchors);
         # some exports transpose to [N, 4+nc]. Put the many anchors on the rows
         # so each row is one candidate — without this the decoder read 5 rows of
         # 8400 values and produced garbage boxes with confidences in the hundreds.
-        # Transpose only when axis 0 is a plausible feature count (>=5: 4 box +
-        # >=1 class) and the smaller dim, so a tiny [N,4+nc] batch (N<5) is left
-        # alone rather than flipped into nonsense.
         if 5 <= arr.shape[0] < arr.shape[1]:
             arr = arr.T
-        S = float(self.input_size[0])
-        results: List[Dict[str, Any]] = []
         cols = arr.shape[1]
-        if cols >= 6 or (cols == 5):
-            # Could be [x1,y1,x2,y2,score(,cls)] in input px, or YOLO
-            # [cx,cy,w,h,score(,cls...)]. Disambiguate by whether the first four
-            # look normalised (<=1.5) => cx,cy,w,h normalised.
-            sample = arr[:, :4]
-            normalised = np.nanmax(sample) <= 1.5 if sample.size else False
-            for row in arr:
-                if cols == 5:
-                    score = float(row[4])
-                else:
-                    # last columns are class scores; take max
-                    score = float(np.max(row[4:]))
-                if score < self.conf:
-                    continue
-                a, b, c, d = float(row[0]), float(row[1]), float(row[2]), float(row[3])
-                if normalised:               # cx,cy,w,h normalised 0-1
-                    x1 = (a - c / 2) * S; y1 = (b - d / 2) * S
-                    x2 = (a + c / 2) * S; y2 = (b + d / 2) * S
-                elif c > a and d > b:        # already xyxy in input px
-                    x1, y1, x2, y2 = a, b, c, d
-                else:                        # cx,cy,w,h in input px
-                    x1 = a - c / 2; y1 = b - d / 2; x2 = a + c / 2; y2 = b + d / 2
-                # input px -> crop px
-                results.append({"_box": (x1 / scale, y1 / scale, x2 / scale, y2 / scale),
-                                "_score": score})
-        else:
+        if cols < 5:
             self.last_error = f"plate model output has too few columns: {cols}"
-        return results
+            return []
+
+        scores = arr[:, 4] if cols == 5 else arr[:, 4:].max(axis=1)
+        keep = scores >= self.conf
+        if not np.any(keep):
+            return []
+        rows = arr[keep]
+        scores = scores[keep]
+        # Cap the number of candidates carried forward; NMS and gating handle
+        # the rest and a pathological frame must not blow up the pass.
+        if rows.shape[0] > 300:
+            top = np.argsort(-scores)[:300]
+            rows, scores = rows[top], scores[top]
+
+        S = float(self.input_size[0])
+        box = rows[:, :4].copy()
+        normalised = float(np.nanmax(rows[:, :4])) <= 1.5
+        if normalised:
+            box *= S
+        layout = self._decide_layout(np.column_stack([box, scores]))
+        if layout == "xyxy":
+            x1, y1, x2, y2 = box[:, 0], box[:, 1], box[:, 2], box[:, 3]
+        else:
+            x1 = box[:, 0] - box[:, 2] / 2.0
+            y1 = box[:, 1] - box[:, 3] / 2.0
+            x2 = box[:, 0] + box[:, 2] / 2.0
+            y2 = box[:, 1] + box[:, 3] / 2.0
+        x1 /= scale; y1 /= scale; x2 /= scale; y2 /= scale
+        return [{"_box": (float(a), float(b), float(c), float(d)), "_score": float(s)}
+                for a, b, c, d, s in zip(x1, y1, x2, y2, scores)]
 
     # -- gating + NMS + emit ----------------------------------------------
     def _finalise(self, raw: List[Dict[str, Any]], crop_w, crop_h,
-                  ox: int, oy: int) -> List[Dict[str, Any]]:
+                  ox: int, oy: int) -> Tuple[List[Dict[str, Any]], Optional[str]]:
+        """(kept detections, rejection reason when everything was rejected)."""
         gated: List[Dict[str, Any]] = []
+        reasons: List[str] = []
         for r in raw:
             x1, y1, x2, y2 = r["_box"]
             x1 = max(0.0, min(float(crop_w), x1)); x2 = max(0.0, min(float(crop_w), x2))
             y1 = max(0.0, min(float(crop_h), y1)); y2 = max(0.0, min(float(crop_h), y2))
-            if not gate_plate(x1, y1, x2, y2, crop_w, crop_h):
+            why = gate_reason(x1, y1, x2, y2, crop_w, crop_h)
+            if why:
+                reasons.append(why)
                 continue
             gated.append({
                 "class": CANON_PLATE,
                 "confidence": r["_score"],
                 "bbox": {"x1": ox + x1, "y1": oy + y1, "x2": ox + x2, "y2": oy + y2},
-                "plate_text": None,   # filled by the OCR stage
+                "plate_text": None,
+                "plate_text_confidence": None,
+                "plate_failure": None,
             })
-        # NMS within a vehicle crop (a plate can fire on several priors).
+        if not gated:
+            if not raw:
+                return [], FAIL_NO_PLATE
+            # report the most common rejection so telemetry is actionable
+            return [], max(set(reasons), key=reasons.count) if reasons else FAIL_NO_PLATE
+
         if len(gated) < 2:
-            return gated
+            return gated, None
         gated.sort(key=lambda d: d["confidence"], reverse=True)
         keep: List[Dict[str, Any]] = []
         for d in gated:
             if all(_iou(d["bbox"], k["bbox"]) <= self.nms for k in keep):
                 keep.append(d)
-        return keep
+        return keep, None
 
-    def _run(self, crop: np.ndarray) -> List[Dict[str, Any]]:
+    def _run(self, crop: np.ndarray) -> Tuple[List[Dict[str, Any]], Optional[str]]:
         ch, cw = crop.shape[:2]
         if self._contract == "lpd_yunet":
             blob = cv2.dnn.blobFromImage(crop, size=(_LPD_W, _LPD_H))  # BGR 0-255
@@ -328,41 +420,72 @@ class PlateDetector:
                 res = self.session.run([self._out_loc, self._out_conf, self._out_iou],
                                        {self._in_name: blob})
                 self.last_infer_ms = (time.time() - t0) * 1000
-            dets = self._finalise(self._decode_lpd(res[0], res[1], res[2], cw, ch), cw, ch, 0, 0)
-        else:
-            S = self.input_size[0]
-            canvas, scale = _letterbox(crop, S)
-            rgb = cv2.cvtColor(canvas, cv2.COLOR_BGR2RGB).astype(np.float32) / 255.0
-            blob = np.ascontiguousarray(rgb.transpose(2, 0, 1)[None])
-            with self._lock:
-                t0 = time.time()
-                res = self.session.run([self._out_single], {self._in_name: blob})
-                self.last_infer_ms = (time.time() - t0) * 1000
-            dets = self._finalise(self._decode_generic(res[0], scale, cw, ch), cw, ch, 0, 0)
-        self._read_text(crop, dets)
-        return dets
+            return self._finalise(self._decode_lpd(res[0], res[1], res[2], cw, ch), cw, ch, 0, 0)
+        S = self.input_size[0]
+        canvas, scale = _letterbox(crop, S)
+        rgb = cv2.cvtColor(canvas, cv2.COLOR_BGR2RGB).astype(np.float32) / 255.0
+        blob = np.ascontiguousarray(rgb.transpose(2, 0, 1)[None])
+        with self._lock:
+            t0 = time.time()
+            res = self.session.run([self._out_single], {self._in_name: blob})
+            self.last_infer_ms = (time.time() - t0) * 1000
+        return self._finalise(self._decode_generic(res[0], scale, cw, ch), cw, ch, 0, 0)
 
-    def _read_text(self, crop: np.ndarray, dets: List[Dict[str, Any]]) -> None:
-        """Fill plate_text with the OCR read of each gated plate. Optional and
-        fail-safe: if no OCR model is installed the plates stay localised with
-        plate_text=None, and an OCR error on one plate never drops the plate."""
+    # -- OCR ---------------------------------------------------------------
+    def _pad_box(self, b: Dict[str, float], w: int, h: int) -> Tuple[int, int, int, int]:
+        """Grow a plate box slightly before cutting the OCR crop.
+
+        Plate detectors are trained to tight boxes and routinely clip the first
+        and last glyph; those two characters are exactly the ones the grammar
+        needs to anchor the state code and the serial. The pad is a fraction of
+        the box, so it scales with distance.
+        """
+        pad = float(config.ANPR_PLATE_PAD_FRAC)
+        bw, bh = b["x2"] - b["x1"], b["y2"] - b["y1"]
+        px, py = bw * pad, bh * pad
+        return (max(0, int(b["x1"] - px)), max(0, int(b["y1"] - py)),
+                min(w, int(b["x2"] + px)), min(h, int(b["y2"] + py)))
+
+    def read_text(self, crop: np.ndarray, dets: List[Dict[str, Any]],
+                  camera_id: str = "", frame: Optional[np.ndarray] = None) -> None:
+        """Fill plate_text with the OCR read of each gated plate.
+
+        Optional and fail-safe: if no OCR model is installed the plates stay
+        localised with plate_text=None, and an OCR error on one plate never
+        drops the plate. A failed read records WHY in `plate_failure` instead of
+        silently vanishing, which is what makes the "no empty results when the
+        plate is clearly visible" requirement checkable in the field.
+        """
         if not dets:
             return
         rec = plate_ocr.get_recognizer()
         if rec is None:
             return
         ch, cw = crop.shape[:2]
+        debug_on = plate_debug.enabled()
         for d in dets:
-            b = d["bbox"]                       # crop-local here (offset added later)
-            x1 = max(0, int(b["x1"])); y1 = max(0, int(b["y1"]))
-            x2 = min(cw, int(b["x2"])); y2 = min(ch, int(b["y2"]))
+            b = d["bbox"]                       # crop-local here
+            x1, y1, x2, y2 = self._pad_box(b, cw, ch)
             if x2 - x1 < 2 or y2 - y1 < 2:
+                d["plate_failure"] = plate_ocr.FAIL_EMPTY_CROP
                 continue
-            text, conf = rec.read(crop[y1:y2, x1:x2])
-            if text:
-                d["plate_text"] = text
-                d["plate_text_confidence"] = round(conf, 3)
+            plate_crop = crop[y1:y2, x1:x2]
+            sink: Optional[Dict[str, np.ndarray]] = {} if debug_on else None
+            res = rec.read_detailed(plate_crop, debug_sink=sink)
+            if res.text:
+                d["plate_text"] = res.text
+                d["plate_text_confidence"] = round(res.confidence, 3)
+                d["plate_valid_format"] = res.valid
+            else:
+                d["plate_failure"] = res.reason
+            if debug_on:
+                plate_debug.record(camera_id, frame, crop, plate_crop, sink,
+                                   {**res.as_dict(),
+                                    "detector_confidence": round(d["confidence"], 3),
+                                    "plate_box_crop_local": [x1, y1, x2, y2],
+                                    "crop_size": [cw, ch]})
 
+    # -- crops -------------------------------------------------------------
     def _vehicle_crops(self, frame, vehicle_boxes) -> List[Tuple[int, int, int, int]]:
         fh, fw = frame.shape[:2]
         crops = []
@@ -379,27 +502,90 @@ class PlateDetector:
                 crops.append((cx1, cy1, cx2, cy2))
         return crops
 
+    @staticmethod
+    def _upscale(crop: np.ndarray) -> Tuple[np.ndarray, float]:
+        """Enlarge a small vehicle crop before plate detection.
+
+        The detector letterboxes to 640 regardless, so a 90px-wide crop is
+        already being upscaled — doing it here with a good interpolator, before
+        inference, is strictly better and lets a distant plate clear the size
+        gate that previously discarded it. Returns (crop, scale_applied) so box
+        coordinates can be mapped back.
+        """
+        target = int(config.ANPR_UPSCALE_TO_W)
+        h, w = crop.shape[:2]
+        if target <= 0 or w <= 0 or w >= target:
+            return crop, 1.0
+        s = min(float(target) / float(w), 4.0)
+        return cv2.resize(crop, (int(w * s), int(h * s)),
+                          interpolation=cv2.INTER_CUBIC), s
+
     def detect_on_vehicles(self, frame: np.ndarray,
-                           vehicle_boxes: List[Dict[str, float]]) -> List[Dict[str, Any]]:
-        """number_plate detections (localised + gated, text not yet read) in
-        absolute frame pixels. Never raises — one bad crop is recorded in
-        last_error and skipped (fail-safe)."""
+                           vehicle_boxes: List[Dict[str, float]],
+                           camera_id: str = "",
+                           track_ids: Optional[Sequence[Optional[int]]] = None,
+                           skip_track_ids: Optional[set] = None,
+                           ) -> List[Dict[str, Any]]:
+        """number_plate detections (localised, gated and read) in absolute frame
+        pixels. Never raises — one bad crop is recorded in last_error and
+        skipped (fail-safe).
+
+        `skip_track_ids` lets the caller drop vehicles whose plate is already
+        settled, so a queue of stationary traffic costs one read each rather
+        than one read per vehicle per pass.
+        """
+        self.last_reason = None
         if not vehicle_boxes:
+            self.last_reason = FAIL_NO_VEHICLE
+            plate_debug.log_failure(camera_id, FAIL_NO_VEHICLE)
             return []
+
+        keep_idx = dedupe_vehicles(vehicle_boxes)
+        if skip_track_ids and track_ids is not None:
+            keep_idx = [i for i in keep_idx
+                        if i >= len(track_ids) or track_ids[i] not in skip_track_ids]
+        if not keep_idx:
+            return []
+
         out: List[Dict[str, Any]] = []
-        for (cx1, cy1, cx2, cy2) in self._vehicle_crops(frame, vehicle_boxes):
+        reasons: List[str] = []
+        for i in keep_idx:
+            box = vehicle_boxes[i]
+            got = self._vehicle_crops(frame, [box])
+            if not got:
+                reasons.append(FAIL_TOO_SMALL)
+                continue
+            cx1, cy1, cx2, cy2 = got[0]
             crop = frame[cy1:cy2, cx1:cx2]
             if crop.size == 0:
                 continue
+            work, up = self._upscale(crop)
             try:
-                dets = self._run(crop)   # takes self._lock around inference
+                dets, why = self._run(work)
             except Exception as e:
                 self.last_error = str(e)
                 continue
-            for d in dets:                       # crop-local -> frame coords
+            if why:
+                reasons.append(why)
+            if not dets:
+                continue
+            if up != 1.0:                       # upscaled px -> source crop px
+                for d in dets:
+                    for k in ("x1", "x2", "y1", "y2"):
+                        d["bbox"][k] /= up
+            self.read_text(crop, dets, camera_id=camera_id, frame=frame)
+            tid = track_ids[i] if (track_ids is not None and i < len(track_ids)) else None
+            for d in dets:                      # crop-local -> frame coords
                 d["bbox"]["x1"] += cx1; d["bbox"]["x2"] += cx1
                 d["bbox"]["y1"] += cy1; d["bbox"]["y2"] += cy1
+                if tid is not None:
+                    d["vehicle_track_id"] = tid
                 out.append(d)
+
+        if not out and reasons:
+            self.last_reason = max(set(reasons), key=reasons.count)
+            plate_debug.log_failure(camera_id, self.last_reason,
+                                    f"{len(keep_idx)} vehicle crop(s) examined")
         return out
 
 
