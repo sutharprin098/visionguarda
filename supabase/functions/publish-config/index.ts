@@ -32,7 +32,7 @@ Deno.serve(async (req: Request) => {
     const db = adminClient();
     const { data: prof, error: profErr } = await db
       .from("profiles").select("org_id, is_super_admin").eq("id", auth.user.id).maybeSingle();
-    if (profErr) return json({ error: `profile lookup failed: ${profErr.message}` }, 500);
+    if (profErr) return json({ error: "profile lookup failed" }, 500);
     if (!prof) return json({ error: "profile missing for this account" }, 403);
 
     // Mirrors app.has_perm(): is_super_admin bypasses the org-scoped role check
@@ -69,6 +69,6 @@ Deno.serve(async (req: Request) => {
     return json(data ?? { success: true });
   } catch (e) {
     console.error("publish-config unhandled", e);
-    return json({ error: `unexpected server error: ${e instanceof Error ? e.message : String(e)}` }, 500);
+    return json({ error: "unexpected server error" }, 500);  // details stay in the function log, not the response
   }
 });

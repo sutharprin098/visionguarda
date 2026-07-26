@@ -67,6 +67,6 @@ Deno.serve(async (req: Request) => {
     return json({ ok: true });
   } catch (e) {
     console.error("delete-account failed", e);
-    return json({ error: e instanceof Error ? e.message : "unexpected error" }, 500);
+    return json({ error: "unexpected error" }, 500);  // details stay in the function log, not the response
   }
 });

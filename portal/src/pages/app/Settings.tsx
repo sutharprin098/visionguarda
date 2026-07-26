@@ -54,7 +54,7 @@ export default function SettingsPage() {
     <>
       <PageHeader title="Settings" subtitle="Manage your profile and organization settings." />
       <Tabs tabs={tabs} active={tab} onChange={setTab} />
-      <div className="max-w-2xl">
+      <div className="w-full max-w-4xl xl:max-w-5xl">
         {tab === "My Profile" && <ProfileTab />}
         {tab === "Organization" && settings && <OrgTab settings={settings} onSave={save} />}
         {tab === "Branding" && settings && <BrandingTab settings={settings} onSave={save} />}
@@ -411,7 +411,7 @@ function AiTab({ canConfigure }: { canConfigure: boolean }) {
     // These are ai_model_packages.name values (see migration 0030) — the
     // catalog's segmentation entry was retired with the YOLOX swap, so the
     // top sensitivity tier now maps to the most accurate detector instead.
-    let resolvedModel = "YOLOX M"; // Default high quality detection
+    let resolvedModel = "CamAI Engine M"; // Default high quality detection
     let activeSensitivity: "low" | "medium" | "high" = "high";
 
     if (activeProfile === "traffic") {
@@ -425,11 +425,11 @@ function AiTab({ canConfigure }: { canConfigure: boolean }) {
     }
 
     if (activeSensitivity === "low") {
-      resolvedModel = "YOLOX Tiny";
+      resolvedModel = "CamAI Engine Tiny";
     } else if (activeSensitivity === "medium") {
-      resolvedModel = "YOLOX S";
+      resolvedModel = "CamAI Engine S";
     } else {
-      resolvedModel = "YOLOX M";
+      resolvedModel = "CamAI Engine M";
     }
 
     // Special factory logic: if factory PPE is checked, use PPE Detection model

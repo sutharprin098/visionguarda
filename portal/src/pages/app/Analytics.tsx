@@ -129,12 +129,11 @@ export default function AnalyticsPage() {
         }
       />
 
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         <Kpi label={`Events (${range})`} value={total} />
         <Kpi label="Critical" value={critical}
              hint={total ? `${Math.round((critical / total) * 100)}% of all events` : undefined} />
         <Kpi label="Cameras Online" value={`${stats?.cameras_online ?? 0} / ${stats?.cameras ?? 0}`} />
-        <Kpi label="Storage Used" value={stats ? fmtBytes(Number(stats.storage_mb)) : "—"} />
       </div>
 
       <div className="card mt-6 p-5">

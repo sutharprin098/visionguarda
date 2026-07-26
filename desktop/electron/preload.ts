@@ -1,11 +1,31 @@
 import { contextBridge, ipcRenderer } from "electron";
 
+// Resolved once, here, rather than awaited by the renderer on every startup.
+// It is four build-time constants; making React wait on a promise for them put
+// an IPC round trip in front of the very first frame. See "get-config-sync".
+const config = ipcRenderer.sendSync("get-config-sync");
+
 contextBridge.exposeInMainWorld("camai", {
   activate: (licenseKey: string) => ipcRenderer.invoke("activate", licenseKey),
   getStoredSession: () => ipcRenderer.invoke("get-stored-session"),
   updateRefreshToken: (t: string) => ipcRenderer.invoke("update-refresh-token", t),
   deactivate: () => ipcRenderer.invoke("deactivate"),
+  /** Synchronous — available before the first render. */
+  config,
   getConfig: () => ipcRenderer.invoke("get-config"),
+  /** The session prefetched by the main process at app start. */
+  getWarmSession: (force?: boolean) => ipcRenderer.invoke("get-warm-session", force),
+  /** supabase-js storage adapter, backed by the DPAPI vault. */
+  sessionStore: {
+    get: () => ipcRenderer.invoke("session-store-get"),
+    set: (session: unknown) => ipcRenderer.invoke("session-store-set", session),
+    remove: () => ipcRenderer.invoke("session-store-remove"),
+  },
+  /** Last known workspace bundle, so the UI paints before the network answers. */
+  bundleCache: {
+    get: () => ipcRenderer.invoke("get-cached-bundle"),
+    set: (bundle: unknown) => ipcRenderer.invoke("set-cached-bundle", bundle),
+  },
   capture: {
     getSources: () => ipcRenderer.invoke("get-capture-sources"),
     setSource: (sourceId: string | null) => ipcRenderer.invoke("set-capture-source", sourceId),

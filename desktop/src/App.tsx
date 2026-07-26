@@ -1,17 +1,92 @@
-import { useEffect, useState } from "react";
-import Activation from "./screens/Activation";
-import Workspace from "./screens/Workspace";
-import AdminStudio from "./screens/AdminStudio"; // configuration drawings & rule studio
-import { restoreSession } from "./lib/session";
-import { startRealtimeSync, SyncBundle } from "./lib/sync";
-import { resetLocalEngineState, syncCamerasToLocalEngine, updateCameraNames } from "./lib/localEngine";
+import { useEffect, useState, lazy, Suspense } from "react";
 import { canConfigure } from "./lib/rbac";
+import type { SyncBundle } from "./lib/sync";
+
+import { Loader2 } from "lucide-react";
+
+// lib/session and lib/sync pull in supabase-js — 200KB of JavaScript that has
+// to be parsed and evaluated before any module importing them can run. Nothing
+// in it is needed to draw the splash, and every millisecond it spends being
+// evaluated is a millisecond the window is blank, so it is imported inside the
+// effects that actually use it instead of at module scope. Same reasoning for
+// lib/localEngine, which drags in the zone-profile tables.
+const loadSession = () => import("./lib/session");
+const loadSync = () => import("./lib/sync");
+const loadLocalEngine = () => import("./lib/localEngine");
+
+// The three screens are ~140KB of source between them and NONE of them can
+// render until the session and bundle have arrived — yet statically imported
+// they had to be downloaded, parsed and evaluated before the splash could show
+// its first frame. Split out, the initial chunk is the splash and little else,
+// and the screens load over the network wait that was happening anyway.
+//
+// Splitting alone would just move the delay to the moment the data lands, so
+// prefetch() below pulls them in immediately after mount — off the critical
+// path, but well before anything needs them.
+const Activation = lazy(() => import("./screens/Activation"));
+const Workspace = lazy(() => import("./screens/Workspace"));
+const AdminStudio = lazy(() => import("./screens/AdminStudio")); // configuration drawings & rule studio
+
+function prefetchScreens() {
+  void import("./screens/Workspace");
+  void import("./screens/AdminStudio");
+  void import("./screens/Activation");
+}
 
 type Phase = "booting" | "needs-activation" | "ready";
 
+function SplashLoading({ title, subtitle }: { title: string; subtitle: string }) {
+  return (
+    <div className="relative flex h-screen items-center justify-center overflow-hidden bg-slate-950 px-6 text-slate-100 selection:bg-sky-500/20">
+      {/* Ambient background glow */}
+      <div className="absolute inset-0 bg-[radial-gradient(at_20%_20%,rgba(14,165,233,0.15)_0px,transparent_50%),radial-gradient(at_80%_80%,rgba(99,102,241,0.15)_0px,transparent_50%)] pointer-events-none" />
+      <div className="absolute -left-20 top-12 h-96 w-96 rounded-full bg-sky-500/10 blur-3xl pointer-events-none animate-pulse" />
+      <div className="absolute -right-20 bottom-12 h-96 w-96 rounded-full bg-indigo-500/10 blur-3xl pointer-events-none" />
+
+      <div className="relative z-10 flex w-full max-w-sm flex-col items-center text-center">
+        {/* Animated Brand Logo Container */}
+        <div className="relative mb-6">
+          <span className="absolute -inset-2 rounded-2xl bg-gradient-to-r from-sky-500 to-indigo-500 opacity-40 blur-lg animate-pulse" />
+          <div className="relative flex h-16 w-16 items-center justify-center rounded-2xl border border-sky-400/30 bg-slate-900/90 p-2.5 shadow-2xl backdrop-blur-xl">
+            <img src="./favicon.svg" alt="CamAI" className="h-full w-full rounded-xl" />
+          </div>
+        </div>
+
+        {/* Brand Name & Tag */}
+        <span className="font-extrabold text-2xl tracking-tight text-white">CamAI Enterprise</span>
+        <span className="mt-1 text-[11px] font-semibold tracking-wider text-sky-400 uppercase">Edge Vision Node</span>
+
+        {/* Loading Card */}
+        <div className="mt-8 w-full rounded-2xl border border-slate-800 bg-slate-900/80 p-5 shadow-2xl backdrop-blur-md">
+          <div className="flex items-center justify-center gap-2 text-xs font-medium text-slate-300">
+            <Loader2 className="h-4 w-4 animate-spin text-sky-400" />
+            <span>{title}</span>
+          </div>
+          <p className="mt-2 text-[11px] text-slate-500 leading-relaxed">
+            {subtitle}
+          </p>
+
+          {/* Animated Progress Bar */}
+          <div className="mt-4 h-1.5 w-full overflow-hidden rounded-full bg-slate-800">
+            <div className="h-full w-2/3 rounded-full bg-gradient-to-r from-sky-500 via-indigo-500 to-sky-400 animate-pulse" />
+          </div>
+        </div>
+
+        {/* Footer info */}
+        <div className="mt-6 flex items-center gap-2 text-[11px] font-medium text-slate-500">
+          <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+          <span>Local Engine & Encrypted Vault Active</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   const [phase, setPhase] = useState<Phase>("booting");
-  const [appType, setAppType] = useState<"desktop" | "admin" | null>(null);
+  // Known synchronously from preload now, so the splash never renders just to
+  // wait for it (this used to be null on the first frame and gated everything).
+  const [appType] = useState<"desktop" | "admin">(() => window.camai.config.appType);
   const [currentScreen, setCurrentScreen] = useState<"workspace" | "admin-studio">("workspace");
   const [bundle, setBundle] = useState<SyncBundle | null>(null);
 
@@ -24,95 +99,114 @@ export default function App() {
     let cancelled = false;
     let attempt = 0;
 
-    async function boot() {
-      const cfg = await window.camai.getConfig();
+    prefetchScreens();
+
+    const tryRestore = async () => {
       if (cancelled) return;
-      setAppType(cfg.appType);
+      const { restoreSession } = await loadSession();
+      if (cancelled) return;
+      const result = await restoreSession(attempt > 0);
+      if (cancelled) return;
+      if (result === "ready") { setPhase("ready"); return; }
+      if (result === "no-creds") { setPhase("needs-activation"); return; }
+      // "retry": keep the saved key, back off (max 15s) and try again.
+      attempt += 1;
+      const delay = Math.min(1000 * 2 ** attempt, 15_000);
+      setTimeout(tryRestore, delay);
+    };
 
-      const tryRestore = async () => {
-        if (cancelled) return;
-        const result = await restoreSession();
-        if (cancelled) return;
-        if (result === "ready") { setPhase("ready"); return; }
-        if (result === "no-creds") { setPhase("needs-activation"); return; }
-        // "retry": keep the saved key, back off (max 15s) and try again.
-        attempt += 1;
-        const delay = Math.min(1000 * 2 ** attempt, 15_000);
-        setTimeout(tryRestore, delay);
-      };
-      void tryRestore();
-    }
-
-    void boot();
+    void tryRestore();
     return () => { cancelled = true; };
   }, []);
+
+  // Paint the workspace from the last known-good bundle rather than holding the
+  // splash open for desktop-sync.
+  //
+  // Gated on phase === "ready" deliberately: the cache is only shown once the
+  // session has been validated, so a device an admin revoked lands on the
+  // activation screen instead of a workspace rendered from stale data. Within
+  // that constraint this is the single biggest win on the clock — the edge
+  // function is the longest pole in startup and the answer is almost always
+  // what it was last time.
+  useEffect(() => {
+    if (phase !== "ready") return;
+    let cancelled = false;
+    void loadSync()
+      .then((m) => m.loadCachedBundle())
+      .then((cached) => {
+        // Never clobber live data: if the real sync already answered, it wins.
+        if (!cancelled && cached) setBundle((current) => current ?? cached);
+      });
+    return () => { cancelled = true; };
+  }, [phase]);
 
   useEffect(() => {
     if (phase !== "ready") return;
     let stop: (() => void) | undefined;
+    let cancelled = false;
 
     const deactivate = async () => {
+      const { resetLocalEngineState } = await loadLocalEngine();
       resetLocalEngineState();
       await window.camai.deactivate();
       setPhase("needs-activation");
     };
 
-    startRealtimeSync(
-      (b) => setBundle(b),
-      deactivate
-    ).then((s) => (stop = s));
+    void loadSync().then(({ startRealtimeSync }) =>
+      startRealtimeSync((b) => setBundle(b), deactivate).then((s) => {
+        // The effect can be torn down while the first sync is still in flight;
+        // without this the subscription outlives the component.
+        if (cancelled) s();
+        else stop = s;
+      }),
+    );
 
-    return () => stop?.();
+    return () => { cancelled = true; stop?.(); };
   }, [phase]);
 
   // Keep the local AI engine's running cameras in step with what's assigned.
-  //
-  // This lived inside Workspace, which is why Admin Studio showed no video. In
-  // the Admin build `showWorkspace` is false (see below), so Workspace never
-  // mounts, so this effect never ran, so the engine was never told a single
-  // camera existed. Admin Studio then pointed an <img> at
-  // /api/cameras/<id>/stream for a camera the engine had never heard of; the
-  // request failed and the browser rendered the tag's alt text — the "small
-  // Live placeholder". The engine itself was online and healthy the whole time,
-  // which is exactly why it read as "the studio is unfinished" rather than as a
-  // broken image.
-  //
-  // Registering cameras with the local engine is an application-level concern,
-  // not a Workspace one: every screen that shows a stream depends on it. Hoisted
-  // here so it runs for whichever screen is up, in either build.
-  //
-  // Interval, not just on bundle change: the engine can still be loading its
-  // model (tens of seconds) when this first fires, and a sync that no-ops
-  // because the engine wasn't reachable yet would otherwise never be retried
-  // until something unrelated refetched the bundle.
   useEffect(() => {
     if (phase !== "ready" || !bundle) return;
-    // Keep camera name map synced for local Telegram alerts.
-    updateCameraNames(bundle.cameras);
-    const sync = () => void syncCamerasToLocalEngine(
-      bundle.cameras, bundle.rule_engine_rules || [], bundle.zone_profile_configs || [],
-    );
-    sync();
-    const id = setInterval(sync, 8_000);
-    return () => clearInterval(id);
+    let id: ReturnType<typeof setInterval> | undefined;
+    let cancelled = false;
+
+    void loadLocalEngine().then(({ updateCameraNames, syncCamerasToLocalEngine }) => {
+      if (cancelled) return;
+      // Keep camera name map synced for local Telegram alerts.
+      updateCameraNames(bundle.cameras);
+      const sync = () => void syncCamerasToLocalEngine(
+        bundle.cameras, bundle.rule_engine_rules || [], bundle.zone_profile_configs || [],
+      );
+      sync();
+      id = setInterval(sync, 8_000);
+    });
+
+    return () => { cancelled = true; if (id) clearInterval(id); };
   }, [phase, bundle?.cameras, bundle?.rule_engine_rules, bundle?.zone_profile_configs]);
 
-  if (phase === "booting" || appType === null) {
-    return (
-      <div className="flex h-screen items-center justify-center text-sm text-zinc-500">
-        Starting CamAI…
-      </div>
-    );
-  }
+  const bootSplash = (
+    <SplashLoading
+      title="Starting CamAI Enterprise Node…"
+      subtitle="Verifying Windows DPAPI hardware vault & initializing local AI supervisor."
+    />
+  );
+
+  if (phase === "booting") return bootSplash;
+
   if (phase === "needs-activation") {
-    return <Activation onActivated={() => setPhase("ready")} />;
+    return (
+      <Suspense fallback={bootSplash}>
+        <Activation onActivated={() => setPhase("ready")} />
+      </Suspense>
+    );
   }
 
   if (!bundle) {
     return (
-      <div className="flex h-screen items-center justify-center text-sm text-zinc-500">
-        Syncing your workspace…
-      </div>
+      <SplashLoading
+        title="Synchronizing Workspace…"
+        subtitle="Connecting to org realtime channel, loading camera rules & zone profiles."
+      />
     );
   }
 
@@ -134,6 +228,14 @@ export default function App() {
 
   return (
     <div className="h-screen w-screen relative overflow-hidden bg-[#0b0d10]">
+      <Suspense
+        fallback={
+          <SplashLoading
+            title="Synchronizing Workspace…"
+            subtitle="Connecting to org realtime channel, loading camera rules & zone profiles."
+          />
+        }
+      >
       {showWorkspace && (
         <div
           className="h-full w-full"
@@ -164,6 +266,7 @@ export default function App() {
           />
         </div>
       )}
+      </Suspense>
     </div>
   );
 }

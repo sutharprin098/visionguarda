@@ -53,6 +53,42 @@ Deno.serve(async (req) => {
   const { data: cam } = await caller.from("cameras").select("id, org_id").eq("id", body.camera_id).maybeSingle();
   if (!cam) return json({ error: "camera not found or not visible to you" }, 404);
 
+  // snapshot_path lands in alerts.snapshot_path, and notify-telegram signs
+  // WHATEVER it finds there with the service role (createSignedUrl bypasses the
+  // storage RLS that scopes the snapshots bucket to '<org_id>/…'). An arbitrary
+  // path here was therefore a cross-tenant object read: name another org's
+  // object, and the signed URL for it is delivered to your own Telegram chat.
+  // Accept only a path inside this camera's own org prefix, and reject the
+  // traversal forms that would climb back out of it. A "/"-prefixed value is a
+  // stale local filesystem path — the existing consumers already skip those, so
+  // it is passed through unchanged rather than rejected.
+  const orgPrefix = `${cam.org_id}/`;
+  const safeSnapshotPath = (p: unknown): string | null => {
+    if (typeof p !== "string" || !p) return null;
+    if (p.startsWith("/")) return p;                        // legacy local path, never signed
+    if (p.length > 1024 || p.includes("..") || p.includes("\\") || p.includes("\0")) return null;
+    return p.startsWith(orgPrefix) ? p : null;
+  };
+
+  // Bound anything that becomes a stored string, so a single call can't write
+  // megabytes of attacker text into the alert feed (the title was already cut).
+  const clip = (v: unknown, n: number) => (typeof v === "string" ? v.slice(0, n) : v);
+
+  // A caller-supplied created_at is deliberate (the engine's own event time is
+  // more accurate than arrival time), but it must parse — an unparseable value
+  // fails the whole batch insert, and a far-future one would pin the event to
+  // the top of every feed forever.
+  const safeTimestamp = (t: unknown): string => {
+    const now = Date.now();
+    if (typeof t === "string") {
+      const ms = Date.parse(t);
+      if (Number.isFinite(ms) && ms > now - 365 * 24 * 3600_000 && ms < now + 5 * 60_000) {
+        return new Date(ms).toISOString();
+      }
+    }
+    return new Date(now).toISOString();
+  };
+
   const rows = events
     .filter((e) => e && typeof e.type === "string")
     .map((e) => {
@@ -63,10 +99,13 @@ Deno.serve(async (req) => {
       // and the dashboard must be able to show the ACTUAL detection the active
       // AI module produced — human, vehicle, fire, or a detector added later —
       // without a hardcoded mapping. So the real name always rides in detail.
-      const detail: Record<string, unknown> = { engine_id: e.engine_id ?? null, detection_name: e.type };
+      const detail: Record<string, unknown> = {
+        engine_id: clip(e.engine_id, 200) ?? null,
+        detection_name: clip(e.type, 120),
+      };
       // Only carry fields that are actually present, so the plate log stays clean.
       for (const k of ["plate_text", "track_id", "speed_kmh", "confidence"] as const) {
-        if (e[k] !== undefined && e[k] !== null) detail[k] = e[k];
+        if (e[k] !== undefined && e[k] !== null) detail[k] = clip(e[k], 64);
       }
       return {
         org_id: cam.org_id,
@@ -75,9 +114,9 @@ Deno.serve(async (req) => {
         severity: SEVERITY[e.type!] ?? "info",
         title: (e.message ?? e.type ?? "event").slice(0, 300),
         detail,
-        snapshot_path: e.snapshot_path ?? null,
+        snapshot_path: safeSnapshotPath(e.snapshot_path),
         // Preserve the engine's UTC timestamp as the event time; fall back to now.
-        created_at: e.timestamp ?? new Date().toISOString(),
+        created_at: safeTimestamp(e.timestamp),
       };
     });
   if (!rows.length) return json({ ok: true, inserted: 0 });

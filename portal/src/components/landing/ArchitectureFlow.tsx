@@ -12,8 +12,8 @@ const PIPELINE_STEPS = [
     step: "02",
     title: "Local Edge AI Engine",
     icon: Cpu,
-    detail: "Frames are processed on local GPUs using YOLOv11 and TensorRT / OpenVINO FP16 backends with sub-12ms latency.",
-    tech: "YOLOv11 · TensorRT · OpenVINO"
+    detail: "Frames are processed on local GPUs using proprietary CamAI Engine with TensorRT / OpenVINO FP16 backends with sub-12ms latency.",
+    tech: "CamAI Core · TensorRT · OpenVINO"
   },
   {
     step: "03",

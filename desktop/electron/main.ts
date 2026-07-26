@@ -1,8 +1,13 @@
-import { app, BrowserWindow, ipcMain, session, desktopCapturer, powerMonitor, Menu } from "electron";
+import { app, BrowserWindow, ipcMain, session, desktopCapturer, powerMonitor, Menu, shell } from "electron";
 import { join } from "node:path";
 import { existsSync } from "node:fs";
-import { computeFingerprint } from "./fingerprint";
-import { saveCredentials, loadCredentials, clearCredentials } from "./secureStore";
+import { computeFingerprint, warmFingerprint } from "./fingerprint";
+import {
+  saveCredentials, loadCredentials, clearCredentials,
+  loadSessionCache, saveSessionCache, clearSessionCache, cachedSessionIsFresh,
+  loadBundleCache, saveBundleCache, clearBundleCache,
+  type CachedSession,
+} from "./secureStore";
 import {
   startEngine, stopEngine, restartEngine, shutdownEngine,
   getStatus as getEngineStatus, getLogs as getEngineLogs,
@@ -34,6 +39,102 @@ process.on("unhandledRejection", (reason) => {
 
 const SUPABASE_URL = process.env.CAMAI_SUPABASE_URL ?? "https://kuqyhceykvisqfyghiot.supabase.co";
 const ANON_KEY = process.env.CAMAI_SUPABASE_ANON_KEY ?? "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imt1cXloY2V5a3Zpc3FmeWdoaW90Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM4Mzc1MjksImV4cCI6MjA5OTQxMzUyOX0.EvmBR-6sjtUO8UWBm9A0Sv9Ms5GMSs7BDsvw8fVZ8LI";
+
+// ---------------------------------------------------------------------------
+// Warm session prefetch.
+//
+// The renderer cannot sign in until it holds a valid access token, and getting
+// one used to be the first thing it did after mounting — so the network round
+// trip to the auth server ran AFTER Electron had booted, the window had been
+// created and the React bundle had parsed. Those two costs are independent, so
+// paying them one after the other is pure waste.
+//
+// This starts the refresh the instant the app is ready, in parallel with window
+// creation and renderer startup. By the time React asks (get-warm-session) the
+// answer is usually already sitting here.
+//
+// Note the skip: if the cached session still has real life left in it, there is
+// no network call at all — the renderer signs in from the DPAPI vault. That is
+// the difference between a warm launch costing ~0ms of auth and ~400ms.
+// ---------------------------------------------------------------------------
+
+type WarmSession =
+  | { ok: true; session: CachedSession }
+  | { ok: false; reason: "no-creds" | "retry" };
+
+let warmSessionPromise: Promise<WarmSession> | null = null;
+
+/** The `exp` claim of a JWT, without verifying it — we are reading our own
+ *  freshly-issued token to know when to stop trusting it, not authenticating
+ *  anything. Returns null on anything that isn't a decodable JWT. */
+function jwtExp(token: string | undefined): number | null {
+  try {
+    const payload = JSON.parse(Buffer.from(token!.split(".")[1], "base64").toString("utf8"));
+    return typeof payload?.exp === "number" ? payload.exp : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Normalise whatever the auth server returned into the shape supabase-js
+ *  persists. expires_at is what every freshness check keys off, so derive it
+ *  from the token itself when the response didn't spell it out. */
+function normalizeSession(raw: any): CachedSession {
+  const expiresAt =
+    typeof raw?.expires_at === "number"
+      ? raw.expires_at
+      : jwtExp(raw?.access_token) ??
+        Math.floor(Date.now() / 1000) + (Number(raw?.expires_in) || 3600);
+  return { ...raw, expires_at: expiresAt, token_type: raw?.token_type ?? "bearer" };
+}
+
+async function refreshWarmSession(): Promise<WarmSession> {
+  const creds = loadCredentials();
+  if (!creds?.refresh_token) return { ok: false, reason: "no-creds" };
+
+  // Fast path: the vault already holds a session good for a while yet.
+  if (cachedSessionIsFresh()) {
+    const cached = loadSessionCache();
+    if (cached) return { ok: true, session: cached };
+  }
+
+  try {
+    const res = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=refresh_token`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", apikey: ANON_KEY },
+      body: JSON.stringify({ refresh_token: creds.refresh_token }),
+    });
+    const body = (await res.json().catch(() => null)) as { access_token?: string } | null;
+    if (!res.ok) {
+      // 4xx means the refresh token itself is dead (revoked/rotated away) and
+      // re-activation is genuinely required. Anything else is transient and the
+      // saved key must be kept — see restoreSession() for the same distinction.
+      if (res.status >= 400 && res.status < 500) {
+        clearSessionCache();
+        return { ok: false, reason: "no-creds" };
+      }
+      return { ok: false, reason: "retry" };
+    }
+    if (!body?.access_token) return { ok: false, reason: "retry" };
+
+    const session = normalizeSession(body);
+    saveSessionCache(session);
+    // Rotation: persist the newest refresh token so the next launch starts from
+    // a live one rather than the token we just spent.
+    if (session.refresh_token && session.refresh_token !== creds.refresh_token) {
+      saveCredentials({ ...creds, refresh_token: session.refresh_token });
+    }
+    return { ok: true, session };
+  } catch {
+    // Offline / DNS not up yet. Transient by definition.
+    return { ok: false, reason: "retry" };
+  }
+}
+
+function warmSession(force = false): Promise<WarmSession> {
+  if (force || !warmSessionPromise) warmSessionPromise = refreshWarmSession();
+  return warmSessionPromise;
+}
 
 // The source id the renderer picked, read by setDisplayMediaRequestHandler on
 // the very next getDisplayMedia call. Null means "no pick" — the handler then
@@ -128,6 +229,45 @@ if (!gotTheLock) {
       console.log(`[Renderer Console] ${message}`);
     });
 
+    // ---------- Navigation containment (Electron security checklist) --------
+    // Nothing may replace this window's document, and nothing may spawn a new
+    // BrowserWindow. Without these two handlers, any link, redirect or
+    // window.open() reachable from renderer content — including one injected
+    // through a value that arrived from the database — could navigate the
+    // preload-privileged renderer to an attacker page, which then talks to the
+    // exposed window.camai bridge (session tokens, engine control token, model
+    // downloads) as if it were our own UI. External links still open, in the
+    // user's real browser, which is where they belonged anyway.
+    const isInternalUrl = (target: string): boolean => {
+      try {
+        const u = new URL(target);
+        if (u.protocol === "file:") return true;
+        const dev = process.env.VITE_DEV_SERVER_URL;
+        return !!dev && target.startsWith(dev);
+      } catch {
+        return false;
+      }
+    };
+
+    win.webContents.setWindowOpenHandler(({ url }) => {
+      if (/^https?:$/.test(new URL(url).protocol)) {
+        shell.openExternal(url).catch((e) => console.error("[main] openExternal failed:", e));
+      }
+      return { action: "deny" };
+    });
+
+    win.webContents.on("will-navigate", (event, url) => {
+      if (isInternalUrl(url)) return;
+      event.preventDefault();
+      console.warn(`[main] blocked in-window navigation to ${url}`);
+      if (/^https?:/.test(url)) {
+        shell.openExternal(url).catch((e) => console.error("[main] openExternal failed:", e));
+      }
+    });
+
+    // A preload/webview attach is never legitimate in this app: refuse both.
+    win.webContents.on("will-attach-webview", (event) => event.preventDefault());
+
     // The OS can change fullscreen without the renderer asking (the user hits the
     // title-bar control, or Windows exits fullscreen on a display change). Push
     // the truth down so React never renders an exit button for a state the window
@@ -192,6 +332,18 @@ if (!gotTheLock) {
         supabase_url: SUPABASE_URL,
         anon_key: ANON_KEY,
       });
+      // A fresh activation may be a different license, and therefore a
+      // different org. Drop the previous workspace snapshot so the cache-first
+      // render cannot briefly paint the old org's cameras.
+      clearBundleCache();
+      // Seed the vault with the session we were just handed and drop the warm
+      // prefetch computed from the (now superseded) pre-activation state, so a
+      // restart right after activation still takes the zero-network path.
+      saveSessionCache(normalizeSession({
+        access_token: body.access_token,
+        refresh_token: body.refresh_token,
+      }));
+      warmSessionPromise = null;
       return { ok: true, access_token: body.access_token, refresh_token: body.refresh_token };
     } catch (e) {
       return { ok: false, error: e instanceof Error ? e.message : "activation failed — check your connection" };
@@ -206,6 +358,48 @@ if (!gotTheLock) {
     return { ok: true, refresh_token: creds.refresh_token, device_id: creds.device_id };
   });
 
+  // The prefetched session (see refreshWarmSession). Usually already resolved by
+  // the time the renderer gets here, which is the entire point.
+  ipcMain.handle("get-warm-session", async (_evt, force?: boolean) => warmSession(!!force));
+
+  // ---- supabase-js storage adapter, backed by the DPAPI vault ---------------
+  //
+  // supabase-js normally persists its session in localStorage. Here that would
+  // mean writing a refresh token to disk in plaintext, throwing away the reason
+  // the vault exists. These three handlers back its storage interface with
+  // safeStorage instead, which buys the warm-start fast path (the auth client
+  // recovers an unexpired session from disk and signs in with NO network) at no
+  // cost to the security posture.
+  ipcMain.handle("session-store-get", async () => loadSessionCache());
+  ipcMain.handle("session-store-set", async (_evt, session: CachedSession | null) => {
+    saveSessionCache(session);
+    // Keep the vault's refresh token in step with rotation, so a cold launch
+    // (cache expired) still has a live token to spend.
+    if (session?.refresh_token) {
+      const creds = loadCredentials();
+      if (creds && creds.refresh_token !== session.refresh_token) {
+        saveCredentials({ ...creds, refresh_token: session.refresh_token });
+      }
+    }
+    return { ok: true };
+  });
+  ipcMain.handle("session-store-remove", async () => {
+    clearSessionCache();
+    return { ok: true };
+  });
+
+  // ---- Workspace bundle cache ---------------------------------------------
+  //
+  // The last good desktop-sync payload, so the workspace renders from disk
+  // instead of holding the splash open for an edge-function round trip. Written
+  // encrypted because the bundle carries org settings values (Telegram tokens
+  // among them), which have no business sitting in plaintext.
+  ipcMain.handle("get-cached-bundle", async () => loadBundleCache());
+  ipcMain.handle("set-cached-bundle", async (_evt, bundle: unknown) => {
+    saveBundleCache(bundle);
+    return { ok: true };
+  });
+
   // Token rotation: renderer reports the newest refresh token after every refresh.
   ipcMain.handle("update-refresh-token", async (_evt, refreshToken: string) => {
     const creds = loadCredentials();
@@ -214,7 +408,8 @@ if (!gotTheLock) {
   });
 
   ipcMain.handle("deactivate", async () => {
-    clearCredentials();
+    clearCredentials(); // also drops the session + bundle caches
+    warmSessionPromise = null;
     return { ok: true };
   });
 
@@ -267,14 +462,28 @@ if (!gotTheLock) {
     }
   });
 
-  ipcMain.handle("get-config", () => {
+  function appConfig() {
     const isAdmin = app.getName().includes("Admin Studio") || process.env.CAMAI_APP_TYPE === "admin";
     return {
       supabaseUrl: SUPABASE_URL,
       anonKey: ANON_KEY,
       appType: isAdmin ? "admin" : "desktop",
-      isPackaged: app.isPackaged
+      isPackaged: app.isPackaged,
     };
+  }
+
+  ipcMain.handle("get-config", () => appConfig());
+
+  // Synchronous twin, read once by the preload script.
+  //
+  // The config is four constants known before the window even exists, yet every
+  // renderer path that needed it began with an async IPC round trip — and App's
+  // first render was gated on it, so the splash could not decide what to draw
+  // until a promise resolved. Resolving it in preload means the renderer has the
+  // config before its first line of React runs. sendSync blocks the main
+  // process, which is acceptable exactly once, for a call that touches no I/O.
+  ipcMain.on("get-config-sync", (evt) => {
+    evt.returnValue = appConfig();
   });
 
   // ---------- IPC: Local AI Engine supervisor ----------
@@ -294,7 +503,19 @@ if (!gotTheLock) {
     setEnginePath(pythonPath, engineDir));
 
   app.whenReady().then(() => {
+    // Kick the auth refresh BEFORE the window exists so it overlaps window
+    // creation, the renderer process spawn and the React bundle parse instead
+    // of queueing behind them. Returns immediately when the vault already holds
+    // a live session.
+    void warmSession();
+
     createWindow();
+
+    // Hardware fingerprint: several seconds of WMI queries on a cold machine.
+    // Precomputed here so a first-run activation spends that time while the
+    // operator is reading the screen, not after they hit Activate. Cached to
+    // disk, so this is a no-op on every later launch.
+    warmFingerprint();
 
     // Hands getDisplayMedia the source the operator actually picked.
     //
@@ -365,7 +586,25 @@ if (!gotTheLock) {
 
     // Local AI engine: launch on app start, keep it alive for the life of
     // the app (see engineSupervisor.ts for restart/crash-loop handling).
-    startEngine(() => win);
+    //
+    // DEFERRED until the window has painted. Spawning the engine is not CPU
+    // work we can ignore — it is a ~200MB PyInstaller exe unpacking itself,
+    // which saturates the disk exactly while Chromium is trying to read the
+    // renderer bundle off that same disk. Starting it first cost the UI its
+    // first paint; starting it a beat later costs the engine nothing, because
+    // nothing can talk to it until the workspace is up anyway.
+    //
+    // Belt and braces on the trigger: did-finish-load is the signal we want,
+    // but a renderer that fails to load must not mean an engine that never
+    // starts, so a timer guarantees it either way.
+    let engineStarted = false;
+    const kickEngine = () => {
+      if (engineStarted) return;
+      engineStarted = true;
+      startEngine(() => win);
+    };
+    win?.webContents.once("did-finish-load", () => setTimeout(kickEngine, 300));
+    setTimeout(kickEngine, 5000);
   });
 
   // Drop the reference the moment the window goes, so anything that fires

@@ -9,8 +9,16 @@ openvino==2026.2.1
 onnxruntime==1.27.0
 # Use a slightly older numpy that's widely available
 numpy==1.26.4
-pillow==10.2.0
-python-multipart==0.0.7
+# Security patch level, API-compatible with the pins they replace:
+#   pillow 10.2.0        -> CVE-2024-28219, buffer overflow in _imagingcms
+#                           (fixed in 10.3.0)
+#   python-multipart 0.0.7 -> CVE-2024-53981, CPU/log exhaustion parsing a
+#                           malformed multipart boundary — reachable from
+#                           /api/cameras/upload (fixed in 0.0.18)
+# Rebuild the frozen engine (server/build_engine.ps1) to pick these up; the
+# shipped camai-engine.exe keeps whatever was frozen into it.
+pillow==10.4.0
+python-multipart==0.0.18
 # Hard dependency of app/ai/pipeline.py's ByteTracker (Hungarian assignment
 # for multi-object data association) — not optional/try-except like the
 # inference backends below.

@@ -16,7 +16,16 @@ Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   if (req.method !== "POST") return json({ error: "method not allowed" }, 405);
 
-  const ip = req.headers.get("x-forwarded-for") ?? "unknown";
+  // X-Forwarded-For is a client-writable header that the platform APPENDS to.
+  // Reading element [0] therefore reads whatever the caller put there, so
+  // `activate:${ip}` produced a brand-new rate-limit bucket for every forged
+  // value — the 5-attempts/minute guard on licence-key submission was bypassable
+  // by sending a different X-Forwarded-For each time. The LAST element is the
+  // hop the infrastructure itself recorded and is the only one a client can't
+  // choose. Same value is used for the audit trail below, so the recorded IP
+  // stops being attacker-controlled too.
+  const _xff = (req.headers.get("x-forwarded-for") ?? "").split(",").map((s) => s.trim()).filter(Boolean);
+  const ip = _xff.length ? _xff[_xff.length - 1] : "unknown";
   if (!(await rateLimit(`activate:${ip}`, 5, 60_000))) {
     return json({ error: "too many attempts, retry later" }, 429);
   }
@@ -69,7 +78,7 @@ Deno.serve(async (req) => {
         // reactivates it. Including it here would let banned hardware
         // self-reactivate with any valid key.
         is_online: true,
-        last_ip: ip === "unknown" ? null : ip.split(",")[0].trim(),
+        last_ip: ip === "unknown" ? null : ip,
         last_seen_at: new Date().toISOString(),
       },
       { onConflict: "org_id,fingerprint_hash" },
@@ -93,6 +102,25 @@ Deno.serve(async (req) => {
     { org_id: lic.org_id, license_id: lic.id, device_id: device.id, revoked_at: null },
     { onConflict: "license_id,device_id" },
   );
+
+  // Check-then-insert is a race: N activations for the same licence, fired
+  // together on N machines, all read the count before any of them has written,
+  // so all N pass a max_devices of 1. Re-count AFTER the write and, if this
+  // activation is the one that pushed the licence over its seat limit, revoke
+  // it again and refuse — the seat count converges on the licensed number
+  // instead of on however many requests were sent in parallel.
+  const { count: after } = await db
+    .from("license_activations")
+    .select("id", { count: "exact", head: true })
+    .eq("license_id", lic.id)
+    .is("revoked_at", null);
+  if ((after ?? 0) > lic.max_devices) {
+    await db.from("license_activations")
+      .update({ revoked_at: new Date().toISOString() })
+      .eq("license_id", lic.id)
+      .eq("device_id", device.id);
+    return json({ error: "license already active on maximum number of devices" }, 403);
+  }
 
   // 4. Mint a session for the license owner (magiclink -> verifyOtp, server-side only)
   const { data: prof } = await db
@@ -128,7 +156,7 @@ Deno.serve(async (req) => {
     action: "device.activate",
     target_type: "device",
     target_id: device.id,
-    ip: ip === "unknown" ? null : ip.split(",")[0].trim(),
+    ip: ip === "unknown" ? null : ip,
     device_id: device.id,
     detail: { app_version: body.app_version ?? "" },
   });

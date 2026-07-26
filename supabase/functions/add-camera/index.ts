@@ -48,8 +48,19 @@ Deno.serve(async (req) => {
 
   const { name, site_id, ...fields } = (await req.json()) as CameraFields & { name: string; site_id?: string };
   if (!name) return json({ error: "name required" }, 400);
-  if (!["rtsp", "onvif", "usb", "ip", "nvr", "dvr", "screen_share"].includes(fields.source_type)) {
+  if (!["rtsp", "onvif", "usb", "ip", "nvr", "dvr", "screen_share", "stream_url"].includes(fields.source_type)) {
     return json({ error: "invalid source_type" }, 400);
+  }
+
+  // site_id is caller-supplied and was written straight into the row. The
+  // insert runs on the service-role client (RLS bypassed), so a foreign site
+  // uuid would have attached this camera to another tenant's site — an
+  // object-reference the sites RLS policy would never have allowed.
+  if (site_id) {
+    const { data: site } = await db.from("sites").select("id, org_id").eq("id", site_id).maybeSingle();
+    if (!site || (!prof.is_super_admin && site.org_id !== prof.org_id)) {
+      return json({ error: "site not found in your organization" }, 400);
+    }
   }
 
   const check = await verifyCameraConnection(fields);

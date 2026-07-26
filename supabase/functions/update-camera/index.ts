@@ -54,6 +54,15 @@ Deno.serve(async (req) => {
   const { data: existing } = await existingQuery.maybeSingle();
   if (!existing) return json({ error: "camera not found" }, 404);
 
+  // Same cross-tenant object-reference guard as add-camera: this update runs on
+  // the service-role client, so a foreign site uuid would otherwise be accepted.
+  if (site_id) {
+    const { data: site } = await db.from("sites").select("id, org_id").eq("id", site_id).maybeSingle();
+    if (!site || (!prof.is_super_admin && site.org_id !== existing.org_id)) {
+      return json({ error: "site not found in your organization" }, 400);
+    }
+  }
+
   const patch: Record<string, unknown> = {};
   if (name !== undefined) patch.name = name;
   if (site_id !== undefined) patch.site_id = site_id || null;
@@ -64,7 +73,7 @@ Deno.serve(async (req) => {
 
   // Only re-verify/re-encrypt when the caller actually sent connection
   // fields — editing just the name shouldn't require re-typing credentials.
-  if (fields.host !== undefined || fields.source_type !== undefined) {
+  if (fields.host !== undefined || fields.url !== undefined || fields.source_type !== undefined) {
     const merged: CameraFields = {
       source_type: fields.source_type ?? existing.source_type as CameraFields["source_type"],
       host: fields.host,
@@ -72,8 +81,9 @@ Deno.serve(async (req) => {
       username: fields.username,
       password: fields.password,
       path: fields.path,
+      url: fields.url,
     };
-    if (!["rtsp", "onvif", "usb", "ip", "nvr", "dvr", "screen_share"].includes(merged.source_type)) {
+    if (!["rtsp", "onvif", "usb", "ip", "nvr", "dvr", "screen_share", "stream_url"].includes(merged.source_type)) {
       return json({ error: "invalid source_type" }, 400);
     }
     const check = await verifyCameraConnection(merged);

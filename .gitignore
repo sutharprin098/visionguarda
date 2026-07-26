@@ -62,6 +62,10 @@ server/.venv-build/
 server/build/
 kernel.errors.txt
 
-# Large demo videos — host via CDN/Vercel, not git
+# Large demo videos — host via CDN/Vercel, not git.
+# These are served from Supabase storage (see ea1faca0); the local copies are
+# only the sources fed to upload_marketing_videos.mjs. ~50MB, and a blob
+# committed once stays in history forever even after a later delete.
 portal/public/demo.mp4
 portal/public/features-demo.mp4
+portal/public/videos/

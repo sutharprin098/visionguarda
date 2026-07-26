@@ -205,6 +205,7 @@ const SOURCE_TYPES = [
   { value: "nvr", label: "NVR" },
   { value: "dvr", label: "DVR" },
   { value: "screen_share", label: "Screen Share" },
+  { value: "stream_url", label: "Stream URL" },
 ] as const;
 
 const DEFAULT_PORTS: Record<string, string> = { rtsp: "554", nvr: "554", dvr: "554", onvif: "80", ip: "80" };
@@ -216,7 +217,7 @@ function AddCameraForm({ camera, onDone }: { camera?: CameraRow; onDone: () => v
     // Connection fields are never sent back from the server (only ciphertext
     // is stored) — editing starts blank; leaving them blank on save keeps
     // the existing encrypted connection untouched.
-    host: "", port: DEFAULT_PORTS[camera?.source_type ?? "rtsp"] ?? "554", username: "", password: "", path: "",
+    host: "", port: DEFAULT_PORTS[camera?.source_type ?? "rtsp"] ?? "554", username: "", password: "", path: "", url: "",
   });
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -240,6 +241,9 @@ function AddCameraForm({ camera, onDone }: { camera?: CameraRow; onDone: () => v
   });
 
   const isUsb = form.source_type === "usb";
+  // Its address is one opaque string, so it shares nothing with the host/port
+  // form below — and nothing is dialled from the cloud to verify it.
+  const isStreamUrl = form.source_type === "stream_url";
 
   function setSourceType(source_type: string) {
     setForm({ ...form, source_type, port: DEFAULT_PORTS[source_type] ?? "" });
@@ -250,9 +254,10 @@ function AddCameraForm({ camera, onDone }: { camera?: CameraRow; onDone: () => v
   // ciphertext back) — only treat the connection as "changed" if the user
   // actually typed something or switched source type, so a plain rename
   // doesn't force re-verification against an empty host.
-  const connectionTouched = !isEdit || form.host.trim() !== "" || form.source_type !== camera?.source_type;
+  const connectionTouched = !isEdit || form.host.trim() !== "" || form.url.trim() !== "" || form.source_type !== camera?.source_type;
 
   function fields() {
+    if (isStreamUrl) return { source_type: form.source_type, url: form.url.trim() };
     return {
       source_type: form.source_type,
       host: isUsb ? undefined : form.host.trim(),
@@ -290,7 +295,10 @@ function AddCameraForm({ camera, onDone }: { camera?: CameraRow; onDone: () => v
     onDone();
   }
 
-  const canSubmit = form.name.trim() && (isUsb || form.source_type === "screen_share" ? true : !connectionTouched || form.host.trim());
+  const canSubmit = form.name.trim() && (
+    isStreamUrl ? (!connectionTouched || form.url.trim())
+      : isUsb || form.source_type === "screen_share" ? true
+      : !connectionTouched || form.host.trim());
 
   return (
     <div className="space-y-3">
@@ -313,7 +321,9 @@ function AddCameraForm({ camera, onDone }: { camera?: CameraRow; onDone: () => v
 
       {isEdit && form.source_type !== "screen_share" && (
         <p className="text-xs text-ink-3">
-          Connection fields are hidden for security — leave them blank to keep the current connection, or fill them in to replace it (re-verified before saving).
+          {isStreamUrl
+            ? "The saved URL is hidden for security — leave it blank to keep the current one, or paste a new URL to replace it."
+            : "Connection fields are hidden for security — leave them blank to keep the current connection, or fill them in to replace it (re-verified before saving)."}
         </p>
       )}
 
@@ -326,6 +336,25 @@ function AddCameraForm({ camera, onDone }: { camera?: CameraRow; onDone: () => v
         <div className="rounded-md border border-accent/20 bg-accent/5 p-3 text-xs text-ink-2">
           This is a virtual camera. You will be able to capture and stream your screen or webcam directly from the desktop application workspace. No physical connection details are needed.
         </div>
+      ) : isStreamUrl ? (
+        <>
+          <Field
+            label="Stream URL"
+            hint="Full address of a live stream — an HLS playlist (.m3u8), an MJPEG endpoint, or an RTSP URL that already includes its credentials. Paste it exactly as-is."
+          >
+            <textarea
+              className="input min-h-[72px] font-mono text-xs"
+              placeholder={isEdit ? "unchanged" : "https://example.com/live/playlist.m3u8"}
+              value={form.url}
+              onChange={(e) => { setForm({ ...form, url: e.target.value }); setTestState({ state: "idle" }); }}
+            />
+          </Field>
+          <div className="rounded-md border border-accent/20 bg-accent/5 p-3 text-xs text-ink-2">
+            The URL is stored as given and opened by the desktop app on your own machine — it is never fetched from the cloud, so it is not verified here. If the stream fails to open, the camera will show as offline.
+            <br /><br />
+            Note that signed playlist URLs (most public live streams) expire after a few hours. For a long unattended run, re-paste a fresh URL or point this at a stream whose address is stable.
+          </div>
+        </>
       ) : (
         <>
           <div className="grid grid-cols-3 gap-3">
@@ -357,7 +386,7 @@ function AddCameraForm({ camera, onDone }: { camera?: CameraRow; onDone: () => v
         </>
       )}
 
-      {form.source_type !== "screen_share" && (
+      {form.source_type !== "screen_share" && !isStreamUrl && (
         <div className="flex items-center gap-3">
           <button type="button" className="btn-ghost text-xs" onClick={testConnection}
                   disabled={testState.state === "testing" || !canSubmit || (isEdit && !connectionTouched)}>

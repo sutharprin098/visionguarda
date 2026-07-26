@@ -36,7 +36,7 @@ const FAQS: FAQItem[] = [
   },
   {
     q: "Can I train or fine-tune custom AI vision detection models?",
-    a: "Yes. Enterprise tier accounts gain access to custom dataset training pipelines powered by YOLOv11 and SAM3 segmentation models, tailored for proprietary industrial equipment or specialized site compliance rules.",
+    a: "Yes. Enterprise tier accounts gain access to custom dataset training pipelines powered by proprietary CamAI vision models, tailored for proprietary industrial equipment or specialized site compliance rules.",
     cat: "Enterprise"
   }
 ];
