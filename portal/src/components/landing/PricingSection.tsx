@@ -15,7 +15,7 @@ export default function PricingSection() {
       popular: false,
       features: [
         "Up to 4 Concurrent RTSP Cameras",
-        "YOLOv11 Person & Vehicle Detection",
+        "CamAI High-Precision Object Detection",
         "Telegram Instant Snapshot Alerts",
         "Windows Desktop Edge Client",
         "7 Days Local Storage Buffer",
@@ -50,7 +50,7 @@ export default function PricingSection() {
       popular: false,
       features: [
         "Unlimited Camera Channels & Nodes",
-        "Custom Vision Model Training (SAM3 & YOLO)",
+        "Custom Vision Model Fine-Tuning",
         "On-Premises Air-Gapped Deployment",
         "Dedicated Solutions Architect & SLA",
         "SIEM & Law Enforcement Integration",

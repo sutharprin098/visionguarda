@@ -48,6 +48,107 @@
 }
 
 @layer components {
+  /* App Portal Card Containers */
+  .card {
+    background-color: var(--s1);
+    border: 1px solid var(--line);
+    border-radius: 18px;
+    box-shadow: 0 2px 10px -2px rgba(30, 41, 51, 0.04), 0 1px 3px -1px rgba(30, 41, 51, 0.02);
+    transition: all 0.2s ease;
+  }
+  .card:hover {
+    box-shadow: 0 8px 24px -4px rgba(30, 41, 51, 0.07), 0 2px 6px -1px rgba(30, 41, 51, 0.03);
+  }
+
+  /* Buttons */
+  .btn-primary {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 9px 18px;
+    border-radius: 12px;
+    background-color: var(--ink1);
+    color: var(--s0);
+    font-weight: 600;
+    font-size: 13px;
+    box-shadow: 0 2px 8px rgba(30, 41, 51, 0.12);
+    transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+    white-space: nowrap;
+    cursor: pointer;
+  }
+  .btn-primary:hover:not(:disabled) {
+    opacity: 0.92;
+    transform: translateY(-1px);
+    box-shadow: 0 4px 14px rgba(30, 41, 51, 0.18);
+  }
+  .btn-primary:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  .btn-ghost {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 9px 18px;
+    border-radius: 12px;
+    background-color: var(--s1);
+    color: var(--ink1);
+    border: 1px solid var(--line);
+    font-weight: 600;
+    font-size: 13px;
+    box-shadow: 0 1px 3px rgba(30, 41, 51, 0.03);
+    transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+    white-space: nowrap;
+    cursor: pointer;
+  }
+  .btn-ghost:hover:not(:disabled) {
+    background-color: var(--s2);
+    border-color: var(--line);
+    transform: translateY(-1px);
+  }
+  .btn-ghost:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  .btn-danger {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 9px 18px;
+    border-radius: 12px;
+    background-color: var(--danger);
+    color: #ffffff;
+    font-weight: 600;
+    font-size: 13px;
+    box-shadow: 0 2px 8px rgba(229, 83, 75, 0.25);
+    transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+    white-space: nowrap;
+    cursor: pointer;
+  }
+  .btn-danger:hover:not(:disabled) {
+    opacity: 0.9;
+    transform: translateY(-1px);
+  }
+  .btn-danger:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  .link-action {
+    color: rgb(var(--accent-rgb));
+    font-size: 13px;
+    font-weight: 600;
+    transition: color 0.15s;
+  }
+  .link-action:hover {
+    text-decoration: underline;
+  }
+
   /* Architectural Light Glass & Card Containers */
   .architectural-card {
     background-color: #ffffff;
@@ -112,6 +213,65 @@
     border-color: #94a3b8;
     transform: translateY(-1px);
   }
+
+  /* Form controls */
+  input[type="text"],
+  input[type="email"],
+  input[type="password"],
+  input[type="number"],
+  input[type="search"],
+  select,
+  textarea {
+    border-radius: 12px;
+    border: 1px solid var(--line);
+    background-color: var(--s1);
+    color: var(--ink1);
+    padding: 8px 12px;
+    font-size: 13px;
+    outline: none;
+    transition: border-color 0.15s, box-shadow 0.15s;
+  }
+  input[type="text"]:focus,
+  input[type="email"]:focus,
+  input[type="password"]:focus,
+  input[type="number"]:focus,
+  input[type="search"]:focus,
+  select:focus,
+  textarea:focus {
+    border-color: rgb(var(--accent-rgb));
+    box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.15);
+  }
+
+  /* Table global typography and compact cell sizes */
+  table {
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 0;
+    font-size: 12px;
+  }
+  th, .th {
+    padding: 8px 12px;
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--ink3);
+    border-bottom: 1px solid var(--line);
+    background-color: var(--s2);
+    white-space: nowrap;
+    text-align: left;
+  }
+  td, .td {
+    padding: 8px 12px;
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--ink1);
+    border-bottom: 1px solid var(--line);
+    vertical-align: middle;
+  }
+  tr:hover td, tr:hover .td {
+    background-color: var(--s2);
+  }
 }
 
 /* Subtle architectural grid pattern */
@@ -145,7 +305,7 @@
   --font-pixel: 'Silkscreen', 'Press Start 2P', monospace;
 
   /* App-shell tokens (admin portal) — Arctic Pearl light.
-     Tailwind surface / ink / line colors map to these. Font stays normal (Inter). */
+     Tailwind surface / ink / line colors map to these. */
   --s0: #F7FBFD;
   --s1: #FFFFFF;
   --s2: #F3F7FA;
@@ -155,64 +315,64 @@
   --ink2: #5B6B75;
   --ink3: #8A9AA4;
 
-  /* Tailwind `accent` reads these RGB channels (so bg-accent/15 opacity works).
-     Default = Arctic-Pearl blue-grey; marketing + auth pages keep this. The
-     admin panel (.app-shell) overrides them to its own theme below. */
-  --accent-rgb: 127 166 184;        /* #7FA6B8 */
-  --accent-hover-rgb: 108 151 171;  /* #6C97AB */
-  --accent-dim-rgb: 42 62 75;       /* #2A3E4B */
+  --accent-rgb: 14 165 233;        /* #0ea5e9 Sky Blue */
+  --accent-hover-rgb: 2 132 199;  /* #0284c7 */
+  --accent-dim-rgb: 224 242 254;   /* #e0f2fe */
 }
 
 /* Admin portal dark theme — glacial Arctic */
 .dark {
-  --s0: #0D1519;
-  --s1: #132029;
-  --s2: #1B2B34;
-  --s3: #24373F;
-  --line: #223540;
-  --ink1: #EAF3F7;
-  --ink2: #A6BAC4;
-  --ink3: #6E828C;
+  --s0: #0B1015;
+  --s1: #121A21;
+  --s2: #1A242E;
+  --s3: #23303C;
+  --line: #1E2D3B;
+  --ink1: #F0F6FC;
+  --ink2: #8B949E;
+  --ink3: #6E7681;
+
+  --accent-rgb: 56 189 248;       /* #38bdf8 Vibrant Sky Blue */
+  --accent-hover-rgb: 14 165 233; /* #0ea5e9 */
+  --accent-dim-rgb: 12 45 72;
 }
 .dark body { background-color: var(--s0); color: var(--ink1); }
 
 /* ============================================================
-   /app admin panel — "Warm Cream + Amber" theme.
-   Scoped to .app-shell so marketing + auth pages are untouched.
-   Overrides the surface/ink/line/accent tokens the panel consumes.
+   /app admin panel — Arctic Pearl Glacial Theme matching Landing Page.
+   Scoped to .app-shell so marketing + auth pages match seamlessly.
    ============================================================ */
 .app-shell {
-  --s0: #FBF8F2;   /* cream page background   */
-  --s1: #FFFFFF;   /* raised surface / cards / sidebar */
-  --s2: #F4EEE3;   /* secondary surface / hover        */
-  --s3: #EBE3D4;   /* elevated / inputs                */
-  --line: #E7DECB; /* warm hairline border   */
-  --ink1: #2B2622; /* warm near-black text   */
-  --ink2: #5C534A; /* warm slate text        */
-  --ink3: #938A7C; /* warm muted text        */
+  --s0: #F7FBFD;   /* Glacial white-ice background matching landing page */
+  --s1: #FFFFFF;   /* Raised surface / cards / sidebar */
+  --s2: #F0F5F8;   /* Soft glacial secondary hover surface */
+  --s3: #E2ECF2;   /* Elevated inputs & controls */
+  --line: #D6E6EF; /* Hairline glacial border matching landing page */
+  --ink1: #1E2933; /* Deep slate text */
+  --ink2: #5B6B75; /* Slate secondary text */
+  --ink3: #8A9AA4; /* Muted text */
 
-  --accent-rgb: 217 119 6;        /* #d97706 amber */
-  --accent-hover-rgb: 180 83 9;   /* #b45309       */
-  --accent-dim-rgb: 251 230 207;  /* #fbe6cf soft amber tint */
+  --accent-rgb: 14 165 233;       /* #0ea5e9 Vibrant Sky Blue */
+  --accent-hover-rgb: 2 132 199;  /* #0284c7 Sky Hover */
+  --accent-dim-rgb: 224 242 254; /* #e0f2fe Soft Sky tint */
 
   background-color: var(--s0);
   color: var(--ink1);
 }
 
-/* Warm-dark (espresso) variant for the panel when dark mode is on */
+/* Glacial Dark Mode for .app-shell */
 .dark .app-shell {
-  --s0: #1A1611;
-  --s1: #221D16;
-  --s2: #2B241B;
-  --s3: #362E22;
-  --line: #3A3226;
-  --ink1: #F5EFE4;
-  --ink2: #C3B8A6;
-  --ink3: #8A8073;
+  --s0: #0B1015;
+  --s1: #121A21;
+  --s2: #1A242E;
+  --s3: #23303C;
+  --line: #1E2D3B;
+  --ink1: #F0F6FC;
+  --ink2: #8B949E;
+  --ink3: #6E7681;
 
-  --accent-rgb: 245 158 11;       /* #f59e0b brighter amber for dark */
-  --accent-hover-rgb: 251 191 36; /* #fbbf24 */
-  --accent-dim-rgb: 60 45 20;
+  --accent-rgb: 56 189 248;       /* #38bdf8 Vibrant Sky Blue */
+  --accent-hover-rgb: 14 165 233; /* #0ea5e9 */
+  --accent-dim-rgb: 12 45 72;
 }
 
 /* Pixel-font accent — labels, wordmark, stat numerals, kickers */

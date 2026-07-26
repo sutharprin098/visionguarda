@@ -84,38 +84,61 @@ export default function BillingPage() {
       {!data?.invoices.length ? (
         <Empty text="No invoices yet. Invoices appear here once billing is active for your organization." />
       ) : (
-        <div className="card overflow-x-auto">
-          <table className="w-full min-w-[560px]">
-            <thead>
-              <tr>
-                <th className="th">Date</th><th className="th">Amount</th>
-                <th className="th">Status</th><th className="th"></th>
-              </tr>
-            </thead>
-            <tbody>
-              {data.invoices.map((i) => (
-                <tr key={i.id} className="hover:bg-surface-2">
-                  <td className="td text-ink-2">{fmtDateTime(i.created_at)}</td>
-                  <td className="td font-medium text-ink-1">{fmtMoney(i.amount_cents, i.currency)}</td>
-                  <td className="td"><Badge tone={statusTone[i.status]}>{i.status}</Badge></td>
-                  <td className="td text-right">
-                    {i.invoice_url && (
-                      <a className="inline-flex items-center gap-1 text-xs text-accent hover:underline"
-                         href={i.invoice_url} target="_blank" rel="noreferrer">
-                        Invoice <ExternalLink size={11} />
-                      </a>
-                    )}
-                  </td>
+        <>
+          {/* Desktop Table View */}
+          <div className="card hidden md:block overflow-x-auto">
+            <table className="w-full min-w-[560px]">
+              <thead>
+                <tr>
+                  <th className="th">Date</th><th className="th">Amount</th>
+                  <th className="th">Status</th><th className="th"></th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody>
+                {data.invoices.map((i) => (
+                  <tr key={i.id} className="hover:bg-surface-2">
+                    <td className="td text-ink-2">{fmtDateTime(i.created_at)}</td>
+                    <td className="td font-medium text-ink-1">{fmtMoney(i.amount_cents, i.currency)}</td>
+                    <td className="td"><Badge tone={statusTone[i.status]}>{i.status}</Badge></td>
+                    <td className="td text-right">
+                      {i.invoice_url && (
+                        <a className="inline-flex items-center gap-1 text-xs text-accent hover:underline"
+                           href={i.invoice_url} target="_blank" rel="noreferrer">
+                          Invoice <ExternalLink size={11} />
+                        </a>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Mobile Card List View */}
+          <div className="space-y-3 md:hidden">
+            {data.invoices.map((i) => (
+              <div key={i.id} className="card p-4 space-y-2 border border-line/70 bg-surface-1">
+                <div className="flex items-center justify-between">
+                  <span className="text-sm font-bold text-ink-1">{fmtMoney(i.amount_cents, i.currency)}</span>
+                  <Badge tone={statusTone[i.status]}>{i.status}</Badge>
+                </div>
+                <div className="flex items-center justify-between text-xs text-ink-3">
+                  <span>{fmtDateTime(i.created_at)}</span>
+                  {i.invoice_url && (
+                    <a className="inline-flex items-center gap-1 text-xs text-accent hover:underline"
+                       href={i.invoice_url} target="_blank" rel="noreferrer">
+                      Invoice <ExternalLink size={11} />
+                    </a>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        </>
       )}
 
       <h2 className="mb-3 mt-8 text-sm font-semibold text-ink-1">Metered usage (all time)</h2>
-      <div className="grid gap-4 sm:grid-cols-2">
-        <Kpi label="Storage" value={`${Math.round(data?.totals["storage_mb"] ?? 0)} MB`} />
+      <div className="grid gap-4 sm:grid-cols-1">
         <Kpi label="Stream Minutes" value={Math.round(data?.totals["stream_minutes"] ?? 0)} />
       </div>
     </>

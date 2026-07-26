@@ -153,7 +153,24 @@ export default function ReportsPage() {
       const w = window.open("", "_blank");
       if (!w) throw new Error("Popup blocked — allow popups to print reports.");
       const title = `${def.label} — ${format(start, "dd MMM yyyy")} to ${format(end, "dd MMM yyyy")}`;
-      w.document.write(`<!doctype html><html><head><title>${title}</title><style>
+      // Everything interpolated below is HTML-escaped. This document is written
+      // into a window.open("") popup, which inherits THIS origin — so markup
+      // smuggled in through any of these values executes as the portal itself,
+      // with access to the Supabase session in localStorage via window.opener.
+      // The organization name is the live example: it is free text an org.manage
+      // holder sets (and it is chosen by the signer-upper at signup), it was
+      // interpolated raw, and it fires for every user who prints a report — a
+      // super admin included. Cell values were only half-escaped ("<" alone),
+      // which leaves attribute-context breakouts, so they go through the same
+      // helper now.
+      const esc = (v: unknown) =>
+        String(v ?? "")
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")
+          .replace(/"/g, "&quot;")
+          .replace(/'/g, "&#39;");
+      w.document.write(`<!doctype html><html><head><title>${esc(title)}</title><style>
         body{font-family:system-ui,sans-serif;margin:32px;color:#111}
         h1{font-size:18px} .meta{color:#666;font-size:12px;margin-bottom:16px}
         table{border-collapse:collapse;width:100%;font-size:11px}
@@ -161,10 +178,10 @@ export default function ReportsPage() {
         th{background:#f4f4f5} tr:nth-child(even) td{background:#fafafa}
         @media print{@page{margin:14mm}}
       </style></head><body>
-        <h1>CamAI — ${title}</h1>
-        <div class="meta">${org?.name ?? ""} · generated ${format(new Date(), "dd MMM yyyy HH:mm")} · ${rows.length} rows</div>
-        <table><thead><tr>${def.headers.map((h) => `<th>${h}</th>`).join("")}</tr></thead>
-        <tbody>${rows.map((r: any) => `<tr>${def.row(r).map((c) => `<td>${String(c ?? "").replace(/</g, "&lt;")}</td>`).join("")}</tr>`).join("")}</tbody>
+        <h1>CamAI — ${esc(title)}</h1>
+        <div class="meta">${esc(org?.name ?? "")} · generated ${format(new Date(), "dd MMM yyyy HH:mm")} · ${rows.length} rows</div>
+        <table><thead><tr>${def.headers.map((h) => `<th>${esc(h)}</th>`).join("")}</tr></thead>
+        <tbody>${rows.map((r: any) => `<tr>${def.row(r).map((c) => `<td>${esc(c)}</td>`).join("")}</tr>`).join("")}</tbody>
         </table></body></html>`);
       w.document.close();
       w.focus();
@@ -242,32 +259,56 @@ export default function ReportsPage() {
       {!history?.length ? (
         <Empty text="No reports generated yet." />
       ) : (
-        <div className="card overflow-x-auto">
-          <table className="w-full min-w-[640px]">
-            <thead>
-              <tr>
-                <th className="th">Report</th><th className="th">Kind</th><th className="th">Format</th>
-                <th className="th">Rows</th><th className="th">Generated</th><th className="th"></th>
-              </tr>
-            </thead>
-            <tbody>
-              {history.map((r) => (
-                <tr key={r.id} className="hover:bg-surface-2">
-                  <td className="td text-ink-1">{r.name}</td>
-                  <td className="td"><Badge>{r.kind}</Badge></td>
-                  <td className="td"><Badge tone="accent">{r.format.toUpperCase()}</Badge></td>
-                  <td className="td text-ink-3">{r.row_count}</td>
-                  <td className="td text-ink-3">{fmtDateTime(r.created_at)}</td>
-                  <td className="td text-right">
-                    {r.storage_path && (
-                      <button className="text-xs text-accent hover:underline" onClick={() => download(r)}>Download</button>
-                    )}
-                  </td>
+        <>
+          {/* Desktop Table View */}
+          <div className="card hidden md:block overflow-x-auto">
+            <table className="w-full min-w-[640px]">
+              <thead>
+                <tr>
+                  <th className="th">Report</th><th className="th">Kind</th><th className="th">Format</th>
+                  <th className="th">Rows</th><th className="th">Generated</th><th className="th"></th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody>
+                {history.map((r) => (
+                  <tr key={r.id} className="hover:bg-surface-2">
+                    <td className="td text-ink-1">{r.name}</td>
+                    <td className="td"><Badge>{r.kind}</Badge></td>
+                    <td className="td"><Badge tone="accent">{r.format.toUpperCase()}</Badge></td>
+                    <td className="td text-ink-3">{r.row_count}</td>
+                    <td className="td text-ink-3">{fmtDateTime(r.created_at)}</td>
+                    <td className="td text-right">
+                      {r.storage_path && (
+                        <button className="text-xs text-accent hover:underline" onClick={() => download(r)}>Download</button>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Mobile Card List View */}
+          <div className="space-y-3 md:hidden">
+            {history.map((r) => (
+              <div key={r.id} className="card p-4 space-y-2 border border-line/70 bg-surface-1">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="font-semibold text-sm text-ink-1">{r.name}</div>
+                  <Badge tone="accent">{r.format.toUpperCase()}</Badge>
+                </div>
+                <div className="flex items-center justify-between text-xs text-ink-3">
+                  <span>{r.kind} · {r.row_count} rows</span>
+                  <span>{fmtDateTime(r.created_at)}</span>
+                </div>
+                {r.storage_path && (
+                  <div className="pt-2 border-t border-line/40 text-right">
+                    <button className="text-xs font-semibold text-accent hover:underline" onClick={() => download(r)}>Download Report</button>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </>
       )}
     </>
   );

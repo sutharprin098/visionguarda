@@ -25,7 +25,7 @@ const STATS = [
     target: 99.8,
     suffix: "%",
     label: "Model Accuracy Rate",
-    subtext: "Validated on YOLOv11 & SAM3 vision models",
+    subtext: "Validated on CamAI Enterprise Vision Engine",
     icon: CheckCircle2,
     color: "from-emerald-400 to-teal-600",
     textColor: "text-emerald-500"

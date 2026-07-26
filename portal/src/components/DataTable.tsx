@@ -91,13 +91,13 @@ export default function DataTable<T>({
 
   return (
     <div>
-      {/* toolbar */}
+      {/* Toolbar */}
       <div className="mb-3 flex flex-wrap items-center gap-2">
         {searchText && (
-          <div className="relative">
+          <div className="relative flex-1 sm:flex-initial min-w-[200px]">
             <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-ink-3" />
             <input
-              className="input w-60 pl-8"
+              className="input w-full sm:w-60 pl-8 text-xs py-1.5"
               placeholder="Search…"
               value={q}
               onChange={(e) => { setQ(e.target.value); setPage(0); }}
@@ -109,7 +109,7 @@ export default function DataTable<T>({
           return (
             <select
               key={c.key}
-              className="input w-auto"
+              className="input w-auto text-xs py-1.5"
               value={filters[c.key] ?? ""}
               onChange={(e) => { setFilters({ ...filters, [c.key]: e.target.value }); setPage(0); }}
             >
@@ -118,20 +118,20 @@ export default function DataTable<T>({
             </select>
           );
         })}
-        <div className="ml-auto flex items-center gap-2">
-          <span className="text-xs text-ink-3">{filtered.length} of {rows.length}</span>
+        <div className="flex flex-wrap items-center justify-between sm:justify-end gap-2 w-full sm:w-auto mt-1 sm:mt-0">
+          <span className="text-xs font-mono text-ink-3">{filtered.length} of {rows.length} records</span>
           {exportName && (
-            <button className="btn-ghost px-2.5 py-1.5 text-xs" onClick={exportCsv}>
-              <Download size={13} /> CSV
+            <button className="btn-ghost px-2.5 py-1.5 text-xs gap-1.5" onClick={exportCsv}>
+              <Download size={13} /> Export CSV
             </button>
           )}
         </div>
       </div>
 
-      {/* bulk bar */}
+      {/* Bulk actions bar */}
       {bulkActions && selected.size > 0 && (
         <div className="mb-3 flex items-center gap-3 rounded-md border border-accent/40 bg-accent/10 px-3 py-2">
-          <span className="text-sm text-accent">{selected.size} selected</span>
+          <span className="text-sm font-semibold text-accent">{selected.size} selected</span>
           {bulkActions.map((a) => (
             <button
               key={a.label}
@@ -147,8 +147,8 @@ export default function DataTable<T>({
         </div>
       )}
 
-      {/* table */}
-      <div className="card overflow-x-auto">
+      {/* Desktop Table View */}
+      <div className="card hidden md:block overflow-x-auto">
         <table className="w-full min-w-[720px]">
           <thead>
             <tr>
@@ -207,15 +207,92 @@ export default function DataTable<T>({
         </table>
       </div>
 
-      {/* pagination */}
+      {/* Mobile Card List View */}
+      <div className="space-y-3 md:hidden">
+        {pageRows.length === 0 ? (
+          <div className="card p-8 text-center text-ink-3 text-sm">{emptyText}</div>
+        ) : (
+          pageRows.map((r) => {
+            const k = rowKey(r);
+            const actionCol = columns.find((c) => c.key === "actions" || c.header === "");
+            const normalCols = columns.filter((c) => c !== actionCol);
+
+            return (
+              <div
+                key={k}
+                className={clsx(
+                  "card p-4 space-y-3 border border-line/70 transition bg-surface-1 shadow-sm",
+                  onRowClick && "cursor-pointer active:bg-surface-2"
+                )}
+                onClick={() => onRowClick?.(r)}
+              >
+                {/* Mobile Card Header */}
+                <div className="flex items-start justify-between gap-3 border-b border-line/50 pb-2.5">
+                  <div className="flex items-start gap-2.5 min-w-0">
+                    {bulkActions && (
+                      <input
+                        type="checkbox"
+                        className="accent-[#5b8cff] mt-0.5 h-4 w-4 shrink-0"
+                        checked={selected.has(k)}
+                        onClick={(e) => e.stopPropagation()}
+                        onChange={(e) => {
+                          const next = new Set(selected);
+                          e.target.checked ? next.add(k) : next.delete(k);
+                          setSelected(next);
+                        }}
+                      />
+                    )}
+                    <div className="min-w-0 font-semibold text-ink-1 text-sm">
+                      {normalCols[0] ? normalCols[0].render(r) : null}
+                    </div>
+                  </div>
+
+                  {/* Status/Badge column if present */}
+                  {normalCols[1] && (
+                    <div className="shrink-0 text-xs">
+                      {normalCols[1].render(r)}
+                    </div>
+                  )}
+                </div>
+
+                {/* Mobile Card Body: Key-Value Pairs */}
+                {normalCols.length > 2 && (
+                  <div className="grid grid-cols-2 gap-2 text-xs">
+                    {normalCols.slice(2).map((c) => (
+                      <div key={c.key} className="space-y-0.5 min-w-0">
+                        <div className="text-[10px] font-bold uppercase tracking-wider text-ink-3">
+                          {c.header}
+                        </div>
+                        <div className="text-ink-1 truncate">{c.render(r)}</div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* Mobile Card Actions Footer */}
+                {actionCol && (
+                  <div
+                    className="flex items-center justify-end gap-3 pt-2 border-t border-line/40 text-xs"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    {actionCol.render(r)}
+                  </div>
+                )}
+              </div>
+            );
+          })
+        )}
+      </div>
+
+      {/* Pagination */}
       {pages > 1 && (
-        <div className="mt-3 flex items-center justify-end gap-2 text-sm text-ink-3">
-          <button className="btn-ghost px-2 py-1" disabled={page === 0} onClick={() => setPage(page - 1)}>
-            <ChevronLeft size={14} />
+        <div className="mt-3 flex items-center justify-between sm:justify-end gap-2 text-sm text-ink-3">
+          <button className="btn-ghost px-3 py-1.5 text-xs font-semibold" disabled={page === 0} onClick={() => setPage(page - 1)}>
+            <ChevronLeft size={14} className="inline mr-1" /> Previous
           </button>
-          <span>Page {page + 1} / {pages}</span>
-          <button className="btn-ghost px-2 py-1" disabled={page >= pages - 1} onClick={() => setPage(page + 1)}>
-            <ChevronRight size={14} />
+          <span className="font-mono text-xs">Page {page + 1} of {pages}</span>
+          <button className="btn-ghost px-3 py-1.5 text-xs font-semibold" disabled={page >= pages - 1} onClick={() => setPage(page + 1)}>
+            Next <ChevronRight size={14} className="inline ml-1" />
           </button>
         </div>
       )}

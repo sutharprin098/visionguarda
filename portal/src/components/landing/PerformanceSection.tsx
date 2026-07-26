@@ -33,7 +33,7 @@ export default function PerformanceSection() {
             { label: "GPU VRAM", val: "4.2 GB", icon: HardDrive, color: "text-purple-500", detail: "NVIDIA TensorRT FP16" },
             { label: "Inference FPS", val: "60.0", icon: Activity, color: "text-emerald-500", detail: "Zero Dropped Frames" },
             { label: "Pipeline Latency", val: "11.2 ms", icon: Zap, color: "text-cyan-400", detail: "Sub-15ms Target" },
-            { label: "Model Accuracy", val: "99.8%", icon: Shield, color: "text-amber-500", detail: "YOLOv11x Benchmark" },
+            { label: "Model Accuracy", val: "99.8%", icon: Shield, color: "text-amber-500", detail: "CamAI Neural Benchmark" },
             { label: "RAM Memory", val: "2.1 GB", icon: Server, color: "text-pink-500", detail: "Optimized Rust C++ Core" },
           ].map((item, idx) => {
             const Icon = item.icon;

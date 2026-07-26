@@ -37,7 +37,7 @@ export default function Footer() {
 
       {/* links */}
       <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 pt-16 pb-10">
-        <div className="grid gap-10 md:grid-cols-4">
+        <div className="grid gap-10 md:grid-cols-5">
           <div className="md:col-span-2">
             <div className="flex items-center gap-3">
               <img src="/favicon.svg" alt="CamAI" className="h-9 w-9 rounded-xl" />
@@ -75,15 +75,26 @@ export default function Footer() {
               <li><Link to="/contact" className="hover:text-[var(--ap-dark)]">Contact Sales</Link></li>
             </ul>
           </div>
+
+          <div>
+            <h4 className="ap-pixel text-[10px] uppercase tracking-[0.1em] text-[var(--ap-ink)]">Legal</h4>
+            <ul className="mt-4 space-y-2.5 text-sm text-[var(--ap-ink-2)]">
+              <li><Link to="/privacy" className="hover:text-[var(--ap-dark)]">Privacy Policy</Link></li>
+              <li><Link to="/terms" className="hover:text-[var(--ap-dark)]">Terms of Service</Link></li>
+              <li><Link to="/security" className="hover:text-[var(--ap-dark)]">Security & Compliance</Link></li>
+            </ul>
+          </div>
         </div>
 
         <div className="mt-12 flex flex-col items-center justify-between gap-3 border-t border-[var(--ap-border)] pt-6 sm:flex-row">
           <span className="ap-pixel text-[9px] tracking-[0.06em] text-[var(--ap-ink-2)]">
             © {new Date().getFullYear()} CAMAI — ALL RIGHTS RESERVED
           </span>
-          <span className="ap-pixel text-[9px] tracking-[0.06em] text-[var(--ap-ink-2)]">
-            ON-PREM · WEB PORTAL + WINDOWS DESKTOP
-          </span>
+          <div className="flex gap-4 ap-pixel text-[9px] tracking-[0.06em] text-[var(--ap-ink-2)]">
+            <Link to="/privacy" className="hover:text-[var(--ap-dark)]">PRIVACY</Link>
+            <Link to="/terms" className="hover:text-[var(--ap-dark)]">TERMS</Link>
+            <Link to="/security" className="hover:text-[var(--ap-dark)]">SECURITY</Link>
+          </div>
         </div>
       </div>
     </footer>

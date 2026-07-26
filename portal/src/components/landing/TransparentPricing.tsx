@@ -14,7 +14,7 @@ export default function TransparentPricing() {
       popular: false,
       features: [
         "Up to 4 Concurrent RTSP/USB Cameras",
-        "YOLOv11 Person & Vehicle Detection",
+        "CamAI High-Precision Object Detection",
         "Instant Telegram Snapshot Alerts",
         "Windows Desktop Edge Application",
         "7 Days Local Storage Buffer",

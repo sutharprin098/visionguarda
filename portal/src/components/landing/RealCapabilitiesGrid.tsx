@@ -2,7 +2,7 @@ import { Cpu, ShieldCheck, Flame, Car, HardHat, ZoomIn, Eye, Activity } from "lu
 
 const CAPABILITIES = [
   {
-    title: "YOLOv11 & YOLOX Real-Time Inference",
+    title: "High-Precision Real-Time Inference",
     icon: Cpu,
     tag: "Core AI Engine",
     description: "Detects persons, vehicles, bicycles, and unattended items at 60 FPS with sub-12ms pipeline latency."

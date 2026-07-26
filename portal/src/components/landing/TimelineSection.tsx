@@ -26,7 +26,7 @@ const STEPS = [
   {
     id: "detection",
     num: "03",
-    title: "YOLOv11 & SAM3 Detection",
+    title: "CamAI Multi-Class Neural Detection",
     subtitle: "Bounding Box & Polygon Segmentation",
     icon: Eye,
     detail: "Classifies objects, PPE equipment, vehicle plates, fire, and boundary breaches with 99.8% precision.",

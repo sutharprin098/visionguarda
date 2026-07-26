@@ -1,10 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-
-/**
- * Plays a REAL recorded clip (demo.mp4) and overlays REAL YOLOX detections
- * (demo-detections.json, baked offline from the actual engine) synced to the
- * video timeline. Boxes are normalized 0..1 so they align at any size.
- */
+import { Loader2 } from "lucide-react";
 
 type Det = { id: number; cls: string; c: number; x: number; y: number; w: number; h: number; spd?: number | null };
 type Frame = { t: number; d: Det[] };
@@ -22,14 +17,14 @@ const colorFor = (c: string) => CLS_COLOR[c] || "#7FA6B8";
 
 type Props = {
   src?: string;
-  dataSrc?: string;
+  dataSrc?: string | null;
   hudLabel?: string;
   caption?: string;
 };
 
 export default function VideoDetections({
-  src = "https://kuqyhceykvisqfyghiot.supabase.co/storage/v1/object/public/marketing/demo.mp4",
-  dataSrc = "/demo-detections.json",
+  src = "/videos/junction.mp4",
+  dataSrc = null,
   hudLabel = "LIVE DETECT",
   caption = "CAMAI · REAL FOOTAGE",
 }: Props) {
@@ -39,20 +34,30 @@ export default function VideoDetections({
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
+    if (!dataSrc) {
+      setData(null);
+      setDets([]);
+      return;
+    }
     fetch(dataSrc)
       .then((r) => r.json())
       .then((d: Data) => setData(d))
-      .catch(() => setData(null));
+      .catch(() => {
+        setData(null);
+        setDets([]);
+      });
   }, [dataSrc]);
 
   useEffect(() => {
-    if (!data) return;
+    if (!data) {
+      setDets([]);
+      return;
+    }
     let raf = 0;
     const tick = () => {
       const v = videoRef.current;
       if (v && data.frames.length) {
         const t = v.currentTime;
-        // nearest sampled frame (frames are ~0.08s apart)
         let lo = 0, hi = data.frames.length - 1, best = 0;
         while (lo <= hi) {
           const mid = (lo + hi) >> 1;
@@ -67,10 +72,57 @@ export default function VideoDetections({
     return () => cancelAnimationFrame(raf);
   }, [data]);
 
+  // Reliable Autoplay & Instant Frame Load logic
+  useEffect(() => {
+    const v = videoRef.current;
+    if (!v) return;
+
+    setReady(false);
+    v.muted = true;
+    v.defaultMuted = true;
+    v.playsInline = true;
+
+    let isMounted = true;
+    let retryTimer: ReturnType<typeof setTimeout>;
+
+    const safePlay = () => {
+      if (!isMounted || !v) return;
+      v.play()
+        .then(() => {
+          if (isMounted) setReady(true);
+        })
+        .catch(() => {
+          if (isMounted) {
+            retryTimer = setTimeout(safePlay, 200);
+          }
+        });
+    };
+
+    v.load();
+    safePlay();
+
+    // Re-trigger play on user click or touch if autoplay blocked by browser policy
+    const handleGlobalInteraction = () => {
+      if (v && v.paused) {
+        v.play().then(() => setReady(true)).catch(() => {});
+      }
+    };
+    window.addEventListener("click", handleGlobalInteraction, { once: true });
+    window.addEventListener("touchstart", handleGlobalInteraction, { once: true });
+
+    return () => {
+      isMounted = false;
+      clearTimeout(retryTimer);
+      window.removeEventListener("click", handleGlobalInteraction);
+      window.removeEventListener("touchstart", handleGlobalInteraction);
+    };
+  }, [src]);
+
   const aspect = data ? `${data.w} / ${data.h}` : "16 / 9";
 
   return (
     <div className="relative w-full overflow-hidden rounded-2xl border border-[var(--ap-dark)] bg-[#0c1418]" style={{ aspectRatio: aspect }}>
+      {/* Video Element */}
       <video
         ref={videoRef}
         src={src}
@@ -80,11 +132,26 @@ export default function VideoDetections({
         playsInline
         preload="auto"
         onCanPlay={() => setReady(true)}
-        className="absolute inset-0 h-full w-full object-cover"
+        onLoadedData={() => setReady(true)}
+        onLoadedMetadata={() => {
+          if (videoRef.current) {
+            videoRef.current.play().then(() => setReady(true)).catch(() => {});
+          }
+        }}
+        className="absolute inset-0 h-full w-full object-cover transition-opacity duration-300"
+        style={{ opacity: ready ? 1 : 0.4 }}
       />
 
-      {/* detection layer */}
-      <div className="absolute inset-0">
+      {/* Loading Overlay if frame not ready */}
+      {!ready && (
+        <div className="absolute inset-0 flex flex-col items-center justify-center bg-[#08131a]/80 backdrop-blur-sm z-10 transition-opacity">
+          <Loader2 className="h-6 w-6 animate-spin text-sky-400 mb-2" />
+          <span className="ap-pixel text-[9px] tracking-wider text-sky-300 uppercase">Connecting Camera Stream…</span>
+        </div>
+      )}
+
+      {/* Detection Layer */}
+      <div className="absolute inset-0 pointer-events-none">
         {dets.map((d) => {
           const col = colorFor(d.cls);
           return (
@@ -95,7 +162,7 @@ export default function VideoDetections({
             >
               <div className="relative h-full w-full rounded-[2px]" style={{ border: `1.5px solid ${col}`, boxShadow: `0 0 10px ${col}55` }}>
                 <span
-                  className="ap-pixel absolute -top-[13px] left-0 whitespace-nowrap rounded-[2px] px-1 py-[1px] text-[7px] leading-none"
+                  className="ap-pixel absolute -top-[13px] left-0 whitespace-nowrap rounded-[2px] px-1 py-[1px] text-[7px] leading-none font-bold"
                   style={{ background: col, color: "#08131a" }}
                 >
                   {d.cls.toUpperCase()} {d.c.toFixed(2)} #{d.id}{d.spd != null ? ` · ${d.spd} km/h` : ""}
@@ -106,21 +173,15 @@ export default function VideoDetections({
         })}
       </div>
 
-      {/* scanline + HUD */}
-      <div className="ap-scanline" />
-      <div className="absolute left-3 top-3 flex items-center gap-2 rounded-lg border border-white/10 bg-black/45 px-2.5 py-1.5 backdrop-blur">
+      {/* Scanline + HUD */}
+      <div className="ap-scanline pointer-events-none" />
+      <div className="absolute left-3 top-3 flex items-center gap-2 rounded-lg border border-white/10 bg-black/45 px-2.5 py-1.5 backdrop-blur z-20">
         <span className="h-2 w-2 animate-ping rounded-full bg-emerald-400" />
         <span className="ap-pixel text-[8px] text-white sm:text-[9px]">{hudLabel}</span>
         <span className="text-white/25">/</span>
-        <span className="ap-pixel text-[8px] text-[var(--ap-accent)] sm:text-[9px]">YOLOX</span>
+        <span className="ap-pixel text-[8px] text-[var(--ap-accent)] sm:text-[9px]">CAMAI ENGINE</span>
       </div>
-      <div className="absolute bottom-3 right-3 ap-pixel text-[7px] text-white/40 sm:text-[8px]">{caption}</div>
-
-      {!ready && (
-        <div className="absolute inset-0 grid place-items-center">
-          <span className="ap-pixel text-[9px] text-white/50">LOADING FEED…</span>
-        </div>
-      )}
+      <div className="absolute bottom-3 right-3 ap-pixel text-[7px] text-white/40 sm:text-[8px] z-20">{caption}</div>
     </div>
   );
 }

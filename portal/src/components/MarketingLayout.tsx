@@ -132,17 +132,22 @@ export default function MarketingLayout() {
           </div>
 
           <div>
-            <h4 className="text-xs font-semibold uppercase tracking-wider text-ink-3">Get started</h4>
-            <p className="mt-3 text-sm text-ink-3">Talk to us about a pilot deployment.</p>
-            <Link to="/contact" className="btn-primary mt-3">
-              Contact us <ArrowRight size={15} />
-            </Link>
+            <h4 className="text-xs font-semibold uppercase tracking-wider text-ink-3">Legal & Security</h4>
+            <ul className="mt-3 space-y-2 text-sm text-ink-2">
+              <li><Link to="/privacy" className="hover:text-ink-1">Privacy Policy</Link></li>
+              <li><Link to="/terms" className="hover:text-ink-1">Terms of Service</Link></li>
+              <li><Link to="/security" className="hover:text-ink-1">Security & Compliance</Link></li>
+            </ul>
           </div>
         </div>
         <div className="border-t border-line">
           <div className="mx-auto flex max-w-6xl flex-col items-center justify-between gap-2 px-6 py-5 text-xs text-ink-3 sm:flex-row">
-            <span>© {new Date().getFullYear()} CamAI. All rights reserved.</span>
-            <span>Runs on-premise · Web portal + Windows desktop</span>
+            <span>© {new Date().getFullYear()} CamAI Enterprise. All rights reserved.</span>
+            <div className="flex gap-4">
+              <Link to="/privacy" className="hover:text-ink-1">Privacy</Link>
+              <Link to="/terms" className="hover:text-ink-1">Terms</Link>
+              <Link to="/security" className="hover:text-ink-1">Security</Link>
+            </div>
           </div>
         </div>
       </footer>
