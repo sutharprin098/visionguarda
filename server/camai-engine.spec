@@ -34,6 +34,11 @@ _PACKAGES = [
     "pydantic",
     "pydantic_core",
     "starlette",
+    # yt_dlp imports its ~2000 site extractors by string at runtime, so
+    # nothing in a static analysis of app/ai/stream_resolver.py reaches them.
+    # collect_all is what makes YouTube resolution work in the frozen engine
+    # rather than only when running from source.
+    "yt_dlp",
 ]
 for _pkg in _PACKAGES:
     try:

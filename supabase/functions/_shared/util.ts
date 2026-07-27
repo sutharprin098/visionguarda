@@ -338,6 +338,21 @@ async function probeOnvifDevice(host: string, port: number): Promise<{ manufactu
 /** Schemes cv2.VideoCapture/CAP_FFMPEG can actually open as a live stream. */
 const STREAM_URL_SCHEMES = ["http:", "https:", "rtsp:", "rtsps:", "rtmp:", "rtmps:"];
 
+/**
+ * Hosts that serve a watch PAGE, not a media address. These pass the same
+ * scheme check as everything else — the engine resolves them to the stream
+ * behind them before opening (server/app/ai/stream_resolver.py). Listed here
+ * only so "Check URL" can tell the operator which of the two things they
+ * pasted, since the two fail in very different ways.
+ */
+const LIVE_PAGE_HOSTS = ["youtube.com", "youtu.be", "youtube-nocookie.com", "twitch.tv"];
+
+function isLivePageHost(hostname: string): boolean {
+  const host = hostname.toLowerCase().replace(/^www\./, "");
+  // Domain-boundary match: notyoutube.com is a different site.
+  return LIVE_PAGE_HOSTS.some((h) => host === h || host.endsWith("." + h));
+}
+
 export async function verifyCameraConnection(f: CameraFields): Promise<CameraVerifyResult> {
   if (f.source_type === "usb" || f.source_type === "screen_share") {
     return {
@@ -366,6 +381,14 @@ export async function verifyCameraConnection(f: CameraFields): Promise<CameraVer
     }
     if (!STREAM_URL_SCHEMES.includes(parsed.protocol)) {
       return { ok: false, message: `Unsupported scheme "${parsed.protocol}" — use one of ${STREAM_URL_SCHEMES.join(", ")}` };
+    }
+    if (isLivePageHost(parsed.hostname)) {
+      return {
+        ok: true,
+        message:
+          "Live page link accepted. The desktop app resolves it to the stream behind " +
+          "it and re-resolves on reconnect. The stream must be live when the camera runs.",
+      };
     }
     return {
       ok: true,

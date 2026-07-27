@@ -210,6 +210,21 @@ const SOURCE_TYPES = [
 
 const DEFAULT_PORTS: Record<string, string> = { rtsp: "554", nvr: "554", dvr: "554", onvif: "80", ip: "80" };
 
+/** Hosts that serve a watch PAGE rather than a media address. */
+const LIVE_PAGE_HOSTS = ["youtube.com", "youtu.be", "youtube-nocookie.com", "twitch.tv"];
+
+function isLivePageUrl(raw: string): boolean {
+  let host: string;
+  try {
+    host = new URL(raw.trim()).hostname.toLowerCase().replace(/^www\./, "");
+  } catch {
+    return false;
+  }
+  // Domain-boundary match, so a lookalike host that merely ends in the same
+  // characters (notyoutube.com) is not claimed as YouTube.
+  return LIVE_PAGE_HOSTS.some((h) => host === h || host.endsWith("." + h));
+}
+
 function AddCameraForm({ camera, onDone }: { camera?: CameraRow; onDone: () => void }) {
   const isEdit = !!camera;
   const [form, setForm] = useState({
@@ -244,6 +259,11 @@ function AddCameraForm({ camera, onDone }: { camera?: CameraRow; onDone: () => v
   // Its address is one opaque string, so it shares nothing with the host/port
   // form below — and nothing is dialled from the cloud to verify it.
   const isStreamUrl = form.source_type === "stream_url";
+  // Mirrors _PAGE_HOSTS in server/app/ai/stream_resolver.py. Purely for the
+  // explainer below — nothing here changes what is stored, and the engine
+  // makes the real decision. Kept in sync by hand; a page host added there and
+  // not here costs a hint, not a broken camera.
+  const isPageUrl = isStreamUrl && isLivePageUrl(form.url);
 
   function setSourceType(source_type: string) {
     setForm({ ...form, source_type, port: DEFAULT_PORTS[source_type] ?? "" });
@@ -340,19 +360,29 @@ function AddCameraForm({ camera, onDone }: { camera?: CameraRow; onDone: () => v
         <>
           <Field
             label="Stream URL"
-            hint="Full address of a live stream — an HLS playlist (.m3u8), an MJPEG endpoint, or an RTSP URL that already includes its credentials. Paste it exactly as-is."
+            hint="A YouTube or Twitch live link, an HLS playlist (.m3u8), an MJPEG endpoint, or an RTSP URL that already includes its credentials. Paste it exactly as-is."
           >
             <textarea
               className="input min-h-[72px] font-mono text-xs"
-              placeholder={isEdit ? "unchanged" : "https://example.com/live/playlist.m3u8"}
+              placeholder={isEdit ? "unchanged" : "https://www.youtube.com/watch?v=… or https://example.com/live/playlist.m3u8"}
               value={form.url}
               onChange={(e) => { setForm({ ...form, url: e.target.value }); setTestState({ state: "idle" }); }}
             />
           </Field>
+          {isPageUrl && (
+            <div className="rounded-md border border-ok/25 bg-ok/5 p-3 text-xs text-ink-2">
+              <span className="font-medium text-ink-1">Live page link detected.</span>{" "}
+              A watch page is not a video address — the desktop app resolves it to the
+              stream behind it before opening, and re-resolves automatically whenever the
+              connection drops, so a signed link ageing out does not take the camera down.
+              Paste the link to a stream that is <span className="font-medium">live now</span>;
+              a past broadcast or an ended stream has nothing to open.
+            </div>
+          )}
           <div className="rounded-md border border-accent/20 bg-accent/5 p-3 text-xs text-ink-2">
-            The URL is stored as given and opened by the desktop app on your own machine — it is never fetched from the cloud, so it is not verified here. If the stream fails to open, the camera will show as offline.
+            Check URL validates the address and scheme only. The stream itself is never fetched from the cloud — it is stored as given and opened by the desktop app on your own machine, so a URL that passes the check can still fail to open, and the camera will then show as offline.
             <br /><br />
-            Note that signed playlist URLs (most public live streams) expire after a few hours. For a long unattended run, re-paste a fresh URL or point this at a stream whose address is stable.
+            Note that a raw signed playlist URL (not a YouTube/Twitch link) expires after a few hours and cannot be renewed on its own. For a long unattended run, use a page link or a stream whose address is stable.
           </div>
         </>
       ) : (
@@ -386,11 +416,17 @@ function AddCameraForm({ camera, onDone }: { camera?: CameraRow; onDone: () => v
         </>
       )}
 
-      {form.source_type !== "screen_share" && !isStreamUrl && (
+      {form.source_type !== "screen_share" && (
         <div className="flex items-center gap-3">
+          {/* Shown for stream_url too. test-camera DOES validate it — it parses the
+              URL and rejects an unsupported scheme (see _shared/util.ts). It just
+              doesn't dial it, because fetching a whole caller-supplied URL from the
+              edge runtime is an SSRF primitive. Hiding the button meant a typo'd or
+              wrong-scheme URL got saved silently and only surfaced later as a camera
+              stuck offline, with nothing in the UI to explain why. */}
           <button type="button" className="btn-ghost text-xs" onClick={testConnection}
                   disabled={testState.state === "testing" || !canSubmit || (isEdit && !connectionTouched)}>
-            {testState.state === "testing" ? "Testing…" : "Test Connection"}
+            {testState.state === "testing" ? "Testing…" : isStreamUrl ? "Check URL" : "Test Connection"}
           </button>
           {testState.state === "ok" && (
             <span className="flex items-center gap-1.5 text-xs text-ok"><CheckCircle2 size={13} /> {testState.message}</span>

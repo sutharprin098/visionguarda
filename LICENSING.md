@@ -83,6 +83,36 @@ did not regress: on an Intel UHD 620 iGPU, `yolox_tiny` measured *faster*
 than the `yolo11n-seg` it replaces (81.0 ms vs 87.9 ms per cycle at
 imgsz=320) while returning more true detections on the same CCTV frame.
 
+## 2a. Secondary detector weights — also permissive
+
+§2 covers the *primary* detector. Four further model files ship in the engine,
+each loaded lazily and only when a camera's zone profile asks for that
+capability. They are listed separately here because a licence review that reads
+§2 alone would conclude YOLOX is the only shipped weight, which is not the case.
+
+| Capability | Model | Licence | Upstream | Loaded by |
+|---|---|---|---|---|
+| Helmet / no-helmet on riders | RT-DETR (R18/R50) | Apache-2.0 | github.com/lyuwenyu/RT-DETR | `server/app/ai/helmet.py` |
+| Face detection | YuNet | MIT | OpenCV Zoo | `server/app/ai/face.py` |
+| Number-plate localisation | LPD-YuNet | Apache-2.0 | OpenCV Zoo | `server/app/ai/plate.py` |
+| Number-plate OCR | CRNN (EN) | Apache-2.0 | OpenCV Zoo | `server/app/ai/plate_ocr.py` |
+
+None carries a copyleft obligation, so none affects the closed-source resale
+position established in §1.
+
+**Helmet detection was migrated off YOLOv8 for the same reason as the primary
+detector.** The original helmet classifier used Ultralytics YOLOv8 weights
+(AGPL-3.0), which would have re-contaminated the frozen engine binary exactly
+as `yolo11n-seg` did. It was replaced with RT-DETR, keeping the public API
+(`get_detector()` / `detect_on_riders()`) and the emitted detection shape
+identical, so no downstream code changed. Any document still describing a
+"YOLOv8 helmet classifier" is describing a state this repository has left.
+
+**Face recognition is not implemented.** `face.py` performs detection only;
+there is no embedding or identity-matching path. SFace (Apache-2.0) is named in
+that module's header as the licence-compatible option *should* recognition ever
+be added — it is not currently loaded or shipped.
+
 ## 3. Runtime dependencies (all permissive)
 
 | Component | License | Notes |
@@ -95,7 +125,12 @@ imgsz=320) while returning more true detections on the same CCTV frame.
 | python-multipart | Apache-2.0 | |
 | React, Vite, Tailwind, Electron, Supabase JS, TanStack Query | MIT | |
 | YOLOX detector weights | Apache-2.0 | Megvii; see §2 |
+| RT-DETR helmet weights | Apache-2.0 | lyuwenyu/RT-DETR; see §2a |
+| YuNet face-detection weights | MIT | OpenCV Zoo; see §2a |
+| LPD-YuNet plate-detection weights | Apache-2.0 | OpenCV Zoo; see §2a |
+| CRNN plate-OCR weights | Apache-2.0 | OpenCV Zoo; see §2a |
 | imageio-ffmpeg | BSD-2 | **but see below** |
+| yt-dlp | Unlicense (public domain) | Resolves YouTube/Twitch live links to the stream behind them; see below |
 
 ### 3a. Development-only dependencies (not shipped)
 
@@ -112,6 +147,15 @@ installer:
 `export_models.py` clones the upstream YOLOX repository (Apache-2.0) into
 `server/.yolox_upstream/` on first run. It is a build-time tool; the clone is
 gitignored and is not vendored into this repository or the installer.
+
+**yt-dlp** is released into the public domain under the Unlicense, so it
+imposes no attribution or source-availability obligation on a buyer. It is
+imported only by `server/app/ai/stream_resolver.py`, and only for camera
+sources whose host is a watch page (YouTube, Twitch) — no other camera type
+touches it. Note that this is a licensing statement about the *software*, not
+about the *content*: whether a given stream may be ingested and recorded is
+governed by that platform's terms of service and by local law, and is the
+operator's decision, not something this codebase can grant.
 
 **imageio-ffmpeg** bundles a static `ffmpeg` binary built with libx264,
 which is **GPL-2.0+**. CamAI invokes it strictly as a separate subprocess

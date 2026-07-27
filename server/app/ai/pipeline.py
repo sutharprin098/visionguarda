@@ -23,6 +23,7 @@ from app.ai import helmet as helmet_detect
 from app.ai import plate as plate_detect
 from app.ai import plate_ocr
 from app.ai import plate_worker
+from app.ai import stream_resolver
 from app import config
 from app.storage import insert_alert, insert_history_record
 from app.recorder import CCTVRecorder
@@ -919,6 +920,22 @@ class PipelineCoordinator:
         except Exception:
             self._is_video_file = False
 
+        # A YouTube/Twitch link is a web PAGE, not a media address — cv2 opens
+        # it in ~1s with isOpened() False and no error, which upstream is
+        # indistinguishable from a dead camera. These sources go through
+        # stream_resolver first (see _capture_source). Everything else, which
+        # is every camera that exists today, is passed to the decoder
+        # untouched.
+        self._is_page_url = False
+        try:
+            if not self._is_video_file and source_type not in ("webcam", "usb", "screenshare"):
+                self._is_page_url = stream_resolver.needs_resolution(source)
+        except Exception:
+            self._is_page_url = False
+        # Last resolution failure, surfaced in telemetry so "offline" comes
+        # with the reason the extractor gave (private / ended / geo-blocked).
+        self._resolve_error = None
+
         self.zones = json.loads(zones_json)
         self.lines = json.loads(lines_json)
         self.rules = json.loads(rules_json)
@@ -1130,6 +1147,13 @@ class PipelineCoordinator:
         # dial; probing them is meaningless and must never gate them.
         if self.source_type in ("usb", "webcam", "screenshare") or self._is_video_file:
             return True
+        # A page URL's own host is never the host that serves the video — a
+        # YouTube link resolves onto googlevideo.com — so probing youtube.com
+        # would answer a question nobody asked. Extraction is the reachability
+        # test for these, and it reports a far better reason than "TCP failed"
+        # (see _capture_source).
+        if self._is_page_url:
+            return True
         src = str(self.source)
         if "://" not in src:
             return True
@@ -1158,6 +1182,45 @@ class PipelineCoordinator:
             self._health_status = "auth_failed"
         return True
 
+    def _source_label(self, src) -> str:
+        """What to print for this source. A resolved manifest URL is ~1 KB of
+        signature and would bury every other line in the desktop's log panel,
+        so page URLs are logged by origin instead."""
+        if self._is_page_url:
+            return f"{mask_source(self.source)} -> {stream_resolver.describe(self.source)}"
+        return mask_source(src)
+
+    def _capture_source(self, refresh: bool = False):
+        """The address to hand cv2.VideoCapture for this camera, right now.
+
+        For every source that already is a media address (RTSP, HLS, MJPEG,
+        file, device index) this is just the configured source and costs
+        nothing. For a page URL it is the direct manifest behind it, which is
+        signed and expires, so `refresh` forces a fresh extraction — the
+        reconnect path always passes it, because the most likely reason a
+        working YouTube stream stopped is that its URL aged out.
+
+        Returns None if a page URL cannot be resolved; the caller treats that
+        the same as a failed open (backoff + health), but with a real reason.
+        """
+        src = (int(self.source)
+               if self.source_type in ("webcam", "usb") and str(self.source).isdigit()
+               else self.source)
+        if not self._is_page_url:
+            return src
+        try:
+            resolved = stream_resolver.resolve(str(self.source), force=refresh)
+            if self._resolve_error:
+                print(f"[Cap-{self.camera_id}] Stream URL resolved again after error.", flush=True)
+            self._resolve_error = None
+            return resolved
+        except Exception as e:
+            self._resolve_error = str(e)
+            self._health_status = "network_error"
+            print(f"[Cap-{self.camera_id}] Cannot resolve {mask_source(self.source)}: "
+                  f"{self._resolve_error}", flush=True)
+            return None
+
     def _update_health_on_failure(self):
         """Classifies a capture failure as connecting/offline/auth_failed/
         network_error. Probing (a real socket round-trip) is rate-limited —
@@ -1167,6 +1230,13 @@ class PipelineCoordinator:
             return
         if self._cap_consecutive_failures == 0:
             self._health_status = "connecting"
+            return
+        # A page URL that failed to resolve has already been classified with a
+        # reason the extractor gave. Probing its host would overwrite that with
+        # a meaningless "connecting": youtube.com answers on :443 whether or
+        # not the stream behind the link exists.
+        if self._is_page_url and self._resolve_error:
+            self._health_status = "network_error"
             return
         now = time.time()
         if now - self._last_probe_ts < 8.0:
@@ -1357,18 +1427,21 @@ class PipelineCoordinator:
         # forever on a decode path this process's GPU usage has broken.
         self._cap_hw_accel = True
 
+        src = None
         if self.source_type != "screenshare":
-            src = (int(self.source)
-                   if self.source_type in ("webcam", "usb") and str(self.source).isdigit()
-                   else self.source)
-            if self._preflight_network_source():
+            src = self._capture_source()
+            if src is None:
+                # Only reachable for a page URL whose extraction failed;
+                # _capture_source has already logged why and set health.
+                self._cap_consecutive_failures += 1
+            elif self._preflight_network_source():
                 self.cap = self._open_capture(src, hw_accel=self._cap_hw_accel)
                 if self.cap.isOpened():
                     self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
                     self.cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
-                    print(f"[Cap-{self.camera_id}] Opened source: {mask_source(src)}", flush=True)
+                    print(f"[Cap-{self.camera_id}] Opened source: {self._source_label(src)}", flush=True)
                 else:
-                    print(f"[Cap-{self.camera_id}] Cannot open source: {mask_source(src)}", flush=True)
+                    print(f"[Cap-{self.camera_id}] Cannot open source: {self._source_label(src)}", flush=True)
             else:
                 # Unreachable on the first try. Leave self.cap as None so the
                 # loop below takes its normal reconnect path (with backoff)
@@ -1411,6 +1484,21 @@ class PipelineCoordinator:
                             self._cap_consecutive_failures += 1
                             last_good_frame_ts = time.time()
                             continue
+                        # A page URL's resolved manifest is signed and expires
+                        # (~6h on the YouTube live stream measured here). Once
+                        # it does, re-opening the SAME address can never
+                        # succeed — the reconnect would burn its entire
+                        # backoff schedule on a URL that is now permanently
+                        # rejected — so every reconnect re-extracts. For all
+                        # other sources this returns the configured address
+                        # and costs nothing.
+                        if self._is_page_url:
+                            src = self._capture_source(refresh=True)
+                            if src is None:
+                                self.cap = None
+                                self._cap_consecutive_failures += 1
+                                last_good_frame_ts = time.time()
+                                continue
                         self.cap = self._open_capture(src, hw_accel=self._cap_hw_accel)
                         if self.cap.isOpened():
                             self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)

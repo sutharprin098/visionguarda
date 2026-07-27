@@ -398,6 +398,11 @@ def get_system_status():
             "latency": thread.latest_telemetry.get("latency", 0),
             "counters": thread.latest_telemetry.get("counters", {"in": 0, "out": 0}),
             "health_status": thread._health_status,
+            # Why it is unhealthy, when the capture layer actually knows. Set
+            # today for a stream URL whose extraction failed ("private video",
+            # "this live event has ended") — the difference between an
+            # operator seeing "offline" and knowing what to fix.
+            "health_reason": getattr(thread, "_resolve_error", None),
             "resolution": thread._last_resolution,
             "recording": thread.recorder.continuous_writer is not None,
         }
