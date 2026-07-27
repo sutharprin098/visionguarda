@@ -5,6 +5,8 @@ import DetectionOverlay from "./DetectionOverlay";
 import { mjpegStreamUrl } from "../lib/localEngine";
 import { TelemetrySession, TelemetryDetection, CameraTelemetry } from "../lib/telemetry";
 import { filterDetections, loadModules } from "../lib/aiModules";
+import { useAlertIngest } from "./alerts/AlertProvider";
+import { siteLabel } from "./alerts/alertUtils";
 
 /**
  * Full-window single-camera viewer.
@@ -42,12 +44,15 @@ export interface ViewerCamera {
 export default function FullscreenViewer({
   cameras,
   cameraId,
+  orgName,
   onSelectCamera,
   onExit,
 }: {
   /** Every camera the operator may switch to without leaving fullscreen. */
   cameras: ViewerCamera[];
   cameraId: string;
+  /** Fallback for the alert card's site line — see siteLabel(). */
+  orgName?: string | null;
   onSelectCamera: (id: string) => void;
   onExit: () => void;
 }) {
@@ -100,19 +105,39 @@ export default function FullscreenViewer({
   }, [winApi]);
 
   const [retryCount, setRetryCount] = useState(0);
+  // Same CORS-with-fallback arrangement as the grid tile: the stream is
+  // requested with crossOrigin so the alert system can crop a snapshot out of
+  // the canvas, and falls back to a plain request (no snapshots) rather than
+  // ever leaving the operator staring at a black window. See Workspace's
+  // CameraTile for the full reasoning.
+  const [imgCors, setImgCors] = useState(true);
+  const corsProvenRef = useRef(false);
 
   // ---- telemetry: detection keeps running; this only subscribes ------------
   // The engine analyses whatever cameras are registered regardless of who is
   // watching, so opening/closing this viewer never interrupts detection — it
   // only changes which telemetry we listen to.
+  // While this viewer is open every tile in the grid drops its telemetry socket
+  // (they are covered — see the `paused` note in Workspace), so THIS is the only
+  // subscription left alive. Without ingesting here, alerts would go silent for
+  // exactly as long as an operator was watching a camera full-window, which is
+  // when they are paying the most attention.
+  const ingestAlert = useAlertIngest();
   useEffect(() => {
     setDetections([]);
     setTelemetry(null);
     setStreamFailed(false);
     setRetryCount(0);
+    const cam = cameras.find((c) => c.id === cameraId);
+    const ctx = {
+      id: cameraId,
+      name: cam?.name ?? cameraId,
+      site: siteLabel(cam, orgName),
+    };
     const session = new TelemetrySession(cameraId, (t) => {
       setDetections(t.detections ?? []);
       setTelemetry(t);
+      ingestAlert(ctx, t, imgCors ? imgRef.current : null);
     });
     session.start();
     log("telemetry subscribed", { cameraId });
@@ -120,9 +145,18 @@ export default function FullscreenViewer({
       session.stop();
       log("telemetry unsubscribed", { cameraId });
     };
-  }, [cameraId]);
+    // `cameras` is intentionally not a dep: it changes identity on every sync
+    // tick and re-subscribing the socket for a renamed camera would drop frames
+    // of telemetry for no visible gain.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cameraId, orgName, ingestAlert, imgCors]);
 
   const handleImageError = () => {
+    if (imgCors && !corsProvenRef.current) {
+      log("stream refused CORS — retrying without it (snapshots unavailable)", { cameraId });
+      setImgCors(false);
+      return;
+    }
     log("stream image error, retrying...", { cameraId, retryCount });
     setTimeout(() => {
       setRetryCount((c) => c + 1);
@@ -188,11 +222,13 @@ export default function FullscreenViewer({
           that are genuinely there. */}
       {!streamFailed ? (
         <img
-          key={`${cameraId}_${retryCount}`}
+          key={`${cameraId}_${retryCount}_${imgCors ? "cors" : "plain"}`}
           ref={imgRef}
+          crossOrigin={imgCors ? "anonymous" : undefined}
           src={mjpegStreamUrl(cameraId)}
           alt=""
           className="h-full w-full object-contain"
+          onLoad={() => { corsProvenRef.current = imgCors; }}
           onError={handleImageError}
         />
       ) : (

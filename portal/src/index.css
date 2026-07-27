@@ -313,7 +313,12 @@
   --line: #D6E6EF;
   --ink1: #1E2933;
   --ink2: #5B6B75;
-  --ink3: #8A9AA4;
+  /* Was #8A9AA4 — 2.90:1 on a white card, below the 4.5:1 WCAG AA floor, and
+     text-ink-3 is the most-used text color in the portal (~230 call sites). It
+     read as washed-out-to-invisible on every light surface. #5e6e78 clears AA
+     against all four light surfaces (5.28 / 5.07 / 4.90 / 4.54) while staying
+     visibly muted against ink-2. */
+  --ink3: #5c6c76;
 
   --accent-rgb: 14 165 233;        /* #0ea5e9 Sky Blue */
   --accent-hover-rgb: 2 132 199;  /* #0284c7 */
@@ -329,7 +334,9 @@
   --line: #1E2D3B;
   --ink1: #F0F6FC;
   --ink2: #8B949E;
-  --ink3: #6E7681;
+  /* Was #6E7681 — 3.82:1 on the dark card, the same sub-AA problem as the light
+     theme. #8e96a1 clears AA on all four dark surfaces (5.88 / 6.39 / 5.26 / 4.51). */
+  --ink3: #8e96a1;
 
   --accent-rgb: 56 189 248;       /* #38bdf8 Vibrant Sky Blue */
   --accent-hover-rgb: 14 165 233; /* #0ea5e9 */
@@ -349,7 +356,10 @@
   --line: #D6E6EF; /* Hairline glacial border matching landing page */
   --ink1: #1E2933; /* Deep slate text */
   --ink2: #5B6B75; /* Slate secondary text */
-  --ink3: #8A9AA4; /* Muted text */
+  --ink3: #5c6c76; /* Muted text — was #8A9AA4, only 2.90:1 on the white card
+                      (WCAG AA needs 4.5:1). This block governs the whole admin
+                      panel and outranks :root, so the muted text every page uses
+                      was washed out to the point of looking absent. */
 
   --accent-rgb: 14 165 233;       /* #0ea5e9 Vibrant Sky Blue */
   --accent-hover-rgb: 2 132 199;  /* #0284c7 Sky Hover */
@@ -368,7 +378,9 @@
   --line: #1E2D3B;
   --ink1: #F0F6FC;
   --ink2: #8B949E;
-  --ink3: #6E7681;
+  /* Was #6E7681 — 3.82:1 on the dark card, the same sub-AA problem as the light
+     theme. #8e96a1 clears AA on all four dark surfaces (5.88 / 6.39 / 5.26 / 4.51). */
+  --ink3: #8e96a1;
 
   --accent-rgb: 56 189 248;       /* #38bdf8 Vibrant Sky Blue */
   --accent-hover-rgb: 14 165 233; /* #0ea5e9 */

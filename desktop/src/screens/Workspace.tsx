@@ -16,6 +16,8 @@ import type { CaptureSource } from "../lib/bridge";
 import {
   ModuleState, loadModules, filterDetections,
 } from "../lib/aiModules";
+import AlertProvider, { useAlertIngest } from "../components/alerts/AlertProvider";
+import { siteLabel } from "../components/alerts/alertUtils";
 import { getTelegramConfig, invalidateTelegramConfig, sendTelegramTest } from "../lib/localTelegram";
 
 // Remembered across launches by name, not id — see startSharing().
@@ -283,6 +285,12 @@ export default function Workspace({
   ] as const).filter((item) => allowedTabs.includes(item.id));
 
   return (
+    /* The live alert surface is mounted here, above the whole shell, so a card
+       raised by a tile in the grid is still on screen after the operator
+       fullscreens a camera or switches to the Alerts tab — the tiles come and
+       go, the alerts do not. "Open Live Feed" on a card lands in exactly the
+       same state the fullscreen button does. */
+    <AlertProvider onOpenLiveFeed={setFullscreenCamId}>
     <div className="flex h-screen">
       {/* Covers the entire shell — sidebar, tabs, grid, stats, settings — with
           plain fixed positioning. The layout underneath is never torn down, so
@@ -292,6 +300,7 @@ export default function Workspace({
         <FullscreenViewer
           cameras={bundle.cameras}
           cameraId={fullscreenCamId}
+          orgName={bundle.organization?.name ?? null}
           onSelectCamera={setFullscreenCamId}
           onExit={() => setFullscreenCamId(null)}
         />
@@ -358,6 +367,7 @@ export default function Workspace({
         <div style={{ display: tab === "cameras" ? "block" : "none" }}>
           <CamerasView
             cameras={bundle.cameras}
+            orgName={bundle.organization?.name ?? null}
             isPackaged={isPackaged}
             healthInfo={healthInfo}
             procStatus={procStatus}
@@ -435,6 +445,7 @@ export default function Workspace({
         </div>
       </main>
     </div>
+    </AlertProvider>
   );
 }
 
@@ -680,6 +691,7 @@ function EngineDiagnosticPanel({
 
 function CamerasView({
   cameras,
+  orgName,
   isPackaged,
   healthInfo,
   procStatus,
@@ -688,6 +700,8 @@ function CamerasView({
   paused,
 }: {
   cameras: any[];
+  /** Fallback for the alert card's site line — see siteLabel(). */
+  orgName: string | null;
   isPackaged: boolean;
   healthInfo: EngineHealthInfo | null;
   procStatus: any;
@@ -712,6 +726,7 @@ function CamerasView({
           <CameraTile
             key={c.id}
             camera={c}
+            site={siteLabel(c, orgName)}
             engineOnline={healthInfo ? (healthInfo.online && healthInfo.ready) : null}
             onFullscreen={() => onFullscreen(c.id)}
             paused={paused}
@@ -775,7 +790,7 @@ const SHARE_STATUS_TONES: Record<ShareStatus, string> = {
  * unaffected either way: the engine analyses registered cameras regardless of
  * who is watching — this only changes who is pulling pixels.
  */
-function CameraTile({ camera: c, engineOnline, onFullscreen, paused }: { camera: any; engineOnline: boolean | null; onFullscreen: () => void; paused: boolean }) {
+function CameraTile({ camera: c, site, engineOnline, onFullscreen, paused }: { camera: any; site: string; engineOnline: boolean | null; onFullscreen: () => void; paused: boolean }) {
   const [streamFailed, setStreamFailed] = useState(false);
   const [sharingType, setSharingType] = useState<"screen" | "webcam" | null>(null);
   const [shareStatus, setShareStatus] = useState<ShareStatus>("idle");
@@ -804,6 +819,32 @@ function CameraTile({ camera: c, engineOnline, onFullscreen, paused }: { camera:
   const mediaRef = (sharingType !== null ? videoRef : imgRef) as React.RefObject<HTMLVideoElement | HTMLImageElement>;
   const showingMedia = sharingType !== null || showStream;
 
+  // ---- smart-snapshot capture source --------------------------------------
+  //
+  // The alert system crops its evidence out of THIS element — the frames the
+  // operator is already watching. Nothing extra is fetched and no second MJPEG
+  // connection is opened, which matters more than it sounds: every MJPEG <img>
+  // pins one of Chromium's six per-host connections for as long as it lives, so
+  // a capture that opened its own stream would stall the grid it was capturing.
+  //
+  // Kept in a ref rather than read from the render closure because the
+  // telemetry subscription deliberately does not re-subscribe when a share
+  // starts — a closed-over element would go stale exactly when the source
+  // changed. `imgCors` gates the <img> case only: a stream fetched without CORS
+  // taints the canvas, and handing that to the alert engine would make it
+  // conclude snapshots are impossible for every camera. A screen/webcam
+  // <video> is a same-origin capture stream and never taints.
+  const [imgCors, setImgCors] = useState(true);
+  const [streamAttempt, setStreamAttempt] = useState(0);
+  const corsProvenRef = useRef(false);
+  const captureRef = useRef<HTMLVideoElement | HTMLImageElement | null>(null);
+  useEffect(() => {
+    if (sharingType !== null) captureRef.current = videoRef.current;
+    else captureRef.current = imgCors ? imgRef.current : null;
+  });
+
+  const ingestAlert = useAlertIngest();
+
   useEffect(() => {
     if (videoRef.current) videoRef.current.srcObject = localStream;
   }, [localStream]);
@@ -820,10 +861,16 @@ function CameraTile({ camera: c, engineOnline, onFullscreen, paused }: { camera:
     const session = new TelemetrySession(c.id, (t) => {
       setDetections(t.detections ?? []);
       setTelemetry(t);
+      // Same payload, second consumer. The alert engine decides on its own
+      // what is an event (a track it has not seen, an analytics counter that
+      // moved) and rate-limits itself; this call is a handful of map lookups
+      // in the common case where nothing new happened, and never blocks —
+      // snapshot encoding is queued to idle time inside the engine.
+      ingestAlert({ id: c.id, name: c.name, site }, t, captureRef.current);
     });
     session.start();
     return () => session.stop();
-  }, [c.id, engineOnline, showingMedia, paused]);
+  }, [c.id, c.name, site, engineOnline, showingMedia, paused, ingestAlert]);
 
   // Persistent across transient disconnects — only torn down on unmount or
   // an explicit "Stop Share" click, never on a dropped socket or a paused
@@ -923,17 +970,37 @@ function CameraTile({ camera: c, engineOnline, onFullscreen, paused }: { camera:
           />
         ) : showStream ? (
           <img
+            // Remounting on retry (rather than reassigning .src on the live
+            // element) is what lets the crossOrigin attribute change at all —
+            // it is only read when the request is made.
+            key={`${c.id}:${streamAttempt}:${imgCors ? "cors" : "plain"}`}
             ref={imgRef}
+            // Requesting the stream with CORS is what makes the smart snapshot
+            // possible: without it the engine's frames taint the canvas and
+            // toBlob() throws SecurityError. config.py already allowlists this
+            // renderer's origin, so the engine answers with a matching
+            // Access-Control-Allow-Origin and nothing changes for the stream
+            // itself. If that ever fails, the error handler below remounts
+            // without the attribute — the live view is never sacrificed for a
+            // snapshot feature; the alerts simply arrive without an image.
+            crossOrigin={imgCors ? "anonymous" : undefined}
             src={mjpegStreamUrl(c.id)}
             alt={c.name}
             className={mediaClass}
-            onError={(e) => {
-              const target = e.currentTarget;
-              setTimeout(() => {
-                if (target) {
-                  target.src = mjpegStreamUrl(c.id);
-                }
-              }, 1000);
+            onLoad={() => { corsProvenRef.current = imgCors; }}
+            onError={() => {
+              // An error before a single frame has ever arrived in CORS mode is
+              // the one that might BE the CORS handshake: drop it and remount
+              // at once. Any error after a frame has landed is an ordinary
+              // stream drop (engine restart, camera reconnect) — retry as
+              // before and keep CORS, or we would permanently lose snapshots
+              // on this tile for an unrelated blip.
+              if (imgCors && !corsProvenRef.current) {
+                console.warn(`[Alerts] stream for ${c.id} refused CORS — snapshots disabled for this tile`);
+                setImgCors(false);
+                return;
+              }
+              setTimeout(() => setStreamAttempt((n) => n + 1), 1000);
             }}
           />
         ) : isScreenShareCam ? (

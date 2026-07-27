@@ -20,7 +20,7 @@ graph TD
     PrimaryInfer --> NMS[Postprocess: Vectorized NMS & Box Decoding]
     NMS --> ByteTrack[ByteTrack Multi-Object Tracking]
     ByteTrack --> SecondaryCheck{Secondary Passes Enabled?}
-    SecondaryCheck -- Rider Crop --> HelmetModel[YOLOv8 Helmet Classifier]
+    SecondaryCheck -- Rider Crop --> HelmetModel[RT-DETR Helmet Detector]
     SecondaryCheck -- Vehicle Crop --> ANPRModel[ANPR License Plate & CRNN OCR]
     SecondaryCheck -- Human Crop --> FaceModel[YuNet Face Detector]
     HelmetModel & ANPRModel & FaceModel & TrackUpdate --> Analytics[CameraAnalytics Rule Evaluation]
@@ -34,8 +34,8 @@ graph TD
 | :--- | :--- | :--- | :--- | :--- |
 | **Primary Detection** | YOLOX-S / YOLO11-Nano | Dynamic (320x320 - 1280x1280) | TensorRT / CUDA FP16 / DirectML / OpenVINO | Person, Car, Bus, Truck, Motorcycle, Bicycle, Item, Infrastructure |
 | **Face Detection** | YuNet Lightweight CNN | 320x320 | OpenVINO / ONNX | Human face localization & facial landmarks |
-| **Helmet Detection** | YOLOv8-Nano Custom | 224x224 (Rider Crop) | OpenVINO / ONNX | `helmet`, `no_helmet` classification |
-| **Plate Detection** | YOLOv8 Plate Detector | 416x416 (Vehicle Crop) | OpenVINO / ONNX | `number_plate` localization |
+| **Helmet Detection** | RT-DETR (R18/R50, Apache-2.0) | Rider Crop | OpenVINO / ONNX | `helmet`, `no_helmet` classification |
+| **Plate Detection** | LPD-YuNet (OpenCV Zoo, Apache-2.0) | Vehicle Crop | OpenVINO / ONNX | `number_plate` localization |
 | **Plate OCR** | CRNN (CNN + GRU + CTC) | 128x32 (Plate Crop) | OpenVINO / ONNX | Alphanumeric character sequence recognition |
 
 ---

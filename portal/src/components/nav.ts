@@ -5,12 +5,13 @@ import {
   BrainCircuit,
   type LucideIcon,
 } from "lucide-react";
+import type { Permission } from "../lib/permissions";
 
 export interface NavItem {
   to: string;
   label: string;
   icon: LucideIcon;
-  perm?: string;
+  perm?: Permission;
   superOnly?: boolean;
   end?: boolean;
 }
@@ -33,15 +34,15 @@ export const NAV: { group: string; items: NavItem[] }[] = [
   {
     group: "Licensing",
     items: [
-      { to: "/app/licenses", label: "Licenses", icon: KeyRound },
-      { to: "/app/devices", label: "Devices", icon: MonitorSmartphone },
-      { to: "/app/activations", label: "Desktop Activations", icon: MonitorCheck },
+      { to: "/app/licenses", label: "Licenses", icon: KeyRound, perm: "licenses.manage" },
+      { to: "/app/devices", label: "Devices", icon: MonitorSmartphone, perm: "devices.manage" },
+      { to: "/app/activations", label: "Desktop Activations", icon: MonitorCheck, perm: "devices.manage" },
     ],
   },
   {
     group: "Surveillance",
     items: [
-      { to: "/app/cameras", label: "Cameras", icon: Video },
+      { to: "/app/cameras", label: "Cameras", icon: Video, perm: "cameras.manage" },
       { to: "/app/camera-groups", label: "Camera Groups", icon: Layers, perm: "cameras.manage" },
       { to: "/app/sites", label: "Sites", icon: MapPin, perm: "cameras.manage" },
       { to: "/app/models", label: "AI Model Library", icon: BrainCircuit, superOnly: true },

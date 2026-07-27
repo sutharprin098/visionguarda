@@ -35,7 +35,16 @@ export interface TelemetryDetection {
    *  The engine will not raise a speeding alert from an estimate, and neither
    *  should any UI present one as a measurement. */
   speed?: number | null;
-  /** True only for a gate-measured reading. Never true for the auto estimate. */
+  /**
+   * MISLEADINGLY NAMED — do not use this as "is this a real measurement".
+   *
+   * pipeline.py sets it `_speed_status in ("calibrated", "estimated")`, so it is
+   * true for the size-prior ESTIMATE as well as for a gate measurement. It
+   * really means "a speed number exists". An earlier version of the alert
+   * engine trusted the name and would have promoted estimates to violations.
+   *
+   * The only test for a measured speed is `speed_status === "calibrated"`.
+   */
   speed_calibrated?: boolean;
   /** Where the number came from:
    *   - "calibrated"  — measured by a two-line gate; act on it
@@ -46,10 +55,26 @@ export interface TelemetryDetection {
   speed_status?: "calibrated" | "estimated" | "unavailable" | "disabled";
   direction?: string;
   /** Seconds this track has been in frame (analytics sets it from first_seen). */
+  dwell_time?: number;
+
+  // ---- NOT EMITTED BY THE SHIPPED ENGINE -----------------------------------
+  // pipeline.py builds client_dets key by key (see "Build normalized
+  // client_dets") and none of the three below is among them, so they are always
+  // undefined at runtime. They are kept declared, and kept here rather than
+  // inline above, because deleting them would silently change the meaning of
+  // existing readers instead of making them visible:
+  //
+  //   DetectionOverlay.tsx reads `overspeed` and `speed_limit` today. The
+  //   badge keyed on `overspeed` can therefore never render, and the red
+  //   colouring falls through to a HARDCODED 50 km/h compared against a speed
+  //   that is usually an estimate. That is a live-view issue, outside the alert
+  //   surface, and is flagged rather than changed here.
+  //
+  // Speeding as an EVENT does work — analytics.py raises it into `alert_counts`
+  // as "speed_limit", which is what the alert engine consumes.
   track_label?: string;
   speed_limit?: number;
   overspeed?: boolean;
-  dwell_time?: number;
   /** OCR-read plate number, on number_plate detections only. null when the
    *  plate was localised but not read (no OCR model, or OCR failed). */
   plate_text?: string | null;

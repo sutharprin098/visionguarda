@@ -46,7 +46,7 @@ CamAI Enterprise solves these challenges by combining an **Edge-First hybrid AI 
 - **Edge & Local Processing**: Performs frame decoding, multi-model AI inference, object tracking, and rule evaluations directly on local edge hardware or on-premise GPU servers—slashing cloud bandwidth costs by over 99%.
 - **Zero-Latency Monitoring**: Emits structured telemetry (bounding boxes, speed estimates, tracking trajectories, counts) over lightweight WebSockets in under 50ms.
 - **Universal Hardware Compatibility**: Auto-detects available GPU acceleration—NVIDIA TensorRT/CUDA, Intel iGPU/dGPU via OpenVINO, or Windows DirectX 12 via DirectML—with seamless CPU fallback.
-- **Unified Analytics**: Combines perimeter intrusion detection, automatic number plate recognition (ANPR), speed estimation, helmet detection, face recognition, unattended item alerts, and crowd analytics into a single pane of glass.
+- **Unified Analytics**: Combines perimeter intrusion detection, automatic number plate recognition (ANPR), speed estimation, helmet detection, face detection, unattended item alerts, and crowd analytics into a single pane of glass. (Face **detection** only — CamAI does not perform biometric identity matching; see `LICENSING.md` §2a.)
 
 ---
 
