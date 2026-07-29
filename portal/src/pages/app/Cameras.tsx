@@ -63,10 +63,20 @@ export default function CamerasPage() {
 
   async function toggleEnabled(c: CameraRow) {
     setActionError(null);
-    const { error } = await supabase.from("cameras").update({ is_enabled: !c.is_enabled }).eq("id", c.id);
-    if (error) return setActionError(error.message);
-    audit(c.is_enabled ? "camera.disable" : "camera.enable", "camera", c.id, { module: "cameras" });
-    refresh();
+    const next = !c.is_enabled;
+    // Flip the switch immediately instead of waiting on the round-trip +
+    // full refetch (joins across sites/assignments/health) — the live
+    // subscription above will reconcile with the server once it lands, and
+    // we roll back here if the write itself fails.
+    qc.setQueryData<CameraRow[]>(["cameras"], (rows) =>
+      rows?.map((r) => (r.id === c.id ? { ...r, is_enabled: next } : r)));
+    const { error } = await supabase.from("cameras").update({ is_enabled: next }).eq("id", c.id);
+    if (error) {
+      qc.setQueryData<CameraRow[]>(["cameras"], (rows) =>
+        rows?.map((r) => (r.id === c.id ? { ...r, is_enabled: c.is_enabled } : r)));
+      return setActionError(error.message);
+    }
+    audit(next ? "camera.enable" : "camera.disable", "camera", c.id, { module: "cameras" });
   }
 
   const columns: Column<CameraRow>[] = [
