@@ -30,10 +30,15 @@ def trk(track_id, bbox, cls="car", conf=0.9, dwell=1.0):
 def _tracker_with_coasting_track(bbox, cls="car", frames_missed=1):
     """A tracker holding one CONFIRMED track that the tracker did not match
     this frame (time_since_update > 0) — i.e. a coasting track."""
-    tracker = ByteTracker(max_lost_frames=10, reid_ttl=30.0, n_init=2)
+    tracker = ByteTracker(max_lost_seconds=0.4, reid_ttl=30.0, n_init=2)
     t = Track(1, list(bbox), cls, 0.9, embedding=None, n_init=2)
     t.state = "confirmed"
     t.time_since_update = frames_missed
+    # Coasting is aged in seconds off the tracker clock, so a fabricated track
+    # has to be placed on that clock too: advance it by the same number of
+    # reference-cadence frames the caller asked to skip.
+    t.last_clock = 0.0
+    tracker._clock = frames_missed / 25.0
     tracker.tracks = [t]
     return tracker
 
@@ -42,7 +47,7 @@ def test_overlapping_same_class_tracks_collapse_to_one_box():
     """Two confirmed tracks stacked on one physical object (an ID switch that
     left both alive) must NOT paint two boxes on one person. Same-class boxes
     at IoU>0.7 collapse to one — the 'N boxes on one human' fix."""
-    tracker = ByteTracker(max_lost_frames=10, reid_ttl=30.0, n_init=2)
+    tracker = ByteTracker(max_lost_seconds=0.4, reid_ttl=30.0, n_init=2)
     box = (100, 100, 200, 300)
     near = (104, 103, 205, 305)   # IoU with box > 0.7
     tracks_raw = [trk(1, box, cls="person"), trk(2, near, cls="person")]
@@ -56,7 +61,7 @@ def test_overlapping_same_class_tracks_collapse_to_one_box():
 def test_overlapping_different_class_boxes_both_survive():
     """A rider's person box and motorcycle box overlap heavily but are different
     objects — the dedup must never merge across classes."""
-    tracker = ByteTracker(max_lost_frames=10, reid_ttl=30.0, n_init=2)
+    tracker = ByteTracker(max_lost_seconds=0.4, reid_ttl=30.0, n_init=2)
     box = (100, 100, 200, 300)
     tracks_raw = [trk(1, box, cls="person"), trk(2, box, cls="motorcycle")]
     dets, _ = resolve_emitted_detections(
@@ -90,7 +95,7 @@ def test_object_never_gets_both_a_raw_box_and_a_coasting_box():
 def test_every_emitted_box_has_a_track_id():
     """No track_id means analytics.update() skips the detection entirely (it is
     keyed by track), which is why such boxes could never show speed or dwell."""
-    tracker = ByteTracker(max_lost_frames=10, reid_ttl=30.0, n_init=2)
+    tracker = ByteTracker(max_lost_seconds=0.4, reid_ttl=30.0, n_init=2)
     tracks_raw = [trk(7, (10, 10, 60, 120))]
     # A raw detection that matches no track at all (nowhere near it).
     dets, _ = resolve_emitted_detections(
@@ -105,14 +110,14 @@ def test_unmatched_raw_detection_is_dropped_not_emitted_as_phantom():
     """A detection the tracker has not (yet) turned into a confirmed track is
     not an object we can identify — emitting it produced the anonymous solid
     box that doubled up with the tracker's own."""
-    tracker = ByteTracker(max_lost_frames=10, reid_ttl=30.0, n_init=2)
+    tracker = ByteTracker(max_lost_seconds=0.4, reid_ttl=30.0, n_init=2)
     dets, masks = resolve_emitted_detections(tracker, [], [det((100, 100, 200, 300))], [[]])
     assert dets == []
     assert masks == []
 
 
 def test_tracked_detection_keeps_its_class_and_mask():
-    tracker = ByteTracker(max_lost_frames=10, reid_ttl=30.0, n_init=2)
+    tracker = ByteTracker(max_lost_seconds=0.4, reid_ttl=30.0, n_init=2)
     BOX = (100, 100, 200, 300)
     mask = [[1, 2], [3, 4]]
     tracks_raw = [trk(3, BOX, cls="car")]
@@ -130,7 +135,7 @@ def test_tracked_detection_keeps_its_class_and_mask():
 def test_track_with_no_matching_detection_still_emits_a_box():
     """Guards the fix against over-correcting: a fast mover whose Kalman box
     falls under the IoU>0.3 re-association gate must not vanish."""
-    tracker = ByteTracker(max_lost_frames=10, reid_ttl=30.0, n_init=2)
+    tracker = ByteTracker(max_lost_seconds=0.4, reid_ttl=30.0, n_init=2)
     # Track is live (in tracks_raw) but the only detection is far away.
     tracks_raw = [trk(5, (100, 100, 200, 300))]
     dets, masks = resolve_emitted_detections(tracker, tracks_raw, [det((500, 400, 560, 470))], [[]])
@@ -144,7 +149,7 @@ def test_track_with_no_matching_detection_still_emits_a_box():
 def test_two_overlapping_detections_on_one_track_emit_one_box():
     """NMS near-duplicates / a person split into two boxes: both overlap the
     same track. Only one may claim it; the loser must not be emitted."""
-    tracker = ByteTracker(max_lost_frames=10, reid_ttl=30.0, n_init=2)
+    tracker = ByteTracker(max_lost_seconds=0.4, reid_ttl=30.0, n_init=2)
     tracks_raw = [trk(1, (100, 100, 200, 300))]
     dets, masks = resolve_emitted_detections(
         tracker, tracks_raw, [det((100, 100, 200, 300)), det((105, 104, 205, 305))], [[], []]
@@ -157,13 +162,13 @@ def test_two_overlapping_detections_on_one_track_emit_one_box():
 def test_coasting_stops_after_the_render_window():
     BOX = (100, 100, 200, 300)
     tracker = _tracker_with_coasting_track(BOX, frames_missed=6)
-    dets, _ = resolve_emitted_detections(tracker, [], [], [], coast_render_frames=5)
+    dets, _ = resolve_emitted_detections(tracker, [], [], [], coast_render_seconds=5 / 25.0)
     assert dets == []
 
 
 def test_tentative_track_does_not_coast():
     """Only confirmed tracks may coast; a tentative one has not earned an ID."""
-    tracker = ByteTracker(max_lost_frames=10, reid_ttl=30.0, n_init=2)
+    tracker = ByteTracker(max_lost_seconds=0.4, reid_ttl=30.0, n_init=2)
     t = Track(1, [100, 100, 200, 300], "car", 0.9, embedding=None, n_init=2)
     t.state = "tentative"
     t.time_since_update = 1
