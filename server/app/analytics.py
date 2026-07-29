@@ -1862,6 +1862,14 @@ class CameraAnalytics:
             # grows these dicts unbounded across a shift.
             self.track_mpp.pop(tid, None)
             self.track_last_px.pop(tid, None)
+            # Written once per track per frame by the homography speed path
+            # (see track_last_world_m assignment above) but missing from this
+            # cleanup, so it was the one per-track dict that outlived its
+            # track. Track ids churn constantly, so on a busy scene this grew
+            # for the entire lifetime of the camera thread — small per entry,
+            # unbounded in aggregate, and invisible because every sibling dict
+            # beside it was being pruned correctly.
+            self.track_last_world_m.pop(tid, None)
             self.speed_filters.pop(tid, None)
             self.track_last_seen.pop(tid, None)
             self.item_stationary_since.pop(tid, None)
