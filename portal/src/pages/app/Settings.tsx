@@ -95,7 +95,7 @@ function ProfileTab() {
     <div className="space-y-6">
       <div className="card p-5 space-y-4">
         <h3 className="text-base font-semibold text-ink-1">Profile Details</h3>
-        <div className="grid grid-cols-2 gap-4 text-sm">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
           <Field label="Full Name">
             <input className="input" value={profile?.full_name ?? ""} disabled />
           </Field>
@@ -103,7 +103,7 @@ function ProfileTab() {
             <input className="input" value={profile?.email ?? ""} disabled />
           </Field>
         </div>
-        <div className="grid grid-cols-2 gap-4 text-sm">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
           <Field label="User Code">
             <span className="keychip">{profile?.user_code ?? "—"}</span>
           </Field>
@@ -194,7 +194,7 @@ function OrgTab({ settings, onSave }: { settings: OrgSettings; onSave: (p: Parti
       <Field label="Organization name">
         <input className="input" value={name} onChange={(e) => setName(e.target.value)} />
       </Field>
-      <div className="grid grid-cols-2 gap-3 text-sm">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
         <Field label="Organization ID"><span className="keychip">{org?.org_code}</span></Field>
         <Field label="Plan"><Badge tone="accent">{org?.plan}</Badge></Field>
       </div>
@@ -260,7 +260,7 @@ function BrandingTab({ settings, onSave }: { settings: OrgSettings; onSave: (p: 
               ? <img src={logoUrl} alt="Organization logo" className="h-full w-full object-contain" />
               : <span className="text-xs text-ink-3">none</span>}
           </div>
-          <label className="btn-ghost cursor-pointer text-xs">
+          <label className="btn-ghost btn-sm cursor-pointer">
             Upload logo
             <input type="file" accept="image/png,image/svg+xml,image/jpeg" className="hidden"
                    onChange={(e) => e.target.files?.[0] && uploadLogo(e.target.files[0])} />
@@ -847,7 +847,7 @@ function SmtpTab({ settings, onSave }: { settings: OrgSettings; onSave: (p: Part
 
   return (
     <div className="space-y-4">
-      <div className="grid grid-cols-3 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
         <div className="col-span-2">
           <Field label="SMTP host">
             <input className="input" placeholder="smtp.example.com" value={form.host}
@@ -892,7 +892,7 @@ function TelegramTab() {
         <p className="text-sm text-ink-3 leading-relaxed mb-4">
           CamAI uses a simple, secure one-time linking code. You do not need to create your own bot or copy bot tokens.
         </p>
-        <div className="rounded-lg bg-[#5b8cff]/10 border border-[#5b8cff]/20 p-4 text-sm text-[#5b8cff] leading-relaxed">
+        <div className="rounded-control border border-accent/20 bg-accent/10 p-4 text-sm leading-relaxed text-accent">
           <span className="font-semibold block mb-1">To link your account:</span>
           <ol className="list-decimal list-inside space-y-1 text-ink-2">
             <li>Open the <strong>CamAI Desktop Application</strong>.</li>
@@ -931,7 +931,7 @@ function RetentionTab({ settings, onSave }: { settings: OrgSettings; onSave: (p:
     <div className="space-y-4">
       {fields.map((f) => (
         <Field key={f.key} label={`${f.label} — ${form[f.key]} days`} hint={f.hint}>
-          <input type="range" min={7} max={730} step={1} className="w-full accent-[#5b8cff]"
+          <input type="range" min={7} max={730} step={1} className="w-full accent-accent"
                  value={form[f.key]}
                  onChange={(e) => setForm({ ...form, [f.key]: Number(e.target.value) })} />
         </Field>

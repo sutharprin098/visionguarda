@@ -120,7 +120,7 @@ export default function DownloadsPage() {
                   <span className="text-sm font-medium text-ink-1">{r.name}</span>
                   {r.prerelease && <Badge tone="warn">pre-release</Badge>}
                 </div>
-                <button className="btn-ghost text-xs" onClick={() => download(r)} disabled={downloadingId === r.asset_id}>
+                <button className="btn-ghost btn-sm" onClick={() => download(r)} disabled={downloadingId === r.asset_id}>
                   {downloadingId === r.asset_id ? "Preparing…" : "Download"}
                 </button>
               </div>

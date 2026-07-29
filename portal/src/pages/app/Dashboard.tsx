@@ -86,7 +86,7 @@ export default function Dashboard() {
         subtitle={`${org?.name ?? "Enterprise Account"} · ${org?.org_code ?? "ORG-MAIN"}`}
         actions={
           can("cameras.manage") ? (
-            <Link to="/app/cameras" className="btn-primary text-xs py-2 px-3.5">
+            <Link to="/app/cameras" className="btn-primary btn-sm">
               <Video size={14} /> Studio Feeds
             </Link>
           ) : undefined
@@ -138,7 +138,7 @@ export default function Dashboard() {
             <span className="font-medium">Couldn't sync telemetry: {(statsErr as any)?.message ?? (recentErr as any)?.message ?? "unknown error"}.</span>
           </div>
           <button
-            className="btn-ghost shrink-0 gap-1.5 px-3 py-1 text-xs text-rose-600 dark:text-rose-400 border-rose-500/30"
+            className="btn-ghost btn-sm shrink-0 text-danger border-danger/30"
             onClick={() => { if (statsError) refetchStats(); if (recentError) refetchRecent(); }}
           >
             <RefreshCw size={13} /> Retry
@@ -150,9 +150,13 @@ export default function Dashboard() {
       {statsLoading && !stats ? (
         <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
           {Array.from({ length: 8 }).map((_, i) => (
-            <div key={i} className="card h-24 animate-pulse p-4">
-              <div className="h-3 w-20 rounded bg-surface-3" />
-              <div className="mt-3 h-6 w-12 rounded bg-surface-3" />
+            /* One shimmer, shared with every other loading placeholder, rather
+               than a pulsing opacity on a flat block — the two read as
+               different kinds of "waiting" when they appear on the same
+               screen. See .skeleton in index.css. */
+            <div key={i} className="card h-24 p-4">
+              <div className="skeleton h-3 w-20" />
+              <div className="skeleton mt-3 h-6 w-12" />
             </div>
           ))}
         </div>

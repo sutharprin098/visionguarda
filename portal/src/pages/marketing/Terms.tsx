@@ -116,10 +116,10 @@ export default function Terms() {
 
         {/* Navigation buttons */}
         <div className="mt-12 flex flex-col sm:flex-row items-center justify-between gap-4 border-t border-line pt-8">
-          <Link to="/privacy" className="btn-ghost flex items-center gap-2 text-xs">
+          <Link to="/privacy" className="btn-ghost btn-sm">
             <FileText size={15} /> Read Privacy Policy
           </Link>
-          <Link to="/contact" className="btn-primary flex items-center gap-2 text-xs">
+          <Link to="/contact" className="btn-primary btn-sm">
             Questions? Contact Support <ArrowRight size={15} />
           </Link>
         </div>

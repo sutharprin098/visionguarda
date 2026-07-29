@@ -29,7 +29,7 @@ export default function Capabilities() {
           {CAPS.map((c, i) => (
             <div key={c.title} className={`ap-card group p-7 ${shown ? `ap-reveal ap-d${(i % 4) + 2}` : "opacity-0"}`}>
               <div className="flex items-center justify-between">
-                <span className="grid h-12 w-12 place-items-center rounded-xl bg-[var(--ap-accent-soft)] text-[var(--ap-dark)] transition-transform group-hover:-translate-y-1">
+                <span className="grid h-12 w-12 place-items-center rounded-xl bg-[var(--ap-accent-soft)] text-[var(--ap-accent)] transition-transform group-hover:-translate-y-1">
                   <c.icon size={22} />
                 </span>
                 <span className="ap-pixel text-[8px] tracking-[0.1em] text-[var(--ap-accent)]">{c.tag}</span>

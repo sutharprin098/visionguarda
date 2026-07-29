@@ -55,8 +55,8 @@ export function PageHeader({ title, subtitle, actions }: { title: string; subtit
           <span className="h-2 w-2 rounded-full bg-sky-500 animate-ping" />
           <span className="ap-eyebrow">Enterprise Command Suite</span>
         </div>
-        <h1 className="text-xl font-extrabold tracking-tight text-ink-1 sm:text-3xl">{title}</h1>
-        {subtitle && <p className="mt-0.5 text-xs sm:text-sm font-medium text-ink-2">{subtitle}</p>}
+        <h1 className="t-h1 sm:t-display">{title}</h1>
+        {subtitle && <p className="t-small mt-1">{subtitle}</p>}
       </div>
       {actions && <div className="flex flex-wrap items-center gap-2">{actions}</div>}
     </div>
@@ -69,7 +69,7 @@ export function Empty({ text }: { text: string }) {
       <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-2xl bg-surface-2 text-ink-3">
         <Sparkles size={22} className="opacity-60" />
       </div>
-      <p className="text-sm font-medium text-ink-2">{text}</p>
+      <p className="t-body">{text}</p>
     </div>
   );
 }
@@ -80,16 +80,16 @@ export function Kpi({ label, value, hint, spark, icon }: { label: string; value:
       <div className="absolute -right-6 -top-6 h-20 w-20 rounded-full bg-sky-500/5 blur-xl group-hover:bg-sky-500/10 transition-all" />
       
       <div className="flex items-center justify-between gap-2">
-        <div className="text-xs font-semibold uppercase tracking-wider text-ink-3">{label}</div>
+        <div className="t-label">{label}</div>
         {icon && <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-surface-2 text-accent group-hover:scale-110 transition-transform">{icon}</div>}
       </div>
 
       <div className="mt-2 flex items-end justify-between gap-3">
-        <div className="text-2xl font-extrabold tracking-tight text-ink-1 sm:text-3xl">{value}</div>
+        <div className="t-display text-2xl sm:text-3xl">{value}</div>
         {spark}
       </div>
 
-      {hint && <div className="mt-2.5 text-xs font-medium text-ink-3 border-t border-line/40 pt-2">{hint}</div>}
+      {hint && <div className="t-caption mt-3 border-t border-line/40 pt-2">{hint}</div>}
     </div>
   );
 }
@@ -110,7 +110,7 @@ export function Modal({ open, onClose, title, wide, children }: {
       <div className={clsx("card max-h-[88vh] w-full overflow-y-auto p-6 shadow-2xl transition-all border-line/80", wide ? "max-w-2xl" : "max-w-md")}
            onClick={(e) => e.stopPropagation()}>
         <div className="mb-5 flex items-center justify-between border-b border-line/60 pb-3">
-          <h2 className="text-base font-bold text-ink-1 flex items-center gap-2">
+          <h2 className="t-h2 flex items-center gap-2">
             <span className="h-2 w-2 rounded-full bg-sky-500" />
             {title}
           </h2>
@@ -137,7 +137,7 @@ export function Drawer({ open, onClose, title, children }: {
       <div className="absolute right-0 top-0 h-full w-full max-w-lg overflow-y-auto border-l border-line bg-surface-1 p-6 shadow-2xl transition-all"
            onClick={(e) => e.stopPropagation()}>
         <div className="mb-6 flex items-center justify-between border-b border-line/60 pb-4">
-          <h2 className="text-lg font-bold text-ink-1">{title}</h2>
+          <h2 className="t-h2">{title}</h2>
           <button onClick={onClose} className="rounded-lg p-1.5 text-ink-3 transition hover:bg-surface-2 hover:text-ink-1"><X size={18} /></button>
         </div>
         {children}
@@ -155,7 +155,7 @@ export function ConfirmDialog({ open, onClose, onConfirm, title, body, confirmLa
     <Modal open={open} onClose={onClose} title={title}>
       <div className="flex items-start gap-3.5 py-2">
         {danger && <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-rose-500/10 text-rose-500"><AlertTriangle size={20} /></div>}
-        <p className="text-sm font-medium text-ink-2 leading-relaxed">{body}</p>
+        <p className="t-body">{body}</p>
       </div>
       <div className="mt-6 flex justify-end gap-2.5 pt-3 border-t border-line/60">
         <button className="btn-ghost" onClick={onClose}>Cancel</button>
@@ -180,9 +180,9 @@ export function ConfirmDialog({ open, onClose, onConfirm, title, body, confirmLa
 export function Field({ label, children, hint }: { label: string; children: ReactNode; hint?: string }) {
   return (
     <div className="space-y-1.5">
-      <label className="block text-xs font-semibold text-ink-2 uppercase tracking-wider">{label}</label>
+      <label className="t-label block">{label}</label>
       {children}
-      {hint && <p className="text-xs text-ink-3 font-medium">{hint}</p>}
+      {hint && <p className="t-caption">{hint}</p>}
     </div>
   );
 }
@@ -190,7 +190,7 @@ export function Field({ label, children, hint }: { label: string; children: Reac
 export function Toggle({ label, value, onChange }: { label: string; value: boolean; onChange: (v: boolean) => void }) {
   return (
     <label className="flex cursor-pointer items-center justify-between py-1">
-      <span className="text-sm font-medium text-ink-2">{label}</span>
+      <span className="t-small">{label}</span>
       <button
         type="button"
         onClick={() => onChange(!value)}
@@ -235,7 +235,7 @@ export function SecretReveal({ label, secret, note }: { label: string; secret: s
       <div className="mt-2 flex items-center justify-between gap-3 rounded-xl bg-surface-1 border border-line/60 p-2.5">
         <code className="break-all font-mono text-xs font-semibold text-ink-1">{secret}</code>
         <button
-          className="btn-ghost shrink-0 px-3 py-1 text-xs gap-1.5"
+          className="btn-ghost btn-sm shrink-0"
           onClick={async () => {
             await navigator.clipboard.writeText(secret);
             setCopied(true);

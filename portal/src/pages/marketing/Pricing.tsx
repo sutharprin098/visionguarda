@@ -74,7 +74,7 @@ export default function Pricing() {
             className={`card flex flex-col p-6 ${t.highlight ? "border-accent/60 ring-1 ring-accent/30" : ""}`}
           >
             {t.highlight && (
-              <span className="mb-3 inline-flex w-fit rounded-full bg-accent-dim px-2.5 py-0.5 text-xs font-medium text-accent">
+              <span className="mb-3 inline-flex w-fit rounded-full bg-accent-dim px-2.5 py-0.5 text-xs font-medium text-accent-ink">
                 Most popular
               </span>
             )}

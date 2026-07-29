@@ -41,19 +41,19 @@ const CAPABILITIES = [
 
 export default function RealCapabilitiesGrid() {
   return (
-    <section id="capabilities" className="py-24 relative overflow-hidden bg-white border-b border-slate-200">
+    <section id="capabilities" className="py-24 relative overflow-hidden bg-[var(--ap-surface)] border-b border-[var(--ap-border)]">
       <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 relative z-10">
         
         {/* Header */}
         <div className="text-center max-w-3xl mx-auto mb-16">
-          <div className="inline-flex items-center gap-2 px-3.5 py-1 rounded-full bg-slate-100 border border-slate-200 text-xs font-mono font-bold text-slate-700 uppercase tracking-wider mb-4">
+          <div className="inline-flex items-center gap-2 px-3.5 py-1 rounded-full bg-[var(--ap-surface-2)] border border-[var(--ap-border)] text-xs font-mono font-bold text-[var(--ap-ink-2)] uppercase tracking-wider mb-4">
             <Eye size={14} className="text-sky-600" />
             <span>Product Modules</span>
           </div>
-          <h2 className="text-3xl sm:text-4xl font-extrabold text-slate-900 tracking-tight">
+          <h2 className="text-3xl sm:text-4xl font-extrabold text-[var(--ap-ink)] tracking-tight">
             Production Vision AI Modules Built Into CamAI
           </h2>
-          <p className="mt-4 text-base text-slate-600">
+          <p className="mt-4 text-base text-[var(--ap-ink-2)]">
             Tested and validated on production NVIDIA RTX and Intel OpenVINO hardware.
           </p>
         </div>
@@ -63,7 +63,7 @@ export default function RealCapabilitiesGrid() {
           {CAPABILITIES.map((cap) => {
             const Icon = cap.icon;
             return (
-              <div key={cap.title} className="architectural-card p-6 bg-white flex flex-col justify-between group">
+              <div key={cap.title} className="architectural-card p-6 bg-[var(--ap-surface)] flex flex-col justify-between group">
                 <div>
                   <div className="flex items-center justify-between mb-4">
                     <span className="text-[10px] font-mono font-bold text-sky-700 bg-sky-50 px-2.5 py-1 rounded-full border border-sky-100">
@@ -74,13 +74,13 @@ export default function RealCapabilitiesGrid() {
                     </div>
                   </div>
 
-                  <h3 className="text-base font-bold text-slate-900">{cap.title}</h3>
-                  <p className="mt-2 text-xs text-slate-600 leading-relaxed">
+                  <h3 className="text-base font-bold text-[var(--ap-ink)]">{cap.title}</h3>
+                  <p className="mt-2 text-xs text-[var(--ap-ink-2)] leading-relaxed">
                     {cap.description}
                   </p>
                 </div>
 
-                <div className="mt-6 pt-4 border-t border-slate-100 flex items-center justify-between text-[11px] font-mono text-slate-500">
+                <div className="mt-6 pt-4 border-t border-slate-100 flex items-center justify-between text-[11px] font-mono text-[var(--ap-ink-2)]">
                   <span>Engine Status: Active</span>
                   <span className="text-emerald-600 font-bold">100% Tested</span>
                 </div>

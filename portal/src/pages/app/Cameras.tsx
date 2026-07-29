@@ -118,8 +118,11 @@ export default function CamerasPage() {
     },
     ...(can("cameras.manage") || can("cameras.assign")
       ? [{
+          // space-x-2 on a nowrap div pushed the third action out of the cell
+          // on a narrow viewport. flex + gap keeps them on the 8px step and
+          // lets the row give them a line of their own.
           key: "actions", header: "", render: (c: CameraRow) => (
-            <div className="space-x-2 whitespace-nowrap text-right" onClick={(e) => e.stopPropagation()}>
+            <div className="flex flex-wrap items-center justify-end gap-x-3 gap-y-1" onClick={(e) => e.stopPropagation()}>
               {can("cameras.assign") && (
                 <button className="text-xs text-accent hover:underline" onClick={() => setAssignFor(c)}>Assign</button>
               )}
@@ -161,7 +164,7 @@ export default function CamerasPage() {
         }
       />
       {(actionError || camerasError) && (
-        <div className="mb-4 flex items-center justify-between rounded-md border border-danger/40 bg-danger/10 px-3 py-2 text-sm text-danger">
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-control border border-danger/40 bg-danger/10 px-3 py-2.5 text-sm text-danger">
           <span>{actionError ?? (camerasError as any)?.message ?? "Failed to load cameras."}</span>
           {actionError && <button className="text-xs underline" onClick={() => setActionError(null)}>Dismiss</button>}
         </div>
@@ -321,11 +324,11 @@ function AddCameraForm({ camera, onDone }: { camera?: CameraRow; onDone: () => v
       : !connectionTouched || form.host.trim());
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-4">
       <Field label="Camera name">
         <input className="input" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
       </Field>
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <Field label="Source type">
           <select className="input" value={form.source_type} onChange={(e) => setSourceType(e.target.value)}>
             {SOURCE_TYPES.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
@@ -353,7 +356,7 @@ function AddCameraForm({ camera, onDone }: { camera?: CameraRow; onDone: () => v
                  onChange={(e) => { setForm({ ...form, host: e.target.value }); setTestState({ state: "idle" }); }} />
         </Field>
       ) : form.source_type === "screen_share" ? (
-        <div className="rounded-md border border-accent/20 bg-accent/5 p-3 text-xs text-ink-2">
+        <div className="rounded-control border border-accent/20 bg-accent/5 p-3 text-xs leading-relaxed text-ink-2">
           This is a virtual camera. You will be able to capture and stream your screen or webcam directly from the desktop application workspace. No physical connection details are needed.
         </div>
       ) : isStreamUrl ? (
@@ -370,7 +373,7 @@ function AddCameraForm({ camera, onDone }: { camera?: CameraRow; onDone: () => v
             />
           </Field>
           {isPageUrl && (
-            <div className="rounded-md border border-ok/25 bg-ok/5 p-3 text-xs text-ink-2">
+            <div className="rounded-control border border-ok/25 bg-ok/5 p-3 text-xs leading-relaxed text-ink-2">
               <span className="font-medium text-ink-1">Live page link detected.</span>{" "}
               A watch page is not a video address — the desktop app resolves it to the
               stream behind it before opening, and re-resolves automatically whenever the
@@ -379,7 +382,7 @@ function AddCameraForm({ camera, onDone }: { camera?: CameraRow; onDone: () => v
               a past broadcast or an ended stream has nothing to open.
             </div>
           )}
-          <div className="rounded-md border border-accent/20 bg-accent/5 p-3 text-xs text-ink-2">
+          <div className="rounded-control border border-accent/20 bg-accent/5 p-3 text-xs leading-relaxed text-ink-2">
             Check URL validates the address and scheme only. The stream itself is never fetched from the cloud — it is stored as given and opened by the desktop app on your own machine, so a URL that passes the check can still fail to open, and the camera will then show as offline.
             <br /><br />
             Note that a raw signed playlist URL (not a YouTube/Twitch link) expires after a few hours and cannot be renewed on its own. For a long unattended run, use a page link or a stream whose address is stable.
@@ -387,8 +390,8 @@ function AddCameraForm({ camera, onDone }: { camera?: CameraRow; onDone: () => v
         </>
       ) : (
         <>
-          <div className="grid grid-cols-3 gap-3">
-            <div className="col-span-2">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+            <div className="sm:col-span-2">
               <Field label="Camera IP">
                 <input className="input" placeholder={isEdit ? "unchanged" : "192.168.1.64"} value={form.host}
                        onChange={(e) => { setForm({ ...form, host: e.target.value }); setTestState({ state: "idle" }); }} />
@@ -399,7 +402,7 @@ function AddCameraForm({ camera, onDone }: { camera?: CameraRow; onDone: () => v
                      onChange={(e) => { setForm({ ...form, port: e.target.value }); setTestState({ state: "idle" }); }} />
             </Field>
           </div>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <Field label="Username">
               <input className="input" value={form.username}
                      onChange={(e) => { setForm({ ...form, username: e.target.value }); setTestState({ state: "idle" }); }} />
@@ -424,7 +427,7 @@ function AddCameraForm({ camera, onDone }: { camera?: CameraRow; onDone: () => v
               edge runtime is an SSRF primitive. Hiding the button meant a typo'd or
               wrong-scheme URL got saved silently and only surfaced later as a camera
               stuck offline, with nothing in the UI to explain why. */}
-          <button type="button" className="btn-ghost text-xs" onClick={testConnection}
+          <button type="button" className="btn-ghost btn-sm" onClick={testConnection}
                   disabled={testState.state === "testing" || !canSubmit || (isEdit && !connectionTouched)}>
             {testState.state === "testing" ? "Testing…" : isStreamUrl ? "Check URL" : "Test Connection"}
           </button>
@@ -439,7 +442,7 @@ function AddCameraForm({ camera, onDone }: { camera?: CameraRow; onDone: () => v
       )}
 
       {!!testState.channels?.length && (
-        <div className="rounded-md border border-line p-2.5">
+        <div className="rounded-control border border-line p-3">
           <p className="mb-1.5 text-xs font-medium text-ink-2">
             {testState.channels.length} channel{testState.channels.length === 1 ? "" : "s"} found — click one to use it
           </p>
@@ -449,7 +452,7 @@ function AddCameraForm({ camera, onDone }: { camera?: CameraRow; onDone: () => v
                 key={c.path}
                 type="button"
                 title={c.note}
-                className="rounded-md border border-line bg-surface-2 px-2 py-1 font-mono text-xs text-ink-2 hover:border-accent hover:text-accent"
+                className="rounded-lg border border-line bg-surface-2 px-2.5 py-1.5 font-mono text-xs text-ink-2 transition-colors hover:border-accent hover:text-accent"
                 onClick={() => setForm({ ...form, path: c.path })}
               >
                 {c.path}
@@ -512,12 +515,12 @@ function AssignForm({ camera, onDone }: { camera: CameraRow; onDone: () => void 
     <div className="max-h-80 space-y-1.5 overflow-y-auto">
       {error && <p className="text-sm text-danger">{error}</p>}
       {users?.map((u: any) => (
-        <label key={u.id} className="flex cursor-pointer items-center justify-between rounded-md border border-line px-3 py-2 hover:bg-surface-2">
+        <label key={u.id} className="flex cursor-pointer items-center justify-between gap-3 rounded-control border border-line px-3 py-2.5 transition-colors hover:bg-surface-2">
           <div>
             <div className="text-sm text-ink-1">{u.full_name}</div>
             <div className="text-xs text-ink-3">{u.email}</div>
           </div>
-          <input type="checkbox" className="h-4 w-4 accent-[#5b8cff]"
+          <input type="checkbox" className="h-4 w-4"
                  checked={assigned?.includes(u.id) ?? false}
                  onChange={(e) => toggle(u.id, e.target.checked)} />
         </label>

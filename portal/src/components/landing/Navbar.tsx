@@ -43,7 +43,7 @@ export default function Navbar() {
             <a
               key={l.href}
               href={l.href}
-              className="ap-pixel text-[10px] tracking-[0.08em] uppercase text-[var(--ap-ink-2)] hover:text-[var(--ap-dark)] transition-colors"
+              className="ap-pixel text-[10px] tracking-[0.08em] uppercase text-[var(--ap-ink-2)] hover:text-[var(--ap-accent)] transition-colors"
             >
               {l.label}
             </a>
@@ -58,7 +58,7 @@ export default function Navbar() {
             </span>
             ON-PREM
           </span>
-          <Link to="/signin" className="ap-pixel text-[10px] uppercase tracking-[0.06em] text-[var(--ap-ink-2)] hover:text-[var(--ap-dark)] px-2">
+          <Link to="/signin" className="ap-pixel text-[10px] uppercase tracking-[0.06em] text-[var(--ap-ink-2)] hover:text-[var(--ap-accent)] px-2">
             Sign In
           </Link>
           <Link to="/app" className="ap-btn ap-btn-primary">
@@ -68,7 +68,7 @@ export default function Navbar() {
 
         <button
           onClick={() => setOpen((v) => !v)}
-          className="md:hidden grid h-10 w-10 place-items-center rounded-xl border border-[var(--ap-border)] bg-white text-[var(--ap-dark)]"
+          className="md:hidden grid h-10 w-10 place-items-center rounded-xl border border-[var(--ap-border)] bg-[var(--ap-surface)] text-[var(--ap-ink)]"
           aria-label="Toggle menu"
         >
           {open ? <X size={18} /> : <Menu size={18} />}
@@ -76,7 +76,7 @@ export default function Navbar() {
       </div>
 
       {open && (
-        <div className="md:hidden mx-4 mt-3 rounded-2xl border border-[var(--ap-border)] bg-white p-5 shadow-xl">
+        <div className="md:hidden mx-4 mt-3 rounded-2xl border border-[var(--ap-border)] bg-[var(--ap-surface)] p-5 shadow-xl">
           <nav className="flex flex-col gap-1">
             {LINKS.map((l) => (
               <a

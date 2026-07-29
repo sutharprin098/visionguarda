@@ -1,6 +1,6 @@
 import { ReactNode, useMemo, useState } from "react";
 import clsx from "clsx";
-import { ChevronLeft, ChevronRight, ChevronsUpDown, Download, Search } from "lucide-react";
+import { ArrowDown, ArrowUp, ChevronLeft, ChevronRight, ChevronsUpDown, Download, Search } from "lucide-react";
 import { downloadCsv } from "../lib/format";
 
 export interface Column<T> {
@@ -72,7 +72,14 @@ export default function DataTable<T>({
   }, [rows, q, filters, sort, columns, searchText]);
 
   const pages = Math.max(1, Math.ceil(filtered.length / pageSize));
-  const pageRows = filtered.slice(page * pageSize, (page + 1) * pageSize);
+  // Clamp rather than trust `page`. The row set shrinks underneath it whenever
+  // something is deleted, a filter is applied from elsewhere, or a refetch
+  // returns fewer records — and a `page` left pointing past the end sliced to
+  // [] and rendered the empty state over a table that still had rows in it.
+  // Derived, not corrected in an effect, so there is no render where the two
+  // disagree.
+  const safePage = Math.min(page, pages - 1);
+  const pageRows = filtered.slice(safePage * pageSize, (safePage + 1) * pageSize);
   const selectedRows = rows.filter((r) => selected.has(rowKey(r)));
   const filterCols = columns.filter((c) => c.filter);
 
@@ -97,7 +104,7 @@ export default function DataTable<T>({
           <div className="relative flex-1 sm:flex-initial min-w-[200px]">
             <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-ink-3" />
             <input
-              className="input w-full sm:w-60 pl-8 text-xs py-1.5"
+              className="input input-sm w-full pl-8 sm:w-60"
               placeholder="Search…"
               value={q}
               onChange={(e) => { setQ(e.target.value); setPage(0); }}
@@ -109,7 +116,7 @@ export default function DataTable<T>({
           return (
             <select
               key={c.key}
-              className="input w-auto text-xs py-1.5"
+              className="input input-sm w-auto"
               value={filters[c.key] ?? ""}
               onChange={(e) => { setFilters({ ...filters, [c.key]: e.target.value }); setPage(0); }}
             >
@@ -121,7 +128,7 @@ export default function DataTable<T>({
         <div className="flex flex-wrap items-center justify-between sm:justify-end gap-2 w-full sm:w-auto mt-1 sm:mt-0">
           <span className="text-xs font-mono text-ink-3">{filtered.length} of {rows.length} records</span>
           {exportName && (
-            <button className="btn-ghost px-2.5 py-1.5 text-xs gap-1.5" onClick={exportCsv}>
+            <button className="btn-ghost btn-sm" onClick={exportCsv}>
               <Download size={13} /> Export CSV
             </button>
           )}
@@ -130,7 +137,7 @@ export default function DataTable<T>({
 
       {/* Bulk actions bar */}
       {bulkActions && selected.size > 0 && (
-        <div className="mb-3 flex items-center gap-3 rounded-md border border-accent/40 bg-accent/10 px-3 py-2">
+        <div className="mb-3 flex flex-wrap items-center gap-x-3 gap-y-2 rounded-control border border-accent/40 bg-accent/10 px-3 py-2.5">
           <span className="text-sm font-semibold text-accent">{selected.size} selected</span>
           {bulkActions.map((a) => (
             <button
@@ -154,7 +161,7 @@ export default function DataTable<T>({
             <tr>
               {bulkActions && (
                 <th className="th w-8">
-                  <input type="checkbox" className="accent-[#5b8cff]"
+                  <input type="checkbox"
                          checked={pageRows.length > 0 && pageRows.every((r) => selected.has(rowKey(r)))}
                          onChange={(e) => toggleAll(e.target.checked)} />
                 </th>
@@ -171,7 +178,11 @@ export default function DataTable<T>({
                       }
                     >
                       {c.header}
-                      <ChevronsUpDown size={11} className={sort?.key === c.key ? "text-accent" : ""} />
+                      {sort?.key === c.key
+                        ? (sort.dir === 1
+                            ? <ArrowUp size={11} className="text-accent" />
+                            : <ArrowDown size={11} className="text-accent" />)
+                        : <ChevronsUpDown size={11} className="opacity-50" />}
                     </button>
                   ) : c.header}
                 </th>
@@ -186,11 +197,12 @@ export default function DataTable<T>({
               const k = rowKey(r);
               return (
                 <tr key={k}
-                    className={clsx("transition hover:bg-surface-2", onRowClick && "cursor-pointer")}
+                    aria-selected={selected.has(k) || undefined}
+                    className={clsx(onRowClick && "cursor-pointer")}
                     onClick={() => onRowClick?.(r)}>
                   {bulkActions && (
                     <td className="td" onClick={(e) => e.stopPropagation()}>
-                      <input type="checkbox" className="accent-[#5b8cff]"
+                      <input type="checkbox"
                              checked={selected.has(k)}
                              onChange={(e) => {
                                const next = new Set(selected);
@@ -221,8 +233,11 @@ export default function DataTable<T>({
               <div
                 key={k}
                 className={clsx(
-                  "card p-4 space-y-3 border border-line/70 transition bg-surface-1 shadow-sm",
-                  onRowClick && "cursor-pointer active:bg-surface-2"
+                  "card space-y-3 p-4",
+                  // Lift on hover only when the card actually does something —
+                  // `.card` no longer reacts to the pointer by default, so a
+                  // static card stops advertising a click that isn't there.
+                  onRowClick && "card-interactive active:bg-surface-2",
                 )}
                 onClick={() => onRowClick?.(r)}
               >
@@ -232,7 +247,7 @@ export default function DataTable<T>({
                     {bulkActions && (
                       <input
                         type="checkbox"
-                        className="accent-[#5b8cff] mt-0.5 h-4 w-4 shrink-0"
+                        className="mt-0.5 h-4 w-4 shrink-0"
                         checked={selected.has(k)}
                         onClick={(e) => e.stopPropagation()}
                         onChange={(e) => {
@@ -287,12 +302,12 @@ export default function DataTable<T>({
       {/* Pagination */}
       {pages > 1 && (
         <div className="mt-3 flex items-center justify-between sm:justify-end gap-2 text-sm text-ink-3">
-          <button className="btn-ghost px-3 py-1.5 text-xs font-semibold" disabled={page === 0} onClick={() => setPage(page - 1)}>
-            <ChevronLeft size={14} className="inline mr-1" /> Previous
+          <button className="btn-ghost btn-sm" disabled={safePage === 0} onClick={() => setPage(safePage - 1)}>
+            <ChevronLeft /> Previous
           </button>
-          <span className="font-mono text-xs">Page {page + 1} of {pages}</span>
-          <button className="btn-ghost px-3 py-1.5 text-xs font-semibold" disabled={page >= pages - 1} onClick={() => setPage(page + 1)}>
-            Next <ChevronRight size={14} className="inline ml-1" />
+          <span className="font-mono text-xs">Page {safePage + 1} of {pages}</span>
+          <button className="btn-ghost btn-sm" disabled={safePage >= pages - 1} onClick={() => setPage(safePage + 1)}>
+            Next <ChevronRight />
           </button>
         </div>
       )}

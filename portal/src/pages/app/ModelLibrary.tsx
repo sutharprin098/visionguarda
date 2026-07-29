@@ -334,7 +334,7 @@ function ModelForm({ initial, onCancel, onSaved, onError }: {
 
   return (
     <div className="space-y-4">
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <Field label="Name"><input className="input" value={f.name ?? ""} onChange={(e) => set("name", e.target.value)} autoFocus /></Field>
         <Field label="Version"><input className="input" value={f.version ?? ""} onChange={(e) => set("version", e.target.value)} /></Field>
       </div>
@@ -343,7 +343,7 @@ function ModelForm({ initial, onCancel, onSaved, onError }: {
         <textarea className="input h-16 resize-none" value={f.description ?? ""} onChange={(e) => set("description", e.target.value)} />
       </Field>
 
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <Field label="Category">
           <select className="input" value={f.category ?? "detection"} onChange={(e) => set("category", e.target.value)}>
             {CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
@@ -356,17 +356,17 @@ function ModelForm({ initial, onCancel, onSaved, onError }: {
         </Field>
       </div>
 
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <Field label="Framework"><input className="input" value={f.framework ?? ""} onChange={(e) => set("framework", e.target.value)} placeholder="Megvii, PaddlePaddle…" /></Field>
         <Field label="Size (MB)"><input className="input" type="number" min={0} step={0.1} value={sizeMb} onChange={(e) => setSizeMb(e.target.value)} /></Field>
       </div>
 
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <Field label="CPU Requirement"><input className="input" value={f.cpu_requirement ?? ""} onChange={(e) => set("cpu_requirement", e.target.value)} placeholder="4 cores" /></Field>
         <Field label="GPU Requirement"><input className="input" value={f.gpu_requirement ?? ""} onChange={(e) => set("gpu_requirement", e.target.value)} placeholder="RTX-class / Optional" /></Field>
       </div>
 
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <Field label="RAM Requirement"><input className="input" value={f.ram_requirement ?? ""} onChange={(e) => set("ram_requirement", e.target.value)} placeholder="8 GB" /></Field>
         <Field label="CUDA Requirement"><input className="input" value={f.cuda_requirement ?? ""} onChange={(e) => set("cuda_requirement", e.target.value)} placeholder="11.8+ / None" /></Field>
       </div>

@@ -97,7 +97,7 @@ export default function PermissionGuard({
               />
               <button
                 onClick={() => setRequested(true)}
-                className="btn-primary text-xs px-4 py-2 flex items-center gap-1.5 shrink-0"
+                className="btn-primary btn-sm shrink-0"
               >
                 <Send size={13} /> Request Access
               </button>
@@ -112,7 +112,7 @@ export default function PermissionGuard({
 
         {/* Footer Navigation */}
         <div className="pt-2 flex items-center justify-center gap-3">
-          <Link to="/app" className="btn-ghost text-xs gap-1.5">
+          <Link to="/app" className="btn-ghost btn-sm">
             <ArrowLeft size={14} /> Return to Dashboard
           </Link>
         </div>

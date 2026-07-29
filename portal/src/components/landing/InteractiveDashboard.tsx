@@ -67,7 +67,7 @@ export default function InteractiveDashboard() {
                     <span className="h-3 w-3 rounded-full bg-amber-500/80 inline-block" />
                     <span className="h-3 w-3 rounded-full bg-emerald-500/80 inline-block" />
                   </div>
-                  <span className="text-xs font-bold font-mono text-slate-400 border-l border-slate-800 pl-3">
+                  <span className="text-xs font-bold font-mono text-[var(--ap-ink-2)] border-l border-slate-800 pl-3">
                     CamAI Studio v1.0.4 · Cluster North-01
                   </span>
                 </div>
@@ -89,7 +89,7 @@ export default function InteractiveDashboard() {
                         className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg transition-all ${
                           activeTab === tab.id
                             ? "bg-blue-600 text-white shadow-md shadow-blue-500/30"
-                            : "text-slate-400 hover:text-white hover:bg-slate-800"
+                            : "text-[var(--ap-ink-2)] hover:text-white hover:bg-slate-800"
                         }`}
                       >
                         <Icon size={14} />
@@ -155,7 +155,7 @@ export default function InteractiveDashboard() {
                     >
                       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                         <div className="bg-slate-900 border border-slate-800 p-4 rounded-xl">
-                          <div className="text-xs text-slate-400 font-mono">THROUGHPUT RATE</div>
+                          <div className="text-xs text-[var(--ap-ink-2)] font-mono">THROUGHPUT RATE</div>
                           <div className="text-2xl font-bold font-mono text-cyan-400 mt-1">42.8 MB/sec</div>
                           <div className="mt-3 h-16 flex items-end gap-1">
                             {[40, 65, 80, 50, 90, 75, 88, 95, 60, 100].map((h, i) => (
@@ -165,7 +165,7 @@ export default function InteractiveDashboard() {
                         </div>
 
                         <div className="bg-slate-900 border border-slate-800 p-4 rounded-xl">
-                          <div className="text-xs text-slate-400 font-mono">LATENCY BENCHMARK</div>
+                          <div className="text-xs text-[var(--ap-ink-2)] font-mono">LATENCY BENCHMARK</div>
                           <div className="text-2xl font-bold font-mono text-emerald-400 mt-1">11.4 ms Avg</div>
                           <div className="mt-3 h-16 flex items-end gap-1">
                             {[90, 85, 92, 88, 95, 91, 93, 89, 94, 96].map((h, i) => (
@@ -175,7 +175,7 @@ export default function InteractiveDashboard() {
                         </div>
 
                         <div className="bg-slate-900 border border-slate-800 p-4 rounded-xl">
-                          <div className="text-xs text-slate-400 font-mono">TOTAL DETECTIONS TODAY</div>
+                          <div className="text-xs text-[var(--ap-ink-2)] font-mono">TOTAL DETECTIONS TODAY</div>
                           <div className="text-2xl font-bold font-mono text-blue-400 mt-1">148,290 Events</div>
                           <div className="mt-3 h-16 flex items-end gap-1">
                             {[30, 45, 60, 70, 85, 90, 95, 100, 80, 90].map((h, i) => (
@@ -207,7 +207,7 @@ export default function InteractiveDashboard() {
                       <div className="absolute bottom-1/4 left-1/2 w-36 h-36 bg-cyan-400/50 rounded-full blur-[35px]" />
                       <div className="absolute top-4 left-4 bg-slate-950/80 backdrop-blur border border-white/10 p-3 rounded-lg text-xs font-mono">
                         <div className="font-bold text-white">SPATIAL OCCUPANCY HEATMAP</div>
-                        <div className="text-[10px] text-slate-400 mt-0.5">High Density Red: 80+ People/m²</div>
+                        <div className="text-[10px] text-[var(--ap-ink-2)] mt-0.5">High Density Red: 80+ People/m²</div>
                       </div>
                     </motion.div>
                   )}
@@ -229,7 +229,7 @@ export default function InteractiveDashboard() {
                       ].map((alert, i) => (
                         <div key={i} className="p-3 rounded-xl bg-slate-900 border border-slate-800 flex items-center justify-between gap-4 hover:border-slate-700">
                           <div className="flex items-center gap-3">
-                            <span className="text-slate-400">{alert.time}</span>
+                            <span className="text-[var(--ap-ink-2)]">{alert.time}</span>
                             <span className={`px-2 py-0.5 rounded text-[10px] font-extrabold ${
                               alert.type === "CRITICAL" ? "bg-red-500/20 text-red-400 border border-red-500/40" : "bg-amber-500/20 text-amber-400 border border-amber-500/40"
                             }`}>
@@ -264,7 +264,7 @@ export default function InteractiveDashboard() {
                         <div key={i} className="bg-slate-900 border border-slate-800 p-2.5 rounded-xl overflow-hidden">
                           <img src={item.img} alt={item.title} className="w-full h-24 object-cover rounded-lg mb-2" />
                           <div className="font-bold text-white">{item.title}</div>
-                          <div className="text-[10px] text-slate-400 mt-0.5">{item.date}</div>
+                          <div className="text-[10px] text-[var(--ap-ink-2)] mt-0.5">{item.date}</div>
                           <div className="text-[10px] text-emerald-400 font-bold mt-1">Conf: {item.conf}</div>
                         </div>
                       ))}
@@ -274,7 +274,7 @@ export default function InteractiveDashboard() {
               </div>
 
               {/* Screen Bottom Telemetry Bar */}
-              <div className="pt-4 border-t border-slate-800 flex flex-wrap items-center justify-between text-xs font-mono text-slate-400 gap-2">
+              <div className="pt-4 border-t border-slate-800 flex flex-wrap items-center justify-between text-xs font-mono text-[var(--ap-ink-2)] gap-2">
                 <div className="flex items-center gap-4">
                   <span className="flex items-center gap-1.5 text-emerald-400">
                     <CheckCircle2 size={13} /> Edge Server Online

@@ -165,7 +165,7 @@ function SiteForm({ site, onDone }: { site: Partial<SiteRow>; onDone: () => void
       <Field label="Name">
         <input className="input" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
       </Field>
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <Field label="Kind">
           <select className="input" value={form.kind} onChange={(e) => setForm({ ...form, kind: e.target.value as any })}>
             {KINDS.map((k) => <option key={k} value={k}>{k}</option>)}
