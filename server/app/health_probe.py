@@ -20,7 +20,7 @@ def probe_connection(source: str, timeout: float = 3.0) -> str:
     host = parsed.hostname
     if not host:
         return "network_error"
-    port = parsed.port or (554 if parsed.scheme == "rtsp" else 80)
+    port = parsed.port or (554 if parsed.scheme == "rtsp" else 443 if parsed.scheme == "https" else 80)
 
     try:
         with socket.create_connection((host, port), timeout=timeout) as sock:

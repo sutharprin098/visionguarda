@@ -265,7 +265,7 @@ function UserDetail({ user, onAction, onReveal, onChanged }: {
 
       {/* action bar */}
       <div className="mt-6 grid grid-cols-2 gap-2 border-t border-line pt-4">
-        <button className="btn-ghost text-xs" onClick={() =>
+        <button className="btn-ghost btn-sm" onClick={() =>
           onAction({
             title: "Reset password",
             body: `Send a password-reset email to ${user.email}?`,
@@ -274,7 +274,7 @@ function UserDetail({ user, onAction, onReveal, onChanged }: {
           Reset Password
         </button>
         {activeLicense && (
-          <button className="btn-ghost text-xs" onClick={() =>
+          <button className="btn-ghost btn-sm" onClick={() =>
             onAction({
               title: "Reset license",
               body: "Revoke the current license (all its device activations are revoked) and issue a fresh key?",
@@ -289,7 +289,7 @@ function UserDetail({ user, onAction, onReveal, onChanged }: {
           </button>
         )}
         {user.status === "active" ? (
-          <button className="btn-ghost text-xs text-warn" onClick={() =>
+          <button className="btn-ghost btn-sm text-warn" onClick={() =>
             onAction({
               title: "Suspend user",
               body: `Suspend ${user.full_name}? Their sessions are terminated immediately.`,
@@ -299,7 +299,7 @@ function UserDetail({ user, onAction, onReveal, onChanged }: {
             Suspend
           </button>
         ) : (
-          <button className="btn-ghost text-xs text-ok" onClick={() =>
+          <button className="btn-ghost btn-sm text-ok" onClick={() =>
             onAction({
               title: "Activate user",
               body: `Re-activate ${user.full_name}?`,
@@ -308,7 +308,7 @@ function UserDetail({ user, onAction, onReveal, onChanged }: {
             Activate
           </button>
         )}
-        <button className="btn-danger text-xs" onClick={() =>
+        <button className="btn-danger btn-sm" onClick={() =>
           onAction({
             title: "Delete user",
             body: `Permanently delete ${user.full_name}? Licenses are revoked and all their data is removed. This cannot be undone.`,
@@ -370,7 +370,7 @@ function ProfileTab({ user, onSaved }: { user: UserRow; onSaved: () => void }) {
       <Field label="Full name">
         <input className="input" value={form.full_name} onChange={(e) => setForm({ ...form, full_name: e.target.value })} />
       </Field>
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <Field label="Department">
           <input className="input" value={form.department} onChange={(e) => setForm({ ...form, department: e.target.value })} />
         </Field>
@@ -454,7 +454,7 @@ function InviteForm({ onDone }: { onDone: (licenseKey?: string) => void }) {
       <Field label="Email">
         <input className="input" type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
       </Field>
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <Field label="Department">
           <input className="input" value={form.department} onChange={(e) => setForm({ ...form, department: e.target.value })} />
         </Field>

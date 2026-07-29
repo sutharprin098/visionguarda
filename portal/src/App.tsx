@@ -68,18 +68,18 @@ export default function App() {
         <Route path="users" element={<PermissionGuard perm="users.manage" moduleName="User Directory"><UsersPage /></PermissionGuard>} />
         <Route path="roles" element={<PermissionGuard perm="roles.manage" moduleName="Roles & Permissions"><RolesPage /></PermissionGuard>} />
         <Route path="licenses" element={<PermissionGuard perm="licenses.manage" moduleName="License Management"><LicensesPage /></PermissionGuard>} />
-        <Route path="devices" element={<PermissionGuard perm="devices.read" moduleName="Device Management"><DevicesPage /></PermissionGuard>} />
+        <Route path="devices" element={<PermissionGuard perm="devices.manage" moduleName="Device Management"><DevicesPage /></PermissionGuard>} />
         <Route path="activations" element={<PermissionGuard perm="devices.manage" moduleName="Desktop Activations"><ActivationsPage /></PermissionGuard>} />
-        <Route path="cameras" element={<PermissionGuard perm="cameras.read" moduleName="Cameras Grid"><CamerasPage /></PermissionGuard>} />
-        <Route path="camera-groups" element={<PermissionGuard perm="cameras.read" moduleName="Camera Groups"><CameraGroupsPage /></PermissionGuard>} />
-        <Route path="sites" element={<PermissionGuard perm="sites.read" moduleName="Site Locations"><SitesPage /></PermissionGuard>} />
+        <Route path="cameras" element={<PermissionGuard perm="cameras.manage" moduleName="Cameras Grid"><CamerasPage /></PermissionGuard>} />
+        <Route path="camera-groups" element={<PermissionGuard perm="cameras.manage" moduleName="Camera Groups"><CameraGroupsPage /></PermissionGuard>} />
+        <Route path="sites" element={<PermissionGuard perm="cameras.manage" moduleName="Site Locations"><SitesPage /></PermissionGuard>} />
         <Route path="models" element={<PermissionGuard perm="ai.configure" moduleName="AI Engine Models"><ModelLibraryPage /></PermissionGuard>} />
-        <Route path="alerts" element={<PermissionGuard perm="alerts.read" moduleName="Real-Time Alerts"><AlertsPage /></PermissionGuard>} />
-        <Route path="incidents" element={<PermissionGuard perm="incidents.read" moduleName="Incidents Desk"><IncidentsPage /></PermissionGuard>} />
-        <Route path="reports" element={<PermissionGuard perm="reports.read" moduleName="System Reports"><ReportsPage /></PermissionGuard>} />
+        <Route path="alerts" element={<PermissionGuard perm="alerts.view" moduleName="Real-Time Alerts"><AlertsPage /></PermissionGuard>} />
+        <Route path="incidents" element={<PermissionGuard perm="alerts.view" moduleName="Incidents Desk"><IncidentsPage /></PermissionGuard>} />
+        <Route path="reports" element={<PermissionGuard perm="reports.view" moduleName="System Reports"><ReportsPage /></PermissionGuard>} />
         <Route path="downloads" element={<DownloadsPage />} />
-        <Route path="billing" element={<PermissionGuard perm="billing.read" moduleName="Billing & Subscriptions"><BillingPage /></PermissionGuard>} />
-        <Route path="audit" element={<PermissionGuard perm="audit.read" moduleName="Audit Logs"><AuditPage /></PermissionGuard>} />
+        <Route path="billing" element={<PermissionGuard perm="org.manage" moduleName="Billing & Subscriptions"><BillingPage /></PermissionGuard>} />
+        <Route path="audit" element={<PermissionGuard perm="audit.view" moduleName="Audit Logs"><AuditPage /></PermissionGuard>} />
         <Route path="notifications" element={<NotificationsPage />} />
         <Route path="settings" element={<PermissionGuard perm="org.manage" moduleName="Organization Settings"><SettingsPage /></PermissionGuard>} />
         <Route path="support" element={<SupportPage />} />

@@ -25,19 +25,19 @@ const DIFFERENTIATORS = [
 
 export default function EnterpriseDifferentiators() {
   return (
-    <section id="differentiators" className="py-24 relative overflow-hidden bg-slate-50 border-b border-slate-200">
+    <section id="differentiators" className="py-24 relative overflow-hidden bg-[var(--ap-bg)] border-b border-[var(--ap-border)]">
       <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 relative z-10">
         
         {/* Header */}
         <div className="text-center max-w-3xl mx-auto mb-16">
-          <div className="inline-flex items-center gap-2 px-3.5 py-1 rounded-full bg-white border border-slate-200 text-xs font-mono font-bold text-slate-700 uppercase tracking-wider mb-4 shadow-sm">
+          <div className="inline-flex items-center gap-2 px-3.5 py-1 rounded-full bg-[var(--ap-surface)] border border-[var(--ap-border)] text-xs font-mono font-bold text-[var(--ap-ink-2)] uppercase tracking-wider mb-4 shadow-sm">
             <Shield size={14} className="text-sky-600" />
             <span>Why Enterprises Choose CamAI</span>
           </div>
-          <h2 className="text-3xl sm:text-4xl font-extrabold text-slate-900 tracking-tight">
+          <h2 className="text-3xl sm:text-4xl font-extrabold text-[var(--ap-ink)] tracking-tight">
             Built for Privacy-Conscious Organizations
           </h2>
-          <p className="mt-4 text-base text-slate-600">
+          <p className="mt-4 text-base text-[var(--ap-ink-2)]">
             Combine the security of on-premises hardware with the convenience of central cloud orchestration.
           </p>
         </div>
@@ -47,13 +47,13 @@ export default function EnterpriseDifferentiators() {
           {DIFFERENTIATORS.map((item) => {
             const Icon = item.icon;
             return (
-              <div key={item.title} className="architectural-card p-8 bg-white flex items-start gap-5">
+              <div key={item.title} className="architectural-card p-8 bg-[var(--ap-surface)] flex items-start gap-5">
                 <div className="p-3.5 rounded-2xl bg-slate-900 text-white shrink-0 shadow-md">
                   <Icon size={24} />
                 </div>
                 <div>
-                  <h3 className="text-lg font-bold text-slate-900">{item.title}</h3>
-                  <p className="mt-2 text-xs sm:text-sm text-slate-600 leading-relaxed">
+                  <h3 className="text-lg font-bold text-[var(--ap-ink)]">{item.title}</h3>
+                  <p className="mt-2 text-xs sm:text-sm text-[var(--ap-ink-2)] leading-relaxed">
                     {item.description}
                   </p>
                 </div>

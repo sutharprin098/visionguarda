@@ -88,10 +88,10 @@ export default function DownloadsPage() {
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <h2 className="font-semibold text-zinc-100">CamAI Desktop {latest.version}</h2>
+                <h2 className="font-semibold text-ink-1">CamAI Desktop {latest.version}</h2>
                 {latest.prerelease && <Badge tone="warn">pre-release</Badge>}
               </div>
-              <p className="mt-0.5 text-sm text-zinc-500">
+              <p className="mt-0.5 text-sm text-ink-3">
                 {fmtSize(latest.size_bytes)} · Released {format(new Date(latest.published_at), "dd MMM yyyy")}
               </p>
               <ChecksumRow sha256={latest.checksum_sha256} />
@@ -117,15 +117,15 @@ export default function DownloadsPage() {
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   <Tag size={13} className="text-ink-3" />
-                  <span className="text-sm font-medium text-zinc-100">{r.name}</span>
+                  <span className="text-sm font-medium text-ink-1">{r.name}</span>
                   {r.prerelease && <Badge tone="warn">pre-release</Badge>}
                 </div>
-                <button className="btn-ghost text-xs" onClick={() => download(r)} disabled={downloadingId === r.asset_id}>
+                <button className="btn-ghost btn-sm" onClick={() => download(r)} disabled={downloadingId === r.asset_id}>
                   {downloadingId === r.asset_id ? "Preparing…" : "Download"}
                 </button>
               </div>
-              {r.release_notes && <p className="mt-2 whitespace-pre-line text-sm text-zinc-400">{r.release_notes}</p>}
-              <div className="mt-2 flex items-center gap-3 text-xs text-zinc-600">
+              {r.release_notes && <p className="mt-2 whitespace-pre-line text-sm text-ink-2">{r.release_notes}</p>}
+              <div className="mt-2 flex items-center gap-3 text-xs text-ink-3">
                 <span>{format(new Date(r.published_at), "dd MMM yyyy")}</span>
                 <span>{fmtSize(r.size_bytes)}</span>
                 {r.asset_name && <span className="font-mono">{r.asset_name}</span>}

@@ -69,6 +69,27 @@ try:
 except ValueError:
     IGPU_STATIC_IMGSZ = 416
 
+# Background model benchmark: "auto" | "on" | "off".
+#
+# Three minutes after startup the engine compiles yolox_tiny/s/m as three
+# additional backends on whatever device the live pipeline is already using, to
+# produce an advisory "recommended model" readout. On a shared-silicon Intel
+# iGPU those compiles contend directly with live camera inference. Measured on
+# this machine (UHD-class iGPU, OpenVINO GPU, 8 camera threads), per-frame
+# inference went from ~40ms to 87-116ms for the duration of the benchmark —
+# a 2-3x latency hit on every camera, i.e. visibly worse tracking and FPS for
+# several minutes on exactly the hardware that has the least headroom to spare.
+# The engine's own comment below already noted 600-1700ms spikes from this.
+#
+# Nothing consumes the result to switch models — it is displayed in /api/status
+# and never acted on — so on an iGPU this is paying a real recurring cost for a
+# number no code reads. "auto" (default) therefore runs the benchmark everywhere
+# EXCEPT a static-shape iGPU. Set "on" to force it (a dGPU/CPU box with headroom,
+# where you want the numbers), "off" to disable it everywhere.
+MODEL_BENCHMARK_MODE = os.getenv("CAMAI_MODEL_BENCHMARK", "auto").strip().lower()
+if MODEL_BENCHMARK_MODE not in ("auto", "on", "off"):
+    MODEL_BENCHMARK_MODE = "auto"
+
 # --- GPU acceleration policy -----------------------------------------------
 # When True, the engine REFUSES to start if a model silently falls back to CPU
 # while the machine actually has a usable accelerator — it fails loud instead
@@ -77,6 +98,30 @@ except ValueError:
 # DirectML (not CUDA) still boot normally; set CAMAI_REQUIRE_GPU=1 on an NVIDIA
 # deployment to guarantee the CUDA/TensorRT path is genuinely in use.
 REQUIRE_GPU = os.getenv("CAMAI_REQUIRE_GPU", "").strip().lower() in ("1", "true", "yes", "on")
+
+# --- MJPEG preview -----------------------------------------------------------
+# The preview JPEG encode is the single most expensive thing the pipeline does
+# outside inference: profiled at 25% of total engine CPU (cv2.imencode in
+# _decode_loop), versus 12% for inference itself, because it ran on every
+# decoded frame at full camera FPS for every camera — whether or not a single
+# client had ever opened that camera's /stream.
+#
+# Two bounds now apply, and both matter:
+#   * Nobody watching -> no encode at all (viewer ref-count, see
+#     PipelineCoordinator.mjpeg_viewer_attached). This is where essentially all
+#     of the saving comes from, and it costs the operator nothing.
+#   * Somebody watching -> encode at most MJPEG_MAX_FPS.
+#
+# The cap is deliberately set ABOVE normal camera rates rather than below them.
+# It was briefly 15, which is a real saving on paper and visibly choppy in
+# practice: a fullscreen live view of moving traffic at 15fps reads as lag, and
+# "the preview is not real time" is a worse bug than "the preview costs CPU".
+# So this now only bounds pathological sources (50/60fps cameras) and leaves
+# every ordinary 25/30fps camera untouched.
+#
+# Set CAMAI_MJPEG_MAX_FPS=0 to disable the cap entirely, or lower it on a
+# machine running many cameras where preview smoothness matters less than CPU.
+MJPEG_MAX_FPS = float(os.getenv("CAMAI_MJPEG_MAX_FPS", "30"))
 
 # Recording settings
 RECORDING_FPS = 10
@@ -120,11 +165,20 @@ HELMET_THRESHOLD = _env_float("CAMAI_HELMET_THRESHOLD", 0.35)
 HELMET_NMS = _env_float("CAMAI_HELMET_NMS", 0.45)
 HELMET_INPUT_SIZE = _env_int("CAMAI_HELMET_INPUT_SIZE", 640)
 HELMET_COOLDOWN = _env_float("CAMAI_HELMET_COOLDOWN", 15.0)
-# Run the helmet detector at most this often (seconds). It is a second network,
-# and a helmet doesn't change frame-to-frame; running it every frame on a busy
-# scene throttles the whole tracking loop. Between runs the pass is skipped —
-# violations still fire (analytics dedups per rider over HELMET_COOLDOWN).
+# Submit a frame to the helmet worker at most this often (seconds). A helmet
+# doesn't change frame-to-frame, so there is nothing to gain from a higher rate.
+# This is now a SUBMIT cadence, not an inline throttle: the pass itself runs on
+# app/ai/helmet_worker.py, off the tracking thread. As an inline throttle it was
+# ineffective by construction — a tracking iteration that ran the helmet pass
+# took ~850ms, far longer than the 0.3s interval, so the interval had already
+# elapsed by the time the next iteration began and the pass ran every frame
+# anyway, pinning tracking at ~1 FPS.
 HELMET_INTERVAL_S = _env_float("CAMAI_HELMET_INTERVAL_S", 0.3)
+
+# How long a published helmet result stays on the overlay. Slightly longer than
+# the submit cadence so boxes don't flicker between passes, short enough that a
+# dead worker's output disappears instead of going stale.
+HELMET_RESULT_TTL_S = _env_float("CAMAI_HELMET_RESULT_TTL_S", 1.5)
 
 # --- ANPR / number-plate detection (Apache-2.0) ----------------------------
 # Vehicle-crop + gating first: the plate detector runs ONLY on car/truck/bus/
@@ -302,6 +356,24 @@ TILING_MAX_TILES = _env_int("CAMAI_TILING_MAX_TILES", 4)
 # 180ms clears one pass with margin under load, still affords 4+ on fast
 # hardware, and still halves per camera as cameras are added.
 TILING_LATENCY_BUDGET_MS = _env_float("CAMAI_TILING_LATENCY_BUDGET_MS", 180.0)
+
+# Frame rate each camera's AI stage aims for. This is a DEADLINE, not a limiter:
+# nothing throttles down to it, but it is the period the adaptive tile engine
+# must fit inside, so it is the single knob that trades frame rate against
+# small-object recall.
+#
+# Measured on the reference machine (i7-8665U + UHD 620, yolox @ 416, one
+# camera, real video):
+#
+#   target 15  ->  44.6ms/cycle, 22.4 fps ceiling, 10.57 detections/frame
+#   target 25  ->  37.1ms/cycle, 26.9 fps ceiling,  6.78 detections/frame
+#
+# 15 is the default because the extra ~5 fps that 25 buys costs 36% of the
+# detections — on this hardware a tile pass costs ~30ms and simply does not fit
+# inside a 40ms period. On a machine with real GPU headroom (a discrete NVIDIA
+# card, where a pass is a few ms) both fit and raising this is free. Anyone who
+# wants raw frame rate over recall can set it here rather than editing code.
+TARGET_FPS = _env_float("CAMAI_TARGET_FPS", 15.0)
 # Threads in the process-wide tile pool (NOT per camera) — bounds the number of
 # extra per-thread InferRequests the backend caches, regardless of camera count.
 TILING_WORKERS = _env_int("CAMAI_TILING_WORKERS", 2)
@@ -385,6 +457,16 @@ CORS_ORIGINS = (
     if _cors
     else [
         "null",                     # Electron file:// renderer
+        # desktop/vite.config.ts pins the desktop renderer's dev server to 5180.
+        # It was missing here, and the effect was not subtle: _ws_origin_allowed()
+        # rejects an unlisted Origin with close code 1008, so `npm run dev` on
+        # the desktop app had its /ws telemetry socket refused on every attempt.
+        # TelemetrySession just saw a close and backed off, so the renderer
+        # reconnect-looped in silence and NO detections ever reached the overlay
+        # in development — while the packaged build (Origin: null) worked fine.
+        # That asymmetry is exactly what makes this class of bug expensive.
+        "http://localhost:5180",
+        "http://127.0.0.1:5180",
         "http://localhost:5173",
         "http://127.0.0.1:5173",
         "http://localhost:4173",

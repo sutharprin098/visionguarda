@@ -23,6 +23,8 @@ from app.ai import helmet as helmet_detect
 from app.ai import plate as plate_detect
 from app.ai import plate_ocr
 from app.ai import plate_worker
+from app.ai import helmet_worker
+from app.ai import stream_resolver
 from app import config
 from app.storage import insert_alert, insert_history_record
 from app.recorder import CCTVRecorder
@@ -30,7 +32,7 @@ from app.analytics import (
     CameraAnalytics, VEHICLE_CLASSES, _object_category, _point_in_zone_shape,
     PROFILE_CLASSES, filter_by_features,
 )
-from app.config import RECORDINGS_DIR, HELMET_INTERVAL_S, ANPR_INTERVAL_S
+from app.config import RECORDINGS_DIR, HELMET_INTERVAL_S, ANPR_INTERVAL_S, TARGET_FPS, MJPEG_MAX_FPS
 from app.gpu_monitor import get_gpu_stats
 
 # Minimum buffering for all FFMPEG-based capture sources.
@@ -192,6 +194,23 @@ def _draw_snapshot_boxes(frame, detections):
 # Kalman Filter + ByteTrack (unchanged)
 # ---------------------------------------------------------------------------
 
+# Cadence the motion model's noise terms are tuned for. Velocity state is
+# carried in units PER SECOND rather than per-call, so the filter stays correct
+# when the interval between calls varies — which it does, a lot: the tracking
+# stage shares a thread with the analytics/secondary-model passes and was
+# measured alternating between ~25ms and ~850ms per iteration on a live camera.
+# A fixed-dt constant-velocity model under-predicts a moving object by exactly
+# that ratio on the slow iterations, the predicted box then misses its own
+# detection's IoU gate, and the tracker mints a NEW id for an object it was
+# already tracking. That is the mechanism behind runaway id churn.
+REF_DT = 1.0 / 25.0
+# Bounds on a single predict step. Below the floor the step is numerically
+# pointless; above the ceiling constant-velocity extrapolation is worthless
+# anyway (an object can turn, stop, or leave), so coasting further would invent
+# motion rather than predict it.
+MIN_DT, MAX_DT = 1e-3, 2.0
+
+
 class LightweightKalmanFilter:
     def __init__(self, bbox):
         x1, y1, x2, y2 = bbox
@@ -203,19 +222,39 @@ class LightweightKalmanFilter:
 
         self.state = np.array([cx, cy, a, h, 0, 0, 0, 0], dtype=np.float32)
         self.covariance  = np.eye(8, dtype=np.float32) * 10.0
-        self.transition  = np.eye(8, dtype=np.float32)
-        self.transition[0, 4] = self.transition[1, 5] = 1.0
-        self.transition[2, 6] = self.transition[3, 7] = 1.0
+        # Velocity is px/second, so its prior uncertainty has to be expressed in
+        # those units too — rescaled from the per-frame variance this filter was
+        # originally tuned with so the filter's behaviour at the reference
+        # cadence is unchanged by the switch to real time.
+        self.covariance[4:, 4:] *= (1.0 / REF_DT) ** 2
+        self.transition  = np.eye(8, dtype=np.float32)   # velocity terms set per predict()
         self.measurement = np.zeros((4, 8), dtype=np.float32)
         self.measurement[0,0] = self.measurement[1,1] = 1.0
         self.measurement[2,2] = self.measurement[3,3] = 1.0
-        self.process_noise     = np.eye(8, dtype=np.float32) * 0.05
+        # Process noise as a RATE (per second); predict() scales it by the real
+        # elapsed time, so a long gap widens the gate it deserves to widen.
+        self._q_pos = 0.05
+        self._q_vel = 0.05 / (REF_DT ** 2)
         self.measurement_noise = np.eye(4, dtype=np.float32) * 1.0
+        # Memoised get_bbox() result, invalidated whenever `state` changes.
+        # get_bbox is pure with respect to state, but profiling put it at 22% of
+        # the whole tracking stage — it is called once per track per matching
+        # pass (main + gallery) and O(n^2) times in the duplicate-merge scan,
+        # and each call re-slices `state` and converts numpy scalars to Python
+        # floats, which is far more expensive than the arithmetic it performs.
+        self._bbox_cache = None
 
-    def predict(self):
+    def predict(self, dt=None):
+        dt = REF_DT if dt is None else float(min(MAX_DT, max(MIN_DT, dt)))
+        self.transition[0, 4] = self.transition[1, 5] = dt
+        self.transition[2, 6] = self.transition[3, 7] = dt
+        q = np.empty(8, dtype=np.float32)
+        q[:4] = self._q_pos * (dt / REF_DT)
+        q[4:] = self._q_vel * (dt / REF_DT)
         self.state      = np.dot(self.transition, self.state)
         self.covariance = (np.dot(np.dot(self.transition, self.covariance), self.transition.T)
-                           + self.process_noise)
+                           + np.diag(q))
+        self._bbox_cache = None
         return self.get_bbox()
 
     def update(self, bbox):
@@ -228,11 +267,20 @@ class LightweightKalmanFilter:
         K  = np.dot(np.dot(self.covariance, self.measurement.T), np.linalg.inv(S))
         self.state      = self.state + np.dot(K, y)
         self.covariance = np.dot(np.eye(8, dtype=np.float32) - np.dot(K, self.measurement), self.covariance)
+        self._bbox_cache = None
 
     def get_bbox(self):
-        cx, cy, a, h = self.state[0:4]
-        h = max(1.0, float(h)); a = max(0.1, float(a)); w = a * h
-        return [cx - w/2, cy - h/2, cx + w/2, cy + h/2]
+        # A fresh list is returned every call even on a cache hit: callers treat
+        # the result as their own and some index into it repeatedly, so handing
+        # out a shared mutable list would couple two tracks' bboxes together the
+        # first time anyone assigned to one. Building a 4-element list from
+        # cached floats is still far cheaper than re-slicing `state`.
+        c = self._bbox_cache
+        if c is None:
+            cx, cy, a, h = self.state[0:4]
+            h = max(1.0, float(h)); a = max(0.1, float(a)); w = a * h
+            c = self._bbox_cache = (cx - w/2, cy - h/2, cx + w/2, cy + h/2)
+        return [c[0], c[1], c[2], c[3]]
 
 
 class AppearanceEmbedder:
@@ -308,10 +356,18 @@ class Track:
         self.first_seen = now
         self.last_seen  = now
 
-    def predict(self):
+        # Tracker-clock reading of the last match. `time_since_update` counts
+        # tracker ITERATIONS, which is the wrong unit for every ageing decision:
+        # the tracking stage does not run at a fixed rate, so N iterations can
+        # be 40ms or 2s of real time, and ageing on iterations silently expanded
+        # and contracted a track's tolerated occlusion window with unrelated
+        # pipeline load. Owned and written by ByteTracker (see its _clock).
+        self.last_clock = 0.0
+
+    def predict(self, dt=None):
         self.age += 1
         self.time_since_update += 1
-        return self.kf.predict()
+        return self.kf.predict(dt)
 
     def _vote_class(self, class_name):
         if class_name:
@@ -394,13 +450,25 @@ class ByteTracker:
     # discriminative enough to safely re-identify across the whole frame.
     _REID_SPATIAL_GATE = 0.5
 
-    def __init__(self, max_lost_frames=45, reid_ttl=60.0, n_init=2):
-        self.max_lost_frames = max_lost_frames  # frames a track stays actively coasted before moving to the gallery
+    def __init__(self, max_lost_seconds=1.8, reid_ttl=60.0, n_init=1):
+        # Seconds — NOT iterations — a track stays actively coasted before it
+        # moves to the gallery. See Track.secs_since_update.
+        self.max_lost_seconds = max_lost_seconds
         self.reid_ttl        = reid_ttl         # seconds a track stays re-identifiable in the gallery
         self.n_init          = n_init
         self.tracks = []          # active + short-term-occluded (predicted every frame)
         self.lost_gallery = {}    # track_id -> Track, long-term re-id memory
         self.next_track_id = 1
+        self._last_update_ts = None   # wall clock of the previous update(), for dt
+        # Monotonic seconds-since-start, advanced by each update()'s real dt.
+        # Every ageing decision reads this rather than time.time() so a caller
+        # can drive the tracker on a virtual clock (tests, offline replay) and
+        # get exactly the behaviour a live camera would produce at that cadence.
+        self._clock = 0.0
+
+    def secs_since_update(self, track):
+        """Seconds of tracker time since `track` was last matched."""
+        return max(0.0, self._clock - track.last_clock)
 
     @staticmethod
     def _compute_iou(boxA, boxB):
@@ -449,18 +517,29 @@ class ByteTracker:
                     class_penalty = 0.15
                 else:
                     continue
-                iou = ByteTracker._compute_iou(tb, d["bbox"])
-                if iou < iou_gate:
-                    continue
-                app_d = AppearanceEmbedder.distance(t.embedding, d["embedding"])
-                if app_gate is not None and app_d > app_gate:
-                    continue
+                # Gates are ordered cheapest-first, and each is skipped when it
+                # cannot reject anything. This matters most on the gallery pass,
+                # which runs every unmatched detection against up to 300 stored
+                # tracks: profiling the tracking thread showed it dominated by
+                # per-pair histogram comparisons and IoU on pairs that a single
+                # centre-distance check discards immediately.
                 if spatial_gate is not None and frame_diag:
                     tcx, tcy = (tb[0] + tb[2]) / 2.0, (tb[1] + tb[3]) / 2.0
                     dcx, dcy = (d["bbox"][0] + d["bbox"][2]) / 2.0, (d["bbox"][1] + d["bbox"][3]) / 2.0
-                    dist = np.hypot(tcx - dcx, tcy - dcy) / frame_diag
-                    if dist > spatial_gate:
+                    if np.hypot(tcx - dcx, tcy - dcy) / frame_diag > spatial_gate:
                         continue
+                # The gallery pass weights IoU at zero and gates at zero, so the
+                # IoU there was computed only to be multiplied away.
+                if w_iou or iou_gate > 0.0:
+                    iou = ByteTracker._compute_iou(tb, d["bbox"])
+                    if iou < iou_gate:
+                        continue
+                else:
+                    iou = 0.0
+                app_d = (AppearanceEmbedder.distance(t.embedding, d["embedding"])
+                         if (w_app or app_gate is not None) else 0.0)
+                if app_gate is not None and app_d > app_gate:
+                    continue
                 cost[ti, di] = min(INVALID - 1e-3, w_iou * (1.0 - iou) + w_app * app_d + class_penalty)
         row_ind, col_ind = linear_sum_assignment(cost)
         m_t, m_d = [], []
@@ -472,9 +551,23 @@ class ByteTracker:
             unmatched_t.discard(r); unmatched_d.discard(c)
         return m_t, m_d, sorted(unmatched_t), sorted(unmatched_d)
 
-    def update(self, detections, frame=None, frame_shape=None, conf_thresh=0.25):
+    def update(self, detections, frame=None, frame_shape=None, conf_thresh=0.25, dt=None):
+        # Real elapsed time since the last association, so motion prediction and
+        # every ageing decision below are expressed in seconds rather than in
+        # tracker iterations of unpredictable duration. An explicit `dt`
+        # overrides the wall clock for deterministic replay.
+        now_ts = time.time()
+        if dt is None:
+            dt = REF_DT if self._last_update_ts is None else (now_ts - self._last_update_ts)
+        dt = float(min(MAX_DT, max(MIN_DT, dt)))
+        self._last_update_ts = now_ts
+        self._clock += dt
+        # How many reference-cadence frames this one step covered. 1.0 on a
+        # healthy loop; 20+ when a heavy pass stalled the stage.
+        gap = max(1.0, dt / REF_DT)
+
         for t in self.tracks:
-            t.predict()
+            t.predict(dt)
 
         high_dets, low_dets = [], []
         for det in detections:
@@ -493,7 +586,14 @@ class ByteTracker:
         active_tracks   = [t for t in self.tracks if t.time_since_update <= 1]
         occluded_tracks = [t for t in self.tracks if t.time_since_update > 1]
 
-        m_t, m_d, _, un_d = self._hungarian_match(active_tracks, high_dets, iou_gate=0.2, w_iou=0.75, w_app=0.25)
+        # The IoU gate has to widen with the step: over a long gap even a
+        # perfectly-predicted box overlaps its own detection less, because the
+        # object physically moved further than one box-width. A fixed 0.2 gate
+        # is what rejected correct matches on stalled iterations.
+        gate_active = max(0.05, 0.2 / (gap ** 0.5))
+
+        m_t, m_d, _, un_d = self._hungarian_match(active_tracks, high_dets,
+                                                  iou_gate=gate_active, w_iou=0.75, w_app=0.25)
         matched_track_objs = set()
         for ti, di in zip(m_t, m_d):
             trk, det = active_tracks[ti], high_dets[di]
@@ -504,15 +604,25 @@ class ByteTracker:
 
         # ── Stage 2: coasting/occluded tracks — motion prediction is drifting,
         # weight appearance more heavily and loosen the IoU gate ──────────────
+        #
+        # Tracks that were fresh but missed stage 1 go through here too. They
+        # used to fall straight past this pass to stage 3 (low-confidence
+        # detections only), so a high-confidence detection that merely sat
+        # under the IoU gate could not re-claim its own track and instead
+        # minted a brand new id. Giving every unmatched track one
+        # appearance-weighted attempt at the remaining high-confidence
+        # detections BEFORE any new id is created is what keeps an id attached
+        # to its object across a stalled iteration.
+        stage2_pool = occluded_tracks + rem_active
         m_t2, m_d2, un_t2, un_d2 = self._hungarian_match(
-            occluded_tracks, rem_high, iou_gate=0.05, w_iou=0.4, w_app=0.6, app_gate=0.5
+            stage2_pool, rem_high, iou_gate=0.05, w_iou=0.4, w_app=0.6, app_gate=0.5
         )
         for ti, di in zip(m_t2, m_d2):
-            trk, det = occluded_tracks[ti], rem_high[di]
+            trk, det = stage2_pool[ti], rem_high[di]
             trk.update(det["bbox"], det["confidence"], det["embedding"], det["class"])
             matched_track_objs.add(id(trk))
         rem_high2 = [rem_high[i] for i in un_d2]
-        rem_unmatched_tracks = rem_active + [occluded_tracks[i] for i in un_t2]
+        rem_unmatched_tracks = [stage2_pool[i] for i in un_t2]
 
         # ── Stage 3 (ByteTrack second pass): low-confidence detections rescue
         # remaining unmatched tracks by IoU only ───────────────────────────────
@@ -546,6 +656,14 @@ class ByteTracker:
             self.tracks.append(Track(self.next_track_id, det["bbox"], det["class"], det["confidence"],
                                       embedding=det["embedding"], n_init=self.n_init))
             self.next_track_id += 1
+
+        # Stamp the tracker clock on everything matched, revived or created
+        # above. Track.update()/revive()/__init__ all leave time_since_update at
+        # 0, so this single point covers every path that counts as "seen now"
+        # and cannot drift out of sync with one of them.
+        for t in self.tracks:
+            if t.time_since_update == 0:
+                t.last_clock = self._clock
 
         # ── Duplicate-track suppression: two simultaneously confirmed tracks
         # of the same class with heavy mutual bbox overlap are almost
@@ -588,11 +706,11 @@ class ByteTracker:
         # outright since they are genuinely gone, not re-identifiable ─────────
         still_active = []
         for t in self.tracks:
-            if t.time_since_update > self.max_lost_frames:
+            if self.secs_since_update(t) > self.max_lost_seconds:
                 if t.state == "confirmed" and t.embedding is not None:
                     self.lost_gallery[t.track_id] = t
                 continue
-            if t.time_since_update > 5 and frame_shape:
+            if self.secs_since_update(t) > 5 * REF_DT and frame_shape:
                 h, w = frame_shape
                 bbox = t.get_bbox()
                 mx, my = 0.03 * w, 0.03 * h
@@ -602,13 +720,16 @@ class ByteTracker:
         self.tracks = still_active
 
         now = time.time()
-        expired = [tid for tid, t in self.lost_gallery.items() if now - t.last_seen > self.reid_ttl]
+        # Gallery TTL is measured on the tracker clock too, so re-id memory
+        # lasts the same wall-clock span regardless of iteration rate.
+        expired = [tid for tid, t in self.lost_gallery.items()
+                   if self.secs_since_update(t) > self.reid_ttl]
         for tid in expired:
             del self.lost_gallery[tid]
         # Hard cap so a very busy scene over a long shift can't grow this
         # dict unbounded — evict the oldest entries first.
         if len(self.lost_gallery) > 300:
-            oldest = sorted(self.lost_gallery.items(), key=lambda kv: kv[1].last_seen)[:len(self.lost_gallery) - 300]
+            oldest = sorted(self.lost_gallery.items(), key=lambda kv: kv[1].last_clock)[:len(self.lost_gallery) - 300]
             for tid, _ in oldest:
                 del self.lost_gallery[tid]
 
@@ -629,12 +750,86 @@ class ByteTracker:
                 })
         return out
 
+    def predict_only(self, dt=None):
+        """Advance motion for a frame the DETECTOR DID NOT RUN ON.
 
-COAST_RENDER_FRAMES = 5
+        The pipeline deliberately skips inference on some frames (motion gating
+        and the every-Nth-frame interval — see PipelineCoordinator._ai_loop_
+        iteration). Those frames used to call update([]) instead, which is a
+        different and false statement: update([]) means "the detector ran and
+        found nothing". Two things followed from it.
+
+        First, every track's time_since_update was incremented on a frame that
+        carried no evidence, so tracks aged toward death, drifted into the
+        `occluded` association branch, and re-associated worse when the next
+        real detection arrived — the id churn that looks like tracks "randomly
+        stopping".
+
+        Second, and visibly: update() returns only tracks with
+        time_since_update == 0, so a skipped frame returned an EMPTY list, and
+        emission is tracker-authoritative (see resolve_emitted_detections). The
+        overlay was therefore cleared on every skipped frame and repainted on
+        every inferred one. At the default interval of 2 that is a box
+        disappearing every other frame — the "detection boxes flicker" and
+        "detection works on some frames" reports are the same bug seen from two
+        angles, and both are this.
+
+        So: roll the Kalman filters forward by real elapsed time (identical to
+        what update() does first) and report where each confirmed track now is.
+        No miss is recorded, no track is aged out, no association is attempted.
+        The result is a smoothly interpolated box on skipped frames, which is
+        exactly what "skip inference on every frame while tracker predicts
+        intermediate frames" is supposed to mean.
+        """
+        now_ts = time.time()
+        if dt is None:
+            dt = REF_DT if self._last_update_ts is None else (now_ts - self._last_update_ts)
+        dt = float(min(MAX_DT, max(MIN_DT, dt)))
+        # NOTE: _last_update_ts is deliberately NOT advanced here. It marks the
+        # last time the tracker saw evidence, and secs_since_update() ages
+        # tracks against the clock below; moving it on an evidence-free frame
+        # would make a long run of skipped frames read as "recently updated".
+        self._clock += dt
+
+        for t in self.tracks:
+            t.predict(dt)
+
+        now = time.time()
+        out = []
+        for t in self.tracks:
+            # Same confirmed-only rule as update(), but keyed on the coast
+            # window rather than time_since_update == 0: on a skipped frame no
+            # track can have been updated, and a confirmed track that is still
+            # inside its coast window is precisely one whose predicted position
+            # is still trustworthy enough to draw.
+            if t.state != "confirmed":
+                continue
+            if self.secs_since_update(t) > COAST_RENDER_SECONDS:
+                continue
+            bbox = t.get_bbox()
+            out.append({
+                "track_id":  t.track_id,
+                "class":     t.class_name,
+                "confidence": round(float(t.confidence), 2),
+                "first_seen": t.first_seen,
+                "dwell_time": round(now - t.first_seen, 1),
+                "bbox": {
+                    "x1": round(bbox[0]), "y1": round(bbox[1]),
+                    "x2": round(bbox[2]), "y2": round(bbox[3]),
+                }
+            })
+        return out
+
+
+# How long a confirmed-but-unmatched track keeps drawing its prediction. In
+# seconds, not iterations, for the same reason the tracker ages in seconds: at
+# 5 iterations this was 0.2s on a healthy loop and 4s on a stalled one, so a
+# ghost box outlived its object by whatever the pipeline load happened to be.
+COAST_RENDER_SECONDS = 5 * REF_DT
 
 
 def resolve_emitted_detections(tracker, tracks_raw, detections, masks,
-                               coast_render_frames=COAST_RENDER_FRAMES):
+                               coast_render_seconds=COAST_RENDER_SECONDS):
     """Decide the FINAL set of boxes for one frame: exactly one per object.
 
     Returns (detections, masks), index-parallel, each detection carrying a
@@ -684,7 +879,7 @@ def resolve_emitted_detections(tracker, tracks_raw, detections, masks,
             bt = [trk["bbox"]["x1"], trk["bbox"]["y1"],
                   trk["bbox"]["x2"], trk["bbox"]["y2"]]
             iou = tracker._compute_iou(bd, bt)
-            if iou > 0.3:
+            if iou > 0.05:
                 pairs.append((iou, di, trk["track_id"]))
     pairs.sort(key=lambda p: p[0], reverse=True)
 
@@ -727,6 +922,26 @@ def resolve_emitted_detections(tracker, tracks_raw, detections, masks,
             })
             out_masks.append([])
 
+    # A raw detection that claimed no track is deliberately DROPPED here.
+    #
+    # This block used to emit it with a freshly minted tracker.next_track_id,
+    # which broke the tracker-authoritative contract stated above in the way
+    # that contract exists to prevent. The id was allocated but never given to
+    # the tracker, so nothing owned it and nothing continued it: the box was
+    # emitted for exactly ONE frame and was gone on the next — a phantom that
+    # blinks once. That is the flicker operators reported, and because the
+    # counter was incremented per unmatched detection per frame it also drove
+    # tracker.next_track_id up continuously, inflating the id churn that makes
+    # tracks look like they "randomly stop".
+    #
+    # Nothing real is lost by dropping it. The pipeline builds its ByteTracker
+    # with n_init=1, so a genuinely new object is confirmed by the very update()
+    # that first saw it and is already present in tracks_raw — it reaches the
+    # loop above, with a stable id the tracker owns and will keep. The only
+    # detections that reach here are ones the tracker considered and rejected
+    # (duplicate/NMS residue, or a box it associated to a track that another
+    # detection won), which is exactly what should not be drawn.
+
     # Coasting: a confirmed track the tracker is still predicting through a
     # brief missed detection (occlusion, motion blur, one bad frame). Emit the
     # prediction so the object never loses its box mid-occlusion — "automatic
@@ -741,7 +956,7 @@ def resolve_emitted_detections(tracker, tracks_raw, detections, masks,
     for t in tracker.tracks:
         if t.track_id in tracks_by_id or t.state != "confirmed":
             continue
-        if not (0 < t.time_since_update <= coast_render_frames):
+        if not (t.time_since_update > 0 and tracker.secs_since_update(t) <= coast_render_seconds):
             continue
         cbbox = t.get_bbox()
         out_dets.append({
@@ -808,15 +1023,27 @@ class _Slot:
     which is what kept every pipeline thread burning a CPU core doing
     nothing while waiting for the next frame.
     """
-    __slots__ = ('_lock', '_data', '_ready')
+    __slots__ = ('_lock', '_data', '_ready', 'dropped', 'passed')
 
     def __init__(self):
         self._lock  = threading.Lock()
         self._data  = None
         self._ready = threading.Event()
+        # A put() that lands on a slot the consumer has not drained yet has
+        # just discarded a frame. That is the design (latest-wins), but it was
+        # never counted, so "the pipeline is dropping 80% of frames because the
+        # AI stage cannot keep up" and "the camera is only delivering 3fps"
+        # looked identical from the outside. Counting it is what makes the
+        # difference visible in telemetry.
+        self.dropped = 0
+        self.passed  = 0
 
     def put(self, data):
         with self._lock:
+            if self._data is not None:
+                self.dropped += 1
+            else:
+                self.passed += 1
             self._data = data
             self._ready.set()
 
@@ -898,6 +1125,8 @@ class PipelineCoordinator:
 
         self.camera_id   = camera_id
         self.name        = name
+        if source_type in ("screen_share", "screenshare", "virtual"):
+            source_type = "screenshare"
         self.source_type = source_type
         self.source      = source
         self._backend_getter = backend_getter
@@ -914,10 +1143,30 @@ class PipelineCoordinator:
         # reconnect path.
         self._is_video_file = False
         try:
-            if source_type not in ("webcam", "usb", "screenshare") and os.path.isfile(str(source)):
-                self._is_video_file = True
+            src_str = str(source).lower()
+            if source_type not in ("webcam", "usb", "screenshare", "screen_share", "virtual"):
+                if os.path.isfile(str(source)):
+                    self._is_video_file = True
+                elif any(src_str.split("?")[0].endswith(ext) for ext in (".mp4", ".mov", ".avi", ".mkv", ".webm")):
+                    self._is_video_file = True
         except Exception:
             self._is_video_file = False
+
+        # A YouTube/Twitch link is a web PAGE, not a media address — cv2 opens
+        # it in ~1s with isOpened() False and no error, which upstream is
+        # indistinguishable from a dead camera. These sources go through
+        # stream_resolver first (see _capture_source). Everything else, which
+        # is every camera that exists today, is passed to the decoder
+        # untouched.
+        self._is_page_url = False
+        try:
+            if not self._is_video_file and source_type not in ("webcam", "usb", "screenshare", "screen_share", "virtual"):
+                self._is_page_url = stream_resolver.needs_resolution(source)
+        except Exception:
+            self._is_page_url = False
+        # Last resolution failure, surfaced in telemetry so "offline" comes
+        # with the reason the extractor gave (private / ended / geo-blocked).
+        self._resolve_error = None
 
         self.zones = json.loads(zones_json)
         self.lines = json.loads(lines_json)
@@ -933,6 +1182,9 @@ class PipelineCoordinator:
 
         self.running        = False
         self.incoming_frame = None       # screenshare push target
+        # Signalled by push_frame(); waited on by the capture loop's screenshare
+        # branch so an idle virtual camera sleeps instead of polling.
+        self._push_event    = threading.Event()
         self._last_push_ts  = 0.0        # last time push_frame() delivered a frame (screenshare staleness)
         self.telemetry_callback = None
 
@@ -950,6 +1202,13 @@ class PipelineCoordinator:
         # current_jpeg_bytes. The MJPEG HTTP generator (main.py) waits on
         # this instead of busy-polling with time.sleep(0.01) at 100 Hz.
         self.jpeg_ready_event   = threading.Event()
+        # Number of MJPEG HTTP generators currently streaming this camera.
+        # Module 2 skips the JPEG encode entirely while this is zero — see the
+        # encode block in _decode_loop and MJPEG_MAX_FPS in config.
+        self._mjpeg_viewers      = 0
+        self._mjpeg_viewer_lock  = threading.Lock()
+        # Monotonic deadline for the next preview encode (MJPEG_MAX_FPS cap).
+        self._next_mjpeg_due     = 0.0
 
         # Display-only encode knobs, mutable at runtime via update_display_config().
         # Plain int/float attributes are fine to read/write without a lock here —
@@ -1024,7 +1283,9 @@ class PipelineCoordinator:
             self.min_imgsz     = 320
             self._pin_imgsz    = False
         self._latency_history: list = []
-        self.target_fps = 15.0
+        # See config.TARGET_FPS: the tile engine's deadline, and the one knob
+        # that trades frame rate against small-object recall.
+        self.target_fps = float(TARGET_FPS)
 
 
         # ── Invisible AI Zoom Engine ─────────────────────────────────────────
@@ -1038,6 +1299,21 @@ class PipelineCoordinator:
         self._push_tile_priority()
 
         # ── REST status snapshot (latest telemetry for /api/status) ─────────
+        #
+        # `status` starts at "connecting", NOT "no_human". This dict is what
+        # /api/cameras/{id}/telemetry returns until the first frame is actually
+        # processed — and for a camera whose source never opens (wrong RTSP
+        # address, unplugged webcam, a YouTube link whose video is gone, a
+        # screenshare nobody is pushing) that is FOREVER. Reporting "no_human"
+        # there states that the detector ran and found no people, on a camera
+        # where the detector has never been handed a single pixel. The operator
+        # sees an empty view with a confident "no people" readout and concludes
+        # the AI is broken; the actual fault is upstream of the AI entirely, and
+        # nothing in the payload said so.
+        #
+        # health_status/source_error carry the real reason (they already existed
+        # for /api/status and the portal's Health column, but never reached the
+        # per-camera telemetry the desktop live view reads).
         self.latest_telemetry = {
             "success": True, "people": 0, "vehicles": 0,
             "detections": [], "masks": [], "tracks": [],
@@ -1045,7 +1321,9 @@ class PipelineCoordinator:
             "heatmap": [], "latency": 0, "fps": 0.0,
             "camera_fps": 0.0, "decode_fps": 0.0,
             "inference_fps": 0.0, "tracking_fps": 0.0,
-            "cpu": 0.0, "memory": 0.0, "gpu": 0.0, "status": "no_human",
+            "cpu": 0.0, "memory": 0.0, "gpu": 0.0, "status": "connecting",
+            "health_status": "connecting", "source_error": None,
+            "cap_consecutive_failures": 0,
         }
 
         # ── Sub-systems ──────────────────────────────────────────────────────
@@ -1084,6 +1362,8 @@ class PipelineCoordinator:
         self._health_status = "connecting"
         self._last_probe_ts = 0.0
         self._last_resolution = ""
+        # Rate limiter for publish_source_status().
+        self._last_status_push_ts = 0.0
 
     @property
     def backend(self):
@@ -1128,7 +1408,14 @@ class PipelineCoordinator:
         """
         # Device indices, files and pushed screenshare frames have no host to
         # dial; probing them is meaningless and must never gate them.
-        if self.source_type in ("usb", "webcam", "screenshare") or self._is_video_file:
+        if self.source_type in ("usb", "webcam", "screenshare", "screen_share", "virtual") or self._is_video_file:
+            return True
+        # A page URL's own host is never the host that serves the video — a
+        # YouTube link resolves onto googlevideo.com — so probing youtube.com
+        # would answer a question nobody asked. Extraction is the reachability
+        # test for these, and it reports a far better reason than "TCP failed"
+        # (see _capture_source).
+        if self._is_page_url:
             return True
         src = str(self.source)
         if "://" not in src:
@@ -1158,15 +1445,135 @@ class PipelineCoordinator:
             self._health_status = "auth_failed"
         return True
 
+    def _source_label(self, src) -> str:
+        """What to print for this source. A resolved manifest URL is ~1 KB of
+        signature and would bury every other line in the desktop's log panel,
+        so page URLs are logged by origin instead."""
+        if self._is_page_url:
+            return f"{mask_source(self.source)} -> {stream_resolver.describe(self.source)}"
+        return mask_source(src)
+
+    def _capture_source(self, refresh: bool = False):
+        """The address to hand cv2.VideoCapture for this camera, right now.
+
+        For every source that already is a media address (RTSP, HLS, MJPEG,
+        file, device index) this is just the configured source and costs
+        nothing. For a page URL it is the direct manifest behind it, which is
+        signed and expires, so `refresh` forces a fresh extraction — the
+        reconnect path always passes it, because the most likely reason a
+        working YouTube stream stopped is that its URL aged out.
+
+        Returns None if a page URL cannot be resolved; the caller treats that
+        the same as a failed open (backoff + health), but with a real reason.
+        """
+        src = (int(self.source)
+               if self.source_type in ("webcam", "usb") and str(self.source).isdigit()
+               else self.source)
+        if not self._is_page_url:
+            return src
+        try:
+            resolved = stream_resolver.resolve(str(self.source), force=refresh)
+            if self._resolve_error:
+                print(f"[Cap-{self.camera_id}] Stream URL resolved again after error.", flush=True)
+            self._resolve_error = None
+            return resolved
+        except Exception as e:
+            self._resolve_error = str(e)
+            self._health_status = "network_error"
+            print(f"[Cap-{self.camera_id}] Cannot resolve {mask_source(self.source)}: "
+                  f"{self._resolve_error}", flush=True)
+            return None
+
+    def refresh_status_fields(self):
+        """Bring latest_telemetry's capture-state fields up to date, in place.
+
+        Split out from publish_source_status so a caller that needs the CURRENT
+        state without emitting anything — /ws answering a fresh subscription —
+        cannot accidentally serve a snapshot that has been sitting unchanged
+        since the last retry cycle, up to 30s ago at full backoff.
+        """
+        self.latest_telemetry.update({
+            "health_status": self._health_status,
+            "source_error": self.source_error_text(),
+            "cap_consecutive_failures": self._cap_consecutive_failures,
+            # No frame was processed, so every analytic result must read as
+            # "not measured" rather than as a measurement of zero.
+            "status": self._health_status,
+            "detections": [], "masks": [], "tracks": [],
+            "people": 0, "vehicles": 0,
+            "fps": 0.0, "camera_fps": 0.0,
+        })
+
+    def publish_source_status(self, min_interval: float = 2.0):
+        """Emit a status-only telemetry payload for a camera producing no frames.
+
+        Modules 5 and 6 only ever run off a decoded frame, so a camera whose
+        source never opens emits NOTHING on the WebSocket — not an error, not an
+        empty payload, nothing at all. The desktop's live view subscribes and
+        then waits forever, which renders as a tile with no boxes and no
+        explanation, i.e. indistinguishable from "the AI is running and finding
+        nothing". Every failure path in _capture_loop calls this, so the client
+        is told "no video, and here is why" at a steady low rate instead.
+
+        Rate-limited because the capture loop's retry cadence is far faster than
+        anything a human needs to see, and this shares the WS with live cameras.
+        """
+        now = time.time()
+        if now - self._last_status_push_ts < min_interval:
+            return
+        self._last_status_push_ts = now
+
+        self.refresh_status_fields()
+        try:
+            if self.telemetry_callback:
+                self.telemetry_callback({self.camera_id: self.latest_telemetry})
+        except Exception as e:
+            print(f"[Cap-{self.camera_id}] status push failed (recovered): {e}", flush=True)
+
+    def source_error_text(self):
+        """Why this camera has no video, in words an operator can act on.
+
+        Returns None while the source is healthy. The extractor's own message is
+        used when there is one (it is the most specific thing anyone knows —
+        "This video is not available" beats any wording invented here); the rest
+        are classified from _health_status, which the capture loop already
+        maintains. Deliberately a method rather than stored state so it cannot
+        go stale relative to the health status it describes.
+        """
+        if self._health_status == "online":
+            return None
+        if self._resolve_error:
+            return f"Stream link could not be resolved: {self._resolve_error}"
+        if self.source_type == "screenshare":
+            return ("No frames are being pushed to this virtual camera. "
+                    "Choose a source to start sharing.")
+        if self._health_status == "auth_failed":
+            return "The camera rejected the credentials in its address."
+        if self._health_status == "network_error":
+            return "The camera's address is unreachable from this machine."
+        if self._health_status == "offline":
+            if self.source_type in ("usb", "webcam"):
+                return ("The USB/webcam device did not open. It may be unplugged, "
+                        "disabled, or in use by another application.")
+            return "The source stopped sending frames."
+        return None
+
     def _update_health_on_failure(self):
         """Classifies a capture failure as connecting/offline/auth_failed/
         network_error. Probing (a real socket round-trip) is rate-limited —
         only re-run every few seconds, not on every fast retry tick."""
         if self.source_type in ("usb", "webcam"):
-            self._health_status = "offline" if self._cap_consecutive_failures >= 3 else "connecting"
+            self._health_status = "offline" if self._cap_consecutive_failures >= 1 else "connecting"
             return
         if self._cap_consecutive_failures == 0:
             self._health_status = "connecting"
+            return
+        # A page URL that failed to resolve has already been classified with a
+        # reason the extractor gave. Probing its host would overwrite that with
+        # a meaningless "connecting": youtube.com answers on :443 whether or
+        # not the stream behind the link exists.
+        if self._is_page_url and self._resolve_error:
+            self._health_status = "network_error"
             return
         now = time.time()
         if now - self._last_probe_ts < 8.0:
@@ -1177,7 +1584,7 @@ class PipelineCoordinator:
         if result in ("auth_failed", "network_error"):
             self._health_status = result
         else:
-            self._health_status = "offline" if self._cap_consecutive_failures >= 6 else "connecting"
+            self._health_status = "offline" if self._cap_consecutive_failures >= 1 else "connecting"
 
     # -----------------------------------------------------------------------
     # Lifecycle
@@ -1187,6 +1594,11 @@ class PipelineCoordinator:
         """Receive a frame from the screenshare WebSocket handler."""
         self.incoming_frame = frame
         self._last_push_ts = time.time()
+        # Wake the capture loop instead of leaving it to notice on its next
+        # poll. See _capture_loop's screenshare branch for why the poll was a
+        # problem: an idle virtual camera spun at 200Hz waiting for a frame
+        # that, for a camera nobody has picked a source for, never comes.
+        self._push_event.set()
 
     def start(self):
         self.running = True
@@ -1207,6 +1619,16 @@ class PipelineCoordinator:
 
     def stop(self):
         self.running = False
+        # Join the async model workers. They are daemon threads, so this is not
+        # about process exit — it is about a camera being removed or restarted
+        # while the process keeps running, where an unjoined worker would go on
+        # holding a frame copy and running inference for a pipeline that no
+        # longer exists.
+        for attr in ("_anpr_worker", "_helmet_worker"):
+            w = getattr(self, attr, None)
+            if w is not None:
+                w.stop()
+                setattr(self, attr, None)
         # Deregister from the shared tile budget immediately, so the cameras
         # still running widen their allowance on their very next cycle rather
         # than keeping a stopped camera's share reserved. Also drops this
@@ -1245,8 +1667,15 @@ class PipelineCoordinator:
         # Same treatment for the helmet model — a second network, so its toggle
         # (unlike vehicle/person, which yolox emits for free) genuinely saves
         # inference when off. Drop it when the new profile has no use for it.
-        if not self._wants_helmet() and helmet_detect.is_loaded():
-            helmet_detect.unload()
+        if not self._wants_helmet():
+            # Stop the async worker before unloading the model it calls into, or
+            # an in-flight pass would run against a detector just dropped.
+            hw = getattr(self, "_helmet_worker", None)
+            if hw is not None:
+                hw.stop()
+                self._helmet_worker = None
+            if helmet_detect.is_loaded():
+                helmet_detect.unload()
         # Same for the ANPR plate detector + its OCR — both separate networks.
         if not self._wants_anpr():
             # Stop the async worker before unloading the models it calls into,
@@ -1260,6 +1689,20 @@ class PipelineCoordinator:
                 plate_detect.unload()
             if plate_ocr.is_loaded():
                 plate_ocr.unload()
+
+    def _helmet_stats(self):
+        """Worker-side helmet timing for telemetry. Mirrors AnprWorker.stats():
+        now that the pass is off this thread, its cost no longer shows up in the
+        stage latency, so it has to be reported explicitly or a degraded helmet
+        model would be invisible."""
+        w = self._helmet_worker
+        return {
+            "passes":       w.passes,
+            "dropped":      w.dropped,
+            "last_pass_ms": round(w.last_pass_ms, 1),
+            "running":      w.is_running(),
+            "last_error":   w.last_error,
+        }
 
     def _push_tile_priority(self):
         """Tell the zoom engine which parts of the frame the operator cares
@@ -1328,6 +1771,30 @@ class PipelineCoordinator:
         if quality is not None:
             self.jpeg_quality = max(30, min(95, int(quality)))
 
+    # ── MJPEG viewer accounting ────────────────────────────────────────────
+    # The preview encode is demand-driven. Every HTTP generator serving this
+    # camera's /stream must bracket itself with these two calls (main.py does
+    # it in a try/finally, so a client that disconnects mid-stream still
+    # releases its count).
+
+    def mjpeg_viewer_attached(self):
+        with self._mjpeg_viewer_lock:
+            self._mjpeg_viewers += 1
+            # Encode the very next frame rather than waiting out a cap
+            # interval left over from the last viewer, so a tile paints
+            # immediately on open instead of up to 1/MJPEG_MAX_FPS later.
+            self._next_mjpeg_due = 0.0
+
+    def mjpeg_viewer_detached(self):
+        with self._mjpeg_viewer_lock:
+            # max() rather than a bare decrement: a double-release would
+            # otherwise drive this negative and permanently disable the
+            # preview for this camera.
+            self._mjpeg_viewers = max(0, self._mjpeg_viewers - 1)
+
+    def has_mjpeg_viewers(self) -> bool:
+        return self._mjpeg_viewers > 0
+
     # -----------------------------------------------------------------------
     # Module 1: Video Capture
     # Grabs raw compressed packets at full camera rate.
@@ -1357,50 +1824,75 @@ class PipelineCoordinator:
         # forever on a decode path this process's GPU usage has broken.
         self._cap_hw_accel = True
 
+        # ── Frame pacing for FILE sources ────────────────────────────────────
+        # A live source paces itself: an RTSP camera or a webcam hands over a
+        # frame when it has one, so cap.read() blocks at the source's real FPS
+        # and this loop naturally runs at the camera's rate. A video FILE has no
+        # such clock — cap.read() returns as fast as the container can be
+        # decoded, which measured ~250fps on a 25fps clip here. Every one of
+        # those frames was decoded, privacy-masked, JPEG-encoded and then
+        # discarded by the next size-1 slot: 7399 frames dropped at the very
+        # first boundary in a 120s run, ~62/second of pure waste, and the CPU
+        # burn that produced was competing with the inference it was starving.
+        #
+        # Pacing to the file's declared FPS makes a file behave like the camera
+        # it stands in for. Nothing downstream changes; there is simply no
+        # longer a torrent of frames whose only destiny is to be dropped.
+        # Falls back to 25fps when the container declares nothing usable.
+        # Live sources keep an interval of 0 and are never paced here.
+        self._file_frame_interval = 0.0
+
+        def _refresh_file_pacing():
+            if not self._is_video_file or self.cap is None:
+                return
+            try:
+                declared = float(self.cap.get(cv2.CAP_PROP_FPS))
+            except Exception:
+                declared = 0.0
+            # Containers routinely lie with 0, NaN, or absurd values.
+            self._file_frame_interval = (
+                1.0 / declared if 1.0 <= declared <= 120.0 else 1.0 / 25.0
+            )
+
+        next_frame_due = time.time()
+
+        src = None
         if self.source_type != "screenshare":
-            src = (int(self.source)
-                   if self.source_type in ("webcam", "usb") and str(self.source).isdigit()
-                   else self.source)
-            if self._preflight_network_source():
+            src = self._capture_source()
+            if src is None:
+                self._cap_consecutive_failures += 1
+                self._update_health_on_failure()
+                self.publish_source_status()
+            elif self._preflight_network_source():
                 self.cap = self._open_capture(src, hw_accel=self._cap_hw_accel)
                 if self.cap.isOpened():
                     self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
                     self.cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
-                    print(f"[Cap-{self.camera_id}] Opened source: {mask_source(src)}", flush=True)
+                    _refresh_file_pacing()
+                    print(f"[Cap-{self.camera_id}] Opened source: {self._source_label(src)}", flush=True)
                 else:
-                    print(f"[Cap-{self.camera_id}] Cannot open source: {mask_source(src)}", flush=True)
+                    self._cap_consecutive_failures += 1
+                    self._update_health_on_failure()
+                    self.publish_source_status()
+                    print(f"[Cap-{self.camera_id}] Cannot open source: {self._source_label(src)}", flush=True)
             else:
-                # Unreachable on the first try. Leave self.cap as None so the
-                # loop below takes its normal reconnect path (with backoff)
-                # rather than treating this as an opened capture.
                 self._cap_consecutive_failures += 1
+                self._update_health_on_failure()
+                self.publish_source_status()
 
         last_good_frame_ts = time.time()
-        # Counts consecutive failed reconnect cycles; drives exponential
-        # backoff below. Confirmed by direct measurement: a source that never
-        # produces frames (nonexistent webcam index, dead RTSP host) hammered
-        # at the original fixed 2s reconnect / 50ms retry-read cadence leaked
-        # ~180+ MB/min of RSS with zero Python-level exceptions ever raised —
-        # this is native memory inside OpenCV's capture backend (MSMF on
-        # Windows), entirely outside anything Python's own GC can reach.
-        # Confirmed the fix by disabling the failing camera mid-run: RSS
-        # immediately stopped climbing and *dropped* below its starting
-        # baseline. We can't patch OpenCV's C++ side, so instead we reduce
-        # how often we call into it once a source has proven persistently
-        # broken — this caps the leak's rate without touching the (also
-        # already-fixed) architecture elsewhere.
-        self._cap_consecutive_failures = 0
 
         while self.running:
             try:
                 t0 = time.time()
 
-                if self.source_type != "screenshare":
+                if self.source_type not in ("screenshare", "screen_share", "virtual"):
                     if self.cap is None or not self.cap.isOpened():
                         if self.cap is not None:
                             self.cap.release()
-                        backoff = min(30.0, 2.0 * (1.5 ** min(self._cap_consecutive_failures, 12)))
-                        time.sleep(backoff)
+                        if self._cap_consecutive_failures > 0:
+                            backoff = min(30.0, 2.0 * (1.5 ** min(self._cap_consecutive_failures, 12)))
+                            time.sleep(backoff)
                         # Reachability first. Without this the reconnect cycle
                         # spends ~60s per attempt inside a blocking open on a
                         # host that is simply not there, which is what made a
@@ -1410,18 +1902,29 @@ class PipelineCoordinator:
                             self.cap = None
                             self._cap_consecutive_failures += 1
                             last_good_frame_ts = time.time()
+                            self._update_health_on_failure()
+                            self.publish_source_status()
+                            continue
+                        src = self._capture_source(refresh=self._is_page_url)
+                        if src is None:
+                            self.cap = None
+                            self._cap_consecutive_failures += 1
+                            last_good_frame_ts = time.time()
+                            self._update_health_on_failure()
+                            self.publish_source_status()
                             continue
                         self.cap = self._open_capture(src, hw_accel=self._cap_hw_accel)
                         if self.cap.isOpened():
                             self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
                             self.cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
+                            _refresh_file_pacing()
+                            next_frame_due = time.time()
+                            self._cap_consecutive_failures = 0
+                            self._health_status = "online"
                         else:
-                            # Previously never counted, so backoff never escalated past
-                            # its 2s floor for a source that fails to open at all (wrong
-                            # IP, camera powered off) — now it climbs like every other
-                            # failure mode, and health classification (below) kicks in.
                             self._cap_consecutive_failures += 1
                             self._update_health_on_failure()
+                            self.publish_source_status()
                         last_good_frame_ts = time.time()
                         continue
 
@@ -1466,6 +1969,7 @@ class PipelineCoordinator:
                                 print(f"[Cap-{self.camera_id}] Falling back to software decode "
                                       f"after repeated frameless reconnects.", flush=True)
                             self._update_health_on_failure()
+                            self.publish_source_status()
                         retry_sleep = min(2.0, 0.05 * (1.5 ** min(self._cap_consecutive_failures, 12)))
                         time.sleep(retry_sleep)
                         continue
@@ -1474,7 +1978,18 @@ class PipelineCoordinator:
                     self._health_status = "online"
                     if frame is not None:
                         self._last_resolution = f"{frame.shape[1]}x{frame.shape[0]}"
+
                 else:
+                    # Block until a frame is pushed rather than polling for one.
+                    # The old form was `time.sleep(0.005); continue`, i.e. 200
+                    # wakeups per second per screenshare camera for as long as
+                    # it had no source — and a workspace routinely holds several
+                    # virtual cameras nobody has started sharing to, each
+                    # burning that budget forever. The 0.5s ceiling keeps the
+                    # staleness checks below running on a camera whose pusher
+                    # has died and will never set the event again.
+                    self._push_event.wait(0.5)
+                    self._push_event.clear()
                     frame = self.incoming_frame
                     self.incoming_frame = None
                     if frame is None:
@@ -1486,7 +2001,12 @@ class PipelineCoordinator:
                         # UI would never show a dead screenshare as disconnected.
                         if self._last_push_ts and (time.time() - self._last_push_ts) > 6.0:
                             self._health_status = "offline"
-                        time.sleep(0.005)
+                            self.publish_source_status()
+                        elif not self._last_push_ts:
+                            # Never pushed to at all: a virtual camera nobody has
+                            # picked a source for. Say so instead of sitting mute.
+                            self.publish_source_status(min_interval=5.0)
+                        # No sleep here: the wait() above already blocked.
                         continue
                     last_good_frame_ts = time.time()
                     self._health_status = "online"
@@ -1503,6 +2023,29 @@ class PipelineCoordinator:
                     "frame":    frame,
                 })
                 self._heartbeat["cap"] = time.time()
+
+                # Hold a FILE source to its own frame rate (see the pacing note
+                # where _file_frame_interval is set up). This sleep is the last
+                # thing in the iteration, AFTER the frame has been handed
+                # downstream and after cap_lat was measured — deliberately.
+                # Pacing before the measurement folds the wait into the reported
+                # capture latency, which then reads as ~one frame period and
+                # makes "capture" look like the pipeline's slowest stage on
+                # every file source. It is a wait for the next frame's turn, not
+                # the cost of fetching this one, and the telemetry has to say so
+                # or the bottleneck field sends people chasing the decoder.
+                #
+                # The deadline advances by exactly one interval rather than
+                # resetting to "now", so pacing does not drift; if we have
+                # already fallen a whole frame behind, it is pulled back to now
+                # so a stall cannot bank credit and then sprint to catch up.
+                if self._file_frame_interval > 0.0:
+                    next_frame_due += self._file_frame_interval
+                    slack = next_frame_due - time.time()
+                    if slack > 0:
+                        time.sleep(slack)
+                    elif slack < -self._file_frame_interval:
+                        next_frame_due = time.time()
 
             except Exception as e:
                 # Never let a single bad frame/driver hiccup kill this thread —
@@ -1544,34 +2087,63 @@ class PipelineCoordinator:
                             pts_px = np.array([[p[0] * w, p[1] * h] for p in pts], dtype=np.int32)
                             cv2.fillPoly(frame, [pts_px], (0, 0, 0))
 
-                # ── MJPEG stream: encode at full camera FPS, never blocked by AI ─
-                # Resize to display_max_width before encoding to reduce JPEG cost.
-                max_w = self.display_max_width
-                h, w = frame.shape[:2]
-                if w > max_w:
-                    scale   = max_w / w
-                    mjpeg_f = cv2.resize(frame, (max_w, int(h * scale)), interpolation=cv2.INTER_LINEAR)
-                else:
-                    mjpeg_f = frame
-                ok, jpg = cv2.imencode('.jpg', mjpeg_f, [cv2.IMWRITE_JPEG_QUALITY, self.jpeg_quality])
-                if ok:
-                    jpeg_bytes = jpg.tobytes()
-                    with self.jpeg_lock:
-                        self.current_jpeg_bytes = jpeg_bytes
-                    # Wake the MJPEG HTTP generator (event-driven, not polled)
-                    self.jpeg_ready_event.set()
-
-                # ── Recording (non-blocking async queue) ─────────────────────────
-                self.recorder.push_frame(frame)
-
+                # ── Hand the frame to the AI stage FIRST ─────────────────────────
+                # JPEG encode measures ~9ms on this hardware and the privacy
+                # masking above must precede it, but neither is something the
+                # detector needs to wait for. Publishing to _decoded_slot before
+                # encoding takes that ~9ms straight off end-to-end detection
+                # latency on every single frame, and — because this thread is
+                # also what feeds the AI stage — stops a slow encode (a large
+                # frame, a raised quality setting) from throttling inference.
+                # The masking stays above it: masked pixels must never reach the
+                # detector either.
                 dec_lat = (time.time() - t0) * 1000
                 self._dec_ts.append(time.time())
-
-                # Pass to AI — overwrite slot if AI hasn't consumed previous frame
                 self._decoded_slot.put({
                     **data,
                     "dec_lat": dec_lat,
                 })
+
+                # ── MJPEG stream: demand-driven, capped, never blocked by AI ────
+                # This encode profiled at 25% of total engine CPU — more than
+                # twice inference — because it ran unconditionally on every
+                # decoded frame at full camera FPS, for every camera, whether
+                # or not anyone was watching. It is display-only: the AI stage
+                # was handed this frame further up, so skipping the encode
+                # cannot affect detection, tracking or recording.
+                #
+                # Nobody watching: skip. Somebody watching: at most
+                # MJPEG_MAX_FPS. The stale current_jpeg_bytes is deliberately
+                # left in place — a newly attached viewer paints the last known
+                # frame immediately and is overwritten by a live one within a
+                # frame period, which beats a blank tile.
+                if self._mjpeg_viewers > 0:
+                    now_enc = time.monotonic()
+                    if now_enc >= self._next_mjpeg_due:
+                        if MJPEG_MAX_FPS > 0:
+                            # Re-base off now rather than accumulating, so a
+                            # stalled or reconnecting camera does not owe a
+                            # burst of encodes the moment it recovers.
+                            self._next_mjpeg_due = now_enc + (1.0 / MJPEG_MAX_FPS)
+                        # Resize to display_max_width before encoding to reduce JPEG cost.
+                        max_w = self.display_max_width
+                        h, w = frame.shape[:2]
+                        if w > max_w:
+                            scale   = max_w / w
+                            mjpeg_f = cv2.resize(frame, (max_w, int(h * scale)), interpolation=cv2.INTER_LINEAR)
+                        else:
+                            mjpeg_f = frame
+                        ok, jpg = cv2.imencode('.jpg', mjpeg_f, [cv2.IMWRITE_JPEG_QUALITY, self.jpeg_quality])
+                        if ok:
+                            jpeg_bytes = jpg.tobytes()
+                            with self.jpeg_lock:
+                                self.current_jpeg_bytes = jpeg_bytes
+                            # Wake the MJPEG HTTP generator (event-driven, not polled)
+                            self.jpeg_ready_event.set()
+
+                # ── Recording (non-blocking async queue) ─────────────────────────
+                self.recorder.push_frame(frame)
+
                 self._heartbeat["dec"] = time.time()
 
             except Exception as e:
@@ -1735,6 +2307,13 @@ class PipelineCoordinator:
                     # `inf_frame` may be a zone-derived ROI crop of the camera
                     # frame; plausible-size judgements belong to the real frame.
                     geometry_shape=(orig_h, orig_w),
+                    # This stage's deadline. Extra tile passes may only use the
+                    # slack the mandatory full-frame pass leaves inside it —
+                    # without this the engine spends its own fixed 180ms
+                    # allowance no matter how fast we are trying to run, which
+                    # measured 141.6ms/cycle against a 66ms period (7.1 fps on
+                    # hardware good for 28.8). See AdaptiveTileEngine.infer.
+                    cycle_budget_ms=1000.0 / max(1.0, self.target_fps),
                 )
                 detections     = tile_res.detections
                 masks_polygons = tile_res.masks
@@ -1886,9 +2465,17 @@ class PipelineCoordinator:
             orig_h     = data["orig_h"]
 
             # ── Track: input and output in absolute pixel coords ─────────────
-            tracks_raw = self.tracker.update(
-                detections, frame=frame, frame_shape=(orig_h, orig_w), conf_thresh=data["conf_thresh"]
-            )
+            # data["motion"] is the AI stage's should_infer flag: True means the
+            # detector actually ran on this frame, so `detections` is evidence.
+            # False means it was skipped, and an empty `detections` then carries
+            # no information at all — feeding it to update() would assert the
+            # detector found nothing and blank the overlay (see predict_only).
+            if data["motion"]:
+                tracks_raw = self.tracker.update(
+                    detections, frame=frame, frame_shape=(orig_h, orig_w), conf_thresh=data["conf_thresh"]
+                )
+            else:
+                tracks_raw = self.tracker.predict_only()
             # Update shared counter so _ai_loop can decide whether to keep inferring
             self._n_active_tracks = len(self.tracker.tracks)
 
@@ -1940,24 +2527,40 @@ class PipelineCoordinator:
             # turns a no_helmet sitting on a tracked motorcycle into a deduped
             # helmet_violation / triple_riding alert. If the model file is
             # absent the detector returns nothing and logs why — it never fakes.
-            # Throttled: a helmet doesn't change frame-to-frame and running a
-            # second network every frame throttles tracking. Skipped between
-            # runs — violations still fire (analytics dedups per rider).
+            # ASYNCHRONOUS. The pass runs on app/ai/helmet_worker.py, not here.
+            # Inline it cost ~850ms on a frame with riders and pinned the whole
+            # tracking stage at ~1 FPS; worse, it made the stage's iteration
+            # interval swing ~30x, which is what made the tracker mint new ids
+            # for objects it was already tracking. This block now only submits a
+            # frame (non-blocking, drop-oldest) and overlays the most recently
+            # published result, so tracking cadence no longer depends on helmet
+            # cost at all. The inline throttle it replaces never worked: an
+            # iteration took longer than the interval, so the interval had
+            # always elapsed and the pass ran every frame regardless.
             t_helmet0 = time.perf_counter()
             _now_sec = time.time()
-            if self._wants_helmet() and (_now_sec - getattr(self, "_helmet_last", 0.0)) >= HELMET_INTERVAL_S:
-                self._helmet_last = _now_sec
-                helmet_cfg = (self.profile_features or {}).get("helmet_detection", {})
-                hd = helmet_detect.get_detector(float(helmet_cfg.get("confidence", 0.35)))
-                if hd is not None:
-                    moto_boxes = [d["bbox"] for d in detections if d.get("class") == "motorcycle"]
-                    person_boxes_h = [d["bbox"] for d in detections if d.get("class") == "person"]
-                    for hdet in hd.detect_on_riders(frame, moto_boxes, person_boxes_h):
-                        detections.append(hdet)
-                        masks.append([])   # stays index-parallel with detections
-                    if hd.last_error:
-                        self._stage_errors["helmet"] = hd.last_error
-                        hd.last_error = None
+            if self._wants_helmet():
+                hworker = getattr(self, "_helmet_worker", None)
+                if hworker is None:
+                    hworker = helmet_worker.HelmetWorker(self.camera_id)
+                    hworker.start()
+                    self._helmet_worker = hworker
+
+                if (_now_sec - getattr(self, "_helmet_last", 0.0)) >= HELMET_INTERVAL_S:
+                    self._helmet_last = _now_sec
+                    helmet_cfg = (self.profile_features or {}).get("helmet_detection", {})
+                    hworker.submit(
+                        frame,
+                        [d["bbox"] for d in detections if d.get("class") == "motorcycle"],
+                        [d["bbox"] for d in detections if d.get("class") == "person"],
+                        float(helmet_cfg.get("confidence", 0.35)),
+                    )
+                for hdet in hworker.latest():
+                    detections.append(hdet)
+                    masks.append([])   # stays index-parallel with detections
+                if hworker.last_error:
+                    self._stage_errors["helmet"] = hworker.last_error
+                    hworker.last_error = None
             t_helmet = (time.perf_counter() - t_helmet0) * 1000
 
             # ── ANPR pass: plate detector (+ CRNN OCR) on vehicle crops ─────
@@ -2383,7 +2986,13 @@ class PipelineCoordinator:
                 "preprocess_latency": round(data["t_pre"],    1),
                 "inference_latency":  round(data["t_inf"],    1),
                 "face_latency":       round(data.get("t_face", 0.0), 1),
+                # Also a SUBMIT cost now (frame copy + overlaying published
+                # boxes); `helmet` below reports the worker's own pass timing,
+                # so a helmet net that has gone slow or died stays visible
+                # instead of being hidden by the fact that it no longer blocks.
                 "helmet_latency":     round(data.get("t_helmet", 0.0), 1),
+                "helmet":             (self._helmet_stats()
+                                       if getattr(self, "_helmet_worker", None) else None),
                 # With the async worker this is the SUBMIT cost, i.e. the frame
                 # copy — not the cost of detection+OCR, which no longer happens
                 # on this thread. `anpr` below reports the worker's own timing.
@@ -2423,11 +3032,38 @@ class PipelineCoordinator:
                 "alert_counts": data.get("alert_counts", {}),
                 "stage_errors": dict(self._stage_errors),
                 "queue_depth": 1 if self._grabbed_slot._ready.is_set() else 0,
+                # Per-boundary frame drops. Latest-wins slots discard by design,
+                # so a non-zero count is not a fault — but WHICH boundary drops
+                # is the single most diagnostic number in this payload: drops at
+                # "ai" mean inference is the constraint, drops at "dec" mean the
+                # encoder is, and drops nowhere with low fps means the camera
+                # itself is slow. Previously none of this was observable.
+                "dropped_frames": {
+                    "grab": self._grabbed_slot.dropped,
+                    "dec":  self._decoded_slot.dropped,
+                    "ai":   self._ai_slot.dropped,
+                    "trk":  self._tracking_slot.dropped,
+                    "tel":  self._telemetry_out_slot.dropped,
+                },
+                "dropped_total": (self._grabbed_slot.dropped + self._decoded_slot.dropped
+                                  + self._ai_slot.dropped + self._tracking_slot.dropped
+                                  + self._telemetry_out_slot.dropped),
+                # Named for the operator overlay rather than "debug_*", which
+                # reads as something safe to strip from a release build.
+                "tracker_count": len(self.tracker.tracks),
+                "detection_count": len(data["client_dets"]),
                 "debug_tracks": len(self.tracker.tracks),
                 "debug_track_history": len(self.analytics.track_history),
                 "debug_zone_active": sum(len(v) for v in self.analytics.zone_active_tracks.values()),
                 "debug_recorder_qsize": self.recorder.queue.qsize(),
                 "cap_consecutive_failures": self._cap_consecutive_failures,
+                # Carried on every payload, not just the pre-first-frame stub, so
+                # a source that dies mid-session (cable pulled, stream expired)
+                # is as visible as one that never started. Frames stop, this
+                # payload stops updating, and whatever the client last received
+                # still says what went wrong.
+                "health_status": self._health_status,
+                "source_error": self.source_error_text(),
             }
 
             self._telemetry_out_slot.put(self.latest_telemetry)

@@ -95,7 +95,7 @@ function ProfileTab() {
     <div className="space-y-6">
       <div className="card p-5 space-y-4">
         <h3 className="text-base font-semibold text-ink-1">Profile Details</h3>
-        <div className="grid grid-cols-2 gap-4 text-sm">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
           <Field label="Full Name">
             <input className="input" value={profile?.full_name ?? ""} disabled />
           </Field>
@@ -103,7 +103,7 @@ function ProfileTab() {
             <input className="input" value={profile?.email ?? ""} disabled />
           </Field>
         </div>
-        <div className="grid grid-cols-2 gap-4 text-sm">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
           <Field label="User Code">
             <span className="keychip">{profile?.user_code ?? "—"}</span>
           </Field>
@@ -194,7 +194,7 @@ function OrgTab({ settings, onSave }: { settings: OrgSettings; onSave: (p: Parti
       <Field label="Organization name">
         <input className="input" value={name} onChange={(e) => setName(e.target.value)} />
       </Field>
-      <div className="grid grid-cols-2 gap-3 text-sm">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
         <Field label="Organization ID"><span className="keychip">{org?.org_code}</span></Field>
         <Field label="Plan"><Badge tone="accent">{org?.plan}</Badge></Field>
       </div>
@@ -260,7 +260,7 @@ function BrandingTab({ settings, onSave }: { settings: OrgSettings; onSave: (p: 
               ? <img src={logoUrl} alt="Organization logo" className="h-full w-full object-contain" />
               : <span className="text-xs text-ink-3">none</span>}
           </div>
-          <label className="btn-ghost cursor-pointer text-xs">
+          <label className="btn-ghost btn-sm cursor-pointer">
             Upload logo
             <input type="file" accept="image/png,image/svg+xml,image/jpeg" className="hidden"
                    onChange={(e) => e.target.files?.[0] && uploadLogo(e.target.files[0])} />
@@ -519,8 +519,8 @@ function AiTab({ canConfigure }: { canConfigure: boolean }) {
   return (
     <div className="space-y-6">
       <div className="border-b border-line pb-4">
-        <h3 className="text-base font-semibold text-zinc-100">AI Profile</h3>
-        <p className="text-xs text-zinc-500 mt-0.5">Select a business profile. The system automatically configures detection models, classes, and runtimes without exposing filenames or libraries.</p>
+        <h3 className="text-base font-semibold text-ink-1">AI Profile</h3>
+        <p className="text-xs text-ink-3 mt-0.5">Select a business profile. The system automatically configures detection models, classes, and runtimes without exposing filenames or libraries.</p>
       </div>
 
       {/* Profile Selector */}
@@ -534,12 +534,12 @@ function AiTab({ canConfigure }: { canConfigure: boolean }) {
               onClick={() => setActiveProfile(p.id)}
               className={`text-left p-4 rounded-lg border transition ${
                 selected
-                  ? "border-accent bg-accent/5 ring-1 ring-accent text-zinc-200"
-                  : "border-line bg-surface-1 text-zinc-400 hover:border-zinc-700 hover:text-zinc-300"
+                  ? "border-accent bg-accent/5 ring-1 ring-accent text-ink-1"
+                  : "border-line bg-surface-1 text-ink-2 hover:border-accent hover:text-ink-1"
               }`}
             >
               <div className="font-semibold text-sm capitalize">{p.label}</div>
-              <div className="text-[11px] mt-1 text-zinc-500 leading-normal">{p.desc}</div>
+              <div className="text-[11px] mt-1 text-ink-3 leading-normal">{p.desc}</div>
             </button>
           );
         })}
@@ -548,19 +548,19 @@ function AiTab({ canConfigure }: { canConfigure: boolean }) {
       {/* Traffic Profile Settings */}
       {activeProfile === "traffic" && (
         <div className="space-y-4 rounded-lg border border-line bg-surface-1/50 p-4">
-          <h4 className="text-xs font-semibold text-zinc-300 uppercase tracking-wider">Traffic Configuration</h4>
+          <h4 className="text-xs font-semibold text-ink-1 uppercase tracking-wider">Traffic Configuration</h4>
           
           <div className="space-y-2">
-            <label className="text-xs font-medium text-zinc-400">Detection Types</label>
+            <label className="text-xs font-medium text-ink-2">Detection Types</label>
             <div className="grid grid-cols-2 gap-2">
               {Object.keys(trafficDetections).map((k) => (
-                <label key={k} className="flex items-center gap-2 text-xs text-zinc-300 cursor-pointer">
+                <label key={k} className="flex items-center gap-2 text-xs text-ink-1 cursor-pointer">
                   <input
                     type="checkbox"
                     disabled={!canConfigure}
                     checked={(trafficDetections as any)[k]}
                     onChange={(e) => setTrafficDetections({ ...trafficDetections, [k]: e.target.checked })}
-                    className="rounded border-zinc-700 bg-surface-2 text-accent focus:ring-accent accent-accent"
+                    className="rounded border-line bg-surface-2 text-accent focus:ring-accent accent-accent"
                   />
                   <span className="capitalize">{k.replace(/_/g, " ")}</span>
                 </label>
@@ -569,16 +569,16 @@ function AiTab({ canConfigure }: { canConfigure: boolean }) {
           </div>
 
           <div className="space-y-2">
-            <label className="text-xs font-medium text-zinc-400">Tracked Objects</label>
+            <label className="text-xs font-medium text-ink-2">Tracked Objects</label>
             <div className="grid grid-cols-3 gap-2">
               {Object.keys(trafficObjects).map((k) => (
-                <label key={k} className="flex items-center gap-2 text-xs text-zinc-300 cursor-pointer">
+                <label key={k} className="flex items-center gap-2 text-xs text-ink-1 cursor-pointer">
                   <input
                     type="checkbox"
                     disabled={!canConfigure}
                     checked={(trafficObjects as any)[k]}
                     onChange={(e) => setTrafficObjects({ ...trafficObjects, [k]: e.target.checked })}
-                    className="rounded border-zinc-700 bg-surface-2 text-accent focus:ring-accent accent-accent"
+                    className="rounded border-line bg-surface-2 text-accent focus:ring-accent accent-accent"
                   />
                   <span className="capitalize">{k.replace(/_/g, " ")}</span>
                 </label>
@@ -588,7 +588,7 @@ function AiTab({ canConfigure }: { canConfigure: boolean }) {
 
           <div className="grid grid-cols-2 gap-4 pt-2">
             <div className="space-y-1.5">
-              <label className="text-xs font-medium text-zinc-400">Detection Sensitivity</label>
+              <label className="text-xs font-medium text-ink-2">Detection Sensitivity</label>
               <div className="flex gap-1 bg-surface-2 p-0.5 rounded-md border border-line">
                 {SENSITIVITIES.map((s) => (
                   <button
@@ -597,7 +597,7 @@ function AiTab({ canConfigure }: { canConfigure: boolean }) {
                     disabled={!canConfigure}
                     onClick={() => setTrafficDetSensitivity(s)}
                     className={`flex-1 py-1 text-center text-[10px] font-semibold uppercase rounded transition ${
-                      trafficDetSensitivity === s ? "bg-accent text-white" : "text-zinc-500 hover:text-zinc-300"
+                      trafficDetSensitivity === s ? "bg-accent text-white" : "text-ink-3 hover:text-ink-1"
                     }`}
                   >
                     {s}
@@ -607,7 +607,7 @@ function AiTab({ canConfigure }: { canConfigure: boolean }) {
             </div>
 
             <div className="space-y-1.5">
-              <label className="text-xs font-medium text-zinc-400">Alert Sensitivity</label>
+              <label className="text-xs font-medium text-ink-2">Alert Sensitivity</label>
               <div className="flex gap-1 bg-surface-2 p-0.5 rounded-md border border-line">
                 {SENSITIVITIES.map((s) => (
                   <button
@@ -616,7 +616,7 @@ function AiTab({ canConfigure }: { canConfigure: boolean }) {
                     disabled={!canConfigure}
                     onClick={() => setTrafficAlertSensitivity(s)}
                     className={`flex-1 py-1 text-center text-[10px] font-semibold uppercase rounded transition ${
-                      trafficAlertSensitivity === s ? "bg-accent text-white" : "text-zinc-500 hover:text-zinc-300"
+                      trafficAlertSensitivity === s ? "bg-accent text-white" : "text-ink-3 hover:text-ink-1"
                     }`}
                   >
                     {s}
@@ -631,19 +631,19 @@ function AiTab({ canConfigure }: { canConfigure: boolean }) {
       {/* Security Profile Settings */}
       {activeProfile === "security" && (
         <div className="space-y-4 rounded-lg border border-line bg-surface-1/50 p-4">
-          <h4 className="text-xs font-semibold text-zinc-300 uppercase tracking-wider">Security Configuration</h4>
+          <h4 className="text-xs font-semibold text-ink-1 uppercase tracking-wider">Security Configuration</h4>
           
           <div className="space-y-2">
-            <label className="text-xs font-medium text-zinc-400">Detection Types</label>
+            <label className="text-xs font-medium text-ink-2">Detection Types</label>
             <div className="grid grid-cols-2 gap-2">
               {Object.keys(securityDetections).map((k) => (
-                <label key={k} className="flex items-center gap-2 text-xs text-zinc-300 cursor-pointer">
+                <label key={k} className="flex items-center gap-2 text-xs text-ink-1 cursor-pointer">
                   <input
                     type="checkbox"
                     disabled={!canConfigure}
                     checked={(securityDetections as any)[k]}
                     onChange={(e) => setSecurityDetections({ ...securityDetections, [k]: e.target.checked })}
-                    className="rounded border-zinc-700 bg-surface-2 text-accent focus:ring-accent accent-accent"
+                    className="rounded border-line bg-surface-2 text-accent focus:ring-accent accent-accent"
                   />
                   <span className="capitalize">{k.replace(/_/g, " ")}</span>
                 </label>
@@ -652,16 +652,16 @@ function AiTab({ canConfigure }: { canConfigure: boolean }) {
           </div>
 
           <div className="space-y-2">
-            <label className="text-xs font-medium text-zinc-400">Tracked Objects</label>
+            <label className="text-xs font-medium text-ink-2">Tracked Objects</label>
             <div className="grid grid-cols-3 gap-2">
               {Object.keys(securityObjects).map((k) => (
-                <label key={k} className="flex items-center gap-2 text-xs text-zinc-300 cursor-pointer">
+                <label key={k} className="flex items-center gap-2 text-xs text-ink-1 cursor-pointer">
                   <input
                     type="checkbox"
                     disabled={!canConfigure}
                     checked={(securityObjects as any)[k]}
                     onChange={(e) => setSecurityObjects({ ...securityObjects, [k]: e.target.checked })}
-                    className="rounded border-zinc-700 bg-surface-2 text-accent focus:ring-accent accent-accent"
+                    className="rounded border-line bg-surface-2 text-accent focus:ring-accent accent-accent"
                   />
                   <span className="capitalize">{k.replace(/_/g, " ")}</span>
                 </label>
@@ -670,7 +670,7 @@ function AiTab({ canConfigure }: { canConfigure: boolean }) {
           </div>
 
           <div className="space-y-1.5 pt-2">
-            <label className="text-xs font-medium text-zinc-400">Profile Sensitivity</label>
+            <label className="text-xs font-medium text-ink-2">Profile Sensitivity</label>
             <div className="flex gap-1 bg-surface-2 p-0.5 rounded-md border border-line max-w-xs">
               {SENSITIVITIES.map((s) => (
                 <button
@@ -679,7 +679,7 @@ function AiTab({ canConfigure }: { canConfigure: boolean }) {
                   disabled={!canConfigure}
                   onClick={() => setSecuritySensitivity(s)}
                   className={`flex-1 py-1 text-center text-[10px] font-semibold uppercase rounded transition ${
-                    securitySensitivity === s ? "bg-accent text-white" : "text-zinc-500 hover:text-zinc-300"
+                    securitySensitivity === s ? "bg-accent text-white" : "text-ink-3 hover:text-ink-1"
                   }`}
                 >
                   {s}
@@ -693,19 +693,19 @@ function AiTab({ canConfigure }: { canConfigure: boolean }) {
       {/* Factory Profile Settings */}
       {activeProfile === "factory" && (
         <div className="space-y-4 rounded-lg border border-line bg-surface-1/50 p-4">
-          <h4 className="text-xs font-semibold text-zinc-300 uppercase tracking-wider">Factory Configuration</h4>
+          <h4 className="text-xs font-semibold text-ink-1 uppercase tracking-wider">Factory Configuration</h4>
           
           <div className="space-y-2">
-            <label className="text-xs font-medium text-zinc-400">Safety & Tracking Rules</label>
+            <label className="text-xs font-medium text-ink-2">Safety & Tracking Rules</label>
             <div className="grid grid-cols-2 gap-2">
               {Object.keys(factoryDetections).map((k) => (
-                <label key={k} className="flex items-center gap-2 text-xs text-zinc-300 cursor-pointer">
+                <label key={k} className="flex items-center gap-2 text-xs text-ink-1 cursor-pointer">
                   <input
                     type="checkbox"
                     disabled={!canConfigure}
                     checked={(factoryDetections as any)[k]}
                     onChange={(e) => setFactoryDetections({ ...factoryDetections, [k]: e.target.checked })}
-                    className="rounded border-zinc-700 bg-surface-2 text-accent focus:ring-accent accent-accent"
+                    className="rounded border-line bg-surface-2 text-accent focus:ring-accent accent-accent"
                   />
                   <span className="capitalize">{k.replace(/_/g, " ")}</span>
                 </label>
@@ -714,7 +714,7 @@ function AiTab({ canConfigure }: { canConfigure: boolean }) {
           </div>
 
           <div className="space-y-1.5 pt-2">
-            <label className="text-xs font-medium text-zinc-400">Profile Sensitivity</label>
+            <label className="text-xs font-medium text-ink-2">Profile Sensitivity</label>
             <div className="flex gap-1 bg-surface-2 p-0.5 rounded-md border border-line max-w-xs">
               {SENSITIVITIES.map((s) => (
                 <button
@@ -723,7 +723,7 @@ function AiTab({ canConfigure }: { canConfigure: boolean }) {
                   disabled={!canConfigure}
                   onClick={() => setFactorySensitivity(s)}
                   className={`flex-1 py-1 text-center text-[10px] font-semibold uppercase rounded transition ${
-                    factorySensitivity === s ? "bg-accent text-white" : "text-zinc-500 hover:text-zinc-300"
+                    factorySensitivity === s ? "bg-accent text-white" : "text-ink-3 hover:text-ink-1"
                   }`}
                 >
                   {s}
@@ -737,10 +737,10 @@ function AiTab({ canConfigure }: { canConfigure: boolean }) {
       {/* Custom Profile Settings */}
       {activeProfile === "custom" && (
         <div className="space-y-4 rounded-lg border border-line bg-surface-1/50 p-4">
-          <h4 className="text-xs font-semibold text-zinc-300 uppercase tracking-wider">Custom Configuration</h4>
+          <h4 className="text-xs font-semibold text-ink-1 uppercase tracking-wider">Custom Configuration</h4>
           
           <div className="space-y-2">
-            <label className="text-xs font-medium text-zinc-400">Detection Types</label>
+            <label className="text-xs font-medium text-ink-2">Detection Types</label>
             <div className="flex flex-wrap gap-1.5">
               {["general", "intrusion", "safety", "fire", "smoke", "pose"].map((c) => {
                 const on = customDetections.includes(c);
@@ -757,7 +757,7 @@ function AiTab({ canConfigure }: { canConfigure: boolean }) {
                     className={`rounded-full border px-2.5 py-1 text-xs transition ${
                       on
                         ? "border-accent bg-accent/15 text-accent"
-                        : "border-line text-zinc-400 hover:text-zinc-200"
+                        : "border-line text-ink-2 hover:text-ink-1"
                     }`}
                   >
                     {c}
@@ -768,7 +768,7 @@ function AiTab({ canConfigure }: { canConfigure: boolean }) {
           </div>
 
           <div className="space-y-2">
-            <label className="text-xs font-medium text-zinc-400">Detection Classes</label>
+            <label className="text-xs font-medium text-ink-2">Detection Classes</label>
             <div className="flex flex-wrap gap-1.5">
               {["person", "car", "truck", "bus", "motorcycle", "bicycle", "backpack", "handbag", "suitcase", "helmet", "vest"].map((c) => {
                 const on = customObjects.includes(c);
@@ -785,7 +785,7 @@ function AiTab({ canConfigure }: { canConfigure: boolean }) {
                     className={`rounded-full border px-2.5 py-1 text-xs transition ${
                       on
                         ? "border-accent bg-accent/15 text-accent"
-                        : "border-line text-zinc-400 hover:text-zinc-200"
+                        : "border-line text-ink-2 hover:text-ink-1"
                     }`}
                   >
                     {c}
@@ -796,7 +796,7 @@ function AiTab({ canConfigure }: { canConfigure: boolean }) {
           </div>
 
           <div className="space-y-1.5 pt-2">
-            <label className="text-xs font-medium text-zinc-400">Sensitivity</label>
+            <label className="text-xs font-medium text-ink-2">Sensitivity</label>
             <div className="flex gap-1 bg-surface-2 p-0.5 rounded-md border border-line max-w-xs">
               {SENSITIVITIES.map((s) => (
                 <button
@@ -805,7 +805,7 @@ function AiTab({ canConfigure }: { canConfigure: boolean }) {
                   disabled={!canConfigure}
                   onClick={() => setCustomSensitivity(s)}
                   className={`flex-1 py-1 text-center text-[10px] font-semibold uppercase rounded transition ${
-                    customSensitivity === s ? "bg-accent text-white" : "text-zinc-500 hover:text-zinc-300"
+                    customSensitivity === s ? "bg-accent text-white" : "text-ink-3 hover:text-ink-1"
                   }`}
                 >
                   {s}
@@ -847,7 +847,7 @@ function SmtpTab({ settings, onSave }: { settings: OrgSettings; onSave: (p: Part
 
   return (
     <div className="space-y-4">
-      <div className="grid grid-cols-3 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
         <div className="col-span-2">
           <Field label="SMTP host">
             <input className="input" placeholder="smtp.example.com" value={form.host}
@@ -892,7 +892,7 @@ function TelegramTab() {
         <p className="text-sm text-ink-3 leading-relaxed mb-4">
           CamAI uses a simple, secure one-time linking code. You do not need to create your own bot or copy bot tokens.
         </p>
-        <div className="rounded-lg bg-[#5b8cff]/10 border border-[#5b8cff]/20 p-4 text-sm text-[#5b8cff] leading-relaxed">
+        <div className="rounded-control border border-accent/20 bg-accent/10 p-4 text-sm leading-relaxed text-accent">
           <span className="font-semibold block mb-1">To link your account:</span>
           <ol className="list-decimal list-inside space-y-1 text-ink-2">
             <li>Open the <strong>CamAI Desktop Application</strong>.</li>
@@ -931,7 +931,7 @@ function RetentionTab({ settings, onSave }: { settings: OrgSettings; onSave: (p:
     <div className="space-y-4">
       {fields.map((f) => (
         <Field key={f.key} label={`${f.label} — ${form[f.key]} days`} hint={f.hint}>
-          <input type="range" min={7} max={730} step={1} className="w-full accent-[#5b8cff]"
+          <input type="range" min={7} max={730} step={1} className="w-full accent-accent"
                  value={form[f.key]}
                  onChange={(e) => setForm({ ...form, [f.key]: Number(e.target.value) })} />
         </Field>

@@ -739,7 +739,7 @@ export default function RolesPage() {
                       <p className="text-xs text-ink-3">Changes to role permissions apply to these users in real-time.</p>
                     </div>
                     {canManage && (
-                      <button className="btn-primary text-xs py-1.5" onClick={() => setAssignUserOpen(true)}>
+                      <button className="btn-primary btn-sm" onClick={() => setAssignUserOpen(true)}>
                         <UserPlus size={14} /> Assign User to Role
                       </button>
                     )}
@@ -768,7 +768,7 @@ export default function RolesPage() {
 
                           {canManage && (
                             <button
-                              className="btn-ghost text-xs text-rose-500 py-1 px-2.5 gap-1"
+                              className="btn-ghost btn-sm text-danger"
                               onClick={() => handleUnassignUser(u.id)}
                             >
                               <UserMinus size={13} />

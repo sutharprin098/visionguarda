@@ -179,7 +179,11 @@ export default function VideoDetections({
         <span className="h-2 w-2 animate-ping rounded-full bg-emerald-400" />
         <span className="ap-pixel text-[8px] text-white sm:text-[9px]">{hudLabel}</span>
         <span className="text-white/25">/</span>
-        <span className="ap-pixel text-[8px] text-[var(--ap-accent)] sm:text-[9px]">CAMAI ENGINE</span>
+        {/* This HUD sits on bg-black/45 over video in BOTH themes, so it needs a
+            fixed light ink — its siblings are text-white. The themed
+            --ap-accent is deliberately dark on the light theme and dropped to
+            3.6:1 here. */}
+        <span className="ap-pixel text-[8px] text-[#9FC4D6] sm:text-[9px]">CAMAI ENGINE</span>
       </div>
       <div className="absolute bottom-3 right-3 ap-pixel text-[7px] text-white/40 sm:text-[8px] z-20">{caption}</div>
     </div>

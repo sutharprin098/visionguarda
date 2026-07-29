@@ -68,7 +68,7 @@ function FeatureVideoSwitcher() {
 
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-[var(--ap-border)] pb-3.5 sm:pb-4 mb-4">
         <div className="flex items-center gap-2.5 sm:gap-3">
-          <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-[var(--ap-dark)] text-[#EAF3F7]">
+          <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-[var(--ap-dark)] text-[var(--ap-on-dark)]">
             <Video size={16} />
           </span>
           <div>
@@ -87,7 +87,7 @@ function FeatureVideoSwitcher() {
               }}
               className={`ap-pixel rounded-lg px-2.5 py-2 sm:py-1.5 text-[8.5px] sm:text-[9px] uppercase transition-all text-center w-full sm:w-auto ${
                 activeIdx === idx
-                  ? "bg-[var(--ap-dark)] text-[#EAF3F7] shadow-sm scale-[1.02] sm:scale-105 font-bold"
+                  ? "bg-[var(--ap-dark)] text-[var(--ap-on-dark)] shadow-sm scale-[1.02] sm:scale-105 font-bold"
                   : "bg-[var(--ap-surface-2)] text-[var(--ap-ink-2)] hover:bg-[var(--ap-border)] active:scale-95"
               }`}
             >

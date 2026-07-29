@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useState, ReactNode } from "react";
 import { Session } from "@supabase/supabase-js";
 import { supabase } from "../lib/supabase";
+import type { Permission } from "../lib/permissions";
 import { Organization, Profile } from "../lib/types";
 
 interface AuthState {
@@ -9,7 +10,10 @@ interface AuthState {
   org: Organization | null;
   permissions: string[];
   loading: boolean;
-  can: (perm: string) => boolean;
+  /** Takes a `Permission`, not a bare string. See lib/permissions.ts — asking
+   *  for a key that isn't in the catalog can only ever return false, so letting
+   *  callers invent keys was the whole bug. */
+  can: (perm: Permission) => boolean;
   refresh: () => Promise<void>;
   signOut: () => Promise<void>;
 }

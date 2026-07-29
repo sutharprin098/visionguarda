@@ -276,7 +276,7 @@ function GenerateForm({ onDone }: { onDone: (key?: string) => void }) {
           {users?.map((u: any) => <option key={u.id} value={u.id}>{u.full_name} — {u.email}</option>)}
         </select>
       </Field>
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <Field label="Type">
           <select className="input" value={form.license_type} onChange={(e) => setForm({ ...form, license_type: e.target.value })}>
             {LICENSE_TYPES.map((t) => (
@@ -380,7 +380,7 @@ function EditForm({ license, onDone }: { license: LicenseRow; onDone: () => void
 
   return (
     <div className="space-y-3">
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <Field label="Type">
           <select className="input" value={licenseType} onChange={(e) => setLicenseType(e.target.value as typeof licenseType)}>
             {LICENSE_TYPES.map((t) => <option key={t} value={t} className="capitalize">{t}</option>)}

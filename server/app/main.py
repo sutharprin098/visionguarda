@@ -1,8 +1,10 @@
 import asyncio
+import base64
 import hmac
 import io
 import time
 import uuid
+import numpy as np
 from dataclasses import asdict
 from pathlib import PurePosixPath
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Depends, Header, UploadFile, File
@@ -280,6 +282,35 @@ def _ws_origin_allowed(websocket: WebSocket) -> bool:
     return origin in CORS_ORIGINS
 
 
+_decode_fail_count = 0
+
+
+def _decode_pushed_frame(frame_base64: str):
+    """base64 data-URL -> BGR ndarray. Runs in a worker thread (see the
+    screen_frame handler), never on the event loop. Returns None on anything
+    malformed rather than raising into the socket's read loop."""
+    global _decode_fail_count
+    try:
+        if "," in frame_base64:
+            frame_base64 = frame_base64.split(",")[1]
+        img_data = base64.b64decode(frame_base64)
+        nparr = np.frombuffer(img_data, np.uint8)
+        return cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+    except Exception as e:
+        # Say so, at least the first few times. Returning a bare None here is
+        # indistinguishable from "the client sent nothing", and the caller's
+        # own handler swallows exceptions too — so a decode that fails for a
+        # structural reason (a missing import, a changed payload shape) would
+        # present as "No frames are being pushed to this virtual camera" with
+        # nothing anywhere saying why. That exact silence cost a debugging
+        # cycle on this function's first version.
+        _decode_fail_count += 1
+        if _decode_fail_count <= 5:
+            print(f"[WS] screen_frame decode failed (#{_decode_fail_count}): "
+                  f"{type(e).__name__}: {e}", flush=True)
+        return None
+
+
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     if not _ws_origin_allowed(websocket):
@@ -308,6 +339,30 @@ async def websocket_endpoint(websocket: WebSocket):
                     cam_id = payload.get("camera_id")
                     if cam_id:
                         ws_manager.add_subscription(websocket, cam_id)
+                        # Answer the subscription immediately with whatever state
+                        # this camera is in, instead of leaving the client blank
+                        # until the camera happens to produce its next payload.
+                        #
+                        # For a HEALTHY camera that wait is one frame. For a
+                        # BROKEN one it is a full reconnect cycle — and that
+                        # backoff climbs to 30s, so a tile could sit empty and
+                        # unexplained for half a minute after the operator opened
+                        # it, which is precisely the "it just isn't detecting"
+                        # experience this release is fixing. The camera already
+                        # knows the answer; send it on subscribe.
+                        thread = manager.camera_threads.get(cam_id)
+                        if thread is not None:
+                            # Only refresh when the source is NOT healthy. On a
+                            # working camera latest_telemetry is a real analytic
+                            # result seconds old at most; overwriting it with a
+                            # zeroed status frame would blank the overlay for one
+                            # tick every time a viewer opened.
+                            if getattr(thread, "_health_status", None) != "online":
+                                thread.refresh_status_fields()
+                            await websocket.send_json({
+                                "type": "telemetry",
+                                "data": {cam_id: thread.latest_telemetry},
+                            })
                 elif msg_type == "unsubscribe":
                     cam_id = payload.get("camera_id")
                     if cam_id:
@@ -318,14 +373,23 @@ async def websocket_endpoint(websocket: WebSocket):
                     cam_id = payload.get("camera_id")
                     frame_base64 = payload.get("frame")
                     if cam_id and frame_base64:
-                        if "," in frame_base64:
-                            frame_base64 = frame_base64.split(",")[1]
-                        img_data = base64.b64decode(frame_base64)
-                        nparr = np.frombuffer(img_data, np.uint8)
-                        frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-                        if frame is not None:
-                            thread = manager.camera_threads.get(cam_id)
-                            if thread and hasattr(thread, "push_frame"):
+                        thread = manager.camera_threads.get(cam_id)
+                        if thread is not None and hasattr(thread, "push_frame"):
+                            # Decode OFF the event loop.
+                            #
+                            # b64decode + cv2.imdecode of a 960x540 JPEG is
+                            # single-digit-to-tens of milliseconds of pure CPU,
+                            # and running it inline here spent that time on the
+                            # ONE asyncio loop that also serves every telemetry
+                            # push, every MJPEG stream and every REST call. With
+                            # a virtual camera pushing at 10fps that is a
+                            # recurring stall on the shared loop — felt by every
+                            # other camera in the app, not just this one, and
+                            # it scales with the number of virtual cameras.
+                            # to_thread moves it to the default executor so the
+                            # loop only does I/O, which is all it should do.
+                            frame = await asyncio.to_thread(_decode_pushed_frame, frame_base64)
+                            if frame is not None:
                                 thread.push_frame(frame)
             except Exception:
                 pass
@@ -398,8 +462,15 @@ def get_system_status():
             "latency": thread.latest_telemetry.get("latency", 0),
             "counters": thread.latest_telemetry.get("counters", {"in": 0, "out": 0}),
             "health_status": thread._health_status,
+            # Why it is unhealthy, when the capture layer actually knows. Set
+            # today for a stream URL whose extraction failed ("private video",
+            # "this live event has ended") — the difference between an
+            # operator seeing "offline" and knowing what to fix.
+            "health_reason": getattr(thread, "_resolve_error", None),
             "resolution": thread._last_resolution,
             "recording": thread.recorder.continuous_writer is not None,
+            "source": getattr(thread, "source", None),
+            "source_type": getattr(thread, "source_type", None),
         }
         
     # Recommendation logic:
@@ -794,19 +865,94 @@ async def get_mjpeg_stream(camera_id: str):
     if not thread:
         raise HTTPException(status_code=404, detail="Camera thread not running or inactive")
 
+    # A camera with no video must NOT be served an endless empty stream.
+    #
+    # This generator used to loop `while thread.running` forever, yielding
+    # nothing at all when the source produced no frames. The HTTP response
+    # therefore never completed, and an MJPEG <img> holds its connection for as
+    # long as the response is open — so every broken camera permanently consumed
+    # one of Chromium's SIX connections per host. Six dead cameras (a wrong RTSP
+    # address, an expired stream link, a virtual camera nobody is sharing to)
+    # and the renderer cannot open a seventh connection to 127.0.0.1:8000 AT
+    # ALL: the health poll, the alerts fetch, /api/status and every control
+    # write queue behind streams that will never send a byte. The engine is
+    # fine and answering, and the app reports it unreachable and shows no
+    # detections — on every camera, including the working ones.
+    #
+    # So the stream now ENDS when there is no video to send. The client's
+    # onError handler remounts after 1s, which is a short request that completes
+    # instead of a connection pinned open forever, and the tile shows the
+    # engine's stated reason (telemetry.source_error) rather than a blank frame.
+    NO_FRAME_GRACE_S = 10.0
+
+    # Module 2 sets this every time it writes a new JPEG. Waiting on it — off
+    # the event loop, in a worker thread — is what makes this generator
+    # event-driven instead of polled. The previous version slept 10ms and
+    # re-checked, i.e. every open stream woke the single shared event loop 100
+    # times a second forever, whether or not a frame had arrived; with the
+    # 6-connection-per-host cap that is up to 600 pointless wakeups/second
+    # competing with WebSocket telemetry delivery on the same loop. The event
+    # already existed and was documented in pipeline.py as the fix for exactly
+    # this; it was simply never wired up here.
+    jpeg_event = getattr(thread, "jpeg_ready_event", None)
+
+    async def _wait_for_frame(timeout: float) -> bool:
+        if jpeg_event is None:
+            await asyncio.sleep(0.01)
+            return True
+        # Event.wait() blocks a thread, so it goes to the default executor
+        # rather than stalling the loop. Returns False on timeout.
+        return await asyncio.to_thread(jpeg_event.wait, timeout)
+
     async def mjpeg_generator():
         last_jpeg = None
-        while thread.running:
-            jpeg_bytes = getattr(thread, "current_jpeg_bytes", None)
-            if jpeg_bytes is not None and jpeg_bytes is not last_jpeg:
-                last_jpeg = jpeg_bytes
-                yield (b'--frame\r\n'
-                       b'Content-Type: image/jpeg\r\n\r\n' + jpeg_bytes + b'\r\n')
-            await asyncio.sleep(0.03)
+        started = time.time()
+        last_frame_ts = None
+        # The preview encode is demand-driven: Module 2 does no JPEG work at
+        # all for a camera with no viewers. The try/finally is what makes that
+        # safe — a client that navigates away, a tile that unmounts, or a
+        # cancelled request must still release its count, or the camera would
+        # keep encoding forever for a viewer that no longer exists.
+        attach = getattr(thread, "mjpeg_viewer_attached", None)
+        detach = getattr(thread, "mjpeg_viewer_detached", None)
+        if attach:
+            attach()
+        try:
+            while thread.running:
+                jpeg_bytes = getattr(thread, "current_jpeg_bytes", None)
+                if jpeg_bytes is not None and jpeg_bytes is not last_jpeg:
+                    last_jpeg = jpeg_bytes
+                    last_frame_ts = time.time()
+                    # Cleared before the yield, so a frame produced while this one
+                    # is still being written to the socket leaves the event set and
+                    # the next wait returns immediately instead of missing it.
+                    if jpeg_event is not None:
+                        jpeg_event.clear()
+                    yield (b'--frame\r\n'
+                           b'Content-Type: image/jpeg\r\n\r\n' + jpeg_bytes + b'\r\n')
+                else:
+                    # Grace is measured from the last frame actually sent, so a
+                    # healthy camera that merely pauses between frames is never cut
+                    # off — only one that has genuinely stopped (or never started).
+                    idle_since = last_frame_ts if last_frame_ts is not None else started
+                    if time.time() - idle_since > NO_FRAME_GRACE_S:
+                        return
+                    # Bounded so the grace check above still runs on a dead camera
+                    # that will never set the event again.
+                    await _wait_for_frame(0.5)
+        finally:
+            if detach:
+                detach()
 
     return StreamingResponse(
         mjpeg_generator(),
-        media_type="multipart/x-mixed-replace; boundary=frame"
+        media_type="multipart/x-mixed-replace; boundary=frame",
+        headers={
+            "Access-Control-Allow-Origin": "*",
+            "Cache-Control": "no-cache, no-store, must-revalidate",
+            "Pragma": "no-cache",
+            "Expires": "0"
+        }
     )
 
 # Alerts

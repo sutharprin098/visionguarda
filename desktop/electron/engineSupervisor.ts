@@ -4,7 +4,7 @@
 // wherever the operator's engine installer puts it) — this module locates
 // that install, launches it on app start, restarts it if it crashes, and
 // exposes its logs/status to the renderer for the Engine Health panel.
-import { spawn, execFile, ChildProcess } from "node:child_process";
+import { spawn, execFile, execFileSync, ChildProcess } from "node:child_process";
 import { app, BrowserWindow } from "electron";
 import { randomBytes } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -48,6 +48,26 @@ const CRASH_LOOP_THRESHOLD = 3;
 // here: force CPU and try again before giving up. Set below the crash-loop
 // pause threshold so the CPU attempt always happens first.
 const GPU_FALLBACK_AFTER_CRASHES = 2;
+// Crashes that happen AFTER the engine has already reported healthy are counted
+// separately, over a much longer window, because neither guard above can see
+// them.
+//
+// Both of those guards assume a crash means "failed to start": consecutiveCrashes
+// is zeroed by confirmHealthyAndReset() the moment /health answers, and
+// crashTimestamps only remembers 60 seconds. A GPU-driver crash that reliably
+// kills the engine a few MINUTES into every run therefore reads as a first-ever
+// crash every single time — so it never reaches GPU_FALLBACK_AFTER_CRASHES, never
+// reaches CRASH_LOOP_THRESHOLD, and the app silently respawns the engine forever.
+// The operator sees detections appear, vanish, reappear, with the health panel
+// insisting everything is fine and nothing written anywhere saying otherwise.
+//
+// Native GPU-plugin faults are the realistic cause on this hardware (they kill
+// the process with no Python traceback, which is why the CPU escalation exists
+// at all), and nothing about them guarantees they land during startup. So:
+// whatever the cause, an engine that keeps dying after healthy runs gets
+// escalated to CPU and then surfaced, instead of cycling invisibly.
+const POST_HEALTHY_CRASH_WINDOW_MS = 15 * 60_000;
+const POST_HEALTHY_CRASH_THRESHOLD = 3;
 // Engine exit codes from run_engine.py (kept in sync with EXIT_* there).
 const ENGINE_EXIT_ANOTHER_ENGINE = 0; // healthy engine already owns the port
 const ENGINE_EXIT_PORT_CONFLICT = 3;  // port held by a foreign process
@@ -60,6 +80,14 @@ let crashTimestamps: number[] = [];
 // Consecutive crashes since the last clean run — drives the GPU->CPU fallback
 // escalation (reset to 0 once the engine reports healthy).
 let consecutiveCrashes = 0;
+// Crash times over POST_HEALTHY_CRASH_WINDOW_MS, counting ONLY runs that had
+// already reported healthy. Deliberately not cleared by confirmHealthyAndReset —
+// becoming healthy is what makes these crashes invisible to the other counters,
+// so it must not also erase the record of them.
+let postHealthyCrashes: number[] = [];
+// Whether the CURRENT child ever answered /health. Decides which bucket its
+// eventual exit belongs in.
+let currentRunWasHealthy = false;
 // Set true after repeated crashes so the next launch forces CPU inference.
 let forceCpu = false;
 let restartTimer: NodeJS.Timeout | null = null;
@@ -73,6 +101,26 @@ let manualStop = true; // flips false the first time startEngine() is called
 let logs: string[] = [];
 let getWin: () => BrowserWindow | null = () => null;
 
+// A liveness deadline for /health, NOT a latency target.
+//
+// This was 1000ms, which is a false-negative generator on exactly the machine
+// state this check exists to survive. The engine's /health is served by the
+// same event loop that serves telemetry and MJPEG, and under load it has been
+// measured at 1.5s rising past 8s — while answering 200 the whole time. A
+// one-second deadline therefore reports "the engine is gone" precisely when
+// the engine is busiest, which is when killing it does the most damage.
+//
+// The renderer's own health poll already settled on this number and on
+// requiring several consecutive misses (see Workspace.tsx, HEALTH_TIMEOUT_MS /
+// MISSES_BEFORE_OFFLINE). This is the same judgement applied to the process
+// that can actually restart the engine.
+const HEALTH_TIMEOUT_MS = 8000;
+
+// Consecutive failed probes before the adopted engine is presumed gone. One
+// miss is noise; three misses spread over ADOPTED_POLL_MS is a pattern.
+const ADOPTED_MISSES_BEFORE_TAKEOVER = 3;
+const ADOPTED_POLL_MS = 5000;
+
 function checkEngineRunning(): Promise<boolean> {
   return new Promise((resolve) => {
     const req = request(
@@ -81,7 +129,7 @@ function checkEngineRunning(): Promise<boolean> {
         port: 8000,
         path: "/health",
         method: "GET",
-        timeout: 1000,
+        timeout: HEALTH_TIMEOUT_MS,
       },
       (res) => {
         resolve(res.statusCode === 200);
@@ -147,13 +195,32 @@ function looksLikeEngineDir(dir: string): boolean {
 
 function resolveEngine(): ResolvedEngine | null {
   // 1. Highest priority: the bundled, frozen engine exe. This is the
-  //    production path — the installer ships server/dist/camai-engine as
-  //    resources/engine/, so no Python is ever required on the user's PC.
-  const frozenCandidates = app.isPackaged
-    ? [join(process.resourcesPath, "engine", "camai-engine.exe")]
-    : [];
-  for (const exe of frozenCandidates) {
-    if (existsSync(exe)) return { frozenExe: exe, engineDir: dirname(exe) };
+  //    production path — the installer ships server/dist/camai-engine or
+  //    camai-engine.zip as resources/engine/, so no Python is required.
+  if (app.isPackaged) {
+    const engineDir = join(process.resourcesPath, "engine");
+    const exe = join(engineDir, "camai-engine.exe");
+    const zip = join(engineDir, "camai-engine.zip");
+
+    if (existsSync(exe)) {
+      return { frozenExe: exe, engineDir };
+    } else if (existsSync(zip)) {
+      appendLog(`[Supervisor] Unpacking bundled AI engine archive...`);
+      try {
+        execFileSync("powershell.exe", [
+          "-NoProfile",
+          "-NonInteractive",
+          "-Command",
+          `Expand-Archive -Path ${JSON.stringify(zip)} -DestinationPath ${JSON.stringify(engineDir)} -Force`,
+        ]);
+        if (existsSync(exe)) {
+          appendLog("[Supervisor] Engine archive unpacked successfully.");
+          return { frozenExe: exe, engineDir };
+        }
+      } catch (err: any) {
+        appendLog(`[Supervisor] Failed to unpack engine archive: ${err?.message}`);
+      }
+    }
   }
 
   // 2. Explicit operator override (Engine Settings) — a Python interpreter.
@@ -174,12 +241,18 @@ function resolveEngine(): ResolvedEngine | null {
   } else {
     // Dev mode: repo-relative ../../server from desktop/dist-electron.
     const devDir = join(__dirname, "..", "..", "server");
+    const devExe = join(devDir, "dist", "camai-engine", "camai-engine.exe");
+    if (existsSync(devExe)) {
+      candidates.push({ frozenExe: devExe, engineDir: join(devDir, "dist", "camai-engine") });
+    }
+    candidates.push({ pythonPath: join(devDir, ".venv-build", "Scripts", "python.exe"), engineDir: devDir });
     candidates.push({ pythonPath: join(devDir, ".venv", "Scripts", "python.exe"), engineDir: devDir });
     candidates.push({ pythonPath: join(devDir, "venv", "Scripts", "python.exe"), engineDir: devDir });
     candidates.push({ pythonPath: "python", engineDir: devDir });
   }
 
   for (const c of candidates) {
+    if (c.frozenExe && existsSync(c.frozenExe)) return c;
     if (!looksLikeEngineDir(c.engineDir)) continue;
     if (c.pythonPath && (c.pythonPath === "python" || existsSync(c.pythonPath))) return c;
   }
@@ -242,18 +315,31 @@ function clearAdoptedMonitor(): void {
 // child so crash-recovery resumes. No-op once we own a child of our own.
 function startAdoptedMonitor(): void {
   clearAdoptedMonitor();
+  // Taking over means starting a SECOND engine against the same database while
+  // the first may still be alive and holding port 8000 — every camera thread
+  // runs twice, and every virtual camera loses the frames being pushed to the
+  // instance that gets displaced. Acting on a single missed probe made that a
+  // routine occurrence under load rather than a genuine recovery.
+  let misses = 0;
   adoptedMonitor = setInterval(async () => {
     if (child || manualStop) {
       clearAdoptedMonitor();
       return;
     }
     const stillUp = await checkEngineRunning();
-    if (!stillUp) {
-      appendLog("[Supervisor] Adopted engine on port 8000 is no longer responding — taking over with a supervised instance.");
-      clearAdoptedMonitor();
-      void launch();
+    if (stillUp) {
+      misses = 0;
+      return;
     }
-  }, 5000);
+    misses++;
+    appendLog(
+      `[Supervisor] Adopted engine did not answer /health (${misses}/${ADOPTED_MISSES_BEFORE_TAKEOVER}).`,
+    );
+    if (misses < ADOPTED_MISSES_BEFORE_TAKEOVER) return;
+    appendLog("[Supervisor] Adopted engine on port 8000 is no longer responding — taking over with a supervised instance.");
+    clearAdoptedMonitor();
+    void launch();
+  }, ADOPTED_POLL_MS);
 }
 
 async function launch(): Promise<void> {
@@ -314,7 +400,7 @@ async function launch(): Promise<void> {
   proc.stdout?.on("data", (d: Buffer) => appendLog(d.toString()));
   proc.stderr?.on("data", (d: Buffer) => appendLog(d.toString()));
 
-  proc.on("error", (err: Error) => {
+  (proc as any).on("error", (err: Error) => {
     appendLog(`[Supervisor] Failed to spawn engine: ${err.message}`);
     child = null;
     pid = null;
@@ -322,7 +408,7 @@ async function launch(): Promise<void> {
     if (!manualStop) scheduleRestart();
   });
 
-  proc.on("exit", (code: number | null, signal: string | null) => {
+  (proc as any).on("exit", (code: number | null, signal: string | null) => {
     appendLog(`[Supervisor] Engine process exited (code=${code}, signal=${signal})`);
     child = null;
     pid = null;
@@ -354,14 +440,48 @@ async function launch(): Promise<void> {
     crashTimestamps.push(Date.now());
     crashTimestamps = crashTimestamps.filter((t) => Date.now() - t < CRASH_LOOP_WINDOW_MS);
 
+    if (currentRunWasHealthy) {
+      postHealthyCrashes.push(Date.now());
+      postHealthyCrashes = postHealthyCrashes.filter(
+        (t) => Date.now() - t < POST_HEALTHY_CRASH_WINDOW_MS,
+      );
+      appendLog(
+        `[Supervisor] Engine died after running healthy (${postHealthyCrashes.length} such crash(es) in the last ` +
+          `${POST_HEALTHY_CRASH_WINDOW_MS / 60_000} minutes).`,
+      );
+    }
+    currentRunWasHealthy = false;
+
     // Escalate to CPU BEFORE giving up: if the engine has crashed repeatedly
     // while (implicitly) trying the GPU, force CPU on the next launch. This is
     // the only layer that can recover a *native* GPU-plugin crash.
-    if (!forceCpu && consecutiveCrashes >= GPU_FALLBACK_AFTER_CRASHES) {
+    const repeatedPostHealthy = postHealthyCrashes.length >= POST_HEALTHY_CRASH_THRESHOLD;
+    if (!forceCpu && (consecutiveCrashes >= GPU_FALLBACK_AFTER_CRASHES || repeatedPostHealthy)) {
       forceCpu = true;
-      appendLog(`[Supervisor] Engine crashed ${consecutiveCrashes}x — the GPU inference path may be failing. Forcing CPU inference on the next start.`);
+      const why = repeatedPostHealthy
+        ? `Engine died ${postHealthyCrashes.length}x after running healthy`
+        : `Engine crashed ${consecutiveCrashes}x`;
+      appendLog(`[Supervisor] ${why} — the GPU inference path may be failing. Forcing CPU inference on the next start.`);
       setState("restarting", "GPU inference may be failing on this machine — automatically retrying on CPU.");
+      // Start the post-healthy count over for the CPU attempt. These crashes are
+      // evidence about the GPU path, which we are now abandoning; carrying them
+      // forward would let a single unlucky CPU run trip the terminal state
+      // below immediately, and the whole point of escalating is to find out
+      // whether CPU actually behaves differently.
+      postHealthyCrashes = [];
       scheduleRestart();
+      return;
+    }
+
+    // Already on CPU and STILL dying after healthy runs: restarting forever
+    // teaches the operator nothing. Stop and say so, the same way a startup
+    // crash loop does.
+    if (forceCpu && repeatedPostHealthy) {
+      setState(
+        "crash_looping",
+        `Engine has died ${postHealthyCrashes.length} times shortly after starting, including on CPU` +
+          " — auto-restart paused. Check %APPDATA%/CamAI/engine-startup.log for the cause and restart manually.",
+      );
       return;
     }
 
@@ -398,6 +518,10 @@ function confirmHealthyAndReset(): void {
       }
       consecutiveCrashes = 0;
       crashTimestamps = [];
+      // Record that THIS run got as far as serving /health, so that if it dies
+      // later we can tell a "never started" crash from a "ran, then died" one.
+      // postHealthyCrashes is intentionally left alone here — see its declaration.
+      currentRunWasHealthy = true;
     }
   }, 3000);
 }
@@ -447,7 +571,7 @@ export function restartEngine(): void {
   if (child) {
     const c = child;
     manualStop = true; // suppress the in-flight exit handler's own restart logic
-    c.once("exit", () => {
+    (c as any).once("exit", () => {
       manualStop = false;
       launch();
     });

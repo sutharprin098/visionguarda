@@ -61,28 +61,28 @@ export default function TransparentPricing() {
   ];
 
   return (
-    <section id="pricing" className="py-24 relative overflow-hidden bg-white border-b border-slate-200">
+    <section id="pricing" className="py-24 relative overflow-hidden bg-[var(--ap-surface)] border-b border-[var(--ap-border)]">
       <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 relative z-10">
         
         {/* Header */}
         <div className="text-center max-w-3xl mx-auto mb-12">
-          <div className="inline-flex items-center gap-2 px-3.5 py-1 rounded-full bg-slate-100 border border-slate-200 text-xs font-mono font-bold text-slate-700 uppercase tracking-wider mb-4">
+          <div className="inline-flex items-center gap-2 px-3.5 py-1 rounded-full bg-[var(--ap-surface-2)] border border-[var(--ap-border)] text-xs font-mono font-bold text-[var(--ap-ink-2)] uppercase tracking-wider mb-4">
             <Zap size={14} className="text-sky-600" />
             <span>Software Licensing Tiers</span>
           </div>
-          <h2 className="text-3xl sm:text-4xl font-extrabold text-slate-900 tracking-tight">
+          <h2 className="text-3xl sm:text-4xl font-extrabold text-[var(--ap-ink)] tracking-tight">
             Transparent Pricing. Zero Cloud Bandwidth Fees.
           </h2>
-          <p className="mt-4 text-base text-slate-600">
+          <p className="mt-4 text-base text-[var(--ap-ink-2)]">
             Activate local hardware nodes with a single license key generated from your portal.
           </p>
 
           {/* Billing Switcher */}
-          <div className="mt-8 inline-flex items-center gap-2 p-1.5 rounded-2xl bg-slate-100 border border-slate-200">
+          <div className="mt-8 inline-flex items-center gap-2 p-1.5 rounded-2xl bg-[var(--ap-surface-2)] border border-[var(--ap-border)]">
             <button
               onClick={() => setAnnual(false)}
               className={`px-4 py-2 text-xs font-bold rounded-xl transition-all ${
-                !annual ? "bg-white text-slate-900 shadow-sm" : "text-slate-600 hover:text-slate-900"
+                !annual ? "bg-[var(--ap-surface)] text-[var(--ap-ink)] shadow-sm" : "text-[var(--ap-ink-2)] hover:text-[var(--ap-ink)]"
               }`}
             >
               Monthly Billing
@@ -90,7 +90,7 @@ export default function TransparentPricing() {
             <button
               onClick={() => setAnnual(true)}
               className={`px-4 py-2 text-xs font-bold rounded-xl transition-all flex items-center gap-2 ${
-                annual ? "bg-slate-900 text-white shadow-sm" : "text-slate-600 hover:text-slate-900"
+                annual ? "bg-slate-900 text-white shadow-sm" : "text-[var(--ap-ink-2)] hover:text-[var(--ap-ink)]"
               }`}
             >
               <span>Annual Billing</span>
@@ -106,7 +106,7 @@ export default function TransparentPricing() {
           {PLANS.map((plan) => (
             <div
               key={plan.name}
-              className={`architectural-card p-8 bg-white flex flex-col justify-between relative ${
+              className={`architectural-card p-8 bg-[var(--ap-surface)] flex flex-col justify-between relative ${
                 plan.popular ? "border-slate-900 shadow-xl ring-2 ring-slate-900/10" : ""
               }`}
             >
@@ -117,19 +117,19 @@ export default function TransparentPricing() {
               )}
 
               <div>
-                <h3 className="text-xl font-extrabold text-slate-900">{plan.name}</h3>
-                <p className="text-xs text-slate-500 mt-1 min-h-[32px]">{plan.description}</p>
+                <h3 className="text-xl font-extrabold text-[var(--ap-ink)]">{plan.name}</h3>
+                <p className="text-xs text-[var(--ap-ink-2)] mt-1 min-h-[32px]">{plan.description}</p>
 
                 <div className="my-6 pb-6 border-b border-slate-100 flex items-baseline gap-1 font-mono">
-                  <span className="text-4xl font-black text-slate-900">
+                  <span className="text-4xl font-black text-[var(--ap-ink)]">
                     {annual ? plan.priceAnnual : plan.priceMonthly}
                   </span>
                   {plan.priceMonthly !== "Custom" && (
-                    <span className="text-xs text-slate-500 font-sans font-medium">/ node / month</span>
+                    <span className="text-xs text-[var(--ap-ink-2)] font-sans font-medium">/ node / month</span>
                   )}
                 </div>
 
-                <ul className="space-y-3 mb-8 text-xs text-slate-700">
+                <ul className="space-y-3 mb-8 text-xs text-[var(--ap-ink-2)]">
                   {plan.features.map((feat) => (
                     <li key={feat} className="flex items-start gap-2.5">
                       <Check size={14} className="text-emerald-600 shrink-0 mt-0.5" />
@@ -139,13 +139,13 @@ export default function TransparentPricing() {
                 </ul>
               </div>
 
+              {/* Was btn-light-primary/secondary — a third button system that
+                  existed for this one call site and matched neither the app
+                  shell's .btn-* nor the landing page's .ap-btn-*. Folded into
+                  the landing CTA so the marketing site has one primary button. */}
               <Link
                 to={plan.linkTo}
-                className={`w-full py-3.5 text-xs font-bold rounded-xl flex items-center justify-center gap-2 transition-all ${
-                  plan.popular
-                    ? "btn-light-primary"
-                    : "btn-light-secondary"
-                }`}
+                className={`ap-btn w-full ${plan.popular ? "ap-btn-primary" : "ap-btn-ghost"}`}
               >
                 <span>{plan.ctaText}</span>
                 <ArrowRight size={14} />

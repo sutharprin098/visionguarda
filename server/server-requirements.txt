@@ -28,4 +28,10 @@ scipy==1.13.1
 # silently falls back to a browser-unplayable codec (mp4v) instead of
 # raising. imageio-ffmpeg bundles a portable ffmpeg binary with libx264.
 imageio-ffmpeg==0.6.0
+# Resolves page URLs (YouTube/Twitch live) into the direct manifest behind
+# them — see app/ai/stream_resolver.py. cv2.VideoCapture cannot open a watch
+# page at all: it returns isOpened()==False with no error, which upstream
+# looks exactly like a dead camera. Unlicense/public-domain, so it carries no
+# obligation into the shipped engine (see LICENSING.md).
+yt-dlp==2026.7.4
 psutil==5.9.8

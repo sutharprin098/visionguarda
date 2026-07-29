@@ -626,7 +626,7 @@ def run_test(
         })
         result.metrics.setdefault("gpu_percent", {
             "status": NOT_MEASURED,
-            "reason": "gpu_monitor samples a system-wide counter every 5s with no per-process attribution; it cannot be attributed to this test.",
+            "reason": "gpu_monitor samples a system-wide counter every 30s with no per-process attribution; it cannot be attributed to this test.",
         })
         if on_phase:
             try:
@@ -666,7 +666,7 @@ def run_test(
     hostname = parsed.hostname or host
     if not hostname:
         return finish(False, ERR_INVALID_URL, "URL has no host component.")
-    p = parsed.port or port or DEFAULT_PORTS.get(st, 554)
+    p = parsed.port or port or (443 if parsed.scheme == "https" else 80 if parsed.scheme == "http" else DEFAULT_PORTS.get(st, 554))
 
     # Credentials from an explicit url= override the separate fields, since the
     # URL is the more specific statement of intent.

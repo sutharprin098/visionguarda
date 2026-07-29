@@ -44,6 +44,9 @@ for _pkg in _PACKAGES:
     except Exception as _e:  # package not installed — skip it
         print(f"[spec] skipping optional package {_pkg}: {_e}")
 
+# Bundle yt_dlp modules into PYZ bytecode instead of 2000+ loose .py files
+hiddenimports += collect_submodules("yt_dlp")
+
 # uvicorn loads its loop/protocol/lifespan implementations by string at
 # runtime, so they must be forced in as hidden imports.
 hiddenimports += collect_submodules("uvicorn")

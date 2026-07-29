@@ -27,7 +27,7 @@ export default function Platform() {
           <p className={`ap-eyebrow ${shown ? "ap-reveal ap-d1" : "opacity-0"}`} style={{ color: "#9FC2D2" }}>
             Why Enterprises Choose CamAI
           </p>
-          <h2 className={`mt-5 text-3xl font-extrabold tracking-tight text-[#EAF3F7] sm:text-4xl ${shown ? "ap-reveal ap-d2" : "opacity-0"}`}>
+          <h2 className={`mt-5 text-3xl font-extrabold tracking-tight text-[var(--ap-on-dark)] sm:text-4xl ${shown ? "ap-reveal ap-d2" : "opacity-0"}`}>
             Built like infrastructure, not a demo.
           </h2>
         </div>
@@ -43,8 +43,8 @@ export default function Platform() {
               <span className="grid h-12 w-12 place-items-center rounded-xl bg-[var(--ap-accent)]/15 text-[var(--ap-accent)]">
                 <p.icon size={22} />
               </span>
-              <h3 className="ap-pixel-bold mt-5 text-[13px] text-[#EAF3F7]">{p.title}</h3>
-              <p className="mt-2 text-sm leading-relaxed text-[#9FB2BD]">{p.body}</p>
+              <h3 className="ap-pixel-bold mt-5 text-[13px] text-[var(--ap-on-dark)]">{p.title}</h3>
+              <p className="mt-2 text-sm leading-relaxed text-[var(--ap-on-dark-2)]">{p.body}</p>
             </div>
           ))}
         </div>

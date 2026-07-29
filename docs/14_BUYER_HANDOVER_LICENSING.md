@@ -15,7 +15,7 @@ This complete, production-ready source code handover package includes full intel
 - [x] **Desktop Application Source**: Electron + React TypeScript monitoring application with interactive `FullscreenViewer` and dynamic grid tile player.
 - [x] **SaaS Web Portal Source**: React + Vite + TailwindCSS admin portal with visual vector zone editor and incident search dashboard.
 - [x] **Automated Test Suite**: 211+ pytest automated unit and integration tests (`server/tests/`).
-- [x] **AI Model Weights & Export Pipelines**: YOLOX-S, YuNet face detector, YOLOv8 helmet classifier, and ANPR plate recognition models.
+- [x] **AI Model Weights & Export Pipelines**: YOLOX-S detector, RT-DETR helmet detector, YuNet face detector, and the LPD-YuNet + CRNN ANPR plate models — all Apache-2.0 or MIT (see `LICENSING.md` §2 and §2a).
 - [x] **Database Schemas & Migrations**: Supabase PostgreSQL schemas, RLS security policies, and indexes.
 - [x] **DevOps & Containerization Scripts**: `docker-compose.yml`, Dockerfiles, NGINX SSL configuration, and deployment scripts.
 - [x] **Complete Enterprise Documentation Package**: 15+ comprehensive technical markdown specifications in `docs/` and root directory.

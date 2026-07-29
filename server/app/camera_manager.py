@@ -160,14 +160,61 @@ class CameraManager:
                     flush=True,
                 )
 
+    def _benchmark_is_safe_here(self):
+        """(should_run, reason) for the background model benchmark on THIS device.
+
+        The benchmark is the only thing in the engine that compiles extra models
+        onto the live inference device. On a static-shape Intel iGPU that costs
+        every camera 2-3x inference latency for the duration, to produce a
+        number nothing reads — see CAMAI_MODEL_BENCHMARK in config.py.
+        """
+        from app.config import MODEL_BENCHMARK_MODE
+
+        if MODEL_BENCHMARK_MODE == "off":
+            return False, "disabled by CAMAI_MODEL_BENCHMARK=off"
+        if MODEL_BENCHMARK_MODE == "on":
+            return True, "forced by CAMAI_MODEL_BENCHMARK=on"
+
+        # "auto": a pinned static shape is precisely the marker for the Intel GPU
+        # path, i.e. shared silicon with no headroom to spare for extra compiles.
+        if getattr(self.yolo_backend, "static_imgsz", None) is not None:
+            dev = getattr(self.yolo_backend, "backend_device", "GPU")
+            return False, (
+                f"skipped on static-shape Intel {dev}: compiling additional models on "
+                f"this device while cameras are running costs 2-3x inference latency "
+                f"on every camera, and nothing acts on the result. "
+                f"Set CAMAI_MODEL_BENCHMARK=on to override."
+            )
+        return True, "dynamic-shape device"
+
     def run_background_benchmark(self):
         # Wait before benchmarking to avoid GPU contention during pipeline warm-up.
         # OpenVINO model compilation takes ~76s per model — without this delay, all 3
         # benchmark models compile simultaneously with the live pipeline, causing
         # 600-1700ms inference latency on the main stream.
         time.sleep(180)
+
+        should_run, reason = self._benchmark_is_safe_here()
+        if not should_run:
+            print(f"[CameraManager] Background model benchmarking {reason}", flush=True)
+            # Leave an explicit terminal state. "running" forever would be a lie
+            # to /api/status, and indistinguishable from a benchmark thread that
+            # died — which is precisely the symptom this whole change is about.
+            self.benchmark_results["status"] = "skipped"
+            self.benchmark_results["reason"] = reason
+            self.benchmark_results["selected"] = self.selected_model_name
+            self.benchmark_results["device"] = getattr(
+                self.yolo_backend, "backend_device", "cpu"
+            )
+            return
+
         print("[CameraManager] Starting background model benchmarking...", flush=True)
-        dummy_img = np.zeros((320, 320, 3), dtype=np.uint8)
+        # Benchmark at the size the device actually runs, not a hardcoded 320.
+        # preprocess() already clamps to a pinned static shape, so a mismatched
+        # dummy only mis-measures preprocess cost — but on a dynamic-shape device
+        # it also compiles a shape nothing else uses, for no reason.
+        warm = getattr(self.yolo_backend, "static_imgsz", None) or 320
+        dummy_img = np.zeros((warm, warm, 3), dtype=np.uint8)
         models_to_test = {
             "yolox_tiny": "yolox_tiny",
             "yolox_s": "yolox_s",
@@ -177,13 +224,14 @@ class CameraManager:
         stats = {}
 
         for name, path in models_to_test.items():
+            backend = None
             try:
                 print(f"[CameraManager] Benchmarking {name}...", flush=True)
                 t0 = time.time()
                 backend = EngineBackend(path)
                 load_time = time.time() - t0
 
-                avg_latency, std_latency, t_preprocess = backend.benchmark(dummy_img, target_size=320, runs=5)
+                avg_latency, std_latency, t_preprocess = backend.benchmark(dummy_img, target_size=warm, runs=5)
                 stats[name] = {
                     "avg_latency_ms": round(avg_latency, 1),
                     "std_latency_ms": round(std_latency, 1),
@@ -201,6 +249,12 @@ class CameraManager:
                     "status": "failed",
                     "error": str(e)
                 }
+            finally:
+                # Drop each candidate before compiling the next one. Three
+                # simultaneously-live compiled models is triple the accelerator
+                # memory for no benefit — only one is ever measured at a time.
+                backend = None
+                gc.collect()
 
         selected = "yolox_tiny"
         candidates = [(name, stats[name]["avg_latency_ms"]) for name in stats if stats[name].get("status") == "success"]
@@ -218,11 +272,14 @@ class CameraManager:
         self.benchmark_results["selected"] = selected
         self.benchmark_results["status"] = "complete"
 
-        try:
-            temp_backend = EngineBackend(selected)
-            self.benchmark_results["device"] = temp_backend.backend_device
-        except Exception:
-            self.benchmark_results["device"] = "cpu"
+        # The device is already known from the run we just did — it was recorded
+        # per model above. Compiling a FOURTH backend purely to read one string
+        # off it was another full model compile against the live device, i.e.
+        # another instance of the thing that makes this thread dangerous.
+        self.benchmark_results["device"] = (
+            stats.get(selected, {}).get("device")
+            or getattr(self.yolo_backend, "backend_device", "cpu")
+        )
 
     def hot_swap_model(self, model_name: str) -> bool:
         """Manually trigger model swapping from client/API control."""

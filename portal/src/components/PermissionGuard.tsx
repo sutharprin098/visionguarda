@@ -2,10 +2,15 @@ import { ReactNode, useState } from "react";
 import { Link } from "react-router-dom";
 import { ShieldAlert, ArrowLeft, Send, CheckCircle2, Lock, Sparkles, ShieldCheck } from "lucide-react";
 import { useAuth } from "../contexts/AuthContext";
+import type { Permission } from "../lib/permissions";
 import { Badge } from "./ui";
 
 interface Props {
-  perm?: string;
+  /** Typed against the real `public.permissions` catalog on purpose: a key the
+   *  database has never heard of can be granted to nobody, so gating a route on
+   *  one locks out every user including the Organization Owner. That used to be
+   *  a silent runtime lockout; it is now a build error. */
+  perm?: Permission;
   superOnly?: boolean;
   moduleName?: string;
   customMessage?: string;
@@ -92,7 +97,7 @@ export default function PermissionGuard({
               />
               <button
                 onClick={() => setRequested(true)}
-                className="btn-primary text-xs px-4 py-2 flex items-center gap-1.5 shrink-0"
+                className="btn-primary btn-sm shrink-0"
               >
                 <Send size={13} /> Request Access
               </button>
@@ -107,7 +112,7 @@ export default function PermissionGuard({
 
         {/* Footer Navigation */}
         <div className="pt-2 flex items-center justify-center gap-3">
-          <Link to="/app" className="btn-ghost text-xs gap-1.5">
+          <Link to="/app" className="btn-ghost btn-sm">
             <ArrowLeft size={14} /> Return to Dashboard
           </Link>
         </div>

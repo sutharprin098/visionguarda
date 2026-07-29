@@ -156,7 +156,7 @@ function IncidentDetail({ incident, onChanged }: { incident: IncidentRow; onChan
       {incident.cameras && <p className="text-xs text-ink-3">Camera: {incident.cameras.name}</p>}
 
       {manage && (
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <Field label="Status">
             <select className="input" value={incident.status} onChange={(e) => setStatus(e.target.value as Incident["status"])}>
               {STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
@@ -249,7 +249,7 @@ function CreateForm({ onDone }: { onDone: () => void }) {
         <textarea className="input min-h-[70px]" value={form.description}
                   onChange={(e) => setForm({ ...form, description: e.target.value })} />
       </Field>
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <Field label="Severity">
           <select className="input" value={form.severity} onChange={(e) => setForm({ ...form, severity: e.target.value })}>
             {["info", "warning", "critical"].map((s) => <option key={s} value={s}>{s}</option>)}

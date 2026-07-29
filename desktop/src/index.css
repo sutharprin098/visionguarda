@@ -8,6 +8,215 @@
   }
 }
 
+/* --- Live alert surface -----------------------------------------------------
+   Motion is deliberately short and eased-out. A control-room alert has to
+   register as "something arrived" without becoming a distraction the operator
+   learns to tune out, so: 260ms in, no bounce, no looping attention-grabbers.
+   Anything that would still be moving a second later is a mistake here.        */
+
+@keyframes camai-alert-in {
+  from { opacity: 0; transform: translateX(24px) scale(0.97); }
+  to   { opacity: 1; transform: translateX(0) scale(1); }
+}
+@keyframes camai-fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+@keyframes camai-pop-in {
+  from { opacity: 0; transform: translateY(10px) scale(0.985); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+@keyframes camai-drawer-in {
+  from { transform: translateX(100%); }
+  to   { transform: translateX(0); }
+}
+@keyframes camai-shimmer {
+  from { transform: translateX(-100%); }
+  to   { transform: translateX(100%); }
+}
+
+.camai-alert-card { animation: camai-alert-in 260ms cubic-bezier(0.22, 1, 0.36, 1) both; }
+.camai-alert-fade { animation: camai-fade-in 160ms ease-out both; }
+.camai-alert-pop  { animation: camai-pop-in 200ms cubic-bezier(0.22, 1, 0.36, 1) both; }
+.camai-drawer-in  { animation: camai-drawer-in 240ms cubic-bezier(0.22, 1, 0.36, 1) both; }
+
+/* Placeholder while the snapshot encodes — a moving highlight, not a spinner
+   that implies something is wrong. It is always replaced within a frame or two. */
+.camai-alert-shimmer {
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.02);
+}
+.camai-alert-shimmer::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(255, 255, 255, 0.05) 50%,
+    transparent 100%
+  );
+  animation: camai-shimmer 1.4s ease-in-out infinite;
+}
+
+/* --- Severity-tiered arrival motion -----------------------------------------
+   The escalation is deliberate and bounded. Critical earns one shake and three
+   pulses; everything below it gets progressively less, and Low gets essentially
+   nothing. The rule that matters: NOTHING loops forever. An indefinitely
+   pulsing card is a thing operators stop seeing within a shift, which makes the
+   loudest signal in the system the least effective one. Attention is spent
+   once, at arrival, and then the card just sits there being readable.          */
+
+@keyframes camai-shake {
+  0%, 100% { transform: translateX(0); }
+  15%      { transform: translateX(-7px); }
+  30%      { transform: translateX(6px); }
+  45%      { transform: translateX(-4px); }
+  60%      { transform: translateX(3px); }
+  80%      { transform: translateX(-1px); }
+}
+
+/* Pulses ride on box-shadow, never on transform or width: both of those force
+   layout on every frame, and this runs while live video is decoding beside it.
+   box-shadow and opacity are compositor-only. */
+@keyframes camai-pulse-critical {
+  0%, 100% { box-shadow: 0 20px 45px -15px rgba(0,0,0,0.85), 0 0 0 0 rgba(224,90,82,0.0); }
+  50%      { box-shadow: 0 20px 45px -15px rgba(0,0,0,0.85), 0 0 0 6px rgba(224,90,82,0.16); }
+}
+@keyframes camai-pulse-high {
+  0%, 100% { box-shadow: 0 20px 45px -15px rgba(0,0,0,0.85), 0 0 0 0 rgba(217,154,60,0.0); }
+  50%      { box-shadow: 0 20px 45px -15px rgba(0,0,0,0.85), 0 0 0 5px rgba(217,154,60,0.14); }
+}
+@keyframes camai-pulse-medium {
+  0%, 100% { box-shadow: 0 20px 45px -15px rgba(0,0,0,0.85), 0 0 0 0 rgba(91,140,255,0.0); }
+  50%      { box-shadow: 0 20px 45px -15px rgba(0,0,0,0.85), 0 0 0 4px rgba(91,140,255,0.12); }
+}
+
+.camai-sev-critical {
+  animation:
+    camai-alert-in 260ms cubic-bezier(0.22, 1, 0.36, 1) both,
+    camai-shake 420ms cubic-bezier(0.36, 0.07, 0.19, 0.97) 260ms 1,
+    camai-pulse-critical 1.5s ease-in-out 300ms 3;
+}
+.camai-sev-high {
+  animation:
+    camai-alert-in 260ms cubic-bezier(0.22, 1, 0.36, 1) both,
+    camai-pulse-high 1.6s ease-in-out 260ms 2;
+}
+.camai-sev-medium {
+  animation:
+    camai-alert-in 260ms cubic-bezier(0.22, 1, 0.36, 1) both,
+    camai-pulse-medium 1.8s ease-in-out 260ms 1;
+}
+.camai-sev-low {
+  animation: camai-alert-in 220ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* Screen-edge glow for criticals. Fixed, pointer-events-none, painted once and
+   faded out — a frame around the whole window that says "look up" without
+   covering a single pixel of video. */
+@keyframes camai-edge-glow {
+  0%   { opacity: 0; }
+  18%  { opacity: 1; }
+  100% { opacity: 0; }
+}
+.camai-edge-glow {
+  position: fixed;
+  inset: 0;
+  z-index: 115;
+  pointer-events: none;
+  animation: camai-edge-glow 2.2s ease-out both;
+  box-shadow: inset 0 0 90px 12px rgba(224, 90, 82, 0.4);
+}
+
+/* Confidence bar fill. Animated width is acceptable here and nowhere else: it
+   is a 12px-tall element that animates exactly once on mount. */
+@keyframes camai-confidence-fill {
+  from { transform: scaleX(0); }
+  to   { transform: scaleX(1); }
+}
+.camai-confidence-fill {
+  transform-origin: left center;
+  animation: camai-confidence-fill 700ms cubic-bezier(0.22, 1, 0.36, 1) 120ms both;
+}
+
+/* Dwell countdown. Driven by CSS rather than a React timer on purpose: a
+   per-frame setState to animate a bar would re-render the card ~60 times a
+   second, next to live video. animation-play-state also gives correct pause and
+   resume on hover for free, which a naive JS timer does not (it restarts). */
+@keyframes camai-countdown {
+  from { transform: scaleX(1); }
+  to   { transform: scaleX(0); }
+}
+.camai-countdown {
+  transform-origin: left center;
+  animation-name: camai-countdown;
+  animation-timing-function: linear;
+  animation-fill-mode: both;
+}
+
+/* Live-crop swap. The refreshed image cross-fades in rather than popping, so a
+   card whose subject is moving reads as a continuous view instead of a
+   stuttering slideshow. */
+@keyframes camai-crop-swap {
+  from { opacity: 0.55; }
+  to   { opacity: 1; }
+}
+.camai-crop-swap { animation: camai-crop-swap 220ms ease-out both; }
+
+/* "Live" indicator: the one intentional infinite animation in the system. It
+   means "this image is still updating", so it has to persist while that is
+   true — and it stops the moment the subject leaves frame. */
+@keyframes camai-live-blink {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.35; }
+}
+.camai-live-dot { animation: camai-live-blink 1.6s ease-in-out infinite; }
+
+/* --- Demo mode --------------------------------------------------------------
+   Presentation only. It changes timing and scale, never content: a demo-mode
+   card shows the same real detection, from the same real frame, as a normal
+   one. Nothing here fabricates an event.                                       */
+.camai-demo .camai-alert-card {
+  width: 400px;
+}
+/* Deliberately NOT animation-duration here. The severity classes set a
+   three-animation shorthand (arrive, shake, pulse); a single duration override
+   would apply that one value to all three, turning the 420ms shake and the
+   1.5s pulse into the same length and wrecking the timing it was tuned for.
+   Demo mode changes scale and dwell, not choreography. */
+.camai-demo .camai-alert-card:hover {
+  transform: translateY(-2px);
+  transition: transform 320ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.camai-demo .camai-crop-swap { animation-duration: 420ms; }
+
+/* The alert stack is fixed-width by design, but this is a resizable desktop
+   window and a narrow one must not push cards off-screen or force the shell to
+   scroll sideways. Cap to the viewport and let the card's own layout reflow. */
+@media (max-width: 460px) {
+  .camai-alert-stack { width: calc(100vw - 2rem) !important; }
+}
+
+/* An operator who has asked the OS to stop animating gets a system that stops
+   animating — the alert still appears, instantly, and the critical edge glow
+   still fires because it is information, not decoration. */
+@media (prefers-reduced-motion: reduce) {
+  .camai-alert-card,
+  .camai-alert-fade,
+  .camai-alert-pop,
+  .camai-drawer-in,
+  .camai-sev-critical,
+  .camai-sev-high,
+  .camai-sev-medium,
+  .camai-sev-low,
+  .camai-confidence-fill,
+  .camai-crop-swap { animation-duration: 1ms; animation-iteration-count: 1; }
+  .camai-alert-shimmer::after,
+  .camai-live-dot { animation: none; }
+  .camai-edge-glow { animation-duration: 900ms; }
+}
+
 @layer components {
   .card {
     @apply rounded-lg border border-line bg-surface-1;

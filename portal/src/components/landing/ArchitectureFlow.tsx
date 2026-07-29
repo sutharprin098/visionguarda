@@ -33,19 +33,19 @@ const PIPELINE_STEPS = [
 
 export default function ArchitectureFlow() {
   return (
-    <section id="how-it-works" className="py-24 relative overflow-hidden bg-white border-b border-slate-200">
+    <section id="how-it-works" className="py-24 relative overflow-hidden bg-[var(--ap-surface)] border-b border-[var(--ap-border)]">
       <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 relative z-10">
         
         {/* Section Header */}
         <div className="text-center max-w-3xl mx-auto mb-16">
-          <div className="inline-flex items-center gap-2 px-3.5 py-1 rounded-full bg-slate-100 border border-slate-200 text-xs font-mono font-bold text-slate-700 uppercase tracking-wider mb-4">
+          <div className="inline-flex items-center gap-2 px-3.5 py-1 rounded-full bg-[var(--ap-surface-2)] border border-[var(--ap-border)] text-xs font-mono font-bold text-[var(--ap-ink-2)] uppercase tracking-wider mb-4">
             <ShieldCheck size={14} className="text-sky-600" />
             <span>Architecture Breakdown</span>
           </div>
-          <h2 className="text-3xl sm:text-4xl font-extrabold text-slate-900 tracking-tight">
+          <h2 className="text-3xl sm:text-4xl font-extrabold text-[var(--ap-ink)] tracking-tight">
             How CamAI Transforms Standard CCTV Feeds
           </h2>
-          <p className="mt-4 text-base text-slate-600">
+          <p className="mt-4 text-base text-[var(--ap-ink-2)]">
             A modular 4-stage pipeline that runs entirely inside your network boundary.
           </p>
         </div>
@@ -69,13 +69,13 @@ export default function ArchitectureFlow() {
                     </div>
                   </div>
 
-                  <h3 className="text-lg font-bold text-slate-900">{s.title}</h3>
-                  <p className="mt-2.5 text-xs text-slate-600 leading-relaxed font-normal">
+                  <h3 className="text-lg font-bold text-[var(--ap-ink)]">{s.title}</h3>
+                  <p className="mt-2.5 text-xs text-[var(--ap-ink-2)] leading-relaxed font-normal">
                     {s.detail}
                   </p>
                 </div>
 
-                <div className="mt-6 pt-4 border-t border-slate-100 font-mono text-[11px] font-bold text-slate-500">
+                <div className="mt-6 pt-4 border-t border-slate-100 font-mono text-[11px] font-bold text-[var(--ap-ink-2)]">
                   {s.tech}
                 </div>
               </div>

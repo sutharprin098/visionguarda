@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Minimize2, ChevronLeft, ChevronRight, Video } from "lucide-react";
+import { Minimize2, ChevronLeft, ChevronRight, Video, AlertTriangle } from "lucide-react";
 import clsx from "clsx";
 import DetectionOverlay from "./DetectionOverlay";
 import { mjpegStreamUrl } from "../lib/localEngine";
 import { TelemetrySession, TelemetryDetection, CameraTelemetry } from "../lib/telemetry";
 import { filterDetections, loadModules } from "../lib/aiModules";
+import { useAlertIngest } from "./alerts/AlertProvider";
+import { siteLabel } from "./alerts/alertUtils";
 
 /**
  * Full-window single-camera viewer.
@@ -42,12 +44,15 @@ export interface ViewerCamera {
 export default function FullscreenViewer({
   cameras,
   cameraId,
+  orgName,
   onSelectCamera,
   onExit,
 }: {
   /** Every camera the operator may switch to without leaving fullscreen. */
   cameras: ViewerCamera[];
   cameraId: string;
+  /** Fallback for the alert card's site line — see siteLabel(). */
+  orgName?: string | null;
   onSelectCamera: (id: string) => void;
   onExit: () => void;
 }) {
@@ -62,6 +67,11 @@ export default function FullscreenViewer({
   const index = cameras.findIndex((c) => c.id === cameraId);
   const modules = loadModules(cameraId);
   const shown = filterDetections(detections, modules);
+
+  // The engine positively reports this camera's capture as not-online. A null
+  // health_status means "nothing heard yet", which must not read as a fault.
+  const sourceFault =
+    telemetry?.health_status != null && telemetry.health_status !== "online";
 
   // ---- OS-level window fullscreen (enhancement, not a dependency) ----------
   //
@@ -100,19 +110,39 @@ export default function FullscreenViewer({
   }, [winApi]);
 
   const [retryCount, setRetryCount] = useState(0);
+  // Same CORS-with-fallback arrangement as the grid tile: the stream is
+  // requested with crossOrigin so the alert system can crop a snapshot out of
+  // the canvas, and falls back to a plain request (no snapshots) rather than
+  // ever leaving the operator staring at a black window. See Workspace's
+  // CameraTile for the full reasoning.
+  const [imgCors, setImgCors] = useState(true);
+  const corsProvenRef = useRef(false);
 
   // ---- telemetry: detection keeps running; this only subscribes ------------
   // The engine analyses whatever cameras are registered regardless of who is
   // watching, so opening/closing this viewer never interrupts detection — it
   // only changes which telemetry we listen to.
+  // While this viewer is open every tile in the grid drops its telemetry socket
+  // (they are covered — see the `paused` note in Workspace), so THIS is the only
+  // subscription left alive. Without ingesting here, alerts would go silent for
+  // exactly as long as an operator was watching a camera full-window, which is
+  // when they are paying the most attention.
+  const ingestAlert = useAlertIngest();
   useEffect(() => {
     setDetections([]);
     setTelemetry(null);
     setStreamFailed(false);
     setRetryCount(0);
+    const cam = cameras.find((c) => c.id === cameraId);
+    const ctx = {
+      id: cameraId,
+      name: cam?.name ?? cameraId,
+      site: siteLabel(cam, orgName),
+    };
     const session = new TelemetrySession(cameraId, (t) => {
       setDetections(t.detections ?? []);
       setTelemetry(t);
+      ingestAlert(ctx, t, imgCors ? imgRef.current : null);
     });
     session.start();
     log("telemetry subscribed", { cameraId });
@@ -120,9 +150,39 @@ export default function FullscreenViewer({
       session.stop();
       log("telemetry unsubscribed", { cameraId });
     };
-  }, [cameraId]);
+    // `cameras` is intentionally not a dep: it changes identity on every sync
+    // tick and re-subscribing the socket for a renamed camera would drop frames
+    // of telemetry for no visible gain.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cameraId, orgName, ingestAlert, imgCors]);
+
+  // ---- preview resolution: deliberately NOT raised for fullscreen -----------
+  //
+  // The engine encodes every preview at TILE_MAX_WIDTH (960), which full-window
+  // is upscaled ~2x on a 1080p display, so the obvious idea is to ask for more
+  // while this viewer owns the stream. It was tried and MEASURED, and it is the
+  // wrong trade for this product:
+  //
+  //     960px  -> 18.5 preview fps, 63 KB/frame
+  //     1280px -> 13.9 preview fps, 97 KB/frame
+  //
+  // The JPEG encode runs on the decode thread that also feeds the AI stage, and
+  // that thread is already the limiter (the camera delivers 30fps; the preview
+  // only reaches 18.5 at 960). So a sharper picture is bought directly out of
+  // frame rate — 25% of it — and a choppier live view is exactly what operators
+  // report as "not real time". Sharpness is cosmetic; smoothness is the job.
+  //
+  // setCameraDisplay() is wired and available (localEngine.ts) if a per-camera
+  // quality control is ever wanted, and the engine's /display endpoint accepts
+  // max_width 320..1920. It is simply not applied automatically here, because
+  // no operator asked to trade frames for pixels.
 
   const handleImageError = () => {
+    if (imgCors && !corsProvenRef.current) {
+      log("stream refused CORS — retrying without it (snapshots unavailable)", { cameraId });
+      setImgCors(false);
+      return;
+    }
     log("stream image error, retrying...", { cameraId, retryCount });
     setTimeout(() => {
       setRetryCount((c) => c + 1);
@@ -186,20 +246,28 @@ export default function FullscreenViewer({
           appear only when the camera's aspect differs from the window's, which
           is the "unless required" case — cropping instead would hide detections
           that are genuinely there. */}
-      {!streamFailed ? (
+      {/* Same connection-budget rule as the grid tile: don't hold an MJPEG
+          connection open for a source the engine says has no video. The reason
+          banner below explains it, and telemetry keeps flowing on the WebSocket
+          so recovery re-requests the stream on its own. */}
+      {!streamFailed && !sourceFault ? (
         <img
-          key={`${cameraId}_${retryCount}`}
+          key={`${cameraId}_${retryCount}_${imgCors ? "cors" : "plain"}`}
           ref={imgRef}
+          crossOrigin={imgCors ? "anonymous" : undefined}
           src={mjpegStreamUrl(cameraId)}
           alt=""
           className="h-full w-full object-contain"
+          onLoad={() => { corsProvenRef.current = imgCors; }}
           onError={handleImageError}
         />
       ) : (
         <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-zinc-500">
           <Video size={40} />
           <span className="text-sm">No live stream for {cam?.name ?? cameraId}</span>
-          <span className="text-xs">The engine isn't decoding this camera.</span>
+          <span className="text-xs">
+            {sourceFault ? "The camera's source isn't sending video." : "The engine isn't decoding this camera."}
+          </span>
         </div>
       )}
 
@@ -207,7 +275,10 @@ export default function FullscreenViewer({
           uses, so alignment logic exists once. It re-measures itself from the
           <img>'s box via ResizeObserver, so entering fullscreen, resizing, or
           moving to a monitor with a different DPR realigns automatically. */}
-      {!streamFailed && shown.length > 0 && (
+      {/* Mounted whenever the stream is, not only while boxes exist — a canvas
+          that unmounts on every empty frame has to re-measure itself before it
+          can draw the next non-empty one. */}
+      {!streamFailed && !sourceFault && (
         <DetectionOverlay
           detections={shown}
           mediaRef={imgRef as React.RefObject<HTMLImageElement>}
@@ -215,10 +286,30 @@ export default function FullscreenViewer({
         />
       )}
 
-      {/* FPS / device */}
-      {telemetry && (
+      {/* Same reason banner as the grid tile. Deliberately NOT tied to
+          showChrome: the chrome auto-hides after a few seconds of no mouse
+          movement, and "why is this camera black" is exactly the question an
+          operator asks while sitting still watching it. Fading the answer out
+          would recreate the original bug inside fullscreen. */}
+      {!streamFailed && sourceFault && (
+        <div className="absolute inset-x-0 bottom-0 z-20 flex items-start gap-2.5 bg-black/85 px-4 py-3">
+          <AlertTriangle size={16} className="mt-px shrink-0 text-warn" />
+          <div className="min-w-0">
+            <div className="text-sm font-semibold text-zinc-100">
+              No video from this source — AI is not running on it
+            </div>
+            {telemetry.source_error && (
+              <div className="mt-0.5 text-xs leading-snug text-zinc-400">{telemetry.source_error}</div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* FPS / device. Hidden while faulted — "0 shown · 0.0 fps" is the absence
+          of a reading, not a reading, and it would sit on the banner. */}
+      {telemetry && !sourceFault && (
         <div className={clsx(
-          "absolute bottom-4 left-4 rounded bg-black/70 px-3 py-1 text-xs font-semibold text-zinc-100 shadow transition-opacity",
+          "absolute bottom-4 left-4 z-20 rounded bg-black/70 px-3 py-1 text-xs font-semibold text-zinc-100 shadow transition-opacity",
           showChrome ? "opacity-100" : "opacity-0",
         )}>
           {shown.length} shown · {(telemetry.fps ?? 0).toFixed(1)} fps
@@ -227,27 +318,30 @@ export default function FullscreenViewer({
       )}
 
       <div className={clsx(
-        "absolute top-4 left-1/2 -translate-x-1/2 rounded bg-black/70 px-3 py-1 text-sm font-semibold text-zinc-100 shadow transition-opacity",
+        "absolute top-4 left-1/2 z-20 -translate-x-1/2 rounded bg-black/70 px-3 py-1 text-sm font-semibold text-zinc-100 shadow transition-opacity",
         showChrome ? "opacity-100" : "opacity-0",
       )}>
         {cam?.name ?? cameraId}
         {cameras.length > 1 && <span className="ml-2 text-xs text-zinc-400">{index + 1}/{cameras.length}</span>}
       </div>
 
-      {/* Switch camera without leaving fullscreen (spec 9). */}
+      {/* Switch camera without leaving fullscreen (spec 9).
+          pointer-events-none while faded out: an opacity-0 button is still a
+          click target, so the hidden arrows and Exit control were silently
+          swallowing clicks on the video underneath them. */}
       {cameras.length > 1 && (
-        <div className={clsx("transition-opacity", showChrome ? "opacity-100" : "opacity-0")}>
+        <div className={clsx("transition-opacity", showChrome ? "opacity-100" : "pointer-events-none opacity-0")}>
           <button
             onClick={(e) => { e.stopPropagation(); step(-1); }}
             title="Previous camera (←)"
-            className="absolute left-4 top-1/2 -translate-y-1/2 rounded-full bg-black/70 p-3 text-zinc-200 hover:bg-black/90 hover:text-white"
+            className="absolute left-4 top-1/2 z-20 -translate-y-1/2 rounded-full bg-black/70 p-3 text-zinc-200 transition-colors hover:bg-black/90 hover:text-white"
           >
             <ChevronLeft size={20} />
           </button>
           <button
             onClick={(e) => { e.stopPropagation(); step(1); }}
             title="Next camera (→)"
-            className="absolute right-4 top-1/2 -translate-y-1/2 rounded-full bg-black/70 p-3 text-zinc-200 hover:bg-black/90 hover:text-white"
+            className="absolute right-4 top-1/2 z-20 -translate-y-1/2 rounded-full bg-black/70 p-3 text-zinc-200 transition-colors hover:bg-black/90 hover:text-white"
           >
             <ChevronRight size={20} />
           </button>
@@ -258,8 +352,8 @@ export default function FullscreenViewer({
         onClick={(e) => { e.stopPropagation(); log("exit button clicked"); onExit(); }}
         title="Exit full screen (ESC or F11)"
         className={clsx(
-          "absolute top-4 right-4 flex items-center gap-1.5 rounded bg-black/70 px-3 py-2 text-xs font-semibold text-zinc-200 shadow hover:bg-black/90 hover:text-white transition-opacity",
-          showChrome ? "opacity-100" : "opacity-0",
+          "absolute top-4 right-4 z-20 flex items-center gap-1.5 rounded bg-black/70 px-3 py-2 text-xs font-semibold text-zinc-200 shadow transition-opacity hover:bg-black/90 hover:text-white",
+          showChrome ? "opacity-100" : "pointer-events-none opacity-0",
         )}
       >
         <Minimize2 size={14} /> Exit Full Screen

@@ -65,8 +65,11 @@ export default function NotificationsBell() {
           <span className="absolute right-1 top-1 h-2 w-2 rounded-full bg-danger" />
         )}
       </button>
+      {/* max-w: w-80 is 320px measured leftward from the bell, which runs off
+          the left edge on a narrow phone. Clamped to the viewport minus the
+          shell's gutters so the panel always lands on screen. */}
       {open && (
-        <div className="card absolute right-0 top-10 z-40 w-80 overflow-hidden shadow-xl">
+        <div className="card absolute right-0 top-10 z-40 w-80 max-w-[calc(100vw-2rem)] overflow-hidden shadow-xl">
           <div className="flex items-center justify-between border-b border-line px-3 py-2">
             <span className="text-xs font-semibold uppercase tracking-wider text-ink-3">Notifications</span>
             {!!unread?.length && (

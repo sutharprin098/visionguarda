@@ -61,6 +61,11 @@ class _H264Writer:
         except (BrokenPipeError, OSError) as e:
             print(f"[Recorder] ffmpeg write failed (encoder process died): {e}", flush=True)
             self._opened = False
+            # Reap it. Clearing _opened alone left the dead ffmpeg unwaited —
+            # a zombie process still holding its half-written .mp4 open — for
+            # the entire lifetime of the engine, because nothing else ever
+            # calls release() on a writer the caller believes is still live.
+            self.release()
 
     def release(self):
         if self._proc is None:
@@ -93,6 +98,17 @@ class CCTVRecorder:
         self.continuous_rec_id = None
         self.continuous_start_time = 0
         self.continuous_segment_limit = 600  # 10 mins
+        # "Continuous recording is switched on", as distinct from "an encoder
+        # is currently running". The encoder is launched lazily on the first
+        # frame that actually arrives (see _handle_continuous_write), because
+        # spawning it at arm time meant every camera that never produces a
+        # frame — an unreachable RTSP host, a virtual camera nobody has picked
+        # a source for — still held a live ffmpeg process and an open, empty
+        # .mp4 for the lifetime of the engine.
+        self.continuous_armed = False
+        # Guards the restart path against a permanently failing encoder
+        # spinning up a new ffmpeg on every single frame.
+        self._continuous_retry_after = 0.0
         
         # Event recording states (only accessed inside recorder thread)
         self.event_writer = None
@@ -101,8 +117,28 @@ class CCTVRecorder:
         self.post_event_counter = 0
         self.post_event_limit = fps * 5  # 5 seconds post-event recording
 
-        # Queue and background thread setup
-        self.queue = queue.Queue(maxsize=1000)
+        # Producer-side rate gate. push_frame() is called from the decode loop
+        # once per DECODED frame (source cadence — 30fps on a typical camera),
+        # but every writer is opened with `-framerate RECORDING_FPS`. Feeding
+        # 30 frames/s into an encoder told it is receiving 10 did two bad
+        # things: it tripled the libx264 work per camera, and it produced
+        # recordings that play back at 3x real speed with timestamps that no
+        # longer correspond to the incident being reviewed. Gate to the
+        # recording cadence here, at the producer, so the surplus frames are
+        # never resized, never queued and never encoded.
+        self._frame_interval = (1.0 / float(fps)) if fps and fps > 0 else 0.0
+        self._next_frame_due = 0.0
+
+        # Queue and background thread setup.
+        #
+        # This holds ALREADY-DOWNSCALED frames (see push_frame) and is bounded
+        # at a couple of seconds of recording cadence rather than 1000 raw
+        # frames. The old bound was a latent out-of-memory: frames were queued
+        # at full capture resolution and only resized by the consumer, so a
+        # stalled encoder (ffmpeg's stdin pipe blocks once its buffer fills)
+        # backed the queue up to 1000 x 1624x906x3 ≈ 4.4 GB for a single
+        # camera. Downscaled and bounded, the same worst case is ~17 MB.
+        self.queue = queue.Queue(maxsize=max(8, int(fps * 2)))
         self.running = True
         self.thread = threading.Thread(target=self._write_loop, name=f"RecLoop-{camera_id}")
         self.thread.daemon = True
@@ -111,16 +147,45 @@ class CCTVRecorder:
     def push_frame(self, frame):
         """Push the latest frame into the recording queue.
 
-        No copy needed here: the recording thread is the sole consumer of the
-        queue and processes the frame synchronously before touching any other
-        frame reference. The frame numpy array is not modified by the pipeline
-        after this call (Module 2 has already finished encoding the MJPEG JPEG
-        and will not reuse the same buffer), so passing by reference is safe.
+        Two things happen here that used to happen later, or not at all:
+
+        1. The frame is dropped unless the recording cadence is due. See
+           _frame_interval — the decode loop calls this at source fps, which is
+           typically 3x the fps every writer is actually opened with.
+
+        2. The frame is downscaled to the recording size on THIS thread before
+           being queued, instead of by the consumer after queueing. The resize
+           has to happen either way, and doing it before the bound means the
+           queue costs ~0.9 MB/frame instead of the full capture resolution.
+           It also removes the aliasing hazard the old comment here reasoned
+           around: cv2.resize allocates a new array, so the recorder no longer
+           holds a reference to a buffer the pipeline may reuse.
+
+        Net effect is strictly less work than before: one resize per RECORDED
+        frame on the decode thread, versus one resize per DECODED frame on the
+        recorder thread.
         """
         if frame is None or not self.running:
             return
+
+        if self._frame_interval:
+            now = time.monotonic()
+            if now < self._next_frame_due:
+                return
+            # Re-base off `now` rather than advancing by a fixed interval: if
+            # the recorder was stalled or the camera reconnected, accumulating
+            # the interval would leave a backlog of "owed" frames that get
+            # encoded back to back the moment it recovers.
+            self._next_frame_due = now + self._frame_interval
+
         try:
-            self.queue.put_nowait(("FRAME", frame))
+            rec_frame = cv2.resize(frame, self.frame_size)
+        except Exception as e:
+            print(f"[Recorder] Failed to downscale frame for recording: {e}", flush=True)
+            return
+
+        try:
+            self.queue.put_nowait(("FRAME", rec_frame))
         except queue.Full:
             pass
 
@@ -151,8 +216,15 @@ class CCTVRecorder:
             self.queue.put(("SHUTDOWN",))
 
     def is_recording(self) -> bool:
-        """Returns True if the recorder is actively recording continuous or event-based footage."""
-        return (self.continuous_writer is not None) or self.event_active
+        """Returns True if continuous recording is switched on for this camera,
+        or an event recording is in progress.
+
+        Reports the ARMED state, not whether an encoder happens to be running:
+        the encoder is opened lazily on the first frame, so a camera that is
+        switched on but has no video yet would otherwise flip the operator's
+        own toggle back off. Why a camera has no video is already reported
+        honestly and separately, through health_status / source_error."""
+        return self.continuous_armed or (self.continuous_writer is not None) or self.event_active
 
     def _write_loop(self):
         """Background thread loop to consume recording tasks sequentially."""
@@ -161,13 +233,23 @@ class CCTVRecorder:
                 task = self.queue.get(timeout=1.0)
             except queue.Empty:
                 if not self.running:
+                    # Release here too, not just on the SHUTDOWN sentinel.
+                    # force_stop_all() clears self.running BEFORE it queues
+                    # SHUTDOWN, so a get() that happens to time out in that
+                    # window exits the loop having never seen the sentinel —
+                    # leaving both writers open, their ffmpeg processes
+                    # unreaped and their .mp4 files truncated (no moov atom,
+                    # so nothing can play them back). _force_stop_all is
+                    # idempotent, so running it on both paths is safe.
+                    self._force_stop_all()
                     break
                 continue
 
             cmd = task[0]
             if cmd == "FRAME":
-                frame = task[1]
-                rec_frame = cv2.resize(frame, self.frame_size)
+                # Already at self.frame_size — push_frame resized it before it
+                # ever entered the queue.
+                rec_frame = task[1]
                 self.pre_event_buffer.append(rec_frame)
                 self._handle_continuous_write(rec_frame)
                 self._handle_event_write(rec_frame)
@@ -187,8 +269,13 @@ class CCTVRecorder:
             self.queue.task_done()
 
     def _start_continuous(self):
+        """Arm continuous recording. Does NOT launch an encoder — see
+        _open_continuous_writer, which runs on the first frame to arrive."""
         self._stop_continuous()
-        
+        self.continuous_armed = True
+        self._continuous_retry_after = 0.0
+
+    def _open_continuous_writer(self) -> bool:
         rec_id = f"cont_{uuid4().hex[:8]}"
         timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
         filename = f"cam_{self.camera_id}_{timestamp}_continuous.mp4"
@@ -202,19 +289,25 @@ class CCTVRecorder:
             start_iso = datetime.utcnow().isoformat() + "Z"
             start_recording_entry(rec_id, self.camera_id, start_iso, "continuous", f"/history/recordings/{filename}")
             print(f"[Recorder] Started continuous recording: {filename}", flush=True)
-        else:
-            self.continuous_writer = None
-            print(f"[Recorder] Error opening continuous video writer for cam: {self.camera_id}", flush=True)
+            return True
+
+        self.continuous_writer = None
+        # Back off before trying again, so a machine where ffmpeg cannot launch
+        # at all doesn't attempt a fresh spawn on every frame.
+        self._continuous_retry_after = time.time() + 30.0
+        print(f"[Recorder] Error opening continuous video writer for cam: {self.camera_id}", flush=True)
+        return False
 
     def _stop_continuous(self):
+        self.continuous_armed = False
         if self.continuous_writer:
             self.continuous_writer.release()
             self.continuous_writer = None
-            
+
             end_iso = datetime.utcnow().isoformat() + "Z"
             if self.continuous_rec_id:
                 end_recording_entry(self.continuous_rec_id, end_iso)
-                
+
             print(f"[Recorder] Stopped continuous recording for cam: {self.camera_id}", flush=True)
             self.continuous_rec_id = None
 
@@ -263,15 +356,39 @@ class CCTVRecorder:
             self.event_active = False
 
     def _handle_continuous_write(self, frame):
-        if not self.continuous_writer:
+        if not self.continuous_armed:
             return
-        
-        # Check segment rotation
-        if time.time() - self.continuous_start_time > self.continuous_segment_limit:
-            self._start_continuous()
-            
-        if self.continuous_writer:
-            self.continuous_writer.write(frame)
+
+        now = time.time()
+
+        # Encoder died mid-segment. write() reaps the process and clears
+        # _opened, but the writer object stays bound here, and every
+        # subsequent write() on it is a silent no-op — which is how a camera
+        # could report "recording" for an entire shift while producing
+        # nothing. Close the database entry out and fall through to the lazy
+        # open below, which starts a fresh segment.
+        if self.continuous_writer and not self.continuous_writer.isOpened():
+            print(f"[Recorder] Continuous encoder died for cam {self.camera_id}; starting a new segment", flush=True)
+            self.continuous_writer = None
+            if self.continuous_rec_id:
+                end_recording_entry(self.continuous_rec_id, datetime.utcnow().isoformat() + "Z")
+                self.continuous_rec_id = None
+            self._continuous_retry_after = now + 2.0
+
+        # Segment rotation.
+        if self.continuous_writer and now - self.continuous_start_time > self.continuous_segment_limit:
+            self._stop_continuous()
+            self.continuous_armed = True
+
+        # Lazy open. The first frame to arrive after arming — or after a
+        # rotation or an encoder failure — is what actually launches ffmpeg.
+        if self.continuous_writer is None:
+            if now < self._continuous_retry_after:
+                return
+            if not self._open_continuous_writer():
+                return
+
+        self.continuous_writer.write(frame)
 
     def _handle_event_write(self, frame):
         if not self.event_writer:

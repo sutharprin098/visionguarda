@@ -64,8 +64,8 @@ export default function CameraGroupsPage() {
                   {members.length > 6 && <Badge>+{members.length - 6} more</Badge>}
                 </div>
                 <div className="mt-4 flex gap-2 border-t border-line pt-3">
-                  <button className="btn-ghost flex-1 text-xs" onClick={() => setEditing(g)}>Manage</button>
-                  <button className="btn-ghost text-xs text-danger" onClick={() =>
+                  <button className="btn-ghost btn-sm flex-1" onClick={() => setEditing(g)}>Manage</button>
+                  <button className="btn-ghost btn-sm text-danger" onClick={() =>
                     setConfirm({
                       title: "Delete group",
                       body: `Delete group "${g.name}"? Cameras themselves are not deleted.`,
@@ -180,7 +180,7 @@ function MembersForm({ group, onDone }: { group: GroupRow; onDone: () => void })
         {cameras?.map((c: any) => (
           <label key={c.id} className="flex cursor-pointer items-center justify-between rounded-md border border-line px-3 py-2 hover:bg-surface-2">
             <span className="text-sm text-ink-1">{c.name}</span>
-            <input type="checkbox" className="h-4 w-4 accent-[#5b8cff]"
+            <input type="checkbox" className="h-4 w-4"
                    checked={members?.includes(c.id) ?? false}
                    onChange={(e) => toggle(c.id, e.target.checked)} />
           </label>

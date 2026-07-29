@@ -53,12 +53,12 @@ export default function Pricing() {
               key={t.name}
               className={`relative flex flex-col p-8 ${
                 t.highlight
-                  ? "rounded-[22px] border-2 border-[var(--ap-accent)] bg-white shadow-[var(--ap-shadow-lg)]"
+                  ? "rounded-[22px] border-2 border-[var(--ap-accent)] bg-[var(--ap-surface)] shadow-[var(--ap-shadow-lg)]"
                   : "ap-card"
               } ${shown ? `ap-reveal ap-d${i + 2}` : "opacity-0"}`}
             >
               {t.highlight && (
-                <span className="ap-pixel absolute -top-3 left-8 rounded-full bg-[var(--ap-dark)] px-3 py-1 text-[8px] text-[#EAF3F7]">
+                <span className="ap-pixel absolute -top-3 left-8 rounded-full bg-[var(--ap-dark)] px-3 py-1 text-[8px] text-[var(--ap-on-dark)]">
                   {t.tag}
                 </span>
               )}

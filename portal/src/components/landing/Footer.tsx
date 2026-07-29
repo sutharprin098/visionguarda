@@ -59,29 +59,29 @@ export default function Footer() {
           <div>
             <h4 className="ap-pixel text-[10px] uppercase tracking-[0.1em] text-[var(--ap-ink)]">Platform</h4>
             <ul className="mt-4 space-y-2.5 text-sm text-[var(--ap-ink-2)]">
-              <li><a href="#pipeline" className="hover:text-[var(--ap-dark)]">Pipeline</a></li>
-              <li><a href="#telemetry" className="hover:text-[var(--ap-dark)]">Live Telemetry</a></li>
-              <li><a href="#capabilities" className="hover:text-[var(--ap-dark)]">Capabilities</a></li>
-              <li><a href="#platform" className="hover:text-[var(--ap-dark)]">Platform</a></li>
+              <li><a href="#pipeline" className="hover:text-[var(--ap-accent)]">Pipeline</a></li>
+              <li><a href="#telemetry" className="hover:text-[var(--ap-accent)]">Live Telemetry</a></li>
+              <li><a href="#capabilities" className="hover:text-[var(--ap-accent)]">Capabilities</a></li>
+              <li><a href="#platform" className="hover:text-[var(--ap-accent)]">Platform</a></li>
             </ul>
           </div>
 
           <div>
             <h4 className="ap-pixel text-[10px] uppercase tracking-[0.1em] text-[var(--ap-ink)]">Access</h4>
             <ul className="mt-4 space-y-2.5 text-sm text-[var(--ap-ink-2)]">
-              <li><Link to="/app" className="hover:text-[var(--ap-dark)]">Launch Portal</Link></li>
-              <li><Link to="/signin" className="hover:text-[var(--ap-dark)]">Sign In</Link></li>
-              <li><Link to="/signup" className="hover:text-[var(--ap-dark)]">Create Account</Link></li>
-              <li><Link to="/contact" className="hover:text-[var(--ap-dark)]">Contact Sales</Link></li>
+              <li><Link to="/app" className="hover:text-[var(--ap-accent)]">Launch Portal</Link></li>
+              <li><Link to="/signin" className="hover:text-[var(--ap-accent)]">Sign In</Link></li>
+              <li><Link to="/signup" className="hover:text-[var(--ap-accent)]">Create Account</Link></li>
+              <li><Link to="/contact" className="hover:text-[var(--ap-accent)]">Contact Sales</Link></li>
             </ul>
           </div>
 
           <div>
             <h4 className="ap-pixel text-[10px] uppercase tracking-[0.1em] text-[var(--ap-ink)]">Legal</h4>
             <ul className="mt-4 space-y-2.5 text-sm text-[var(--ap-ink-2)]">
-              <li><Link to="/privacy" className="hover:text-[var(--ap-dark)]">Privacy Policy</Link></li>
-              <li><Link to="/terms" className="hover:text-[var(--ap-dark)]">Terms of Service</Link></li>
-              <li><Link to="/security" className="hover:text-[var(--ap-dark)]">Security & Compliance</Link></li>
+              <li><Link to="/privacy" className="hover:text-[var(--ap-accent)]">Privacy Policy</Link></li>
+              <li><Link to="/terms" className="hover:text-[var(--ap-accent)]">Terms of Service</Link></li>
+              <li><Link to="/security" className="hover:text-[var(--ap-accent)]">Security & Compliance</Link></li>
             </ul>
           </div>
         </div>
@@ -91,9 +91,9 @@ export default function Footer() {
             © {new Date().getFullYear()} CAMAI — ALL RIGHTS RESERVED
           </span>
           <div className="flex gap-4 ap-pixel text-[9px] tracking-[0.06em] text-[var(--ap-ink-2)]">
-            <Link to="/privacy" className="hover:text-[var(--ap-dark)]">PRIVACY</Link>
-            <Link to="/terms" className="hover:text-[var(--ap-dark)]">TERMS</Link>
-            <Link to="/security" className="hover:text-[var(--ap-dark)]">SECURITY</Link>
+            <Link to="/privacy" className="hover:text-[var(--ap-accent)]">PRIVACY</Link>
+            <Link to="/terms" className="hover:text-[var(--ap-accent)]">TERMS</Link>
+            <Link to="/security" className="hover:text-[var(--ap-accent)]">SECURITY</Link>
           </div>
         </div>
       </div>
