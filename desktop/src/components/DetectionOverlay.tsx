@@ -30,9 +30,21 @@ interface Props {
 
 function sourceSize(el: HTMLVideoElement | HTMLImageElement | null): { w: number; h: number } | null {
   if (!el) return null;
-  const w = (el as HTMLVideoElement).videoWidth ?? (el as HTMLImageElement).naturalWidth;
-  const h = (el as HTMLVideoElement).videoHeight ?? (el as HTMLImageElement).naturalHeight;
+  const w = (el as HTMLVideoElement).videoWidth || (el as HTMLImageElement).naturalWidth;
+  const h = (el as HTMLVideoElement).videoHeight || (el as HTMLImageElement).naturalHeight;
   return w && h ? { w, h } : null;
+}
+
+/** Black or white, whichever is readable on `hex`. The label chip is filled with
+ *  the box colour, and half this palette is light (amber #eab308, green #22c55e,
+ *  orange #f97316) — white-on-amber is the unreadable combination that made
+ *  plate numbers and speeds impossible to read against a bright road. */
+function inkFor(hex: string): string {
+  const r = parseInt(hex.slice(1, 3), 16);
+  const g = parseInt(hex.slice(3, 5), 16);
+  const b = parseInt(hex.slice(5, 7), 16);
+  // Rec. 709 luma, the same weighting the eye applies.
+  return (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255 > 0.6 ? "#0b0d10" : "#ffffff";
 }
 
 const COLORS: Record<string, string> = {
@@ -182,19 +194,53 @@ export default function DetectionOverlay({ detections, mediaRef, fit = "cover" }
       ctx.font = "bold 11px Inter, system-ui, sans-serif";
       const tw = ctx.measureText(label).width;
       const lh = 16;
+      const lw = tw + 10;
       // Flip the label inside the box when the detection touches the top edge,
       // otherwise it renders off-canvas and vanishes.
       const ly = y1 - lh < 0 ? y1 + 2 : y1 - lh - 2;
+      // Same reasoning horizontally, which was missing: a detection near the
+      // right edge (very common — that is where vehicles leave frame, and where
+      // a plate is read last) pushed its chip past the canvas and the text was
+      // simply cut off. Clamp into the visible box instead of overflowing it.
+      const lx = Math.max(0, Math.min(x1 - 1, rect.width - lw));
       ctx.fillStyle = color;
-      ctx.fillRect(x1 - 1, ly, tw + 10, lh);
-      ctx.fillStyle = "#fff";
-      ctx.fillText(label, x1 + 4, ly + 12);
+      ctx.fillRect(lx, ly, lw, lh);
+      ctx.fillStyle = inkFor(color);
+      ctx.fillText(label, lx + 5, ly + 12);
     }
   }, [detections, mediaRef, fit]);
 
-  useEffect(() => {
-    draw();
+  // Coalesce repaints onto the next animation frame.
+  //
+  // draw() calls getBoundingClientRect() (a forced layout) and then issues a
+  // few hundred canvas ops. Calling it straight from an effect ran it once per
+  // telemetry message on the main thread, synchronously, whether or not the
+  // browser was ready to paint — so a burst of messages (or several tiles
+  // updating together) did that work repeatedly between two actual frames and
+  // threw all but the last result away. Scheduling instead means at most one
+  // draw per displayed frame, always with the freshest detections, and the
+  // paint lands with the compositor rather than fighting it.
+  const rafRef = useRef<number | null>(null);
+  const scheduleDraw = useCallback(() => {
+    if (rafRef.current != null) return;   // one already pending; it will read the latest
+    rafRef.current = requestAnimationFrame(() => {
+      rafRef.current = null;
+      draw();
+    });
   }, [draw]);
+
+  useEffect(() => {
+    scheduleDraw();
+    // Cancelling on cleanup is what stops a queued callback from firing against
+    // an unmounted canvas (and keeps a fullscreen enter/exit from leaving an
+    // orphaned frame request behind).
+    return () => {
+      if (rafRef.current != null) {
+        cancelAnimationFrame(rafRef.current);
+        rafRef.current = null;
+      }
+    };
+  }, [scheduleDraw]);
 
   // The canvas is sized from the media element's CSS box, which changes on
   // fullscreen enter/exit, window resize, a monitor switch (DPR change), and
@@ -207,30 +253,43 @@ export default function DetectionOverlay({ detections, mediaRef, fit = "cover" }
   useEffect(() => {
     const media = mediaRef.current;
     if (!media) return;
-    let last = "";
-    const ro = new ResizeObserver((entries) => {
-      // Log only real size changes, not every observation — this fires on the
-      // fullscreen transition and would otherwise spam the console per frame.
-      const r = entries[0]?.contentRect;
-      if (r) {
-        const key = `${Math.round(r.width)}x${Math.round(r.height)}`;
-        if (key !== last) {
-          last = key;
-          console.log(`[Overlay] resized -> ${key} @dpr${window.devicePixelRatio || 1}`);
-        }
-      }
-      draw();
-    });
+    const ro = new ResizeObserver(() => scheduleDraw());
     ro.observe(media);
     return () => ro.disconnect();
-  }, [mediaRef, draw]);
+  }, [mediaRef, scheduleDraw]);
+
+  // Zoom (Ctrl +/-) and dragging the window to a display with a different scale
+  // factor change devicePixelRatio WITHOUT changing the element's CSS box, so
+  // the ResizeObserver above never fires and the backing store keeps the old
+  // DPR — boxes stay soft or, at a big enough jump, visibly misplaced. A
+  // media query pinned to the current ratio is the only event that reports it;
+  // it is one-shot, so re-arm it against the new ratio each time it fires.
+  useEffect(() => {
+    if (typeof window.matchMedia !== "function") return;
+    let mql: MediaQueryList | null = null;
+    let cancelled = false;
+    const arm = () => {
+      if (cancelled) return;
+      mql = window.matchMedia(`(resolution: ${window.devicePixelRatio || 1}dppx)`);
+      mql.addEventListener("change", onChange, { once: true });
+    };
+    const onChange = () => {
+      scheduleDraw();
+      arm();
+    };
+    arm();
+    return () => {
+      cancelled = true;
+      mql?.removeEventListener("change", onChange);
+    };
+  }, [scheduleDraw]);
 
   // The intrinsic source size can arrive after the element mounts (first MJPEG
   // frame / video metadata). Until it does, draw() bails and no boxes appear.
   useEffect(() => {
     const media = mediaRef.current;
     if (!media) return;
-    const onReady = () => draw();
+    const onReady = () => scheduleDraw();
     media.addEventListener("load", onReady);        // <img>
     media.addEventListener("loadedmetadata", onReady); // <video>
     media.addEventListener("resize", onReady);      // <video> source size change
@@ -239,7 +298,11 @@ export default function DetectionOverlay({ detections, mediaRef, fit = "cover" }
       media.removeEventListener("loadedmetadata", onReady);
       media.removeEventListener("resize", onReady);
     };
-  }, [mediaRef, draw]);
+  }, [mediaRef, scheduleDraw]);
 
-  return <canvas ref={canvasRef} className="pointer-events-none absolute inset-0 h-full w-full" />;
+  // z-10 is explicit rather than relying on paint order. The media is a static
+  // <img>/<video> and the chrome above it (status chips, fullscreen button) is
+  // z-20, so the overlay has a reserved band between them and cannot be buried
+  // by a sibling that later gains a stacking context.
+  return <canvas ref={canvasRef} className="pointer-events-none absolute inset-0 z-10 h-full w-full" />;
 }

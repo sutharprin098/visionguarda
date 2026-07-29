@@ -106,6 +106,99 @@ export interface CameraTelemetry {
   device?: string;
   backend?: string;
   status?: string;
+
+  // ── Performance overlay fields (see pipeline.py _telemetry_loop_iteration) ──
+  /** Rate the capture thread is pulling frames off the source, before any AI.
+   *  Diverging from `fps` is the clearest signal that the AI stage — not the
+   *  camera — is the constraint. */
+  camera_fps?: number;
+  decode_fps?: number;
+  inference_fps?: number;
+  tracking_fps?: number;
+  capture_latency?: number;
+  preprocess_latency?: number;
+  postprocess_latency?: number;
+  tracking_latency?: number;
+  total_latency?: number;
+  /** Slowest stage this cycle, preformatted as "stage (12.3ms)". */
+  bottleneck?: string;
+  /** Frames discarded at each size-1 stage boundary since camera start.
+   *  Latest-wins slots drop by design, so this is a rate indicator, not an
+   *  error count — but WHICH boundary drops identifies the bottleneck. */
+  dropped_frames?: Record<string, number>;
+  dropped_total?: number;
+  detection_count?: number;
+  tracker_count?: number;
+  cpu?: number;
+  memory?: number;
+  gpu?: number;
+  gpu_memory?: number;
+  gpu_temp?: number | null;
+  imgsz?: number;
+  /** Adaptive tile engine diagnostics, incl. the deadline-derived budget. */
+  zoom_engine?: Record<string, unknown>;
+  /** Capture-side connection state: online | connecting | offline |
+   *  network_error | auth_failed. Anything other than "online" means the
+   *  detector was never handed a frame, so `detections` being empty says
+   *  nothing about the scene. */
+  health_status?: string;
+  /** Operator-readable reason the source has no video, null while healthy.
+   *  Built by pipeline.PipelineCoordinator.source_error_text(). */
+  source_error?: string | null;
+}
+
+/**
+ * True when two detection payloads would draw an identical overlay.
+ *
+ * Detections arrive at AI FPS (~10-15Hz per camera) and every payload is a
+ * fresh array, so committing each one to React state re-rendered the tile and
+ * repainted the canvas at that rate whether or not anything had moved. Two
+ * cases made that pure waste:
+ *
+ *   - A camera with no video sends an empty array forever. Every tick still
+ *     produced a new `[]`, a new state identity, a re-render and a canvas
+ *     clear. Seven idle cameras on a grid did this continuously.
+ *   - A parked scene sends the same boxes at the same coordinates.
+ *
+ * Compares exactly the fields DetectionOverlay reads — bbox, class, track_id,
+ * confidence, speed, overspeed, speed_limit and plate_text — and nothing else,
+ * so a payload that differs only in a field nobody draws does not force a
+ * repaint. bbox is compared at 1e-4 of the frame, which is sub-pixel at any
+ * realistic display size.
+ *
+ * Deliberately NOT a deep equality helper: it must stay cheap enough to run on
+ * every message, and it must fail towards "changed" so a missed repaint is
+ * impossible.
+ */
+export function detectionsRenderEqual(
+  a: TelemetryDetection[] | undefined,
+  b: TelemetryDetection[] | undefined,
+): boolean {
+  const x = a ?? [];
+  const y = b ?? [];
+  if (x === y) return true;
+  if (x.length !== y.length) return false;
+  const EPS = 1e-4;
+  for (let i = 0; i < x.length; i++) {
+    const p = x[i];
+    const q = y[i];
+    if (
+      p.class !== q.class ||
+      p.track_id !== q.track_id ||
+      p.confidence !== q.confidence ||
+      p.speed !== q.speed ||
+      p.overspeed !== q.overspeed ||
+      p.speed_limit !== q.speed_limit ||
+      p.plate_text !== q.plate_text
+    ) return false;
+    if (
+      Math.abs(p.bbox.x1 - q.bbox.x1) > EPS ||
+      Math.abs(p.bbox.y1 - q.bbox.y1) > EPS ||
+      Math.abs(p.bbox.x2 - q.bbox.x2) > EPS ||
+      Math.abs(p.bbox.y2 - q.bbox.y2) > EPS
+    ) return false;
+  }
+  return true;
 }
 
 const WS_URL = "ws://127.0.0.1:8000/ws";
@@ -126,6 +219,18 @@ export class TelemetrySession {
   private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private lastPongTs = 0;
+  private lastPingTs = 0;
+  private lastMsgTs = 0;
+  /** Client-side delivery metrics. The engine's own payload reports what it
+   *  COMPUTED; these report what actually arrived, which is the only way to
+   *  see event-loop congestion or a saturated socket from the UI side. */
+  private stats = { rttMs: 0, gapMs: 0, parseMs: 0, received: 0 };
+
+  /** Snapshot for the performance HUD. */
+  getStats(): { rttMs: number; gapMs: number; parseMs: number; received: number } {
+    return { ...this.stats };
+  }
+
   private reconnectAttempt = 0;
   private stopped = true;
 
@@ -175,6 +280,7 @@ export class TelemetrySession {
     };
 
     ws.onmessage = (evt) => {
+      const t0 = performance.now();
       let msg: any;
       try {
         msg = JSON.parse(evt.data);
@@ -183,12 +289,26 @@ export class TelemetrySession {
       }
       if (msg?.type === "pong") {
         this.lastPongTs = Date.now();
+        // Round trip over the loopback socket. Distinguishes "the engine is
+        // slow to produce telemetry" from "delivery is slow", which look
+        // identical from the UI and have completely different fixes.
+        if (this.lastPingTs) this.stats.rttMs = Date.now() - this.lastPingTs;
         return;
       }
       // { type: "telemetry", data: { "<camera_id>": {...} } }  — main.py:70-81
       if (msg?.type === "telemetry" && msg.data) {
         const mine = msg.data[this.cameraId];
-        if (mine) this.onData(mine as CameraTelemetry);
+        if (mine) {
+          // Inter-arrival gap is the honest client-side measure of delivery
+          // rate: the engine can report 15 fps in the payload while messages
+          // actually land every 400ms because the event loop is congested.
+          const now = performance.now();
+          if (this.lastMsgTs) this.stats.gapMs = now - this.lastMsgTs;
+          this.lastMsgTs = now;
+          this.stats.parseMs = now - t0;
+          this.stats.received++;
+          this.onData(mine as CameraTelemetry);
+        }
       }
     };
 
@@ -216,6 +336,7 @@ export class TelemetrySession {
         return;
       }
       try {
+        this.lastPingTs = Date.now();
         ws.send(JSON.stringify({ type: "ping", ts: Date.now() }));
       } catch { /* onclose will fire */ }
     }, HEARTBEAT_INTERVAL_MS);

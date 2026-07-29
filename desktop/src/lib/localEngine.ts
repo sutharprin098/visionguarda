@@ -42,6 +42,41 @@ export function mjpegStreamUrl(cameraId: string): string {
   return `${ENGINE_BASE}/api/cameras/${cameraId}/stream`;
 }
 
+/**
+ * Set the MJPEG preview encode size for one camera. Display only — it never
+ * touches capture, inference or recording resolution (see
+ * PipelineCoordinator.update_display_config).
+ *
+ * The engine defaults every camera to 960px wide, which is right for a grid
+ * tile and wrong for the full-window viewer: on a 1080p display that image is
+ * upscaled roughly 2x, so the picture is soft and the detection boxes drawn
+ * over it look imprecise against edges the operator can no longer resolve. The
+ * endpoint existed from the start and nothing in the desktop had ever called
+ * it, so every camera stayed at 960 forever.
+ *
+ * Deliberately fire-and-forget: a failed cosmetic resize must never break the
+ * viewer, and the engine clamps to 320..1920 on its side regardless of what is
+ * sent here.
+ */
+export async function setCameraDisplay(
+  cameraId: string,
+  opts: { maxWidth?: number; quality?: number },
+): Promise<void> {
+  try {
+    await fetch(`${ENGINE_BASE}/api/cameras/${cameraId}/display`, {
+      method: "POST",
+      headers: await controlHeaders(),
+      body: JSON.stringify({ max_width: opts.maxWidth, quality: opts.quality }),
+      signal: AbortSignal.timeout(3000),
+    });
+  } catch {
+    /* cosmetic only — the stream keeps working at whatever size it already had */
+  }
+}
+
+/** What the engine falls back to for a grid tile. */
+export const TILE_MAX_WIDTH = 960;
+
 export async function isEngineOnline(): Promise<boolean> {
   try {
     // 2s was measured too tight — under active AI/pipeline load (a live

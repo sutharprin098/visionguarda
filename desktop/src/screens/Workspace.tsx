@@ -1,12 +1,13 @@
-import { useEffect, useState, useRef, useCallback } from "react";
+import { useEffect, useState, useRef, useCallback, memo } from "react";
 import { Video, Bell, Settings2, LogOut, Wifi, WifiOff, Sliders, Activity, AlertTriangle, RotateCw, Maximize2, Minimize2, Lock, Send, Check, Loader2, MessageCircle, ChevronDown, ChevronRight, Copy } from "lucide-react";
 import clsx from "clsx";
 import { startRealtimeSync, DeactivatedError, SyncBundle } from "../lib/sync";
 import { syncAiModelToLocalEngine, syncAiConfidenceToLocalEngine, mjpegStreamUrl, resetLocalEngineState, reportCameraHealth, reportEvents } from "../lib/localEngine";
 import { MediaShareSession, ShareStatus } from "../lib/mediaShare";
-import { TelemetrySession, TelemetryDetection, CameraTelemetry } from "../lib/telemetry";
+import { TelemetrySession, TelemetryDetection, CameraTelemetry, TelemetryStatus, detectionsRenderEqual } from "../lib/telemetry";
 import type { ZoneProfileKey } from "../lib/zoneProfiles";
 import DetectionOverlay from "../components/DetectionOverlay";
+import PerformanceOverlay from "../components/PerformanceOverlay";
 import FullscreenViewer from "../components/FullscreenViewer";
 import ProfileDashboard from "../components/ProfileDashboard";
 import SourcePicker from "../components/SourcePicker";
@@ -22,6 +23,12 @@ import { getTelegramConfig, invalidateTelegramConfig, sendTelegramTest } from ".
 
 // Remembered across launches by name, not id — see startSharing().
 const LAST_SOURCE_KEY = "camai.lastCaptureSource";
+
+// How often the tile's fps readout may force a re-render. The number is shown
+// to one decimal in a status line; refreshing it at telemetry rate (10-15Hz)
+// costs a full subtree render per camera per frame to change a digit faster
+// than anyone can read it. 500ms still reads as live.
+const FPS_COMMIT_INTERVAL_MS = 500;
 import type { EngineProcessState } from "../lib/bridge";
 import ModelManagerUI from "../components/ModelManagerUI";
 import EngineHealthPanel from "../components/EngineHealthPanel";
@@ -69,11 +76,50 @@ export default function Workspace({
       if (!cancelled) setLogs((prev) => [...prev.slice(-99), line]);
     });
 
-    const checkHealth = async () => {
+    // SELF-SCHEDULING, NOT setInterval.
+    //
+    // This loop used to be `setInterval(checkHealth, 1000)` with an
+    // `AbortSignal.timeout(3000)` — a 3s timeout fired from a 1s timer, so the
+    // moment /health took longer than a second the requests overlapped and
+    // piled up, each one holding a connection. Chromium allows six per host and
+    // every MJPEG <img> permanently owns one, so the health probes queued
+    // behind the video streams, blew their 3s deadline, and after two
+    // consecutive aborts (i.e. two seconds) the UI declared the engine
+    // unreachable and showed "Waiting for local engine service to respond…".
+    //
+    // The engine was answering HTTP 200 the whole time. Measured against the
+    // shipped build: /health returned `{"status":"ok","ready":true,
+    // "model_loaded":true}` with a time-to-first-byte of 1.5s rising to 8s+ as
+    // the engine's own load grew. A liveness check that declares death at 3s,
+    // for a service whose own contract says model load may take minutes, is a
+    // false-negative generator.
+    //
+    // Now: one request in flight at a time, the next scheduled only after the
+    // previous settles, a deadline that reflects how slow this thing legitimately
+    // gets, and enough consecutive failures to mean something.
+    const HEALTH_TIMEOUT_MS = 8000;
+    const POLL_AFTER_OK_MS = 2000;
+    const POLL_AFTER_FAIL_MS = 1000;
+    // ~3 failed probes back to back. Anything less and an engine that is merely
+    // busy reads as an engine that is gone.
+    const MISSES_BEFORE_OFFLINE = 3;
+
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    let misses = 0;
+
+    const tick = async () => {
+      if (cancelled) return;
+      let ok = false;
+
       try {
-        const res = await fetch("http://127.0.0.1:8000/health", { signal: AbortSignal.timeout(3000) });
+        const res = await fetch("http://127.0.0.1:8000/health", {
+          signal: AbortSignal.timeout(HEALTH_TIMEOUT_MS),
+          cache: "no-store",
+        });
         if (res.ok) {
           const data = await res.json();
+          ok = true;
+          misses = 0;
           if (!cancelled) {
             setHealthInfo({
               online: true,
@@ -86,40 +132,43 @@ export default function Workspace({
             });
             setConsecutiveMisses(0);
           }
-        } else {
-          throw new Error("unhealthy");
         }
-      } catch (err) {
-        if (!cancelled) {
-          setConsecutiveMisses((m) => {
-            const next = m + 1;
-            if (next >= 2) {
-              setHealthInfo((h) => ({
-                online: false,
-                status: "unreachable",
-                ready: false,
-                engine_status: "failed",
-                engine_error: "Connection to port 8000 refused",
-                model_loaded: false,
-                active_cameras: 0,
-              }));
-            }
-            return next;
+      } catch { /* counted below — a throw here is just "no answer this time" */ }
+
+      if (!ok && !cancelled) {
+        misses += 1;
+        setConsecutiveMisses(misses);
+        if (misses >= MISSES_BEFORE_OFFLINE) {
+          setHealthInfo({
+            online: false,
+            status: "unreachable",
+            ready: false,
+            engine_status: "failed",
+            engine_error: `No response from the engine on port 8000 after ${misses} attempts (${HEALTH_TIMEOUT_MS / 1000}s each).`,
+            model_loaded: false,
+            active_cameras: 0,
           });
         }
       }
 
-      // Update supervisor status
-      const s = await window.camai.engine.getStatus();
-      if (!cancelled) setProcStatus(s);
+      // Supervisor status. Guarded: it crosses the IPC bridge, and a throw here
+      // used to abort the whole tick — including the reschedule below, which
+      // silently killed health polling for the rest of the session.
+      try {
+        const s = await window.camai.engine.getStatus();
+        if (!cancelled) setProcStatus(s);
+      } catch { /* bridge unavailable — health polling must continue regardless */ }
+
+      if (!cancelled) {
+        timer = setTimeout(tick, ok ? POLL_AFTER_OK_MS : POLL_AFTER_FAIL_MS);
+      }
     };
 
-    checkHealth();
-    const id = setInterval(checkHealth, 1000); // Poll /health every second
+    void tick();
 
     return () => {
       cancelled = true;
-      clearInterval(id);
+      if (timer) clearTimeout(timer);
       offLog();
     };
   }, []);
@@ -728,7 +777,7 @@ function CamerasView({
             camera={c}
             site={siteLabel(c, orgName)}
             engineOnline={healthInfo ? (healthInfo.online && healthInfo.ready) : null}
-            onFullscreen={() => onFullscreen(c.id)}
+            onFullscreen={onFullscreen}
             paused={paused}
           />
         ))}
@@ -790,13 +839,46 @@ const SHARE_STATUS_TONES: Record<ShareStatus, string> = {
  * unaffected either way: the engine analyses registered cameras regardless of
  * who is watching — this only changes who is pulling pixels.
  */
-function CameraTile({ camera: c, site, engineOnline, onFullscreen, paused }: { camera: any; site: string; engineOnline: boolean | null; onFullscreen: () => void; paused: boolean }) {
+const CameraTile = memo(function CameraTile({ camera: c, site, engineOnline, onFullscreen, paused }: { camera: any; site: string; engineOnline: boolean | null; onFullscreen: (id: string) => void; paused: boolean }) {
+  // Bound once per tile. The parent now passes its own stable setter straight
+  // through (it used to wrap it in a fresh arrow per render, which would have
+  // made the memo() above a no-op by handing every tile a new prop identity on
+  // every parent poll tick).
+  const goFullscreen = useCallback(() => onFullscreen(c.id), [onFullscreen, c.id]);
+
   const [streamFailed, setStreamFailed] = useState(false);
   const [sharingType, setSharingType] = useState<"screen" | "webcam" | null>(null);
   const [shareStatus, setShareStatus] = useState<ShareStatus>("idle");
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
   const [detections, setDetections] = useState<TelemetryDetection[]>([]);
   const [telemetry, setTelemetry] = useState<CameraTelemetry | null>(null);
+  // Newest payload, always current, never triggers a render. The gate in the
+  // telemetry callback below decides which of these are worth committing to
+  // state; this ref is what makes discarding the rest safe.
+  const telemetryRef = useRef<CameraTelemetry | null>(null);
+  // Last detection set actually committed to state. Kept in a ref because the
+  // comparison runs inside the socket callback, which closes over the state
+  // value from the render it was created in.
+  const detectionsRef = useRef<TelemetryDetection[]>([]);
+  const lastFpsCommitRef = useRef(0);
+  const telemetrySessionRef = useRef<TelemetrySession | null>(null);
+  // Stable getters: the HUD polls these on its own tick, so they must not
+  // change identity per render or they would restart its sampling effect.
+  const getWsStats = useCallback(
+    () => telemetrySessionRef.current?.getStats() ?? { rttMs: 0, gapMs: 0, parseMs: 0, received: 0 },
+    [],
+  );
+  const getPushStats = useCallback(
+    () => sessionRef.current?.getPushStats() ?? { sent: 0, dropped: 0, buffered: 0, stalledMs: 0 },
+    [],
+  );
+  // Telemetry socket state, distinct from the camera's own health_status: the
+  // socket can be live while the camera has no video, and vice versa. The HUD
+  // shows both because conflating them is what made "disconnected" ambiguous.
+  const [telemetryConn, setTelemetryConn] = useState<TelemetryStatus>("idle");
+  // Opt-in per session (Ctrl+P). Off by default so the HUD never covers the
+  // picture for an operator who did not ask for it.
+  const [showPerf, setShowPerf] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [sourceName, setSourceName] = useState<string | null>(null);
   // Overlay class filter, kept at its saved defaults (all on). No per-user toggle
@@ -810,8 +892,39 @@ function CameraTile({ camera: c, site, engineOnline, onFullscreen, paused }: { c
   const sessionRef = useRef<MediaShareSession | null>(null);
 
   const isScreenShareCam = c.source_type === "screen_share";
+
+  // The engine reached the camera's source but got no usable video. Explicitly
+  // NOT "telemetry is null": that just means we haven't heard anything yet
+  // (still connecting, tile just mounted), which must not flash a fault banner.
+  // Only a payload that positively reports a non-online capture state counts.
+  const sourceFault =
+    telemetry?.health_status != null && telemetry.health_status !== "online";
+
   // `!paused` drops the MJPEG connection while the viewer covers this tile.
-  const showStream = engineOnline && !streamFailed && !isScreenShareCam && !paused;
+  //
+  // `!sourceFault` is the load-bearing half of the connection-budget fix. An
+  // MJPEG <img> pins one of Chromium's six connections per host for as long as
+  // its response is open, and a camera with no video has nothing to send — so
+  // pointing an <img> at one buys a blank picture at the cost of a connection
+  // every other engine request has to queue behind. Six dead cameras used to
+  // exhaust the budget outright, stalling /health and /api/status and making a
+  // perfectly healthy engine look unreachable on EVERY camera.
+  //
+  // The engine now also ends a frameless stream after a grace window
+  // (main.py, get_mjpeg_stream), but that alone is not sufficient: the <img>
+  // retries on error, so the connection would simply be reopened, occupying the
+  // slot for most of every cycle. Not asking for the stream in the first place
+  // is what actually frees it. Telemetry keeps arriving on the WebSocket, so
+  // the moment the source recovers (health_status flips to "online") the stream
+  // is requested again — no manual retry, no stale blank tile.
+  const showStream =
+    engineOnline && !streamFailed && !isScreenShareCam && !paused && !sourceFault;
+
+  // Show the reason banner for a real camera whose source is faulted, and for a
+  // screen share that WAS running and has stopped being pushed. Not for an
+  // idle virtual camera: that tile already offers "Choose Source…", which is
+  // the same information plus the button that fixes it.
+  const showSourceFault = sourceFault && !paused && (!isScreenShareCam || sharingType !== null);
 
   // The media element the overlay measures: the local <video> while sharing,
   // otherwise the MJPEG <img>. Both show the same frames the engine analysed.
@@ -850,27 +963,79 @@ function CameraTile({ camera: c, site, engineOnline, onFullscreen, paused }: { c
   }, [localStream]);
 
   // Detections are pushed once per AI cycle to /ws subscribers. Only subscribe
-  // while something is actually on screen — the engine pushes per subscriber,
-  // so a hidden tile would cost real work for boxes nobody can see.
-  // `!paused` is not redundant with showingMedia: a screen-share tile keeps
-  // showingMedia true while covered (its <video> is local and its share session
-  // must keep pushing frames to the engine), so without this its telemetry
-  // socket would stay open behind the viewer for boxes nobody can see.
+  // while the tile is actually on screen — the engine pushes per subscriber, so
+  // a covered tile would cost real work for boxes nobody can see. `paused` is
+  // what the fullscreen viewer sets on the tiles it covers.
+  //
+  // Gated on `paused`, NOT on `showingMedia`. showingMedia now depends on
+  // sourceFault, which is derived FROM this subscription's telemetry — feeding
+  // it back in here would oscillate: fault arrives -> media hides -> socket
+  // closes -> telemetry cleared -> fault clears -> media shows -> resubscribe ->
+  // fault arrives again, forever. The telemetry socket is also the only way a
+  // faulted camera can ever tell us it recovered, so it is precisely the thing
+  // that must stay open while the picture is hidden.
   useEffect(() => {
-    if (!engineOnline || !showingMedia || paused) { setDetections([]); setTelemetry(null); return; }
+    if (!engineOnline || paused) {
+      setDetections([]); setTelemetry(null); setTelemetryConn("idle");
+      telemetryRef.current = null;
+      // Must track the cleared state, or the first payload after resuming
+      // would compare against a stale set and could be skipped.
+      detectionsRef.current = [];
+      return;
+    }
     const session = new TelemetrySession(c.id, (t) => {
-      setDetections(t.detections ?? []);
-      setTelemetry(t);
+      // Commit only when the boxes would actually look different. Every
+      // payload carries a fresh array, so an unconditional commit re-rendered
+      // this tile and repainted the canvas at telemetry rate even for a camera
+      // sending nothing but empty arrays — see detectionsRenderEqual.
+      const nextDets = t.detections ?? [];
+      if (!detectionsRenderEqual(detectionsRef.current, nextDets)) {
+        detectionsRef.current = nextDets;
+        setDetections(nextDets);
+      }
+
+      // Telemetry arrives at AI FPS (~10-15Hz per camera). Committing every
+      // payload to state re-rendered this whole tile that often — times every
+      // tile on the grid, so a 6-camera workspace was doing ~90 subtree
+      // re-renders a second to update text nobody can read at that rate. That
+      // is the "dashboard becomes sluggish" symptom, and it gets worse with
+      // each camera added.
+      //
+      // Only four fields of this payload are ever rendered (health_status,
+      // source_error, device, fps). Three of them change rarely; fps changes
+      // constantly but is displayed to one decimal, where 15Hz and 2Hz are
+      // indistinguishable to a human. So commit only when something visible
+      // actually changed, and rate-limit the one field that always "changes".
+      //
+      // The full payload is still stored — the perf HUD reads every field of
+      // it — but it rides along with a commit that was going to happen anyway
+      // instead of forcing one of its own.
+      const prev = telemetryRef.current;
+      telemetryRef.current = t;
+      const now = Date.now();
+      const fpsDue = now - lastFpsCommitRef.current >= FPS_COMMIT_INTERVAL_MS;
+      const changed =
+        prev == null ||
+        prev.health_status !== t.health_status ||
+        prev.source_error !== t.source_error ||
+        prev.device !== t.device ||
+        (fpsDue && (prev.fps ?? 0).toFixed(1) !== (t.fps ?? 0).toFixed(1));
+      if (changed) {
+        if (fpsDue) lastFpsCommitRef.current = now;
+        setTelemetry(t);
+      }
+
       // Same payload, second consumer. The alert engine decides on its own
       // what is an event (a track it has not seen, an analytics counter that
       // moved) and rate-limits itself; this call is a handful of map lookups
       // in the common case where nothing new happened, and never blocks —
       // snapshot encoding is queued to idle time inside the engine.
       ingestAlert({ id: c.id, name: c.name, site }, t, captureRef.current);
-    });
+    }, setTelemetryConn);
+    telemetrySessionRef.current = session;
     session.start();
-    return () => session.stop();
-  }, [c.id, c.name, site, engineOnline, showingMedia, paused, ingestAlert]);
+    return () => { session.stop(); telemetrySessionRef.current = null; };
+  }, [c.id, c.name, site, engineOnline, paused, ingestAlert]);
 
   // Persistent across transient disconnects — only torn down on unmount or
   // an explicit "Stop Share" click, never on a dropped socket or a paused
@@ -896,12 +1061,20 @@ function CameraTile({ camera: c, site, engineOnline, onFullscreen, paused }: { c
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "F11") {
         e.preventDefault();
-        onFullscreen();
+        goFullscreen();
+      }
+      // Ctrl+P toggles the performance HUD for the hovered tile. Per-tile
+      // rather than global: on a multi-camera grid the useful question is
+      // almost always "why is THIS one slow", and showing every HUD at once
+      // costs render budget on tiles nobody is investigating.
+      if ((e.ctrlKey || e.metaKey) && (e.key === "p" || e.key === "P")) {
+        e.preventDefault();
+        setShowPerf((v) => !v);
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [isHovered, showingMedia, onFullscreen]);
+  }, [isHovered, showingMedia, goFullscreen]);
 
   // Screen shares must name their surface; webcam has no picker.
   function startSharing(type: "screen" | "webcam", source?: CaptureSource) {
@@ -955,7 +1128,7 @@ function CameraTile({ camera: c, site, engineOnline, onFullscreen, paused }: { c
     <div className="card overflow-hidden">
       <div
         ref={tileRef}
-        onDoubleClick={showingMedia ? onFullscreen : undefined}
+        onDoubleClick={showingMedia ? goFullscreen : undefined}
         onMouseEnter={() => setIsHovered(true)}
         onMouseLeave={() => setIsHovered(false)}
         className="relative flex aspect-video items-center justify-center bg-surface-0 text-zinc-600"
@@ -1026,15 +1199,63 @@ function CameraTile({ camera: c, site, engineOnline, onFullscreen, paused }: { c
         )}
 
         {/* Boxes sit above the media and below the status chips. object-cover
-            matches the className on both the <video> and the <img> above. */}
-        {showingMedia && shownDetections.length > 0 && (
+            matches the className on both the <video> and the <img> above.
+
+            Mounted for the whole life of the media element, NOT only while
+            detections exist. Gating on `shownDetections.length > 0` tore the
+            canvas down on every frame that happened to detect nothing and built
+            a fresh one on the next — so the overlay spent its life remounting,
+            and each new canvas had to wait for a ResizeObserver/`load` tick
+            before it knew its own size. An empty detection list now simply
+            draws an empty (cleared) canvas, which is both cheaper and stable. */}
+        {showingMedia && (
           <DetectionOverlay detections={shownDetections} mediaRef={mediaRef} fit={fit} />
         )}
 
+        {/* Performance HUD. Rendered only on request (Ctrl+P while hovering the
+            tile) and self-throttled to 4Hz internally, so it cannot become a
+            source of the frame drops it is there to diagnose. */}
+        <PerformanceOverlay
+          telemetry={telemetry}
+          connection={telemetryConn}
+          visible={showPerf}
+          getWsStats={getWsStats}
+          getPushStats={sharingType !== null ? getPushStats : undefined}
+        />
+
+        {/* "No video" is not the same as "nothing detected", and until now the
+            tile rendered both identically: an empty picture with no boxes. An
+            operator looking at a camera whose RTSP address is wrong, whose
+            YouTube link has died, or whose virtual source nobody picked, saw
+            exactly what a working camera watching an empty room looks like —
+            and reasonably concluded the detection had stopped working.
+
+            The engine knows the difference and now says so on every telemetry
+            payload (pipeline.source_error_text). Show it. */}
+        {showSourceFault && (
+          // pr-12 keeps the text clear of the fullscreen button in the corner.
+          <div className="absolute inset-x-0 bottom-0 z-20 flex items-start gap-2 bg-black/80 py-2 pl-2.5 pr-12 text-left">
+            <AlertTriangle size={14} className="mt-px shrink-0 text-warn" />
+            <div className="min-w-0">
+              <div className="text-[11px] font-semibold text-zinc-100">
+                No video from this source — AI is not running on it
+              </div>
+              {telemetry?.source_error && (
+                <div className="mt-0.5 text-[10px] leading-snug text-zinc-400">
+                  {telemetry.source_error}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
         {/* Stays visible in fullscreen — an operator watching a full-screen feed
-            is exactly who needs to see the pipeline is still keeping up. */}
-        {showingMedia && telemetry && (
-          <div className="absolute bottom-2 left-2 rounded bg-black/70 px-2 py-0.5 text-[10px] font-semibold text-zinc-200 shadow">
+            is exactly who needs to see the pipeline is still keeping up.
+            Hidden while the source is faulted: "0 shown · 0.0 fps" is not a
+            performance reading there, it is the absence of one, and it would sit
+            on top of the banner that explains why. */}
+        {showingMedia && telemetry && !showSourceFault && (
+          <div className="absolute bottom-2 left-2 z-20 rounded bg-black/70 px-2 py-0.5 text-[10px] font-semibold text-zinc-200 shadow">
             {shownDetections.length} shown · {(telemetry.fps ?? 0).toFixed(1)} fps
             {telemetry.device ? ` · ${telemetry.device.toUpperCase()}` : ""}
           </div>
@@ -1042,9 +1263,11 @@ function CameraTile({ camera: c, site, engineOnline, onFullscreen, paused }: { c
 
         {showingMedia && (
           <button
-            onClick={onFullscreen}
+            onClick={goFullscreen}
             title="Full screen (F11, or double-click)"
-            className="absolute bottom-2 right-2 rounded bg-black/70 p-1.5 text-zinc-300 hover:bg-black/90 hover:text-white"
+            // z-30 keeps it clickable above the source-fault banner, which
+            // spans the full width of the tile's bottom edge.
+            className="absolute bottom-2 right-2 z-30 rounded bg-black/70 p-1.5 text-zinc-300 transition-colors hover:bg-black/90 hover:text-white"
           >
             <Maximize2 size={13} />
           </button>
@@ -1053,7 +1276,7 @@ function CameraTile({ camera: c, site, engineOnline, onFullscreen, paused }: { c
         {/* Name the actual surface, not just the mode — "Sharing screen" gave the
             operator no way to tell which screen/window was going out. */}
         {sharingType !== null && (
-          <div className="absolute top-2 right-2 max-w-[70%] truncate rounded bg-red-600/90 px-2 py-0.5 text-[10px] font-semibold text-white shadow"
+          <div className="absolute top-2 right-2 z-20 max-w-[70%] truncate rounded bg-red-600/90 px-2 py-0.5 text-[10px] font-semibold text-white shadow"
                title={sourceName ?? undefined}>
             Sharing: {sourceName ?? sharingType}
           </div>
@@ -1062,7 +1285,7 @@ function CameraTile({ camera: c, site, engineOnline, onFullscreen, paused }: { c
         {/* Terminal state: the window we were capturing is gone. Offer a re-pick
             rather than retrying an id that can never resolve again. */}
         {shareStatus === "source_gone" && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-surface-0/95 p-4 text-center">
+          <div className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-3 bg-surface-0/95 p-4 text-center">
             <AlertTriangle size={22} className="text-warn" />
             <div className="text-xs text-zinc-300">Selected source is no longer available.</div>
             <div className="flex gap-2">
@@ -1121,7 +1344,7 @@ function CameraTile({ camera: c, site, engineOnline, onFullscreen, paused }: { c
       </div>
     </div>
   );
-}
+});
 
 function Panel({ title, children }: { title: string; children: React.ReactNode }) {
   return (

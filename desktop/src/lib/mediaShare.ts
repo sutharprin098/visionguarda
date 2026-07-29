@@ -33,7 +33,33 @@ const WS_URL = "ws://127.0.0.1:8000/ws";
 const FRAME_INTERVAL_MS = 100;
 const HEARTBEAT_INTERVAL_MS = 5000;
 const HEARTBEAT_TIMEOUT_MS = 12000;
+// How long the socket may stay open with NO frame actually sent before the
+// capture stream is presumed dead and re-acquired. Declared with the original
+// watchdog design but never wired to anything until checkFrameFlow() below —
+// see the note in startFrameLoop for what that cost.
 const SEND_STALL_TIMEOUT_MS = 8000;
+// Ceiling on un-drained WebSocket bytes before frames start being skipped.
+//
+// This was 512KB, justified as "8-12 frames of slack: enough to ride out a
+// brief engine hiccup". That reasoning is right for a file upload and wrong
+// for live video, and it is the single largest source of delay in the virtual
+// camera path: a queued frame is not resilience, it is a frame that will be
+// DISPLAYED LATE. At the 10fps push rate, 8-12 queued frames is roughly a full
+// SECOND of latency that the design settles into under any sustained load —
+// the operator sees a second-old screen with boxes drawn on it and reports,
+// correctly, that it is nowhere near real time.
+//
+// For live video the rule is the opposite one: never hold a frame you could
+// replace with a newer one. This is a loopback socket (127.0.0.1), so
+// bufferedAmount returns to zero almost immediately whenever the engine is
+// keeping up; a non-trivial reading means it is NOT keeping up, and the right
+// response is to drop this frame and offer a fresher one 100ms later.
+//
+// Sized to roughly one frame, so at most one is ever in flight. Worst-case
+// added latency goes from ~1s to ~100-150ms, and a genuine engine stall now
+// drops frames (which is invisible) instead of accumulating stale ones (which
+// is the complaint).
+const MAX_WS_BUFFERED_BYTES = 64 * 1024;
 const STREAM_REACQUIRE_DELAY_MS = 1500;
 const RECONNECT_BACKOFF_MS = [500, 1000, 2000, 4000, 8000, 15000, 30000];
 
@@ -55,6 +81,10 @@ export class MediaShareSession {
 
   private lastPongTs = 0;
   private lastSendOkTs = 0;
+  /** Frames skipped because the socket was backed up — surfaced for the debug panel. */
+  private droppedFrames = 0;
+  /** Frames that actually reached the socket. */
+  private sentFrames = 0;
   private reconnectAttempt = 0;
   private stopped = true;
   private status: ShareStatus = "idle";
@@ -74,6 +104,19 @@ export class MediaShareSession {
 
   getStream(): MediaStream | null { return this.stream; }
   getStatus(): ShareStatus { return this.status; }
+
+  /** Push-side counters for the performance HUD. `buffered` is the socket's
+   *  un-drained byte count — a number that climbs and stays high is the engine
+   *  failing to keep up, which is invisible from the engine's own telemetry
+   *  because those frames never arrived. */
+  getPushStats(): { sent: number; dropped: number; buffered: number; stalledMs: number } {
+    return {
+      sent: this.sentFrames,
+      dropped: this.droppedFrames,
+      buffered: this.ws?.bufferedAmount ?? 0,
+      stalledMs: this.lastSendOkTs ? Date.now() - this.lastSendOkTs : 0,
+    };
+  }
 
   async start(): Promise<void> {
     if (!this.stopped) return;
@@ -308,6 +351,11 @@ export class MediaShareSession {
       try {
         this.ws.send(JSON.stringify({ type: "ping", ts: Date.now() }));
       } catch { /* onclose will follow and trigger reconnect */ }
+
+      // Socket liveness and video liveness are separate failures and need
+      // separate detectors. The ping above covers the socket; this covers the
+      // case where the socket answers perfectly and no pixels are moving.
+      this.checkFrameFlow();
     }, HEARTBEAT_INTERVAL_MS);
   }
 
@@ -335,21 +383,75 @@ export class MediaShareSession {
     this.frameTimer = setInterval(() => {
       if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
       const video = this.video;
+
+      // ── Backpressure: never queue a frame the socket cannot drain ─────────
+      // ws.send() buffers without bound. When the engine is busy (a slow
+      // inference cycle, another camera saturating the loop) the encoded
+      // frames pile up in bufferedAmount instead of going anywhere — the
+      // renderer's memory grows, and every frame that does arrive is already
+      // stale by the length of the backlog. Skipping while backed up is the
+      // "drop old frames instead of queueing" rule applied at the only place
+      // in this path that can actually queue.
+      if (this.ws.bufferedAmount > MAX_WS_BUFFERED_BYTES) {
+        this.droppedFrames++;
+        return;
+      }
+
       if (video && video.readyState >= video.HAVE_CURRENT_DATA && this.ctx && this.canvas) {
         try {
           this.ctx.drawImage(video, 0, 0, this.canvas.width, this.canvas.height);
           const frame = this.canvas.toDataURL("image/jpeg", 0.6);
           this.ws.send(JSON.stringify({ type: "screen_frame", camera_id: this.cameraId, frame }));
+          // Only a frame that actually reached the socket counts as progress.
           this.lastSendOkTs = Date.now();
+          this.sentFrames++;
         } catch {
-          // transient encode/send failure — the stall watchdog below covers
-          // the case where this keeps failing instead of self-healing.
+          // transient encode/send failure — ignore
         }
       }
-      if (Date.now() - this.lastSendOkTs > SEND_STALL_TIMEOUT_MS) {
-        this.forceReconnect();
-      }
+      // NOTE: the `else` branch here used to refresh lastSendOkTs whenever the
+      // video element was not ready, on the reasoning that a loading stream
+      // should not trip the watchdog. That is exactly backwards, and it is the
+      // bug behind "No frames are being pushed":
+      //
+      // A capture track that has ended (screen share revoked, monitor
+      // unplugged, laptop lid closed, OS reclaimed the surface) leaves the
+      // <video> permanently below HAVE_CURRENT_DATA. That branch then refreshed
+      // the freshness timestamp forever, so nothing downstream could ever tell
+      // "starting up" from "dead". The socket stays open, ping/pong keeps
+      // answering, the heartbeat below is satisfied — and zero frames flow, for
+      // as long as the app is left running. The engine correctly reports "No
+      // frames are being pushed to this virtual camera" and nothing on this
+      // side ever tries to fix it.
+      //
+      // Now the timestamp only moves on a real send, and checkFrameFlow()
+      // below turns a stalled stream into a re-acquire.
     }, FRAME_INTERVAL_MS);
+  }
+
+  /**
+   * Frame-flow watchdog: detects "socket healthy, but no video".
+   *
+   * The heartbeat proves the SOCKET is alive; it says nothing about whether the
+   * capture is producing pixels. Those two fail independently, and the failure
+   * that stranded virtual cameras was the second one — which had no detector at
+   * all (lastSendOkTs was written in three places and read in none, so the
+   * watchdog it existed for was never actually built).
+   *
+   * Re-acquiring the stream is the right recovery because the socket is fine:
+   * tearing down and reconnecting the WebSocket would not bring the video back.
+   */
+  private checkFrameFlow(): void {
+    if (this.stopped) return;
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
+    if (Date.now() - this.lastSendOkTs <= SEND_STALL_TIMEOUT_MS) return;
+
+    this.setStatus("reconnecting", "no frames from capture source");
+    // Reset first: acquireStream() is async and this check runs on an
+    // interval, so without it the same stall re-fires a re-acquire every tick
+    // while the first one is still in flight.
+    this.lastSendOkTs = Date.now();
+    this.ensureStream();
   }
 
   private stopFrameLoop(): void {
