@@ -18,6 +18,13 @@ a long time looking fine:
 
 So the assertions here are mostly "this class does NOT come out" — absence is
 the whole point, and absence is what silently regresses.
+
+Note on scope: profiles narrow to what a camera can ACT on, not to a single
+object family. The first cut was too aggressive — traffic excluded person, so
+a helmet violation had no rider to attach to; security and factory excluded
+vehicles, so a car crossing a perimeter drew nothing. Those classes are in
+their profiles now. What stays excluded is anything with no producer or no use
+on that camera, which is the part that actually protects the client.
 """
 import pytest
 
@@ -45,10 +52,16 @@ def classes_of(dets):
 # 1. Profiles narrow what the camera reports
 # --------------------------------------------------------------------------
 
-def test_traffic_reports_vehicles_and_drops_people():
+def test_traffic_reports_vehicles_and_riders_but_drops_scene_clutter():
     out = classes_of(filter_by_profile(SCENE, "traffic"))
     assert "bus" in out and "car" in out
-    assert "person" not in out, "a traffic camera must not report people"
+    # person IS in the traffic profile: a helmet violation is attached to a
+    # RIDER, and both helmet.py and the plate path key off the person/vehicle
+    # pair. Dropping person here left the traffic build unable to say who the
+    # bare head belonged to.
+    assert "person" in out
+    # Personal-effect and face classes still have no traffic use and no
+    # producer worth paying for on a road camera.
     assert "handbag" not in out
     assert "face" not in out
 
@@ -83,14 +96,24 @@ def test_traffic_reports_number_plate_and_toggle_gates_it():
     assert "number_plate" in on_out
 
 
-def test_security_reports_people_and_drops_vehicles():
+def test_security_reports_people_and_vehicles():
     out = classes_of(filter_by_profile(SCENE, "security"))
     assert "person" in out and "handbag" in out and "face" in out
-    assert "car" not in out and "bus" not in out
+    # Vehicles are in scope for security too — a car entering a secured yard is
+    # the event, not noise. Narrowing them away meant a perimeter camera drew
+    # nothing at all for the most common thing that crosses it.
+    assert "car" in out and "bus" in out
+    # Still nothing traffic-specific: no producer runs for these on a security
+    # camera, so listing them would advertise a detector that never fires.
+    assert "number_plate" not in classes_of(
+        filter_by_profile(SCENE + [det("number_plate")], "security")
+    )
 
 
-def test_factory_reports_only_people_and_faces():
-    assert classes_of(filter_by_profile(SCENE, "factory")) == ["face", "person"]
+def test_factory_reports_people_faces_and_vehicles():
+    out = classes_of(filter_by_profile(SCENE, "factory"))
+    assert out == ["bus", "car", "face", "person"]
+    assert "handbag" not in out
 
 
 @pytest.mark.parametrize("profile", ["custom", None])
@@ -180,7 +203,7 @@ def test_profile_and_features_both_apply():
 def test_filters_tolerate_missing_and_odd_values():
     junk = [{"class": "person"}, {}, {"class": None}, {"class": "car"}]
     # Neither filter may raise; unknown/None classes simply don't match.
-    assert classes_of(filter_by_profile(junk, "traffic")) == ["car"]
+    assert classes_of(filter_by_profile(junk, "traffic")) == ["car", "person"]
     assert filter_by_features(junk, off("person_detection")) is not None
     assert filter_by_features(junk, None) == junk
     assert filter_by_profile([], "traffic") == []

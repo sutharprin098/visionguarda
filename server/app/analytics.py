@@ -67,9 +67,9 @@ def _object_category(class_name: str) -> str:
 PRODUCIBLE_VEHICLE_CLASSES = {"car", "bus", "truck", "motorcycle", "bicycle"}
 
 PROFILE_CLASSES = {
-    "traffic": set(PRODUCIBLE_VEHICLE_CLASSES) | {"traffic_light", "stop_sign", "helmet", "no_helmet", "number_plate"},
-    "security": {"person", "backpack", "handbag", "suitcase", "umbrella", "face"},
-    "factory": {"person", "face"},
+    "traffic": set(PRODUCIBLE_VEHICLE_CLASSES) | {"person", "traffic_light", "stop_sign", "helmet", "no_helmet", "number_plate"},
+    "security": set(PRODUCIBLE_VEHICLE_CLASSES) | {"person", "backpack", "handbag", "suitcase", "umbrella", "face"},
+    "factory": set(PRODUCIBLE_VEHICLE_CLASSES) | {"person", "face"},
 }
 
 
