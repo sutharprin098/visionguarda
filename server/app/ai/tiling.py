@@ -148,6 +148,15 @@ _CHANGE_MAP_W = 480
 # there. See _fuse for how truncated boxes are recombined.
 _EDGE_SLACK_PX = 2
 
+# What the rest of the AI/tracking/telemetry path costs per cycle, outside the
+# inference passes this module schedules. Subtracted from the caller's frame
+# period before any tile budget is derived (see AdaptiveTileEngine.infer), so
+# the tile stage cannot spend slack that the stages after it still need.
+# Measured on the reference machine (i7-8665U/UHD 620): preprocess 3.1ms +
+# postprocess 2.1ms + tracking 1.9ms, rounded up to leave room for analytics
+# and telemetry build on a busy frame.
+_NON_INFER_STAGE_MS = 12.0
+
 # Grid is chosen so a full sweep of every tile completes within this many
 # cycles at the current budget. Prevents e.g. a 5x5 grid being selected when
 # the budget only affords one tile per cycle (25 cycles ≈ 2s to cover a frame,
@@ -1001,7 +1010,8 @@ class AdaptiveTileEngine:
 
     def infer(self, backend, frame, *, base_imgsz: int, conf_thresh: float,
               iou_thresh: float, min_imgsz: int, max_imgsz: int,
-              n_tracks: int = 0, geometry_shape=None) -> TileResult:
+              n_tracks: int = 0, geometry_shape=None,
+              cycle_budget_ms: float = None) -> TileResult:
         """Run this cycle's inference and return fused detections in `frame`
         coordinates.
 
@@ -1012,6 +1022,19 @@ class AdaptiveTileEngine:
         is itself a crop of it (the pipeline's zone-derived ROI pre-crop). It is
         used only to judge whether a box is a plausible size for its class —
         see EngineBackend.postprocess. Defaults to `frame`'s own shape.
+
+        `cycle_budget_ms` is the WHOLE cycle's wall-clock allowance — the AI
+        stage's frame period, derived by the caller from its target FPS. Extra
+        tile passes may only use what the mandatory full-frame pass leaves
+        unspent. Without it the engine spends `latency_budget_ms` (180ms by
+        default) of EXTRA inference regardless of how fast the pipeline is
+        trying to run, which is a policy divorced from the frame period:
+        measured on this hardware a 29ms base pass became a 141.6ms cycle
+        (4.08x, 28.8 -> 7.1 fps ceiling) purely because nothing related the
+        budget to the deadline it was supposed to protect. Passing it makes
+        tiling strictly opportunistic — it consumes real slack and nothing
+        else, so recall is bought only where framerate is not being sold.
+        None keeps the old unbounded-by-deadline behaviour.
         """
         s = get_tiling_settings()
         now = time.time()
@@ -1069,8 +1092,25 @@ class AdaptiveTileEngine:
         # same configuration behaving like two different products. The tolerance
         # costs at most 15% over the nominal budget on the marginal tile and
         # buys a stable, reproducible answer.
+        # The governor's pool is an upper bound on what this camera MAY spend.
+        # The frame period is an upper bound on what it CAN spend without
+        # missing its deadline. Take the smaller: a camera is never allowed to
+        # buy recall with framerate the operator asked for.
+        #
+        # Slack is measured against the full-frame pass that has already run
+        # this cycle (t_inf_base) plus a fixed allowance for the rest of the
+        # stage — pre/post, tracking, analytics, telemetry — which the base
+        # measurement does not include but which still has to fit in the same
+        # period. Without that allowance the tile stage would spend the frame's
+        # entire remainder and the cycle would land exactly one stage late.
+        effective_budget_ms = alloc.budget_ms
+        if cycle_budget_ms is not None and cycle_budget_ms > 0:
+            spent = t_inf_base if t_inf_base > 0 else (self._base_ms_ema or 0.0)
+            slack = cycle_budget_ms - spent - _NON_INFER_STAGE_MS
+            effective_budget_ms = max(0.0, min(effective_budget_ms, slack))
+
         budget_tiles = 0 if per_tile is None else int(
-            _clamp(int(alloc.budget_ms / max(1.0, per_tile) + 0.15), 0, alloc.max_tiles)
+            _clamp(int(effective_budget_ms / max(1.0, per_tile) + 0.15), 0, alloc.max_tiles)
         )
         if not s.enabled:
             budget_tiles = 0
@@ -1111,6 +1151,12 @@ class AdaptiveTileEngine:
             "budget_tiles": budget_tiles,
             "tile_budget": tile_budget,
             "reserve": reserve,
+            # Both numbers, so "why did tiling stop?" is answerable from
+            # telemetry alone: pool_ms is what the governor offered,
+            # budget_ms is what the frame period actually left.
+            "pool_ms": round(alloc.budget_ms, 1),
+            "budget_ms": round(effective_budget_ms, 1),
+            "cycle_budget_ms": round(cycle_budget_ms, 1) if cycle_budget_ms else None,
             "per_tile_ms": round(per_tile, 1) if per_tile is not None else None,
             "cameras_sharing": _active_count(),
             "headroom": round(alloc.headroom, 3),
@@ -1158,7 +1204,11 @@ class AdaptiveTileEngine:
         # Whatever the tile stage did not use, plus the reservation held back
         # for these stages in the first place.
         spare = budget_tiles - stats["tiles_inferred"]
-        spare_ms = max(0.0, alloc.budget_ms - t_inf + t_inf_base)
+        # Same deadline-derived allowance the tile stage was held to, minus what
+        # the tile stage actually spent (t_inf - t_inf_base). Using the raw pool
+        # here would let the zoom/edge stages re-spend a budget the frame period
+        # already refused the tiles.
+        spare_ms = max(0.0, effective_budget_ms - t_inf + t_inf_base)
         if s.enabled and spare > 0 and spare_ms > 0:
             exp_items, ep, ei, epo, n_exp = self._expand_edges(
                 backend, frame, items, s, conf_thresh, iou_thresh,
