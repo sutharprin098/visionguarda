@@ -170,6 +170,22 @@ def _extract(url: str) -> _Resolved:
         "logger": _QuietLogger(),
         "skip_download": True,
         "noplaylist": True,
+        # `noplaylist` is NOT enough on its own, and the difference is what
+        # wedged a capture thread indefinitely in production.
+        #
+        # noplaylist only suppresses the playlist ATTACHED to a video URL
+        # (?v=X&list=Y). A channel or tab URL — "youtube.com/@NASA/videos" —
+        # *is* the playlist, so yt-dlp enumerates it as requested. Combined with
+        # the entries[0] materialisation below, that paged through the channel's
+        # entire back catalogue over the network, one API call at a time, with
+        # no upper bound. py-spy caught it live: __process_playlist -> _entries
+        # -> get_requested_items, blocked on an SSL read, holding the camera's
+        # Cap thread forever while the UI showed the camera as "connecting".
+        #
+        # playlist_items caps the enumeration at the source, so a channel URL
+        # costs one page instead of hundreds.
+        "playlist_items": "1",
+        "playlistend": 1,
         "format": _FORMAT,
         "socket_timeout": _SOCKET_TIMEOUT_S,
         # Fail fast. This runs on the capture thread; a long retry schedule
@@ -193,11 +209,17 @@ def _extract(url: str) -> _Resolved:
 
     # A search or channel URL resolves to a playlist; take its first entry so
     # a channel's /live URL still works.
+    #
+    # Taken LAZILY. `entries` is a yt-dlp LazyList, not a list: the previous
+    # `[e for e in (info.get("entries") or []) if e]` looked like a cheap filter
+    # but forced the generator to completion, which for a channel tab means
+    # paging the whole back catalogue over the network before the first frame
+    # could ever be decoded. next() stops after the first item, which is the
+    # only one this function has ever used.
     if info.get("_type") == "playlist":
-        entries = [e for e in (info.get("entries") or []) if e]
-        if not entries:
+        info = next((e for e in (info.get("entries") or []) if e), None)
+        if not info:
             raise StreamResolveError("that URL has no playable stream")
-        info = entries[0]
 
     direct = info.get("url")
     if not direct:

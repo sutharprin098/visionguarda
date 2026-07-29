@@ -34,11 +34,6 @@ _PACKAGES = [
     "pydantic",
     "pydantic_core",
     "starlette",
-    # yt_dlp imports its ~2000 site extractors by string at runtime, so
-    # nothing in a static analysis of app/ai/stream_resolver.py reaches them.
-    # collect_all is what makes YouTube resolution work in the frozen engine
-    # rather than only when running from source.
-    "yt_dlp",
 ]
 for _pkg in _PACKAGES:
     try:
@@ -48,6 +43,9 @@ for _pkg in _PACKAGES:
         hiddenimports += h
     except Exception as _e:  # package not installed — skip it
         print(f"[spec] skipping optional package {_pkg}: {_e}")
+
+# Bundle yt_dlp modules into PYZ bytecode instead of 2000+ loose .py files
+hiddenimports += collect_submodules("yt_dlp")
 
 # uvicorn loads its loop/protocol/lifespan implementations by string at
 # runtime, so they must be forced in as hidden imports.
