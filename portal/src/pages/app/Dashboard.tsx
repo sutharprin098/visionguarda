@@ -1,4 +1,5 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
+import clsx from "clsx";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import {
@@ -12,6 +13,7 @@ import { useAuth } from "../../contexts/AuthContext";
 import { PageHeader, Kpi, Badge, statusTone, statusLabel } from "../../components/ui";
 import { TimeSeries, Spark } from "../../components/charts";
 import { fmtAgo, fmtBytes } from "../../lib/format";
+import { computeCameraStatus, CAMERA_STATUS_TONE, CAMERA_STATUS_LABEL, CAMERA_STATUS_DOT } from "../../lib/cameraStatus";
 
 export default function Dashboard() {
   const { org, profile, can } = useAuth();
@@ -36,7 +38,7 @@ export default function Dashboard() {
           .order("created_at", { ascending: false }).limit(5),
         supabase.from("devices").select("id, name, is_online, last_seen_at, profiles(full_name)")
           .order("created_at", { ascending: false }).limit(5),
-        supabase.from("cameras").select("id, name, status").order("name"),
+        supabase.from("cameras").select("id, name, status, camera_health(checked_at)").order("name"),
         supabase.from("usage_logs").select("metric, quantity, recorded_at")
           .in("metric", ["cpu_pct", "gpu_pct", "mem_pct"])
           .order("recorded_at", { ascending: false }).limit(30),
@@ -65,10 +67,20 @@ export default function Dashboard() {
       })
       .on("postgres_changes", { event: "*", schema: "public", table: "cameras" }, () =>
         qc.invalidateQueries({ queryKey: ["dash-recent"] }))
+      .on("postgres_changes", { event: "*", schema: "public", table: "camera_health" }, () =>
+        qc.invalidateQueries({ queryKey: ["dash-recent"] }))
       .on("postgres_changes", { event: "*", schema: "public", table: "devices" }, () =>
         qc.invalidateQueries({ queryKey: ["dash-recent"] }))
       .subscribe();
     return () => { supabase.removeChannel(ch); };
+  }, []);
+
+  // Same staleness re-check as Cameras.tsx: a camera whose health relay
+  // stopped must stop reading "Online" without needing a new realtime event.
+  const [, forceTick] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => forceTick((v) => v + 1), 1000);
+    return () => clearInterval(id);
   }, []);
 
   const events7d: { day: string; count: number }[] = (stats?.events_7d ?? []).map((d: any) => ({
@@ -281,17 +293,20 @@ export default function Dashboard() {
             <p className="py-6 text-center text-xs text-ink-3">No cameras configured yet.</p>
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-              {recent.cameras.slice(0, 8).map((c: any) => (
-                <div key={c.id} className="flex items-center justify-between gap-2 rounded-xl border border-line/80 bg-surface-2/40 px-3 py-2 transition hover:border-accent/40 min-w-0">
-                  <div className="flex items-center gap-2 min-w-0 flex-1">
-                    <span className={`h-2 w-2 shrink-0 rounded-full ${c.status === 'online' ? 'bg-emerald-500 animate-pulse' : 'bg-slate-400'}`} />
-                    <span className="truncate text-xs font-semibold text-ink-1">{c.name}</span>
+              {recent.cameras.slice(0, 8).map((c: any) => {
+                const s = computeCameraStatus(c.status, c.camera_health?.checked_at);
+                return (
+                  <div key={c.id} className="flex items-center justify-between gap-2 rounded-xl border border-line/80 bg-surface-2/40 px-3 py-2 transition hover:border-accent/40 min-w-0">
+                    <div className="flex items-center gap-2 min-w-0 flex-1">
+                      <span className={clsx("h-2 w-2 shrink-0 rounded-full", CAMERA_STATUS_DOT[s], (s === "online" || s === "connecting") && "animate-pulse")} />
+                      <span className="truncate text-xs font-semibold text-ink-1">{c.name}</span>
+                    </div>
+                    <span className="shrink-0">
+                      <Badge tone={CAMERA_STATUS_TONE[s]} pulse={s === "online" || s === "connecting"}>{CAMERA_STATUS_LABEL[s]}</Badge>
+                    </span>
                   </div>
-                  <span className="shrink-0">
-                    <Badge tone={statusTone[c.status]}>{statusLabel[c.status] ?? c.status}</Badge>
-                  </span>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>

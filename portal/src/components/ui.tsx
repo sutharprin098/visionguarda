@@ -3,13 +3,17 @@ import clsx from "clsx";
 import { X, AlertTriangle, Sparkles, CheckCircle2 } from "lucide-react";
 
 // ---------------------------------------------------------------- badges
-export function Badge({ tone = "default", children }: { tone?: string; children: ReactNode }) {
+export function Badge({ tone = "default", pulse = false, children }: { tone?: string; pulse?: boolean; children: ReactNode }) {
   const tones: Record<string, string> = {
     default: "bg-surface-3/80 text-ink-2 border-line/60",
     ok: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20",
     warn: "bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20",
     danger: "bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/20",
     accent: "bg-sky-500/10 text-sky-600 dark:text-sky-400 border-sky-500/20",
+    // -700, not -600: the same -600-on-10%-tint pairing measured ~3.6:1 in
+    // light mode for the other tones above (below the 4.5:1 AA floor, fixed
+    // separately in AppShell.tsx) — no reason to add a 6th instance of it.
+    error: "bg-orange-500/10 text-orange-700 dark:text-orange-400 border-orange-500/20",
   };
 
   const dots: Record<string, string> = {
@@ -17,12 +21,13 @@ export function Badge({ tone = "default", children }: { tone?: string; children:
     warn: "bg-amber-500 shadow-amber-500/50",
     danger: "bg-rose-500 shadow-rose-500/50",
     accent: "bg-sky-500 shadow-sky-500/50",
+    error: "bg-orange-500 shadow-orange-500/50",
     default: "bg-slate-400",
   };
 
   return (
     <span className={clsx("inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border px-2.5 py-0.5 text-xs font-semibold tracking-wide transition-all shadow-2xs", tones[tone])}>
-      <span className={clsx("h-1.5 w-1.5 rounded-full shadow-xs", dots[tone])} />
+      <span className={clsx("h-1.5 w-1.5 rounded-full shadow-xs", dots[tone], pulse && "animate-pulse")} />
       {children}
     </span>
   );
@@ -189,14 +194,29 @@ export function Field({ label, children, hint }: { label: string; children: Reac
 
 export function Toggle({ label, value, onChange }: { label: string; value: boolean; onChange: (v: boolean) => void }) {
   return (
-    <label className="flex cursor-pointer items-center justify-between py-1">
-      <span className="t-small">{label}</span>
+    <label className="inline-flex cursor-pointer items-center justify-between gap-3 py-1 select-none">
+      {label ? <span className="t-small font-semibold text-ink-1">{label}</span> : null}
       <button
         type="button"
-        onClick={() => onChange(!value)}
-        className={clsx("relative h-6 w-11 rounded-full transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-accent/20", value ? "bg-sky-500" : "bg-surface-3")}
+        role="switch"
+        aria-checked={value}
+        onClick={(e) => {
+          e.stopPropagation();
+          onChange(!value);
+        }}
+        className={clsx(
+          "relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-accent/40 shadow-inner",
+          value ? "bg-emerald-500" : "bg-slate-300 dark:bg-slate-700",
+        )}
       >
-        <span className={clsx("absolute top-1 h-4 w-4 rounded-full bg-white transition-transform duration-200 ease-in-out shadow-xs", value ? "translate-x-6" : "translate-x-1")} />
+        <span
+          className={clsx(
+            "pointer-events-none inline-flex h-5 w-5 transform items-center justify-center rounded-full bg-white shadow-md transition duration-200 ease-in-out font-extrabold text-[10px]",
+            value ? "translate-x-5 text-emerald-600" : "translate-x-0 text-slate-400",
+          )}
+        >
+          {value ? "✓" : "✕"}
+        </span>
       </button>
     </label>
   );

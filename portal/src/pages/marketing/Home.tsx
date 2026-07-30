@@ -1,36 +1,37 @@
+import React from "react";
 import { motion, useScroll, useSpring } from "framer-motion";
 import { useSmoothScroll } from "../../lib/useSmoothScroll";
-import Navbar from "../../components/landing/Navbar";
-import Hero from "../../components/landing/Hero";
-import TrustMarquee from "../../components/landing/TrustMarquee";
-import Pipeline from "../../components/landing/Pipeline";
-import Telemetry from "../../components/landing/Telemetry";
-import Capabilities from "../../components/landing/Capabilities";
-import Platform from "../../components/landing/Platform";
-import Footer from "../../components/landing/Footer";
+import HeroSection from "../../components/landing/HeroSection";
+import RealtimeAlertSection from "../../components/landing/RealtimeAlertSection";
+import CameraNetworkSection from "../../components/landing/CameraNetworkSection";
+import AIFeaturesGrid from "../../components/landing/AIFeaturesGrid";
+import LiveDashboardSection from "../../components/landing/LiveDashboardSection";
+import TrustSection from "../../components/landing/TrustSection";
 
 export default function Home() {
+  // Inertial smooth scroll via Lenis
   useSmoothScroll();
+
   const { scrollYProgress } = useScroll();
-  const progress = useSpring(scrollYProgress, { stiffness: 120, damping: 30, restDelta: 0.001 });
+  const scaleX = useSpring(scrollYProgress, { stiffness: 120, damping: 30, restDelta: 0.001 });
 
   return (
-    <div className="ap-page relative min-h-screen overflow-x-hidden selection:bg-[var(--ap-accent-soft)]">
-      {/* scroll progress bar */}
+    <div className="ap-page min-h-screen overflow-x-hidden selection:bg-[var(--ap-accent-soft)]">
+      {/* Top Scroll Progress Bar */}
       <motion.div
-        style={{ scaleX: progress }}
-        className="fixed left-0 right-0 top-0 z-[60] h-[3px] origin-left bg-[var(--ap-accent)]"
+        style={{ scaleX }}
+        className="fixed top-0 left-0 right-0 h-[3px] bg-[var(--ap-accent)] z-[60] origin-left shadow-sm"
       />
-      <Navbar />
-      <main>
-        <Hero />
-        <TrustMarquee />
-        <Pipeline />
-        <Telemetry />
-        <Capabilities />
-        <Platform />
+
+      {/* Main Content Sections */}
+      <main className="relative">
+        <HeroSection />
+        <RealtimeAlertSection />
+        <CameraNetworkSection />
+        <AIFeaturesGrid />
+        <LiveDashboardSection />
+        <TrustSection />
       </main>
-      <Footer />
     </div>
   );
 }

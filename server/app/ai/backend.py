@@ -18,6 +18,82 @@ except ImportError:
     HAS_ONNXRUNTIME = False
 
 
+# ── Shared OpenVINO Core ────────────────────────────────────────────────────
+# ov.Core() itself is free; reading `.available_devices` off a FRESH Core is
+# not — it enumerates every installed plugin, and on this machine's Intel iGPU
+# that measured 2.9-3.9 s. The result is cached inside the Core, so the second
+# read on the SAME Core is 0.00 s — but a new Core pays it again in full.
+#
+# Startup used to build three throwaway Cores per EngineBackend: one for the
+# sort key in _initialize_backend, a second for the log line that recomputed
+# the very same score purely to print it, and a third in _load_openvino. That
+# was 9.9 s of the 10.6 s model load spent re-answering "is there a GPU?" —
+# against an actual model compile of 0.3 s and a warm-up of 0.06 s.
+#
+# One process-wide Core removes all of it. Sharing is the supported pattern
+# (one Core can hold many compiled models, and every camera thread already
+# shares the one on EngineBackend), and it makes CACHE_DIR a process-wide
+# setting rather than something each backend re-applies.
+_OV_CORE = None
+_OV_CORE_LOCK = threading.Lock()
+
+
+def get_ov_core():
+    """The process-wide ov.Core, created on first use. None without OpenVINO."""
+    global _OV_CORE
+    if not HAS_OPENVINO:
+        return None
+    if _OV_CORE is None:
+        with _OV_CORE_LOCK:
+            if _OV_CORE is None:
+                _OV_CORE = ov.Core()
+    return _OV_CORE
+
+
+def ov_available_devices():
+    """Cached device list, e.g. ['CPU', 'GPU']. Empty when OpenVINO is absent."""
+    core = get_ov_core()
+    if core is None:
+        return []
+    try:
+        return list(core.available_devices)
+    except Exception:
+        return []
+
+
+def prewarm_ov_devices():
+    """Start the (slow) plugin enumeration NOW, on a background thread.
+
+    Enumeration is ~2.5 s of C++ device probing that releases the GIL, and the
+    engine spends several seconds after this module is imported doing unrelated
+    work — importing fastapi and scipy, opening the database, building routes.
+    Running the probe alongside that work costs nothing and means the first
+    caller usually finds the answer already cached.
+
+    Nobody has to wait on this thread: get_ov_core() takes the same lock, so a
+    caller that arrives early simply blocks until the probe finishes — exactly
+    the behaviour it had when the probe was inline. Failures are swallowed
+    because this is pure prefetch; the real call path reports its own errors.
+    """
+    if not HAS_OPENVINO:
+        return
+
+    def _probe():
+        try:
+            ov_available_devices()
+        except Exception:
+            pass
+
+    threading.Thread(target=_probe, name="ov-device-prewarm", daemon=True).start()
+
+
+# Fired at import so it overlaps the imports that follow this module —
+# app.camera_manager imports backend BEFORE pipeline, and pipeline alone pulls
+# in scipy.optimize (~1.5 s), with fastapi (~1.4 s) still to come after it.
+# That is enough unrelated work to hide most of the probe.
+prewarm_ov_devices()
+
+
 # Grid strides of the YOLOX detection head. The ONNX/OpenVINO exports are
 # produced with decode_in_inference=False, so the graph emits raw per-anchor
 # offsets and postprocess() below applies the grid decode itself. That keeps
@@ -237,7 +313,7 @@ class EngineBackend:
             return 10        # CPU-only ONNX Runtime build
         if backend_type == "openvino" and HAS_OPENVINO:
             try:
-                if "GPU" in ov.Core().available_devices:
+                if "GPU" in ov_available_devices():
                     return 80  # Intel iGPU/dGPU — real GPU accel, but not CUDA/TensorRT
             except Exception:
                 pass
@@ -341,9 +417,14 @@ class EngineBackend:
                 print(f"[AI Backend] [WARN] Possibly corrupted model for {_bt}: {_problem}", flush=True)
 
         # Stable sort: ties (e.g. two CPU-only options) keep preferred_backends order.
-        candidates.sort(key=lambda c: self._backend_score(c[0]), reverse=True)
+        # Score each backend type ONCE and reuse it for both the sort and the log
+        # line below — the log used to re-call _backend_score per candidate, which
+        # on OpenVINO meant a second full device enumeration purely to print a
+        # number the sort had already computed.
+        _scores = {bt: self._backend_score(bt) for bt, _ in candidates}
+        candidates.sort(key=lambda c: _scores[c[0]], reverse=True)
         print(f"[AI Backend] Candidate order (best acceleration first): "
-              f"{[(bt, self._backend_score(bt)) for bt, _ in candidates]}", flush=True)
+              f"{[(bt, _scores[bt]) for bt, _ in candidates]}", flush=True)
 
         last_errors = []
         for backend_type, path in candidates:
@@ -378,8 +459,8 @@ class EngineBackend:
         )
 
     def _load_openvino(self, model_path):
-        self.ov_core = ov.Core()
-        devices = self.ov_core.available_devices
+        self.ov_core = get_ov_core()
+        devices = ov_available_devices()
         print(f"[AI Backend] OpenVINO available devices: {devices}")
 
         force_cpu = os.environ.get("CAMAI_FORCE_CPU", "").lower() in ("1", "true", "yes")

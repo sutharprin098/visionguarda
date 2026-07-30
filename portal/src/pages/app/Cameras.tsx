@@ -5,14 +5,18 @@ import { supabase, getErrorMessage } from "../../lib/supabase";
 import { audit } from "../../lib/audit";
 import { Camera } from "../../lib/types";
 import { useAuth } from "../../contexts/AuthContext";
-import { PageHeader, Badge, statusTone, statusLabel, Modal, ConfirmDialog, Field, Toggle } from "../../components/ui";
+import { PageHeader, Badge, Modal, ConfirmDialog, Field, Toggle } from "../../components/ui";
 import DataTable, { Column } from "../../components/DataTable";
 import { fmtAgo } from "../../lib/format";
+import { computeCameraStatus, CAMERA_STATUS_TONE, CAMERA_STATUS_LABEL } from "../../lib/cameraStatus";
 
 type CameraRow = Camera & {
   sites: { name: string } | null;
   camera_assignments: { user_id: string; profiles: { full_name: string } | null }[];
-  camera_health: { fps: number; resolution: string; recording: boolean; is_online: boolean; checked_at: string } | null;
+  camera_health: {
+    fps: number; resolution: string; recording: boolean; is_online: boolean;
+    checked_at: string; latency_ms: number; source_error: string | null;
+  } | null;
 };
 
 export default function CamerasPage() {
@@ -38,7 +42,7 @@ export default function CamerasPage() {
         // assigned_by) — PostgREST can't infer which one "profiles(...)"
         // means and 400s with "more than one relationship was found"
         // unless the FK is pinned explicitly via profiles!<constraint>.
-        .select("*, sites(name), camera_assignments(user_id, profiles!camera_assignments_user_id_fkey(full_name)), camera_health(fps, resolution, recording, is_online, checked_at)")
+        .select("*, sites(name), camera_assignments(user_id, profiles!camera_assignments_user_id_fkey(full_name)), camera_health(fps, resolution, recording, is_online, checked_at, latency_ms, source_error)")
         .order("created_at");
       if (error) throw error;
       return data as CameraRow[];
@@ -59,6 +63,18 @@ export default function CamerasPage() {
       .on("postgres_changes", { event: "*", schema: "public", table: "camera_assignments" }, refresh)
       .subscribe();
     return () => { supabase.removeChannel(ch); };
+  }, []);
+
+  // Forces a re-render every second so "Last Seen" (fmtAgo) and the
+  // staleness cutoff in computeCameraStatus() both advance in real time
+  // instead of only updating on the next unrelated re-render or realtime
+  // event — a camera whose relay stopped should visibly go "Unknown"
+  // within ~1s of crossing the cutoff, not whenever something else happens
+  // to redraw the table.
+  const [, forceTick] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => forceTick((t) => t + 1), 1000);
+    return () => clearInterval(id);
   }, []);
 
   async function toggleEnabled(c: CameraRow) {
@@ -101,7 +117,7 @@ export default function CamerasPage() {
       render: (c) => c.camera_health
         ? (
           <div className="text-xs text-ink-3">
-            <div>{c.camera_health.resolution || "—"} · {c.camera_health.fps.toFixed(0)} fps</div>
+            <div>{c.camera_health.resolution || "—"} · {c.camera_health.fps.toFixed(0)} fps · {c.camera_health.latency_ms}ms</div>
             <div>{c.camera_health.recording ? "recording" : "not recording"} · {fmtAgo(c.camera_health.checked_at)}</div>
           </div>
         )
@@ -123,8 +139,18 @@ export default function CamerasPage() {
         : <Badge tone={c.is_enabled ? "ok" : "default"}>{c.is_enabled ? "yes" : "no"}</Badge>,
     },
     {
-      key: "status", header: "Status", filter: true, value: (c) => statusLabel[c.status] ?? c.status,
-      render: (c) => <Badge tone={statusTone[c.status]}>{statusLabel[c.status] ?? c.status}</Badge>,
+      key: "status", header: "Status", filter: true,
+      value: (c) => CAMERA_STATUS_LABEL[computeCameraStatus(c.status, c.camera_health?.checked_at)],
+      render: (c) => {
+        const s = computeCameraStatus(c.status, c.camera_health?.checked_at);
+        return (
+          <div title={c.camera_health?.source_error ?? undefined}>
+            <Badge tone={CAMERA_STATUS_TONE[s]} pulse={s === "online" || s === "connecting"}>
+              {CAMERA_STATUS_LABEL[s]}
+            </Badge>
+          </div>
+        );
+      },
     },
     ...(can("cameras.manage") || can("cameras.assign")
       ? [{

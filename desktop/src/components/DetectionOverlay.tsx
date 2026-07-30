@@ -284,6 +284,14 @@ export default function DetectionOverlay({ detections, mediaRef, fit = "cover" }
     };
   }, [scheduleDraw]);
 
+  // Re-draw when root theme class changes (light <-> dark toggle) so overlay
+  // adapts immediately to background color changes.
+  useEffect(() => {
+    const observer = new MutationObserver(() => scheduleDraw());
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ["class", "data-theme", "style"] });
+    return () => observer.disconnect();
+  }, [scheduleDraw]);
+
   // The intrinsic source size can arrive after the element mounts (first MJPEG
   // frame / video metadata). Until it does, draw() bails and no boxes appear.
   useEffect(() => {

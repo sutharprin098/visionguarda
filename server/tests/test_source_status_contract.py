@@ -177,3 +177,96 @@ def test_usb_device_failure_names_the_device_not_the_network():
     text = pc.source_error_text()
     assert "USB" in text or "webcam" in text
     assert "unreachable" not in text, "a local device was described as a network fault"
+
+
+# --- Failure classification (_update_health_on_failure) ---------------------
+#
+# These exercise the state-transition method directly rather than the capture
+# loop that calls it — make_coordinator() deliberately never starts a thread
+# (see its docstring), and _update_health_on_failure() is a plain method that
+# reads/writes only self._health_status, self._cap_consecutive_failures and
+# self._last_probe_ts, so it is fully testable without one. The frame-timeout
+# staleness check for screenshare (a >6s gap since the last pushed frame,
+# pipeline.py ~2029-2037) lives inline inside the capture loop itself, not in
+# a standalone method, so it is not unit-tested here — see the plan's manual
+# end-to-end verification step instead.
+
+def test_usb_offline_after_one_failure_not_before():
+    pc = make_coordinator(source_type="usb", source="0")
+    assert pc._health_status == "connecting"
+    pc._update_health_on_failure()
+    assert pc._health_status == "connecting", "zero failures yet — a device that hasn't tried is not 'offline'"
+    pc._cap_consecutive_failures = 1
+    pc._update_health_on_failure()
+    assert pc._health_status == "offline"
+
+
+def test_network_source_stays_connecting_before_first_failure():
+    pc = make_coordinator()
+    pc._cap_consecutive_failures = 0
+    pc._update_health_on_failure()
+    assert pc._health_status == "connecting"
+
+
+@pytest.mark.parametrize("probe_result,expect_status", [
+    ("auth_failed", "auth_failed"),
+    ("network_error", "network_error"),
+    ("connecting", "offline"),  # host reachable, decoder still can't get a frame
+])
+def test_rtsp_reconnect_classification_follows_the_probe(monkeypatch, probe_result, expect_status):
+    """RTSP reconnect must land on the specific reason the probe found, not a
+    generic 'offline' that hides whether it's worth an operator's time to
+    check credentials vs. check the network vs. check the camera itself."""
+    pc = make_coordinator()
+    pc._cap_consecutive_failures = 1
+    pc._last_probe_ts = 0.0  # defeat the 8s probe rate limiter
+
+    import app.health_probe
+    monkeypatch.setattr(app.health_probe, "probe_connection", lambda *a, **k: probe_result)
+
+    pc._update_health_on_failure()
+    assert pc._health_status == expect_status
+
+
+def test_onvif_source_has_no_distinct_classification_path(monkeypatch):
+    """ONVIF cameras are registered as a plain RTSP URL in this engine — there
+    is no ONVIF-specific branch in _update_health_on_failure() to diverge
+    from the generic network-source path tested above. This pins that
+    (accurate) absence rather than asserting a distinction that doesn't
+    exist in the code."""
+    pc = make_coordinator(source_type="rtsp", source="rtsp://198.51.100.9:554/onvif1")
+    pc._cap_consecutive_failures = 1
+    pc._last_probe_ts = 0.0
+
+    import app.health_probe
+    monkeypatch.setattr(app.health_probe, "probe_connection", lambda *a, **k: "network_error")
+
+    pc._update_health_on_failure()
+    assert pc._health_status == "network_error"
+
+
+def test_recording_and_health_status_are_independent_fields():
+    """Recording is reported separately in telemetry (via self.recorder,
+    not self._health_status — see pipeline.py's telemetry loop) and must
+    never be folded into the health state machine: a camera that is
+    (for whatever reason) still writing to a recorder while its capture
+    loop is failing needs both facts visible, not one silently overwriting
+    the other."""
+    pc = make_coordinator()
+    pc._health_status = "offline"
+    assert pc._health_status == "offline"
+    assert pc.source_error_text() == "The source stopped sending frames."
+    # Nothing about a recorder's own state can be reached through
+    # _health_status — it is not one of the inputs to source_error_text()
+    # or _update_health_on_failure(), by design.
+
+
+def test_multiple_cameras_do_not_share_health_state():
+    a = make_coordinator(source="rtsp://198.51.100.10:554/a")
+    b = make_coordinator(source="rtsp://198.51.100.11:554/b")
+
+    a._health_status = "auth_failed"
+    assert b._health_status == "connecting", "camera b's health flipped when only camera a was mutated"
+
+    b._cap_consecutive_failures = 4
+    assert a._cap_consecutive_failures == 0, "camera a's failure counter is not independent of camera b's"
