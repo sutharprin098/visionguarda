@@ -6,8 +6,20 @@ export default defineConfig({
   plugins: [
     react(),
     electron([
-      { entry: "electron/main.ts", vite: { build: { outDir: "dist-electron" } } },
-      { entry: "electron/preload.ts", vite: { build: { outDir: "dist-electron" } } },
+      {
+        entry: "electron/main.ts",
+        onstart(options) {
+          options.startup();
+        },
+        vite: { build: { outDir: "dist-electron" } },
+      },
+      {
+        entry: "electron/preload.ts",
+        onstart(options) {
+          options.reload();
+        },
+        vite: { build: { outDir: "dist-electron" } },
+      },
     ]),
   ],
   server: {
