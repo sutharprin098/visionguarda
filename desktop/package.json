@@ -6,7 +6,8 @@
   "type": "module",
   "main": "dist-electron/main.js",
   "scripts": {
-    "dev": "vite",
+    "kill": "taskkill /F /IM electron.exe /T 2>nul & taskkill /F /IM \"CamAI Desktop.exe\" /T 2>nul & exit /b 0",
+    "dev": "npm run kill && vite",
     "test": "vitest run",
     "test:watch": "vitest",
     "build:engine": "powershell -ExecutionPolicy Bypass -File ../server/build_engine.ps1",

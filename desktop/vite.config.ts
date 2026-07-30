@@ -11,14 +11,25 @@ export default defineConfig({
         onstart(options) {
           options.startup();
         },
-        vite: { build: { outDir: "dist-electron" } },
+        vite: {
+          build: {
+            outDir: "dist-electron",
+            rollupOptions: {
+              output: { format: "es" },
+            },
+          },
+        },
       },
       {
         entry: "electron/preload.ts",
-        onstart(options) {
-          options.reload();
+        vite: {
+          build: {
+            outDir: "dist-electron",
+            rollupOptions: {
+              output: { format: "cjs", entryFileNames: "[name].js" },
+            },
+          },
         },
-        vite: { build: { outDir: "dist-electron" } },
       },
     ]),
   ],

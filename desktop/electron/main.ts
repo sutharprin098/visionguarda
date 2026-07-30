@@ -1,6 +1,11 @@
 import { app, BrowserWindow, ipcMain, session, desktopCapturer, powerMonitor, Menu, shell } from "electron";
-import { join } from "node:path";
+import { join, dirname } from "node:path";
 import { existsSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+
+// ESM-compatible __dirname (not available natively when type:module)
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 import { computeFingerprint, warmFingerprint } from "./fingerprint";
 import {
   saveCredentials, loadCredentials, clearCredentials,

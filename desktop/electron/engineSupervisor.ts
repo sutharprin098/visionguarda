@@ -9,8 +9,13 @@ import { app, BrowserWindow } from "electron";
 import { randomBytes } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 import { request } from "node:http";
 import { safeSend } from "./safeSend";
+
+// ESM-compatible __dirname
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
 export type EngineProcessState =
   | "not_configured"
