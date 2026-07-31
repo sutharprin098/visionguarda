@@ -1,7 +1,14 @@
-# CamAI Enterprise Source Code License & IP Transfer Agreement
+# License
 
-Copyright (c) 2026 CamAI Enterprise Technologies. All Rights Reserved.
+**CamAI — Proprietary Software**
+Copyright (c) 2026. All rights reserved.
 
-This software codebase, including all source files, documentation, AI model weights, database schemas, and application assets, is proprietary and confidential.
+This software and associated documentation files (the "Software") are the confidential and proprietary property of the copyright holder. No license, express or implied, is granted by this file.
 
-Authorized enterprise licensees are granted a perpetual, non-exclusive, worldwide license to deploy, modify, integrate, and operate the software within their organization or enterprise SaaS environment in accordance with the executed Master Commercial License Agreement.
+The Software may not be used, copied, modified, merged, published, distributed, sublicensed, or sold except under a written agreement executed by the copyright holder (for example, an asset purchase or source-code transfer agreement).
+
+Third-party components bundled with or referenced by the Software remain under their own licenses — see [`docs/LICENSING.md`](docs/LICENSING.md) for the complete inventory and the obligations that attach to each component.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+
+This file is the canonical, human-readable statement of terms. A plain-text copy is also kept at [`LICENSE`](LICENSE) for tooling that expects an extensionless file.
