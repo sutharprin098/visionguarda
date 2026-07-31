@@ -1,6 +1,6 @@
 {
   "name": "camai-desktop",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "CamAI Desktop — Enterprise AI CCTV client for Windows",
   "private": true,
   "type": "module",
