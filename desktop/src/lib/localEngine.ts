@@ -139,7 +139,13 @@ export async function getEngineAppStatus(): Promise<EngineAppStatus | null> {
 // way via cv2.VideoCapture(url), so they all map to 'rtsp'.
 function engineType(sourceType: string): string {
   if (sourceType === "usb") return "usb";
-  if (sourceType === "screen_share" || sourceType === "screenshare") return "screenshare";
+  if (
+    sourceType === "screen_share" ||
+    sourceType === "screenshare" ||
+    sourceType === "virtual"
+  ) {
+    return "screenshare";
+  }
   return "rtsp";
 }
 
@@ -351,7 +357,11 @@ async function doSyncCamerasToLocalEngine(
       continue;
     }
 
-    if (cam.source_type === "screen_share") {
+    if (
+      cam.source_type === "screen_share" ||
+      cam.source_type === "screenshare" ||
+      cam.source_type === "virtual"
+    ) {
       try {
         const res = await fetch(`${ENGINE_BASE}/api/cameras`, {
           method: "POST",

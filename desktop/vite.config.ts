@@ -21,12 +21,20 @@ export default defineConfig({
         },
       },
       {
-        entry: "electron/preload.ts",
         vite: {
           build: {
             outDir: "dist-electron",
+            lib: {
+              entry: "electron/preload.ts",
+              formats: ["cjs"],
+              fileName: () => "preload.cjs",
+            },
             rollupOptions: {
-              output: { format: "cjs", entryFileNames: "[name].js" },
+              external: ["electron"],
+              output: {
+                format: "cjs",
+                entryFileNames: "preload.cjs",
+              },
             },
           },
         },

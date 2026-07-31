@@ -879,7 +879,10 @@ const CameraTile = memo(function CameraTile({ camera: c, site, engineOnline, onF
   const videoRef = useRef<HTMLVideoElement>(null);
   const sessionRef = useRef<MediaShareSession | null>(null);
 
-  const isScreenShareCam = c.source_type === "screen_share";
+  const isScreenShareCam =
+    c.source_type === "screen_share" ||
+    c.source_type === "screenshare" ||
+    c.source_type === "virtual";
 
   // The engine reached the camera's source but got no usable video. Explicitly
   // NOT "telemetry is null": that just means we haven't heard anything yet

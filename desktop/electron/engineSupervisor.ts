@@ -198,7 +198,7 @@ function looksLikeEngineDir(dir: string): boolean {
   return existsSync(join(dir, "app", "main.py"));
 }
 
-function resolveEngine(): ResolvedEngine | null {
+async function resolveEngine(): Promise<ResolvedEngine | null> {
   // 1. Highest priority: the bundled, frozen engine exe. This is the
   //    production path — the installer ships server/dist/camai-engine or
   //    camai-engine.zip as resources/engine/, so no Python is required.
@@ -212,15 +212,21 @@ function resolveEngine(): ResolvedEngine | null {
     } else if (existsSync(zip)) {
       appendLog(`[Supervisor] Unpacking bundled AI engine archive...`);
       try {
-        execFileSync("powershell.exe", [
-          "-NoProfile",
-          "-NonInteractive",
-          "-Command",
-          `Expand-Archive -Path ${JSON.stringify(zip)} -DestinationPath ${JSON.stringify(engineDir)} -Force`,
-        ]);
-        if (existsSync(exe)) {
+        const unpacked = await new Promise<boolean>((resolve) => {
+          const cp = spawn("powershell.exe", [
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            `Expand-Archive -Path ${JSON.stringify(zip)} -DestinationPath ${JSON.stringify(engineDir)} -Force`,
+          ], { windowsHide: true });
+          cp.on("close", (code) => resolve(code === 0));
+          cp.on("error", () => resolve(false));
+        });
+        if (unpacked && existsSync(exe)) {
           appendLog("[Supervisor] Engine archive unpacked successfully.");
           return { frozenExe: exe, engineDir };
+        } else {
+          appendLog("[Supervisor] Unpacking completed but engine executable not found.");
         }
       } catch (err: any) {
         appendLog(`[Supervisor] Failed to unpack engine archive: ${err?.message}`);
@@ -358,7 +364,7 @@ async function launch(): Promise<void> {
     return;
   }
 
-  const resolved = resolveEngine();
+  const resolved = await resolveEngine();
   if (!resolved) {
     setState(
       "not_configured",

@@ -227,7 +227,11 @@ if (!gotTheLock) {
       autoHideMenuBar: true,
       icon: existsSync(iconPath) ? iconPath : undefined,
       webPreferences: {
-        preload: join(__dirname, "preload.js"),
+        preload: existsSync(join(__dirname, "preload.cjs"))
+          ? join(__dirname, "preload.cjs")
+          : existsSync(join(__dirname, "preload.mjs"))
+          ? join(__dirname, "preload.mjs")
+          : join(__dirname, "preload.js"),
         contextIsolation: true,
         nodeIntegration: false,
         sandbox: false,
