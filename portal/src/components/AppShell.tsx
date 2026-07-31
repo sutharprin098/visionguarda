@@ -51,7 +51,11 @@ export default function AppShell() {
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-1.5">
               <span className="text-sm font-extrabold tracking-tight text-ink-1">CamAI</span>
-              <span className="rounded bg-sky-500/10 px-1.5 py-0.5 font-mono text-[9px] font-bold text-sky-600 dark:text-sky-400">CORE</span>
+              {/* text-sky-600 on this 10%-opacity tint measured ~3.6:1 in light
+                  mode — below the 4.5:1 AA floor. -700 clears it (~5.3:1)
+                  without touching the dark-mode -400 pairing, which already
+                  has plenty of contrast against the dark tint. */}
+              <span className="rounded bg-sky-500/10 px-1.5 py-0.5 font-mono text-[9px] font-bold text-sky-700 dark:text-sky-400">CORE</span>
             </div>
             <div className="truncate text-xs font-medium text-ink-3">{org?.name ?? "Enterprise Node"}</div>
           </div>
@@ -66,7 +70,9 @@ export default function AppShell() {
 
         {/* Live Node Status Card */}
         <div className="mx-3 mt-3 rounded-xl border border-emerald-500/20 bg-emerald-500/5 p-2.5">
-          <div className="flex items-center justify-between text-xs font-semibold text-emerald-600 dark:text-emerald-400">
+          {/* Same under-AA issue as the CORE badge above: emerald-600 on a
+              5%-opacity tint measured ~3.6:1 in light mode. -700 clears AA. */}
+          <div className="flex items-center justify-between text-xs font-semibold text-emerald-700 dark:text-emerald-400">
             <span className="flex items-center gap-1.5">
               <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
               Edge Core Online
@@ -98,7 +104,7 @@ export default function AppShell() {
                         clsx(
                           "group relative flex items-center gap-3 rounded-xl px-3 py-2 text-xs font-semibold transition-all duration-150",
                           isActive
-                            ? "bg-sky-500/10 text-sky-600 dark:text-sky-400 font-bold border border-sky-500/20 shadow-xs"
+                            ? "bg-sky-500/10 text-sky-700 dark:text-sky-400 font-bold border border-sky-500/20 shadow-xs"
                             : "text-ink-2 hover:bg-surface-2/80 hover:text-ink-1",
                         )
                       }
@@ -168,7 +174,7 @@ export default function AppShell() {
 
           <div className="flex items-center gap-2">
             {/* Live Sync Pulse */}
-            <div className="hidden md:flex items-center gap-2 rounded-full border border-sky-500/20 bg-sky-500/5 px-3 py-1 text-xs font-medium text-sky-600 dark:text-sky-400">
+            <div className="hidden md:flex items-center gap-2 rounded-full border border-sky-500/20 bg-sky-500/5 px-3 py-1 text-xs font-medium text-sky-700 dark:text-sky-400">
               <Activity size={13} className="animate-pulse" />
               <span>Realtime Engine Synced</span>
             </div>

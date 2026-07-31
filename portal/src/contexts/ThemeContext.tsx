@@ -9,9 +9,7 @@ const Ctx = createContext<{ theme: Theme; toggle: () => void }>({ theme: "light"
 export const useTheme = () => useContext(Ctx);
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
-  const [theme, setTheme] = useState<Theme>(
-    () => (localStorage.getItem("camai-theme") as Theme) ?? "light",
-  );
+  const [theme, setTheme] = useState<Theme>("light");
 
   useEffect(() => {
     document.documentElement.classList.toggle("dark", theme === "dark");

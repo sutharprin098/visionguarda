@@ -2,7 +2,7 @@ import { useEffect, useState, useRef, useCallback, memo } from "react";
 import { Video, Bell, Settings2, LogOut, Wifi, WifiOff, Sliders, Activity, AlertTriangle, RotateCw, Maximize2, Minimize2, Lock, Send, Check, Loader2, MessageCircle, ChevronDown, ChevronRight, Copy } from "lucide-react";
 import clsx from "clsx";
 import { startRealtimeSync, DeactivatedError, SyncBundle } from "../lib/sync";
-import { syncAiModelToLocalEngine, syncAiConfidenceToLocalEngine, mjpegStreamUrl, resetLocalEngineState, reportCameraHealth, reportEvents } from "../lib/localEngine";
+import { syncAiModelToLocalEngine, syncAiConfidenceToLocalEngine, mjpegStreamUrl, resetLocalEngineState } from "../lib/localEngine";
 import { MediaShareSession, ShareStatus } from "../lib/mediaShare";
 import { TelemetrySession, TelemetryDetection, CameraTelemetry, TelemetryStatus, detectionsRenderEqual } from "../lib/telemetry";
 import type { ZoneProfileKey } from "../lib/zoneProfiles";
@@ -188,23 +188,11 @@ export default function Workspace({
 
   // Realtime sync is now managed at the App level to persist state during screen switching.
 
-  // NOTE: camera->local-engine sync used to live here. It now runs in App, because
-  // Admin Studio needs it too and this component never mounts in the Admin build
-  // — see the comment on that effect. Two copies would double the registration
-  // traffic in the desktop build for no benefit.
-
-  // push each assigned camera's live connection state (online/offline/
-  // connecting/auth_failed/network_error) to Supabase so the portal's
-  // Health column and status badge stay accurate without a refresh
-  const cameraIds = bundle?.cameras.map((c: any) => c.id).join(",") ?? "";
-  useEffect(() => {
-    if (!cameraIds) return;
-    const ids = cameraIds.split(",");
-    void reportCameraHealth(ids);
-    void reportEvents();
-    const id = setInterval(() => { void reportCameraHealth(ids); void reportEvents(); }, 10_000);
-    return () => clearInterval(id);
-  }, [cameraIds]);
+  // NOTE: camera->local-engine sync, and camera health/event reporting to
+  // Supabase, used to live here. Both now run in App, because Admin Studio
+  // needs them too and this component never mounts in the Admin build — see
+  // the comments on those effects. Two copies would double the traffic in
+  // the desktop build for no benefit.
 
   // hot-swap the engine's active model when the org's ai.model setting changes
   const orgModel = bundle?.settings.find((s) => s.scope === "org" && s.key === "ai.model")?.value;
@@ -891,7 +879,10 @@ const CameraTile = memo(function CameraTile({ camera: c, site, engineOnline, onF
   const videoRef = useRef<HTMLVideoElement>(null);
   const sessionRef = useRef<MediaShareSession | null>(null);
 
-  const isScreenShareCam = c.source_type === "screen_share";
+  const isScreenShareCam =
+    c.source_type === "screen_share" ||
+    c.source_type === "screenshare" ||
+    c.source_type === "virtual";
 
   // The engine reached the camera's source but got no usable video. Explicitly
   // NOT "telemetry is null": that just means we haven't heard anything yet

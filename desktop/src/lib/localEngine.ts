@@ -139,7 +139,13 @@ export async function getEngineAppStatus(): Promise<EngineAppStatus | null> {
 // way via cv2.VideoCapture(url), so they all map to 'rtsp'.
 function engineType(sourceType: string): string {
   if (sourceType === "usb") return "usb";
-  if (sourceType === "screen_share" || sourceType === "screenshare") return "screenshare";
+  if (
+    sourceType === "screen_share" ||
+    sourceType === "screenshare" ||
+    sourceType === "virtual"
+  ) {
+    return "screenshare";
+  }
   return "rtsp";
 }
 
@@ -351,7 +357,11 @@ async function doSyncCamerasToLocalEngine(
       continue;
     }
 
-    if (cam.source_type === "screen_share") {
+    if (
+      cam.source_type === "screen_share" ||
+      cam.source_type === "screenshare" ||
+      cam.source_type === "virtual"
+    ) {
       try {
         const res = await fetch(`${ENGINE_BASE}/api/cameras`, {
           method: "POST",
@@ -418,23 +428,69 @@ async function doSyncCamerasToLocalEngine(
   }
 }
 
-interface EngineStatus {
+export interface EngineStatus {
   cameras: Record<string, {
     health_status?: string;
+    health_reason?: string | null;
     fps?: number;
+    latency?: number;
     resolution?: string;
     recording?: boolean;
   }>;
 }
 
+export interface CameraHealthReportItem {
+  camera_id: string;
+  status: string;
+  is_online: boolean;
+  fps: number;
+  resolution: string;
+  recording: boolean;
+  source_error: string | null;
+  latency_ms: number;
+}
+
 /**
- * Pulls each registered camera's live connection state from the local
- * engine's /api/status and pushes it to Supabase (report-camera-health
- * edge function) so the portal's Health column and status badge
- * (Online/Offline/Connecting/Authentication Failed/Network Error) reflect
- * what's actually happening on this machine instead of staying frozen at
- * whatever cameras.status was when the row was created. Safe to call on a
- * timer — no-ops cheaply if the engine isn't reachable.
+ * Pure shaping step, pulled out of reportCameraHealth() so it's testable
+ * without mocking fetch/Supabase: turns the engine's /api/status response
+ * into the batch report-camera-health expects, one entry per requested
+ * camera id regardless of whether the engine currently knows about it.
+ */
+export function buildHealthReport(cameraIds: string[], status: EngineStatus): CameraHealthReportItem[] {
+  return cameraIds.map((id) => {
+    const cam = status.cameras?.[id];
+    // Not in the engine's active thread map (registration still pending,
+    // or the engine dropped it) — the desktop hasn't lost the camera, it's
+    // just not running yet, which reads to the operator as "connecting".
+    const health_status = cam?.health_status ?? "connecting";
+    return {
+      camera_id: id,
+      status: health_status,
+      is_online: health_status === "online",
+      fps: cam?.fps ?? 0,
+      resolution: cam?.resolution ?? "",
+      recording: cam?.recording ?? false,
+      source_error: cam?.health_reason ?? null,
+      latency_ms: cam?.latency ?? 0,
+    };
+  });
+}
+
+/**
+ * Pulls every registered camera's live connection state from the local
+ * engine's /api/status (one call regardless of camera count) and pushes all
+ * of them to Supabase in a single report-camera-health request, so the
+ * portal's Health column and status badge (Online/Offline/Connecting/
+ * Authentication Failed/Network Error) reflect what's actually happening on
+ * this machine instead of staying frozen at whatever cameras.status was when
+ * the row was created.
+ *
+ * Batched deliberately: this used to be one edge-function call per camera,
+ * which meant a faster report interval would have multiplied request count
+ * by fleet size against the function's rate limit. One call per tick keeps
+ * that limit's headroom independent of how many cameras are registered.
+ *
+ * Safe to call on a timer — no-ops cheaply if the engine isn't reachable.
  */
 export async function reportCameraHealth(cameraIds: string[]): Promise<void> {
   if (!cameraIds.length) return;
@@ -448,26 +504,12 @@ export async function reportCameraHealth(cameraIds: string[]): Promise<void> {
   }
 
   const sb = await getSupabase();
-  for (const id of cameraIds) {
-    const cam = status.cameras?.[id];
-    // Not in the engine's active thread map (registration still pending,
-    // or the engine dropped it) — the desktop hasn't lost the camera, it's
-    // just not running yet, which reads to the operator as "connecting".
-    const health_status = cam?.health_status ?? "connecting";
-    try {
-      await sb.functions.invoke("report-camera-health", {
-        body: {
-          camera_id: id,
-          status: health_status,
-          is_online: health_status === "online",
-          fps: cam?.fps ?? 0,
-          resolution: cam?.resolution ?? "",
-          recording: cam?.recording ?? false,
-        },
-      });
-    } catch {
-      // transient — the next tick retries
-    }
+  const cameras = buildHealthReport(cameraIds, status);
+
+  try {
+    await sb.functions.invoke("report-camera-health", { body: { cameras } });
+  } catch {
+    // transient — the next tick retries
   }
 }
 

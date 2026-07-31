@@ -184,6 +184,32 @@ export default function App() {
     return () => { cancelled = true; if (id) clearInterval(id); };
   }, [phase, bundle?.cameras, bundle?.rule_engine_rules, bundle?.zone_profile_configs]);
 
+  // Push each assigned camera's live connection state (online/offline/
+  // connecting/auth_failed/network_error) to Supabase so the portal's Health
+  // column and status badge stay accurate without a refresh. Used to live in
+  // Workspace, which meant an Admin-Studio-only session (appType==="admin",
+  // showWorkspace===false below) reported nothing at all for as long as it
+  // was open — same reasoning as the syncCamerasToLocalEngine move above.
+  // 2s, not 10s: report-camera-health now takes the whole camera list in one
+  // batched call (see lib/localEngine.ts), so a faster interval no longer
+  // multiplies the edge-function request count by fleet size.
+  const cameraIds = bundle?.cameras.map((c: any) => c.id).join(",") ?? "";
+  useEffect(() => {
+    if (phase !== "ready" || !cameraIds) return;
+    let cancelled = false;
+    let id: ReturnType<typeof setInterval> | undefined;
+
+    void loadLocalEngine().then(({ reportCameraHealth, reportEvents }) => {
+      if (cancelled) return;
+      const ids = cameraIds.split(",");
+      const tick = () => { void reportCameraHealth(ids); void reportEvents(); };
+      tick();
+      id = setInterval(tick, 2_000);
+    });
+
+    return () => { cancelled = true; if (id) clearInterval(id); };
+  }, [phase, cameraIds]);
+
   const bootSplash = (
     <SplashLoading
       title="Starting CamAI Enterprise Node…"

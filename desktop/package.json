@@ -1,15 +1,17 @@
 {
   "name": "camai-desktop",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "CamAI Desktop — Enterprise AI CCTV client for Windows",
   "private": true,
+  "type": "module",
   "main": "dist-electron/main.js",
   "scripts": {
-    "dev": "vite",
+    "kill": "taskkill /F /IM electron.exe /T 2>nul & taskkill /F /IM \"CamAI Desktop.exe\" /T 2>nul & exit /b 0",
+    "dev": "npm run kill && vite",
     "test": "vitest run",
     "test:watch": "vitest",
     "build:engine": "powershell -ExecutionPolicy Bypass -File ../server/build_engine.ps1",
-    "build": "tsc -p tsconfig.node.json && vite build && electron-builder --win && node scripts/checksum.js && node scripts/verify-signature.js",
+    "build": "tsc -p tsconfig.node.json && vite build && electron-builder --win && node scripts/checksum.cjs && node scripts/verify-signature.cjs",
     "build:full": "npm run build:engine && npm run build",
     "build:admin": "tsc -p tsconfig.node.json && vite build && electron-builder --win --config electron-builder.admin.json",
     "start": "tsc -p tsconfig.node.json && vite build && electron ."

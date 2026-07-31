@@ -462,11 +462,13 @@ def get_system_status():
             "latency": thread.latest_telemetry.get("latency", 0),
             "counters": thread.latest_telemetry.get("counters", {"in": 0, "out": 0}),
             "health_status": thread._health_status,
-            # Why it is unhealthy, when the capture layer actually knows. Set
-            # today for a stream URL whose extraction failed ("private video",
-            # "this live event has ended") — the difference between an
-            # operator seeing "offline" and knowing what to fix.
-            "health_reason": getattr(thread, "_resolve_error", None),
+            # source_error_text() covers every failure class (auth, network,
+            # USB-unplugged, unpicked screenshare, generic offline), not just
+            # a failed stream-URL resolution — this used to read only
+            # `_resolve_error`, so a camera offline for any other reason
+            # reported no reason at all here even though the WS telemetry
+            # payload (built from the same method) already had one.
+            "health_reason": thread.source_error_text() if hasattr(thread, "source_error_text") else None,
             "resolution": thread._last_resolution,
             "recording": thread.recorder.continuous_writer is not None,
             "source": getattr(thread, "source", None),

@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Mail, MapPin, MessageSquare, Send, Check } from "lucide-react";
 
-const CONTACT_EMAIL = "hello@camai.app";
+const CONTACT_EMAIL = "sutharprince098@gmail.com";
 
 const INPUT =
   "w-full rounded-xl border border-[var(--ap-border)] bg-[var(--ap-surface)] px-4 py-2.5 text-sm text-[var(--ap-ink)] " +

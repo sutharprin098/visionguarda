@@ -1,41 +1,51 @@
-import { Link, NavLink, Outlet, useLocation } from "react-router-dom";
-import { ArrowRight, Menu, X, Sun, Moon } from "lucide-react";
+import { Link, NavLink, Outlet } from "react-router-dom";
+import { ArrowRight, Menu, X, CheckCircle2 } from "lucide-react";
 import { useState } from "react";
-import { useTheme } from "../contexts/ThemeContext";
 
 const NAV = [
   { to: "/features", label: "Features" },
+  { to: "/pricing", label: "Pricing" },
   { to: "/about", label: "About" },
   { to: "/contact", label: "Contact" },
 ];
 
 export default function MarketingLayout() {
   const [open, setOpen] = useState(false);
-  const { theme, toggle } = useTheme();
-  const location = useLocation();
-
-  // On home page, Home component renders its own floating navbar & luxury footer
-  if (location.pathname === "/") {
-    return <Outlet />;
-  }
 
   return (
-    <div className="flex min-h-screen flex-col bg-surface-0 text-ink-1">
-      <header className="sticky top-0 z-40 border-b border-line bg-surface-0/80 backdrop-blur">
-        <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-4">
-          <Link to="/" className="flex items-center gap-2.5" onClick={() => setOpen(false)}>
-            <img src="/favicon.svg" alt="CamAI" className="h-8 w-8 rounded-md" />
-            <span className="text-sm font-semibold text-ink-1">CamAI</span>
+    <div className="flex min-h-screen flex-col bg-[var(--ap-bg)] text-[var(--ap-ink)] selection:bg-[var(--ap-accent-soft)]">
+      {/* Unified Global Header */}
+      <header className="sticky top-0 z-50 border-b border-[var(--ap-border)] bg-[var(--ap-glass-bg)] backdrop-blur-xl transition-all">
+        <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-3.5 sm:px-6 lg:px-8">
+          
+          {/* Logo & Brand Wordmark */}
+          <Link to="/" className="flex items-center gap-3 group" onClick={() => setOpen(false)}>
+            <img
+              src="/favicon.svg"
+              alt="CamAI Logo"
+              className="h-8 w-8 rounded-lg shadow-sm transition-transform group-hover:scale-105"
+            />
+            <span className="flex flex-col leading-none">
+              <span className="ap-pixel-bold text-[14px] tracking-tight text-[var(--ap-ink)]">
+                CamAI
+              </span>
+              <span className="ap-pixel mt-0.5 text-[7.5px] tracking-[0.16em] text-[var(--ap-accent)]">
+                ARCTIC VISION GRID
+              </span>
+            </span>
           </Link>
 
-          <nav className="hidden items-center gap-1 md:flex">
+          {/* Desktop Navigation */}
+          <nav className="hidden items-center gap-8 md:flex">
             {NAV.map((n) => (
               <NavLink
                 key={n.to}
                 to={n.to}
                 className={({ isActive }) =>
-                  `rounded-md px-3 py-1.5 text-sm transition ${
-                    isActive ? "text-ink-1 font-semibold" : "text-ink-2 hover:text-ink-1"
+                  `ap-pixel text-[9.5px] uppercase tracking-[0.08em] transition-colors ${
+                    isActive
+                      ? "text-[var(--ap-ink)] font-bold border-b-2 border-[var(--ap-accent)] pb-0.5"
+                      : "text-[var(--ap-ink-2)] hover:text-[var(--ap-accent)]"
                   }`
                 }
               >
@@ -44,109 +54,132 @@ export default function MarketingLayout() {
             ))}
           </nav>
 
-          <div className="hidden gap-2 md:flex items-center">
-            <button
-              onClick={toggle}
-              className="p-2 rounded-md hover:bg-surface-2 text-ink-2 hover:text-ink-1 transition-colors"
-              aria-label="Toggle Theme"
+          {/* Right Action Controls */}
+          <div className="hidden items-center gap-4 md:flex">
+            <span className="ap-chip">
+              <span className="relative flex h-2 w-2">
+                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[var(--ap-accent)] opacity-70" />
+                <span className="relative inline-flex h-2 w-2 rounded-full bg-[var(--ap-accent)]" />
+              </span>
+              <span className="text-[9px]">ON-PREM</span>
+            </span>
+
+            <Link
+              to="/signin"
+              className="ap-pixel text-[9.5px] uppercase tracking-[0.06em] text-[var(--ap-ink-2)] hover:text-[var(--ap-ink)] px-2"
             >
-              {theme === "dark" ? <Sun size={18} /> : <Moon size={18} />}
-            </button>
-            <Link to="/signin" className="btn-ghost">Sign In</Link>
-            <Link to="/signup" className="btn-primary">Create Account</Link>
+              Sign In
+            </Link>
+
+            <Link to="/signup" className="ap-btn ap-btn-primary text-[9.5px]">
+              Start Free Trial <ArrowRight size={13} />
+            </Link>
           </div>
 
+          {/* Mobile Menu Toggle Button */}
           <button
-            className="btn-ghost md:hidden"
+            className="ap-btn ap-btn-ghost md:hidden p-2"
             onClick={() => setOpen((v) => !v)}
-            aria-label="Toggle menu"
+            aria-label="Toggle Menu"
           >
             {open ? <X size={18} /> : <Menu size={18} />}
           </button>
         </div>
 
+        {/* Mobile Navigation Drawer */}
         {open && (
-          <div className="border-t border-line bg-surface-1 px-6 py-3 md:hidden">
-            <nav className="flex flex-col gap-1">
+          <div className="border-t border-[var(--ap-border)] bg-[var(--ap-surface)] px-6 py-4 md:hidden shadow-lg">
+            <nav className="flex flex-col gap-2">
               {NAV.map((n) => (
                 <NavLink
                   key={n.to}
                   to={n.to}
                   onClick={() => setOpen(false)}
                   className={({ isActive }) =>
-                    `rounded-md px-3 py-2 text-sm ${
-                      isActive ? "bg-surface-2 text-ink-1 font-semibold" : "text-ink-2"
+                    `ap-pixel text-[10px] uppercase tracking-[0.06em] py-2 ${
+                      isActive ? "text-[var(--ap-ink)] font-bold" : "text-[var(--ap-ink-2)]"
                     }`
                   }
                 >
                   {n.label}
                 </NavLink>
               ))}
-              <div className="mt-2 flex gap-2 items-center">
-                <button
-                  onClick={toggle}
-                  className="p-2.5 rounded-md border border-line bg-surface-2 text-ink-2 hover:text-ink-1 transition-colors"
-                  aria-label="Toggle Theme"
-                >
-                  {theme === "dark" ? <Sun size={18} /> : <Moon size={18} />}
-                </button>
-                <Link to="/signin" className="btn-ghost flex-1" onClick={() => setOpen(false)}>Sign In</Link>
-                <Link to="/signup" className="btn-primary flex-1" onClick={() => setOpen(false)}>Create Account</Link>
+              <div className="mt-3 flex flex-col gap-2 border-t border-[var(--ap-border)] pt-3">
+                <Link to="/signin" onClick={() => setOpen(false)} className="ap-btn ap-btn-ghost w-full justify-center">
+                  Sign In
+                </Link>
+                <Link to="/signup" onClick={() => setOpen(false)} className="ap-btn ap-btn-primary w-full justify-center">
+                  Start Free Trial
+                </Link>
               </div>
             </nav>
           </div>
         )}
       </header>
 
+      {/* Main Page Outlet */}
       <main className="flex-1">
         <Outlet />
       </main>
 
-      <footer className="border-t border-line">
-        <div className="mx-auto grid max-w-6xl gap-8 px-6 py-12 sm:grid-cols-2 lg:grid-cols-4">
+      {/* Unified Global Footer */}
+      <footer className="border-t border-[var(--ap-border)] bg-[var(--ap-surface-2)]">
+        <div className="mx-auto grid max-w-7xl gap-8 px-6 py-12 sm:grid-cols-2 lg:grid-cols-4">
+          
+          {/* Brand Info */}
           <div>
             <div className="flex items-center gap-2.5">
               <img src="/favicon.svg" alt="CamAI" className="h-7 w-7 rounded-md" />
-              <span className="text-sm font-semibold text-ink-1">CamAI</span>
+              <span className="ap-pixel-bold text-[14px] text-[var(--ap-ink)]">CamAI</span>
             </div>
-            <p className="mt-3 max-w-xs text-sm leading-relaxed text-ink-3">
-              Enterprise AI video analytics that runs on your own hardware, activated with a single key.
+            <p className="ap-pixel mt-3 max-w-xs text-[9.5px] leading-relaxed text-[var(--ap-ink-2)]">
+              Enterprise camera AI processed on your own hardware — sub-12 ms inference, zero cloud video egress, one activation key.
             </p>
+            <div className="mt-3 flex items-center gap-1.5 ap-pixel text-[8.5px] text-[var(--ap-accent)]">
+              <CheckCircle2 size={12} /> 100% ON-PREMISE SECURITY
+            </div>
           </div>
 
+          {/* Product Links */}
           <div>
-            <h4 className="text-xs font-semibold uppercase tracking-wider text-ink-3">Product</h4>
-            <ul className="mt-3 space-y-2 text-sm text-ink-2">
-              <li><Link to="/features" className="hover:text-ink-1">Features</Link></li>
-              <li><Link to="/signup" className="hover:text-ink-1">Create Account</Link></li>
-              <li><Link to="/signin" className="hover:text-ink-1">Sign In</Link></li>
+            <h4 className="ap-pixel text-[9px] uppercase tracking-wider text-[var(--ap-accent)]">Product</h4>
+            <ul className="mt-3 space-y-2 ap-pixel text-[9.5px] text-[var(--ap-ink-2)]">
+              <li><Link to="/features" className="hover:text-[var(--ap-ink)]">Features</Link></li>
+              <li><Link to="/pricing" className="hover:text-[var(--ap-ink)]">Pricing</Link></li>
+              <li><Link to="/app/downloads" className="hover:text-[var(--ap-ink)]">Desktop App Downloads</Link></li>
+              <li><Link to="/signup" className="hover:text-[var(--ap-ink)]">Start Free Trial</Link></li>
             </ul>
           </div>
 
+          {/* Company Links */}
           <div>
-            <h4 className="text-xs font-semibold uppercase tracking-wider text-ink-3">Company</h4>
-            <ul className="mt-3 space-y-2 text-sm text-ink-2">
-              <li><Link to="/about" className="hover:text-ink-1">About</Link></li>
-              <li><Link to="/contact" className="hover:text-ink-1">Contact</Link></li>
+            <h4 className="ap-pixel text-[9px] uppercase tracking-wider text-[var(--ap-accent)]">Company</h4>
+            <ul className="mt-3 space-y-2 ap-pixel text-[9.5px] text-[var(--ap-ink-2)]">
+              <li><Link to="/about" className="hover:text-[var(--ap-ink)]">About Us</Link></li>
+              <li><Link to="/contact" className="hover:text-[var(--ap-ink)]">Contact Support</Link></li>
+              <li><Link to="/signin" className="hover:text-[var(--ap-ink)]">Sign In</Link></li>
             </ul>
           </div>
 
+          {/* Legal & Compliance */}
           <div>
-            <h4 className="text-xs font-semibold uppercase tracking-wider text-ink-3">Legal & Security</h4>
-            <ul className="mt-3 space-y-2 text-sm text-ink-2">
-              <li><Link to="/privacy" className="hover:text-ink-1">Privacy Policy</Link></li>
-              <li><Link to="/terms" className="hover:text-ink-1">Terms of Service</Link></li>
-              <li><Link to="/security" className="hover:text-ink-1">Security & Compliance</Link></li>
+            <h4 className="ap-pixel text-[9px] uppercase tracking-wider text-[var(--ap-accent)]">Legal & Security</h4>
+            <ul className="mt-3 space-y-2 ap-pixel text-[9.5px] text-[var(--ap-ink-2)]">
+              <li><Link to="/privacy" className="hover:text-[var(--ap-ink)]">Privacy Policy</Link></li>
+              <li><Link to="/terms" className="hover:text-[var(--ap-ink)]">Terms of Service</Link></li>
+              <li><Link to="/security" className="hover:text-[var(--ap-ink)]">Security Policy</Link></li>
             </ul>
           </div>
         </div>
-        <div className="border-t border-line">
-          <div className="mx-auto flex max-w-6xl flex-col items-center justify-between gap-2 px-6 py-5 text-xs text-ink-3 sm:flex-row">
+
+        {/* Bottom Bar */}
+        <div className="border-t border-[var(--ap-border)] bg-[var(--ap-surface)]">
+          <div className="mx-auto flex max-w-7xl flex-col items-center justify-between gap-2 px-6 py-4 ap-pixel text-[8.5px] text-[var(--ap-ink-2)] sm:flex-row">
             <span>© {new Date().getFullYear()} CamAI Enterprise. All rights reserved.</span>
             <div className="flex gap-4">
-              <Link to="/privacy" className="hover:text-ink-1">Privacy</Link>
-              <Link to="/terms" className="hover:text-ink-1">Terms</Link>
-              <Link to="/security" className="hover:text-ink-1">Security</Link>
+              <Link to="/privacy" className="hover:text-[var(--ap-ink)]">Privacy</Link>
+              <Link to="/terms" className="hover:text-[var(--ap-ink)]">Terms</Link>
+              <Link to="/security" className="hover:text-[var(--ap-ink)]">Security</Link>
             </div>
           </div>
         </div>

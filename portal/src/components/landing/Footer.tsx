@@ -1,101 +1,79 @@
+import React from "react";
 import { Link } from "react-router-dom";
-import { ArrowRight } from "lucide-react";
+import { ArrowRight, ShieldCheck, Terminal, Cpu, CheckCircle } from "lucide-react";
 
 export default function Footer() {
   return (
-    <footer className="ap-page border-t border-[var(--ap-border)]">
-      {/* CTA band */}
-      <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-        <div
-          className="relative -mt-0 overflow-hidden rounded-[26px] border border-[var(--ap-border)] bg-[var(--ap-surface)] px-8 py-14 text-center shadow-[var(--ap-shadow-md)]"
-          style={{ marginTop: "-3.5rem" }}
-        >
-          <div className="absolute inset-0 ap-aurora opacity-70" />
-          <div className="relative">
-            <p className="ap-eyebrow mx-auto justify-center">Get Started</p>
-            <h2 className="mt-4 text-3xl font-extrabold tracking-tight text-[var(--ap-ink)] sm:text-4xl">
-              Put a camera in front of it.
-            </h2>
-            <p className="mx-auto mt-3 max-w-xl text-[var(--ap-ink-2)]">
-              Pair a stream, launch the local engine, and watch real detections stream into the portal.
-            </p>
-            <div className="mt-5 flex justify-center">
-              <span className="ap-chip">
-                <span className="h-2 w-2 rounded-full bg-emerald-500" />
-                FREE DURING EARLY ACCESS
-              </span>
-            </div>
-            <div className="mt-8 flex flex-wrap items-center justify-center gap-4">
-              <Link to="/app" className="ap-btn ap-btn-primary px-7 py-4">
-                Launch Portal <ArrowRight size={15} />
-              </Link>
-              <Link to="/contact" className="ap-btn ap-btn-ghost px-7 py-4">Talk to sales</Link>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* links */}
-      <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 pt-16 pb-10">
-        <div className="grid gap-10 md:grid-cols-5">
-          <div className="md:col-span-2">
+    <footer className="relative bg-[#05080C] text-white border-t border-slate-800/80 pt-16 pb-12 overflow-hidden">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        
+        {/* Main Footer Links & Banner */}
+        <div className="grid grid-cols-1 md:grid-cols-12 gap-10 pb-16 border-b border-slate-800/80">
+          
+          {/* Brand Col */}
+          <div className="md:col-span-4 space-y-4">
             <div className="flex items-center gap-3">
-              <img src="/favicon.svg" alt="CamAI" className="h-9 w-9 rounded-xl" />
-              <span className="ap-pixel-bold text-[15px] text-[var(--ap-ink)]">CamAI</span>
+              <img src="/favicon.svg" alt="CamAI" className="w-8 h-8 rounded-xl shadow-md" />
+              <span className="text-lg font-extrabold text-white tracking-tight">CamAI Enterprise</span>
             </div>
-            <p className="mt-4 max-w-sm text-sm leading-relaxed text-[var(--ap-ink-2)]">
-              Enterprise camera AI that runs on your own hardware — high-speed local inference, zero cloud video egress,
-              activated with a single key.
+            <p className="text-xs text-slate-400 leading-relaxed font-sans max-w-sm">
+              Next-generation on-premise vision intelligence grid. Zero cloud egress, real-time AI object tracking, and sub-12ms local inference.
             </p>
-            <div className="ap-chip mt-6">
-              <span className="relative flex h-2 w-2">
-                <span className="absolute inline-flex h-full w-full animate-ping rounded-full opacity-70 bg-[var(--ap-accent)]" />
-                <span className="relative inline-flex h-2 w-2 rounded-full bg-[var(--ap-accent)]" />
-              </span>
-              RUNS ON YOUR HARDWARE
+
+            <div className="pt-2 flex items-center gap-2 text-xs text-emerald-400 font-mono">
+              <CheckCircle className="w-4 h-4" /> 100% On-Premise Data Sovereignty
             </div>
           </div>
 
-          <div>
-            <h4 className="ap-pixel text-[10px] uppercase tracking-[0.1em] text-[var(--ap-ink)]">Platform</h4>
-            <ul className="mt-4 space-y-2.5 text-sm text-[var(--ap-ink-2)]">
-              <li><a href="#pipeline" className="hover:text-[var(--ap-accent)]">Pipeline</a></li>
-              <li><a href="#telemetry" className="hover:text-[var(--ap-accent)]">Live Telemetry</a></li>
-              <li><a href="#capabilities" className="hover:text-[var(--ap-accent)]">Capabilities</a></li>
-              <li><a href="#platform" className="hover:text-[var(--ap-accent)]">Platform</a></li>
+          {/* Column 2: Product */}
+          <div className="md:col-span-2 space-y-3">
+            <h4 className="text-xs font-mono uppercase tracking-widest text-slate-400 font-bold">Product</h4>
+            <ul className="space-y-2 text-xs font-sans text-slate-400">
+              <li><a href="#live-demo" className="hover:text-white transition-colors">Live Product Demo</a></li>
+              <li><a href="#ai-features" className="hover:text-white transition-colors">AI Neural Models</a></li>
+              <li><a href="#live-dashboard" className="hover:text-white transition-colors">Command Dashboard</a></li>
+              <li><Link to="/app/downloads" className="hover:text-white transition-colors">Desktop App Download</Link></li>
             </ul>
           </div>
 
-          <div>
-            <h4 className="ap-pixel text-[10px] uppercase tracking-[0.1em] text-[var(--ap-ink)]">Access</h4>
-            <ul className="mt-4 space-y-2.5 text-sm text-[var(--ap-ink-2)]">
-              <li><Link to="/app" className="hover:text-[var(--ap-accent)]">Launch Portal</Link></li>
-              <li><Link to="/signin" className="hover:text-[var(--ap-accent)]">Sign In</Link></li>
-              <li><Link to="/signup" className="hover:text-[var(--ap-accent)]">Create Account</Link></li>
-              <li><Link to="/contact" className="hover:text-[var(--ap-accent)]">Contact Sales</Link></li>
+          {/* Column 3: Platform */}
+          <div className="md:col-span-3 space-y-3">
+            <h4 className="text-xs font-mono uppercase tracking-widest text-slate-400 font-bold">Enterprise</h4>
+            <ul className="space-y-2 text-xs font-sans text-slate-400">
+              <li><Link to="/security" className="hover:text-white transition-colors">Security & Compliance (SOC 2)</Link></li>
+              <li><Link to="/features" className="hover:text-white transition-colors">Vision Grid Architecture</Link></li>
+              <li><Link to="/pricing" className="hover:text-white transition-colors">Transparent Licensing</Link></li>
+              <li><Link to="/about" className="hover:text-white transition-colors">Company & Mission</Link></li>
             </ul>
           </div>
 
-          <div>
-            <h4 className="ap-pixel text-[10px] uppercase tracking-[0.1em] text-[var(--ap-ink)]">Legal</h4>
-            <ul className="mt-4 space-y-2.5 text-sm text-[var(--ap-ink-2)]">
-              <li><Link to="/privacy" className="hover:text-[var(--ap-accent)]">Privacy Policy</Link></li>
-              <li><Link to="/terms" className="hover:text-[var(--ap-accent)]">Terms of Service</Link></li>
-              <li><Link to="/security" className="hover:text-[var(--ap-accent)]">Security & Compliance</Link></li>
-            </ul>
+          {/* Column 4: CTA Box */}
+          <div className="md:col-span-3 p-5 rounded-2xl border border-slate-800 bg-slate-900/60 space-y-3">
+            <h4 className="text-sm font-bold text-white">Deploy CamAI Today</h4>
+            <p className="text-xs text-slate-400 font-sans">
+              Activate your hardware with a single key and start detecting threats instantly.
+            </p>
+            <Link
+              to="/signup"
+              className="w-full py-2.5 rounded-xl bg-sky-500 hover:bg-sky-400 text-white font-semibold text-xs flex items-center justify-center gap-2 shadow-md transition-colors"
+            >
+              <span>Get Started Free</span>
+              <ArrowRight className="w-3.5 h-3.5" />
+            </Link>
+          </div>
+
+        </div>
+
+        {/* Bottom Copyright Bar */}
+        <div className="mt-8 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs font-mono text-slate-500">
+          <p>© {new Date().getFullYear()} CamAI Enterprise Vision Inc. All rights reserved.</p>
+          <div className="flex gap-6">
+            <Link to="/privacy" className="hover:text-slate-300">Privacy Policy</Link>
+            <Link to="/terms" className="hover:text-slate-300">Terms of Service</Link>
+            <Link to="/security" className="hover:text-slate-300">Security Policy</Link>
           </div>
         </div>
 
-        <div className="mt-12 flex flex-col items-center justify-between gap-3 border-t border-[var(--ap-border)] pt-6 sm:flex-row">
-          <span className="ap-pixel text-[9px] tracking-[0.06em] text-[var(--ap-ink-2)]">
-            © {new Date().getFullYear()} CAMAI — ALL RIGHTS RESERVED
-          </span>
-          <div className="flex gap-4 ap-pixel text-[9px] tracking-[0.06em] text-[var(--ap-ink-2)]">
-            <Link to="/privacy" className="hover:text-[var(--ap-accent)]">PRIVACY</Link>
-            <Link to="/terms" className="hover:text-[var(--ap-accent)]">TERMS</Link>
-            <Link to="/security" className="hover:text-[var(--ap-accent)]">SECURITY</Link>
-          </div>
-        </div>
       </div>
     </footer>
   );

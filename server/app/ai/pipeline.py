@@ -8,13 +8,6 @@ import threading
 from collections import deque
 import numpy as np
 from uuid import uuid4
-# Hungarian assignment for ByteTracker._hungarian_match. Without this import the
-# tracking loop raises NameError every frame, which silently defeats tracking
-# AND telemetry: the tracking stage feeds Module 5, so if it throws on every
-# iteration the telemetry slot is never filled and /api/status reports all-zero
-# fps/detections even while inference is finding objects. (Root cause of a
-# "nothing is detected" report where the model is actually running fine.)
-from scipy.optimize import linear_sum_assignment
 from app.ai.backend import EngineBackend
 from app.ai.tiling import AdaptiveTileEngine
 from app.ai.tile_governor import governor
@@ -34,6 +27,47 @@ from app.analytics import (
 )
 from app.config import RECORDINGS_DIR, HELMET_INTERVAL_S, ANPR_INTERVAL_S, TARGET_FPS, MJPEG_MAX_FPS
 from app.gpu_monitor import get_gpu_stats
+
+# ── Hungarian assignment, imported off the startup path ─────────────────────
+# ByteTracker._hungarian_match needs scipy's linear_sum_assignment, and that ONE
+# function costs ~1.6 s to import: `scipy.optimize`'s package __init__ drags in
+# scipy.linalg, scipy.sparse and scipy.sparse.csgraph behind it. Importing a
+# submodule directly does not help — the parent __init__ runs either way (both
+# paths measured within 0.2 s of each other).
+#
+# That 1.6 s used to sit on the critical path between process launch and the
+# engine answering HTTP at all, delaying every camera behind it. It is now
+# prefetched on a background thread while the rest of startup (fastapi, the
+# database, route construction, the model compile) proceeds, and resolved on
+# first use if the prefetch has not landed yet.
+#
+# It must NOT silently degrade: the tracking stage feeds Module 5, so if this
+# raises every iteration the telemetry slot is never filled and /api/status
+# reports all-zero fps/detections even while inference is finding objects —
+# the root cause of a past "nothing is detected" report where the model was
+# running fine. So _get_lsa() raises rather than returning a stub.
+_linear_sum_assignment = None
+
+
+def _get_lsa():
+    """scipy's linear_sum_assignment, imported at most once."""
+    global _linear_sum_assignment
+    if _linear_sum_assignment is None:
+        from scipy.optimize import linear_sum_assignment as _f
+        _linear_sum_assignment = _f
+    return _linear_sum_assignment
+
+
+def _prewarm_scipy():
+    def _load():
+        try:
+            _get_lsa()
+        except Exception:
+            pass  # pure prefetch; the real call path surfaces any real failure
+    threading.Thread(target=_load, name="scipy-prewarm", daemon=True).start()
+
+
+_prewarm_scipy()
 
 # Minimum buffering for all FFMPEG-based capture sources.
 #
@@ -541,7 +575,7 @@ class ByteTracker:
                 if app_gate is not None and app_d > app_gate:
                     continue
                 cost[ti, di] = min(INVALID - 1e-3, w_iou * (1.0 - iou) + w_app * app_d + class_penalty)
-        row_ind, col_ind = linear_sum_assignment(cost)
+        row_ind, col_ind = _get_lsa()(cost)
         m_t, m_d = [], []
         unmatched_t, unmatched_d = set(range(n_t)), set(range(n_d))
         for r, c in zip(row_ind, col_ind):

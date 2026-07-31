@@ -60,11 +60,19 @@ def ort_has_gpu() -> bool:
 
 # -------------------------------------------------------------------- OpenVINO
 def openvino_devices() -> list[str]:
+    # Goes through backend's shared Core rather than building one here: a fresh
+    # ov.Core().available_devices re-enumerates every plugin and measured ~3 s
+    # on this machine's Intel iGPU, and this helper is called from status/report
+    # paths that have no reason to pay it again.
     try:
-        import openvino as ov
-        return list(ov.Core().available_devices)
+        from app.ai.backend import ov_available_devices
+        return ov_available_devices()
     except Exception:
-        return []
+        try:
+            import openvino as ov
+            return list(ov.Core().available_devices)
+        except Exception:
+            return []
 
 
 def openvino_has_gpu() -> bool:
