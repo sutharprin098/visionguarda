@@ -15,7 +15,7 @@ const { execFileSync } = require("child_process");
 //
 // So: if this build intended to sign, an unsigned output is a BUILD FAILURE.
 // If it didn't intend to sign, this prints exactly what shipped and why, and
-// exits 0 — v1.0.0 is deliberately unsigned (see docs/SIGNING.md).
+// exits 0 — v1.0.0 is deliberately unsigned (see docs/DEPLOYMENT.md, "Code signing" section).
 
 const releaseDir = path.join(__dirname, "..", "release");
 const installerExt = /\.(exe|msi)$/i;
@@ -124,7 +124,7 @@ if (requested && (unsigned > 0 || indeterminate > 0)) {
   console.error(
     `\nverify-signature.js: signing was requested (${requested}) but ${why}. ` +
     `Failing the build rather than shipping an installer that only looks ` +
-    `finished. See docs/SIGNING.md.`,
+    `finished. See docs/DEPLOYMENT.md, "Code signing" section.`,
   );
   process.exit(1);
 }
@@ -135,7 +135,7 @@ if (indeterminate > 0) {
   console.log(
     "\nNOTE: Authenticode status could not be determined on this machine, and " +
     "no signing was configured, so the installer is presumed unsigned. " +
-    "See docs/SIGNING.md.",
+    "See docs/DEPLOYMENT.md, \"Code signing\" section.",
   );
 } else if (unsigned > 0) {
   console.log(
@@ -143,6 +143,6 @@ if (indeterminate > 0) {
     "\"Windows protected your PC — Unknown publisher\" and the user must click " +
     "More info -> Run anyway.\nThis is the intended state for v1.0.0: a " +
     "code-signing certificate is bound to a legal identity and is not " +
-    "transferable, so the acquirer signs under their own. See docs/SIGNING.md.",
+    "transferable, so the acquirer signs under their own. See docs/DEPLOYMENT.md, \"Code signing\" section.",
   );
 }

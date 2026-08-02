@@ -212,13 +212,36 @@ async function resolveEngine(): Promise<ResolvedEngine | null> {
     } else if (existsSync(zip)) {
       appendLog(`[Supervisor] Unpacking bundled AI engine archive...`);
       try {
+        // .NET's ZipFile, not Expand-Archive: Expand-Archive is backed by the
+        // Microsoft.PowerShell.Archive module, and on a real machine that
+        // module can fail to autoload (seen here as "the module could not be
+        // loaded") for reasons that have nothing to do with this app - a
+        // stale module cache, low disk on the system drive PSModulePath
+        // lives on, whatever. When it fails, Expand-Archive exits non-zero
+        // and NOTHING is extracted, but the log line that followed
+        // ("Unpacking completed but engine executable not found") read like
+        // a packaging problem rather than a missing PowerShell module, and
+        // the desktop has no engine at all afterward - every camera sits at
+        // "not_configured" forever, which is indistinguishable from "nothing
+        // detects" to whoever is looking at the app. ZipFile is a .NET
+        // Framework class, not a PowerShell module; it has nothing to
+        // autoload and nothing to fail to load.
+        const stderrChunks: Buffer[] = [];
         const unpacked = await new Promise<boolean>((resolve) => {
           const cp = spawn("powershell.exe", [
             "-NoProfile",
             "-NonInteractive",
             "-Command",
-            `Expand-Archive -Path ${JSON.stringify(zip)} -DestinationPath ${JSON.stringify(engineDir)} -Force`,
+            // Clear anything left by a prior partial/failed unpack first:
+            // ExtractToDirectory has no overwrite flag on the .NET Framework
+            // build Windows PowerShell 5.1 resolves (only .NET Core's does),
+            // so a retry into a non-empty dir throws on the first colliding
+            // file instead of just replacing it.
+            `Get-ChildItem -Path ${JSON.stringify(engineDir)} -Exclude 'camai-engine.zip' | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue; ` +
+              `Add-Type -AssemblyName System.IO.Compression.FileSystem; ` +
+              `[System.IO.Compression.ZipFile]::ExtractToDirectory(${JSON.stringify(zip)}, ${JSON.stringify(engineDir)})`,
           ], { windowsHide: true });
+          cp.stderr?.on("data", (d) => stderrChunks.push(d));
           cp.on("close", (code) => resolve(code === 0));
           cp.on("error", () => resolve(false));
         });
@@ -226,7 +249,8 @@ async function resolveEngine(): Promise<ResolvedEngine | null> {
           appendLog("[Supervisor] Engine archive unpacked successfully.");
           return { frozenExe: exe, engineDir };
         } else {
-          appendLog("[Supervisor] Unpacking completed but engine executable not found.");
+          const detail = Buffer.concat(stderrChunks).toString("utf8").trim();
+          appendLog(`[Supervisor] Failed to unpack engine archive${detail ? `: ${detail}` : " (unpacking finished but the executable is still missing)."}`);
         }
       } catch (err: any) {
         appendLog(`[Supervisor] Failed to unpack engine archive: ${err?.message}`);

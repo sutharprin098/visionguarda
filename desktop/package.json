@@ -1,6 +1,6 @@
 {
   "name": "camai-desktop",
-  "version": "1.0.1",
+  "version": "1.0.0",
   "description": "CamAI Desktop — Enterprise AI CCTV client for Windows",
   "private": true,
   "type": "module",
@@ -14,6 +14,8 @@
     "build": "tsc -p tsconfig.node.json && vite build && electron-builder --win && node scripts/checksum.cjs && node scripts/verify-signature.cjs",
     "build:full": "npm run build:engine && npm run build",
     "build:admin": "tsc -p tsconfig.node.json && vite build && electron-builder --win --config electron-builder.admin.json",
+    "release": "tsc -p tsconfig.node.json && vite build && electron-builder --win --publish always && node scripts/checksum.cjs && node scripts/verify-signature.cjs && node scripts/publish-checksum.cjs",
+    "release:full": "npm run build:engine && npm run release",
     "start": "tsc -p tsconfig.node.json && vite build && electron ."
   },
   "dependencies": {
@@ -83,6 +85,12 @@
         "to": "engine/camai-engine.zip"
       }
     ],
-    "publish": null
+    "publish": {
+      "provider": "github",
+      "owner": "sutharprin098",
+      "repo": "visionguarda",
+      "private": true,
+      "releaseType": "release"
+    }
   }
 }

@@ -105,7 +105,24 @@ if (Test-Path $exe) {
         }
     }
 
+    # desktop/package.json's extraResources ships engine/camai-engine.zip, NOT
+    # the dist\camai-engine\ folder above - electron-builder never reads that
+    # folder directly. Zipping it here, every run, is what makes "rebuild the
+    # engine" and "the installer ships the new engine" the same statement.
+    #
+    # Before this, the zip was a separate manual step nobody scripted, so a
+    # source fix (rebuilt exe, fresh LastWriteTime, passes the staleness check
+    # above) could still ship inside an installer carrying whatever zip was
+    # last made by hand - silently. That is the exact AGPL-swap incident from
+    # 07-16/07-17 (fixed in source one day, shipped in the exe the next)
+    # repeating in a new spot; zipping unconditionally here closes it for good
+    # instead of relying on whoever packages a release to remember.
+    Write-Host "==> Zipping engine to dist\camai-engine.zip..."
+    $zipPath = Join-Path $PSScriptRoot "dist\camai-engine.zip"
+    if (Test-Path $zipPath) { Remove-Item -Force $zipPath }
+    Compress-Archive -Path (Join-Path $PSScriptRoot "dist\camai-engine\*") -DestinationPath $zipPath -CompressionLevel Optimal
     Write-Host "==> SUCCESS: $exe" -ForegroundColor Green
+    Write-Host "==> SUCCESS: $zipPath" -ForegroundColor Green
 } else {
     Write-Error "Build finished but $exe was not produced."
     exit 1

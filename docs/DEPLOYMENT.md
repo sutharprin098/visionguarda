@@ -25,7 +25,18 @@ npm run build:full
 
 `electron-builder` produces an NSIS installer (`release/CamAI-Desktop-Setup-<version>.exe`). `desktop/scripts/checksum.cjs` writes a companion `.sha256` file next to it; `desktop/scripts/verify-signature.cjs` verifies code signing before the build is considered done. An Admin Studio variant is built with `npm run build:admin`, using `electron-builder.admin.json`.
 
-**Publishing a release:** create a GitHub Release on the configured releases repo (tag = version, release body = notes), and attach both the `.exe` and its `.exe.sha256`. The portal's Downloads page reads releases live via the `github-releases` Edge Function — there's nothing to register or upload into Supabase, and the page never hashes the multi-hundred-MB installer itself; it reads the small `.sha256` companion file.
+**Code signing:** v1.0.0 ships deliberately unsigned — a code-signing certificate is bound to a legal identity and isn't transferable, so the acquirer signs future builds under their own. `verify-signature.cjs` only *fails the build* if signing was actually requested (via `CSC_LINK`/`WIN_CSC_LINK`/etc. or `build.win.certificateFile` in `package.json`) and didn't produce a valid Authenticode signature — an unsigned build with no signing requested passes, logging a SmartScreen warning note.
+
+**Publishing a release:** the AI engine and model weights are gitignored (proprietary/licensed — see `server/models/`), so there is no way to build the full installer on a stock GitHub Actions runner; releases are cut locally, on the build machine that already has the engine and models. Bump `desktop/package.json`'s `version`, then run:
+
+```bash
+cd desktop
+GH_TOKEN=<a token with repo:release write access> npm run release        # or release:full to rebuild the engine first
+```
+
+This runs the same build as `npm run build`, then `electron-builder --win --publish always` creates the GitHub Release for the current `version` (tag `v<version>`) if it doesn't exist and uploads the installer, its `.blockmap`, and `latest.yml`; `scripts/publish-checksum.cjs` then attaches the `.sha256` to the same release. `desktop/package.json`'s `build.publish` points at `sutharprin098/visionguarda` with `private: true` (electron-builder authenticates the upload with `GH_TOKEN`, since the repo has no anonymous/public release access — see `supabase/functions/download-release`). Never create the release manually and separately from the build — that's what left v1.0.0 with a tag and a local installer but no GitHub Release, breaking the Downloads page's direct link for weeks.
+
+The portal's Downloads page reads releases live via the `github-releases` Edge Function — there's nothing to register or upload into Supabase, and the page never hashes the multi-hundred-MB installer itself; it reads the small `.sha256` companion file. Because the repo is private, the plain `github.com/.../releases/download/...` URL only resolves for a browser session authenticated to GitHub with repo access — the portal's own download button instead calls the `download-release` Edge Function, which resolves a short-lived signed URL server-side using a `GITHUB_TOKEN` Supabase secret, so a portal user never needs a GitHub login. Configure `GITHUB_RELEASES_REPO` and `GITHUB_TOKEN` as Supabase Edge Function secrets for both `github-releases` and `download-release`.
 
 ## 3. Supabase backend
 

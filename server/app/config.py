@@ -448,15 +448,25 @@ PORT = int(os.getenv("CAMAI_PORT", "8000"))
 API_TOKEN = os.getenv("CAMAI_API_TOKEN", "").strip()
 
 # Origins allowed to make cross-origin calls. The desktop renderer is a
-# file:// page (Origin: null) in production and the Vite dev server in
-# development; the legacy local viewer runs on 5173/4173 too. "*" is still
-# available via CAMAI_CORS_ORIGINS for anyone embedding the engine elsewhere.
+# file:// page in production and the Vite dev server in development; the
+# legacy local viewer runs on 5173/4173 too. "*" is still available via
+# CAMAI_CORS_ORIGINS for anyone embedding the engine elsewhere.
 _cors = os.getenv("CAMAI_CORS_ORIGINS", "").strip()
 CORS_ORIGINS = (
     [o.strip() for o in _cors.split(",") if o.strip()]
     if _cors
     else [
-        "null",                     # Electron file:// renderer
+        # Electron file:// renderer. Older Chromium sent the literal string
+        # "null" as Origin for a file:// page; the Chromium build in the
+        # currently-shipped Electron sends "file://" instead. Both have to be
+        # accepted or the packaged app's /ws telemetry socket gets a 403 on
+        # every single connection attempt — the engine still detects
+        # correctly, but not one detection ever reaches the overlay, which is
+        # indistinguishable from "the AI isn't running" to an operator. Keep
+        # both forms rather than replacing one with the other so a future
+        # Electron/Chromium bump in either direction can't reopen this.
+        "null",
+        "file://",
         # desktop/vite.config.ts pins the desktop renderer's dev server to 5180.
         # It was missing here, and the effect was not subtle: _ws_origin_allowed()
         # rejects an unlisted Origin with close code 1008, so `npm run dev` on
