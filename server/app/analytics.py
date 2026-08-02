@@ -1012,26 +1012,77 @@ class CameraAnalytics:
         # alerts above dedup via alert_cooldowns), so one rider = one event.
         no_helmet_dets = [d for d in detections if d.get("class") == "no_helmet"]
         if no_helmet_dets:
+            # confidence gate: a low-confidence "motorcycle" call (e.g. a car
+            # the detector wasn't sure about) must not anchor a real alert —
+            # see VEHICLE_ACTION_MIN_CONFIDENCE in config.py.
             motos = [d for d in detections
-                     if d.get("class") == "motorcycle" and d.get("track_id") is not None]
+                     if d.get("class") == "motorcycle" and d.get("track_id") is not None
+                     and d.get("confidence", 0.0) >= config.VEHICLE_ACTION_MIN_CONFIDENCE]
             persons = [d for d in detections if d.get("class") == "person"]
 
             def _cx(b):
                 return (b["x1"] + b["x2"]) / 2.0
 
+            def _has_valid_rider(mb):
+                """Same rider window as app/ai/helmet.py's _rider_crops(): a
+                real PERSON (not just the no_helmet head box itself) must sit
+                on this specific motorcycle. Without this, a dense curbside
+                row of parked bikes still let _assoc_moto pick whichever
+                PARKED bike happened to be geometrically closest to a head
+                detected on a genuinely different, real rider nearby — the
+                per-head window alone can't tell two adjacent bikes apart in
+                a tight cluster, but "does THIS bike have its own rider" can.
+                Confirmed live 2026-08-02: 2/15 evidence crops still showed a
+                riderless parked bike after the by-head-only fix."""
+                pad = (mb["x2"] - mb["x1"]) * 0.25
+                moto_h = mb["y2"] - mb["y1"]
+                for p in persons:
+                    if p.get("confidence", 0.0) < config.HELMET_RIDER_MIN_PERSON_CONFIDENCE:
+                        continue
+                    pb = p["bbox"]
+                    p_cx = _cx(pb)
+                    if not (mb["x1"] - pad <= p_cx <= mb["x2"] + pad):
+                        continue
+                    if not (mb["y1"] - moto_h * 1.2 <= pb["y2"] <= mb["y2"] + moto_h * 0.3):
+                        continue
+                    return True
+                return False
+
             def _assoc_moto(box):
                 """The tracked motorcycle a rider-region box belongs to: its
                 horizontal centre falls within the bike's x-span (padded) and it
-                sits at/above the bike. Returns the closest such motorcycle det."""
+                sits at/above the bike, within about one bike-height of it, AND
+                that specific motorcycle has its own valid rider (_has_valid_rider)
+                — not just proximity to the head box. Returns the closest such
+                motorcycle det.
+
+                The vertical side used to only reject boxes BELOW the bike
+                (box centre > mb["y2"]), with no upper bound — so a head
+                anywhere above a motorcycle, no matter how far (a pedestrian
+                standing yards away but horizontally within the 25% pad),
+                would associate to it. That produced both false-positive
+                helmet_violation alerts on people who were never on the bike,
+                and evidence crops (rider_bbox = this motorcycle's box) showing
+                an unrelated bike instead of the actual rider — confirmed via
+                a live spot-check run 2026-08-02. Bounding the vertical window
+                fixed the isolated case, but in a dense parked-bike row the
+                window of several adjacent bikes overlaps, so the "closest
+                bike" was still sometimes a parked one — the _has_valid_rider
+                check added 2026-08-02 rejects any candidate bike that doesn't
+                itself have a person actually on it."""
                 bx = _cx(box["bbox"])
+                by2 = box["bbox"]["y2"]
                 best, best_dx = None, None
                 for m in motos:
                     mb = m["bbox"]
                     pad = (mb["x2"] - mb["x1"]) * 0.25
                     if not (mb["x1"] - pad <= bx <= mb["x2"] + pad):
                         continue
-                    if (box["bbox"]["y1"] + box["bbox"]["y2"]) / 2.0 > mb["y2"]:
-                        continue  # box is below the bike — not a rider on it
+                    moto_h = mb["y2"] - mb["y1"]
+                    if not (mb["y1"] - moto_h * 1.2 <= by2 <= mb["y2"]):
+                        continue  # not above the bike, or too far above it to be its rider
+                    if not _has_valid_rider(mb):
+                        continue  # this specific bike has no rider of its own — a nearby parked bike, not a match
                     dx = abs(bx - _cx(mb))
                     if best_dx is None or dx < best_dx:
                         best, best_dx = m, dx
@@ -1043,11 +1094,18 @@ class CameraAnalytics:
                     continue  # a bare head with no bike under it is not a rider
                 tid = moto["track_id"]
                 alert_key = f"helmet_violation_{tid}"
-                # Cooldown is operator-configurable (config.HELMET_COOLDOWN) so a
-                # site can trade duplicate-suppression against missing a second
-                # genuine pass of the same rider. Still keyed to the motorcycle
-                # track, so it dedups per rider, not per frame.
-                if now - self.alert_cooldowns.get(alert_key, 0) > config.HELMET_COOLDOWN:
+                # Fires once per rider, not once per config.HELMET_COOLDOWN
+                # seconds. A rider who sits in frame for two minutes (traffic
+                # signal, parked at a stall) used to re-trigger every
+                # HELMET_COOLDOWN (15s default) - four-plus Telegram messages
+                # for one still-in-frame rider who never left. alert_key is
+                # cleared the moment this track_id is actually pruned as gone
+                # (see the dead_tracks sweep below, which deletes every
+                # "*_{tid}"-suffixed cooldown key), so a genuinely NEW pass by
+                # a different rider - or the same rider leaving and coming
+                # back - still gets its own fresh alert. Only "the same
+                # continuous sighting" is deduplicated to one.
+                if alert_key not in self.alert_cooldowns:
                     riders = sum(
                         1 for p in persons
                         if moto["bbox"]["x1"] - (moto["bbox"]["x2"] - moto["bbox"]["x1"]) * 0.25
@@ -1825,7 +1883,24 @@ class CameraAnalytics:
                             cls_name = self.track_classes.get(tid, "person")
                             if cls_name == "person":
                                 alert_key = f"factory_hazard_{z_id}_{tid}"
-                                if now - self.alert_cooldowns.get(alert_key, 0) > 15.0:
+                                # This says "entered" - it should fire once per
+                                # worker per continuous time inside the zone,
+                                # not every 15s they remain there. A worker
+                                # standing in a hazard zone for two minutes
+                                # used to raise 8 separate "entered" alerts for
+                                # an entry that happened once. The key clears
+                                # once this track_id is pruned as gone for good
+                                # (see the dead_tracks sweep below), so a worker
+                                # who genuinely leaves and a different one who
+                                # enters later both still alert normally. A
+                                # worker who exits this zone but stays tracked
+                                # elsewhere in frame and re-enters later will
+                                # not re-alert until their track fully expires -
+                                # narrower than the general zone alerts below
+                                # (which re-arm on exit), accepted here since
+                                # the reported problem was the opposite failure
+                                # (repeat spam for one continuous visit).
+                                if alert_key not in self.alert_cooldowns:
                                     alerts.append({
                                         "type": "human_entry",
                                         "message": f"Hazard Zone Entry: Worker (ID: {tid}) entered restricted hazard area '{z_name}'",
@@ -1835,12 +1910,53 @@ class CameraAnalytics:
 
                 ppe_cfg = features.get("ppe_detection", {})
                 if ppe_cfg.get("enabled"):
+                    # no_helmet/no_vest boxes carry no track_id of their own
+                    # (same as the helmet_violation block above) - det.get(
+                    # "track_id") was therefore almost always None here, which
+                    # made the key fall back to f"..._{now}": a NEW key every
+                    # single frame, so the 25.0s cooldown below never actually
+                    # applied and this alerted on every frame a violation was
+                    # visible. Associate to the nearest tracked person instead,
+                    # exactly like the motorcycle association above, so the
+                    # dedup key is stable for as long as the same worker is in
+                    # frame.
+                    ppe_persons = [d for d in detections
+                                   if d.get("class") == "person" and d.get("track_id") is not None]
+
+                    def _ppe_cx(b):
+                        return (b["x1"] + b["x2"]) / 2.0
+
+                    def _assoc_person(box):
+                        bx = _ppe_cx(box)
+                        best, best_dx = None, None
+                        for p in ppe_persons:
+                            pb = p["bbox"]
+                            pad = (pb["x2"] - pb["x1"]) * 0.25
+                            if not (pb["x1"] - pad <= bx <= pb["x2"] + pad):
+                                continue
+                            dx = abs(bx - _ppe_cx(pb))
+                            if best_dx is None or dx < best_dx:
+                                best, best_dx = p, dx
+                        return best
+
                     for det in detections:
                         if det["class"] in ("no_helmet", "no_vest"):
-                            track_id = det.get("track_id")
+                            worker = _assoc_person(det["bbox"])
+                            track_id = worker["track_id"] if worker else None
                             violation_type = "No Helmet" if det["class"] == "no_helmet" else "No Vest"
                             alert_key = f"factory_ppe_{violation_type}_{track_id or now}"
-                            if now - self.alert_cooldowns.get(alert_key, 0) > 25.0:
+                            # Once per worker per continuous sighting, not once
+                            # per 25s - see helmet_violation above for why and
+                            # for how the key clears itself once the track is
+                            # actually gone. A worker with no associated track
+                            # still falls back to the old time-cooldown (there
+                            # is no stable identity to dedup by), rather than
+                            # silently dropping the violation.
+                            fresh = (
+                                alert_key not in self.alert_cooldowns if track_id is not None
+                                else now - self.alert_cooldowns.get(alert_key, 0) > 25.0
+                            )
+                            if fresh:
                                 alerts.append({
                                     "type": "ppe_violation",
                                     "message": f"PPE Violation: worker (ID: {track_id or 'unknown'}) is missing required {violation_type.split()[-1].lower()}!",

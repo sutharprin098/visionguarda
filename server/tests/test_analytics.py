@@ -63,9 +63,10 @@ def test_helmet_violation_fires_once_per_rider():
     a = CameraAnalytics("cam_helmet")
     moto = det(1, "motorcycle", 300, 300, 360, 400)
     head = undet("no_helmet", 320, 270, 340, 300)   # centred over the bike, above it
+    rider = det(2, "person", 305, 260, 355, 400)    # the actual rider _has_valid_rider needs
     count = 0
     for _ in range(10):
-        alerts, *_ = a.update([moto, head], zones=[], lines=[], frame_w=FW, frame_h=FH)
+        alerts, *_ = a.update([moto, head, rider], zones=[], lines=[], frame_w=FW, frame_h=FH)
         count += sum(1 for al in alerts if al["type"] == "helmet_violation")
     assert count == 1, f"expected exactly one deduped violation, got {count}"
 
@@ -102,11 +103,77 @@ def test_helmet_no_duplicate_alerts_over_1000_frames():
     a = CameraAnalytics("cam_stress")
     moto = det(1, "motorcycle", 300, 300, 360, 400)
     head = undet("no_helmet", 320, 270, 340, 300)
+    rider = det(2, "person", 305, 260, 355, 400)
     total = 0
     for _ in range(1000):
-        alerts, *_ = a.update([moto, head], zones=[], lines=[], frame_w=FW, frame_h=FH)
+        alerts, *_ = a.update([moto, head, rider], zones=[], lines=[], frame_w=FW, frame_h=FH)
         total += sum(1 for al in alerts if al["type"] in ("helmet_violation", "triple_riding"))
     assert total == 1, f"expected exactly one deduped violation over 1000 frames, got {total}"
+
+
+def test_helmet_violation_does_not_repeat_while_rider_stays_in_frame(monkeypatch):
+    """A rider who sits in frame for minutes (red light, parked at a stall)
+    must raise exactly ONE violation for that whole visit, not one every
+    config.HELMET_COOLDOWN (15s default) - that used to mean four-plus
+    Telegram messages for a single rider who never left. Advancing well past
+    the old cooldown with the SAME track_id still present must not re-fire;
+    a DIFFERENT track_id (a genuinely different rider) must still fire its
+    own violation normally."""
+    import app.analytics as analytics_module
+
+    a = CameraAnalytics("cam_helmet_dwell")
+    moto = det(1, "motorcycle", 300, 300, 360, 400)
+    head = undet("no_helmet", 320, 270, 340, 300)
+    rider = det(2, "person", 305, 260, 355, 400)
+
+    fake_now = 1_000_000.0
+    monkeypatch.setattr(analytics_module.time, "time", lambda: fake_now)
+
+    total = 0
+    for _ in range(5):
+        alerts, *_ = a.update([moto, head, rider], zones=[], lines=[], frame_w=FW, frame_h=FH)
+        total += sum(1 for al in alerts if al["type"] == "helmet_violation")
+    assert total == 1, f"expected exactly one violation on first sighting, got {total}"
+
+    # Jump forward 5 minutes — the SAME rider (same track_id) is still there.
+    fake_now += 300.0
+    for _ in range(5):
+        alerts, *_ = a.update([moto, head, rider], zones=[], lines=[], frame_w=FW, frame_h=FH)
+        total += sum(1 for al in alerts if al["type"] == "helmet_violation")
+    assert total == 1, f"same rider re-alerted after only a time jump, got {total} total"
+
+    # A different, newly-tracked rider must still alert normally.
+    moto2 = det(3, "motorcycle", 100, 300, 160, 400)
+    head2 = undet("no_helmet", 120, 270, 140, 300)
+    rider2 = det(4, "person", 105, 260, 155, 400)
+    alerts, *_ = a.update([moto2, head2, rider2], zones=[], lines=[], frame_w=FW, frame_h=FH)
+    total += sum(1 for al in alerts if al["type"] == "helmet_violation")
+    assert total == 2, f"a different rider's violation was suppressed too, got {total} total"
+
+
+def test_helmet_violation_skips_closer_parked_bike_in_a_cluster():
+    """Two motorcycles sit close together: one with a real rider, one parked
+    with nobody on it. The no_helmet head is geometrically CLOSER to the
+    parked bike than to the ridden one (by raw distance) — a live spot-check
+    run 2026-08-02 found exactly this in a dense curbside row near a fruit
+    stand: the head-to-bike distance tiebreak alone picked the nearer PARKED
+    bike, producing a false helmet_violation with a riderless evidence crop.
+    _has_valid_rider() must exclude the parked bike as a candidate regardless
+    of it being closer, so the alert associates to the actually-ridden bike."""
+    a = CameraAnalytics("cam_cluster")
+    moto_ridden = det(1, "motorcycle", 300, 300, 360, 400)
+    rider = det(2, "person", 305, 260, 355, 400)
+    moto_parked = det(3, "motorcycle", 365, 305, 425, 405)   # no person anywhere near this one
+    head = undet("no_helmet", 355, 270, 375, 300)            # closer to moto_parked by centre distance
+    found = None
+    for _ in range(3):
+        alerts, *_ = a.update([moto_ridden, rider, moto_parked, head],
+                               zones=[], lines=[], frame_w=FW, frame_h=FH)
+        for al in alerts:
+            if al["type"] in ("helmet_violation", "triple_riding"):
+                found = al
+    assert found is not None, "expected the violation to associate to the ridden bike, got none at all"
+    assert found["track_id"] == 1, f"associated to track {found['track_id']} — the parked bike, not the rider's"
 
 
 def test_helmet_alert_carries_evidence_bboxes():
@@ -115,9 +182,10 @@ def test_helmet_alert_carries_evidence_bboxes():
     a = CameraAnalytics("cam_ev")
     moto = det(1, "motorcycle", 300, 300, 360, 400)
     head = undet("no_helmet", 320, 270, 340, 300)
+    rider = det(2, "person", 305, 260, 355, 400)
     found = None
     for _ in range(3):
-        alerts, *_ = a.update([moto, head], zones=[], lines=[], frame_w=FW, frame_h=FH)
+        alerts, *_ = a.update([moto, head, rider], zones=[], lines=[], frame_w=FW, frame_h=FH)
         for al in alerts:
             if al["type"] in ("helmet_violation", "triple_riding"):
                 found = al

@@ -367,17 +367,55 @@ class HelmetDetector:
 
     # -- rider association (unchanged) ------------------------------------
     def _rider_crops(self, frame, motorcycle_boxes, person_boxes) -> List[Tuple[int, int, int, int]]:
+        """One crop per motorcycle that has a genuine rider on it — NEVER a
+        crop of the bare motorcycle alone.
+
+        Previously this unioned in ANY person box merely horizontally
+        overlapping the motorcycle's x-span (no vertical constraint at all),
+        and — critically — a motorcycle with ZERO matching persons still fell
+        through to `bw, bh = ux2-ux1, uy2-uy1` using just its own box, which
+        is > 0, so the "no valid rider" case was never actually rejected: a
+        crop of the bare motorcycle was cropped and handed to the helmet
+        model every time. That model, asked to find a head/helmet in a photo
+        of only a motorcycle, would occasionally hallucinate one on the bike
+        body — a parked motorcycle reported as helmet/no_helmet with no rider
+        in the frame at all. Confirmed live 2026-08-02.
+
+        Fix: a person only counts as a rider if their confidence clears
+        HELMET_RIDER_MIN_PERSON_CONFIDENCE, their horizontal centre falls
+        within the motorcycle's x-span (padded), and they sit at/above the
+        bike within about one bike-height of it — the same association
+        window used for helmet_violation alerts in analytics.py's
+        _assoc_moto(). A motorcycle with no such person is skipped entirely:
+        no crop, no model call, no chance of a hallucinated result."""
         fh, fw = frame.shape[:2]
         crops: List[Tuple[int, int, int, int]] = []
+        min_person_conf = config.HELMET_RIDER_MIN_PERSON_CONFIDENCE
         for mb in motorcycle_boxes:
             mx1, my1 = float(mb["x1"]), float(mb["y1"])
             mx2, my2 = float(mb["x2"]), float(mb["y2"])
-            ux1, uy1, ux2, uy2 = mx1, my1, mx2, my2
+            m_cx = (mx1 + mx2) / 2.0
+            m_h = my2 - my1
+            pad = (mx2 - mx1) * 0.25
+            ux1, uy1, ux2, uy2 = None, None, None, None
             for pb in person_boxes:
-                if pb["x2"] < mx1 or pb["x1"] > mx2:
+                if float(pb.get("confidence", 0.0)) < min_person_conf:
                     continue
-                ux1 = min(ux1, float(pb["x1"])); uy1 = min(uy1, float(pb["y1"]))
-                ux2 = max(ux2, float(pb["x2"])); uy2 = max(uy2, float(pb["y2"]))
+                px1, py1 = float(pb["x1"]), float(pb["y1"])
+                px2, py2 = float(pb["x2"]), float(pb["y2"])
+                p_cx = (px1 + px2) / 2.0
+                if not (mx1 - pad <= p_cx <= mx2 + pad):
+                    continue  # not horizontally on this bike
+                if not (my1 - m_h * 1.2 <= py2 <= my2 + m_h * 0.3):
+                    continue  # not sitting at/above this bike (or way below it)
+                ux1 = px1 if ux1 is None else min(ux1, px1)
+                uy1 = py1 if uy1 is None else min(uy1, py1)
+                ux2 = px2 if ux2 is None else max(ux2, px2)
+                uy2 = py2 if uy2 is None else max(uy2, py2)
+            if ux1 is None:
+                continue  # no valid rider on this motorcycle — skip it, no crop
+            ux1 = min(ux1, mx1); uy1 = min(uy1, my1)
+            ux2 = max(ux2, mx2); uy2 = max(uy2, my2)
             bw, bh = ux2 - ux1, uy2 - uy1
             if bw <= 0 or bh <= 0:
                 continue

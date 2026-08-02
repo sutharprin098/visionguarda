@@ -6,7 +6,18 @@ opencv-python-headless==4.8.1.78
 # OpenVINO (Intel CPU/iGPU) > ONNX Runtime CPU. The engine runs fully on
 # these two; no AGPL packages are required at runtime (see LICENSING.md).
 openvino==2026.2.1
-onnxruntime==1.27.0
+# onnxruntime-openvino was tried for the helmet/ANPR secondary detectors
+# (app/ai/helmet.py, app/ai/plate.py) so they could also use this box's Intel
+# iGPU instead of silently falling back to CPU — its bundled
+# onnxruntime_providers_openvino.dll requires a specific OpenVINO runtime ABI
+# and failed to load against the openvino==2026.2.1 above (Error 127: "the
+# specified procedure could not be found" — version mismatch between the two
+# packages, confirmed 2026-08-02). onnxruntime-directml has no such coupling
+# (DirectML talks to the GPU via DirectX 12, independent of the openvino
+# package) and verified working: DmlExecutionProvider loads and runs real
+# inference on this hardware. Same "onnxruntime" import namespace as plain
+# onnxruntime — a drop-in replacement, not an additional package.
+onnxruntime-directml==1.24.4
 # Use a slightly older numpy that's widely available
 numpy==1.26.4
 # Security patch level, API-compatible with the pins they replace:

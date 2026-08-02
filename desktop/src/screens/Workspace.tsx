@@ -17,7 +17,7 @@ import type { CaptureSource } from "../lib/bridge";
 import {
   ModuleState, loadModules, filterDetections,
 } from "../lib/aiModules";
-import AlertProvider, { useAlertIngest } from "../components/alerts/AlertProvider";
+import { useAlertIngest } from "../components/alerts/AlertProvider";
 import { siteLabel } from "../components/alerts/alertUtils";
 import { getTelegramConfig, invalidateTelegramConfig, sendTelegramTest } from "../lib/localTelegram";
 
@@ -46,12 +46,18 @@ export default function Workspace({
   bundle,
   onDeactivated,
   onOpenAdminStudio,
+  openLiveCam,
 }: {
   bundle: SyncBundle;
   onDeactivated: () => void;
   /** Undefined when this user lacks cameras.manage — App decides, from the
    *  user's permissions rather than from which build is running. */
   onOpenAdminStudio?: () => void;
+  /** "Open Live Feed" clicked on an alert card in Admin Studio (the alert UI
+   *  lives there now, not here — see AlertProvider's renderUI). A nonce
+   *  because the operator can click the same camera's card twice in a row
+   *  and both have to reopen the fullscreen viewer, not just the first. */
+  openLiveCam?: { id: string; nonce: number } | null;
 }) {
   const [tab, setTab] = useState<"cameras" | "alerts" | "settings" | "engine">("cameras");
   // Which camera is showing full-window, or null. Lifted to Workspace (not the
@@ -59,6 +65,15 @@ export default function Workspace({
   // because switching camera while fullscreen has to keep the SAME viewer
   // mounted — a per-tile fullscreen element cannot do either.
   const [fullscreenCamId, setFullscreenCamId] = useState<string | null>(null);
+
+  // Admin Studio's alert cards can send an operator here to see the camera
+  // live (see App.tsx's onOpenLiveFeed) — keyed by nonce, not just id, so
+  // clicking the same camera's card twice in a row reopens the viewer both
+  // times rather than the second click being a no-op dependency change.
+  useEffect(() => {
+    if (openLiveCam) setFullscreenCamId(openLiveCam.id);
+  }, [openLiveCam]);
+
   const [syncError, setSyncError] = useState(false);
   const [syncErrorDetails, setSyncErrorDetails] = useState<string | null>(null);
   const [isPackaged, setIsPackaged] = useState(true);
@@ -322,12 +337,10 @@ export default function Workspace({
   ] as const).filter((item) => allowedTabs.includes(item.id));
 
   return (
-    /* The live alert surface is mounted here, above the whole shell, so a card
-       raised by a tile in the grid is still on screen after the operator
-       fullscreens a camera or switches to the Alerts tab — the tiles come and
-       go, the alerts do not. "Open Live Feed" on a card lands in exactly the
-       same state the fullscreen button does. */
-    <AlertProvider onOpenLiveFeed={setFullscreenCamId}>
+    // AlertProvider is mounted once in App.tsx, wrapping both this screen and
+    // Admin Studio — this screen still ingests telemetry into it (see the
+    // useAlertIngest() calls in the camera tiles below), it just no longer
+    // renders the alert UI itself. See renderUI on AlertProvider for why.
     <div className="flex h-screen">
       {/* Covers the entire shell — sidebar, tabs, grid, stats, settings — with
           plain fixed positioning. The layout underneath is never torn down, so
@@ -482,7 +495,6 @@ export default function Workspace({
         </div>
       </main>
     </div>
-    </AlertProvider>
   );
 }
 

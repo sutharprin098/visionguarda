@@ -736,20 +736,37 @@ class ByteTracker:
             self.tracks = [t for t in self.tracks if t.track_id not in merged_ids]
 
         # ── Age out: long-lost active tracks move to the gallery instead of
-        # vanishing; edge-exits (object left frame, not occluded) are dropped
-        # outright since they are genuinely gone, not re-identifiable ─────────
+        # vanishing ─────────────────────────────────────────────────────────
+        #
+        # This used to give a track near the frame edge a much shorter fuse
+        # (5*REF_DT = 0.2s vs the normal max_lost_seconds = 1.8s) and drop it
+        # OUTRIGHT with no gallery entry, on the theory that an edge track is
+        # "genuinely gone, not re-identifiable". That conflated "near the
+        # edge" with "has left the frame" - a rider or pedestrian spends a lot
+        # of real, still-in-frame time near the frame boundary (that is where
+        # people and vehicles enter and exit a scene from), and one occluded
+        # or motion-blurred frame at exactly the wrong moment there was enough
+        # to permanently kill the id with no way back, even though the same
+        # miss in the centre of frame would have been well inside the normal
+        # occlusion tolerance and coasted through fine. Confirmed against a
+        # real video: person/vehicle tracks near frame edges were being
+        # reminted under new ids every few seconds while a centrally-framed,
+        # slower object on the same footage kept one id for 20+ minutes -
+        # exactly the asymmetry this produced, and exactly what "tag number
+        # keeps changing" reports were describing.
+        #
+        # All tracks now get the SAME max_lost_seconds occlusion tolerance and
+        # the same gallery re-identification chance regardless of screen
+        # position. A track that has actually left for good simply ages out
+        # of the gallery on its own TTL/cap, same as it always did for a
+        # centrally-framed one - there was never a real need for edge
+        # position to shorten that fuse.
         still_active = []
         for t in self.tracks:
             if self.secs_since_update(t) > self.max_lost_seconds:
                 if t.state == "confirmed" and t.embedding is not None:
                     self.lost_gallery[t.track_id] = t
                 continue
-            if self.secs_since_update(t) > 5 * REF_DT and frame_shape:
-                h, w = frame_shape
-                bbox = t.get_bbox()
-                mx, my = 0.03 * w, 0.03 * h
-                if bbox[0] < mx or bbox[2] > w - mx or bbox[1] < my or bbox[3] > h - my:
-                    continue
             still_active.append(t)
         self.tracks = still_active
 
@@ -1768,11 +1785,25 @@ class PipelineCoordinator:
             regions = []
         self._tile_engine.set_priority_regions(regions)
 
+    @staticmethod
+    def _feature_enabled(profile_features, key) -> bool:
+        """Same isinstance guard as analytics.filter_by_features()/_speed_cfg
+        below: a feature's config may be a dict ({"enabled": true, ...}) from
+        the normal path, but a caller can also hand a bare bool. `.get()` on
+        a bool raises AttributeError, which — thrown every tracking iteration
+        — silently zeroed detections behind a wall of recovered exceptions
+        rather than failing loudly or degrading gracefully. Treat a bare bool
+        as itself; anything else missing/malformed reads as disabled."""
+        cfg = (profile_features or {}).get(key)
+        if isinstance(cfg, dict):
+            return bool(cfg.get("enabled"))
+        return bool(cfg)
+
     def _wants_faces(self) -> bool:
         """Both gates must pass: the operator's toggle AND a profile whose class
         list actually reports faces (a traffic camera discards them, so paying
         ~35ms to detect them would be pure waste)."""
-        if not (self.profile_features or {}).get("face_detection", {}).get("enabled"):
+        if not self._feature_enabled(self.profile_features, "face_detection"):
             return False
         allowed = PROFILE_CLASSES.get(self.zone_profile)
         return "face" in allowed if allowed else True
@@ -1782,7 +1813,7 @@ class PipelineCoordinator:
         toggle AND a profile that actually reports helmets (only traffic does).
         A security camera left with the toggle on must not pay for a helmet net
         whose output the profile filter would then discard."""
-        if not (self.profile_features or {}).get("helmet_detection", {}).get("enabled"):
+        if not self._feature_enabled(self.profile_features, "helmet_detection"):
             return False
         allowed = PROFILE_CLASSES.get(self.zone_profile)
         return "no_helmet" in allowed if allowed else True
@@ -1792,7 +1823,7 @@ class PipelineCoordinator:
         profile that reports plates (only traffic does). The plate detector +
         OCR are separate networks, so keeping them off a non-traffic camera is a
         real inference saving, not just a display filter."""
-        if not (self.profile_features or {}).get("anpr", {}).get("enabled"):
+        if not self._feature_enabled(self.profile_features, "anpr"):
             return False
         allowed = PROFILE_CLASSES.get(self.zone_profile)
         return "number_plate" in allowed if allowed else True
@@ -2534,7 +2565,9 @@ class PipelineCoordinator:
             # the output. A profile that cannot report faces must not pay for
             # detecting them. Same predicate update_config() uses to decide
             # whether to unload the model, so the two can't drift apart.
-            face_cfg = (self.profile_features or {}).get("face_detection", {})
+            face_cfg = (self.profile_features or {}).get("face_detection")
+            if not isinstance(face_cfg, dict):
+                face_cfg = {}
             t_face0 = time.perf_counter()
             if self._wants_faces():
                 fd = face_detect.get_detector(float(face_cfg.get("confidence", 0.6)))
@@ -2582,11 +2615,19 @@ class PipelineCoordinator:
 
                 if (_now_sec - getattr(self, "_helmet_last", 0.0)) >= HELMET_INTERVAL_S:
                     self._helmet_last = _now_sec
-                    helmet_cfg = (self.profile_features or {}).get("helmet_detection", {})
+                    helmet_cfg = (self.profile_features or {}).get("helmet_detection")
+                    if not isinstance(helmet_cfg, dict):
+                        helmet_cfg = {}
+                    # bbox + confidence: helmet.py's rider-association gate
+                    # (HELMET_RIDER_MIN_PERSON_CONFIDENCE) needs the person's
+                    # confidence to reject a shaky "person" call as a rider,
+                    # not just its box.
                     hworker.submit(
                         frame,
-                        [d["bbox"] for d in detections if d.get("class") == "motorcycle"],
-                        [d["bbox"] for d in detections if d.get("class") == "person"],
+                        [{**d["bbox"], "confidence": d.get("confidence", 0.0)}
+                         for d in detections if d.get("class") == "motorcycle"],
+                        [{**d["bbox"], "confidence": d.get("confidence", 0.0)}
+                         for d in detections if d.get("class") == "person"],
                         float(helmet_cfg.get("confidence", 0.35)),
                     )
                 for hdet in hworker.latest():
@@ -2623,9 +2664,18 @@ class PipelineCoordinator:
 
                 if (_now_sec - getattr(self, "_anpr_last", 0.0)) >= ANPR_INTERVAL_S:
                     self._anpr_last = _now_sec
-                    anpr_cfg = (self.profile_features or {}).get("anpr", {})
+                    anpr_cfg = (self.profile_features or {}).get("anpr")
+                    if not isinstance(anpr_cfg, dict):
+                        anpr_cfg = {}
+                    # Same confidence gate as the helmet/motorcycle association
+                    # (config.VEHICLE_ACTION_MIN_CONFIDENCE) — a shaky vehicle
+                    # classification shouldn't burn an ANPR pass on a crop of
+                    # the wrong object, or (if it happens to contain a real
+                    # plate) log that plate against a vehicle class nobody is
+                    # confident is correct.
                     vehicles = [d for d in detections
-                                if d.get("class") in plate_detect.PLATE_VEHICLES]
+                                if d.get("class") in plate_detect.PLATE_VEHICLES
+                                and d.get("confidence", 0.0) >= config.VEHICLE_ACTION_MIN_CONFIDENCE]
                     if vehicles:
                         if config.ANPR_ASYNC:
                             worker.submit(
