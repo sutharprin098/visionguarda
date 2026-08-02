@@ -73,10 +73,20 @@ function loadSettings(): Settings {
 export default function AlertProvider({
   children,
   onOpenLiveFeed,
+  renderUI = true,
 }: {
   children: React.ReactNode;
   /** Opens the camera full-window. Provided by whoever owns that state. */
   onOpenLiveFeed?: (cameraId: string) => void;
+  /** Whether to render the floating stack / bell / notification center /
+   *  incident window. Ingestion (and therefore alert generation) keeps
+   *  running either way — this only controls the visible surface, so
+   *  whoever mounts this provider decides where alerts are SEEN without
+   *  ever stopping them from being derived from live telemetry. Alerts are
+   *  a Full-Admin/Admin-Studio concern; the live camera Workspace still has
+   *  to feed telemetry into this provider (that's where the camera tiles
+   *  and their ingest calls live), it just doesn't render the UI itself. */
+  renderUI?: boolean;
 }) {
   const [events, setEvents] = useState<AlertEvent[]>([]);
   const [stackIds, setStackIds] = useState<string[]>([]);
@@ -91,6 +101,12 @@ export default function AlertProvider({
   // over a stale threshold.
   const settingsRef = useRef(settings);
   settingsRef.current = settings;
+  // Same reason: the critical chime/glow are part of the visible surface
+  // too (an audible cue is still "showing" an alert), so they must not fire
+  // while this provider is only ingesting for a screen that isn't rendering
+  // its UI (see renderUI).
+  const renderUIRef = useRef(renderUI);
+  renderUIRef.current = renderUI;
 
   useEffect(() => {
     try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings)); } catch { /* private mode */ }
@@ -173,7 +189,7 @@ export default function AlertProvider({
           return next;
         });
         const { floor, muted, sound } = settingsRef.current;
-        if (!muted && SEVERITY_RANK[e.severity] >= SEVERITY_RANK[floor]) {
+        if (renderUIRef.current && !muted && SEVERITY_RANK[e.severity] >= SEVERITY_RANK[floor]) {
           setStackIds((prev) => [e.id, ...prev].slice(0, MAX_VISIBLE));
           if (e.severity === "critical") {
             setGlowKey((k) => k + 1);
@@ -357,6 +373,7 @@ export default function AlertProvider({
   return (
     <IngestContext.Provider value={ingest}>
       {children}
+      {renderUI && <>
 
       {/* Screen-edge glow: one shot per critical, keyed so a second critical
           restarts it rather than being swallowed by the running animation. */}
@@ -436,6 +453,7 @@ export default function AlertProvider({
           onSelectEvent={setDetailId}
         />
       )}
+      </>}
     </IngestContext.Provider>
   );
 }

@@ -175,6 +175,27 @@ HELMET_COOLDOWN = _env_float("CAMAI_HELMET_COOLDOWN", 15.0)
 # anyway, pinning tracking at ~1 FPS.
 HELMET_INTERVAL_S = _env_float("CAMAI_HELMET_INTERVAL_S", 0.3)
 
+# Minimum PRIMARY-DETECTOR confidence a "motorcycle"/vehicle box must carry to
+# be used as the anchor for a helmet_violation association or an ANPR crop.
+# The general tracker only requires >= 0.25 (app/ai/pipeline.py Tracker.update,
+# lower still in crowded scenes via CROWDED_CONF_RATIO) — fine for drawing a
+# box on the overlay, too permissive for actions with real consequences (an
+# alert, a plate-read attempt). Confirmed live 2026-08-02: a car misclassified
+# as "motorcycle" at 0.25 confidence anchored a false helmet_violation with a
+# wrong evidence crop. This is deliberately separate from the unused, never-
+# wired CONFIDENCE_THRESHOLD above — raising that would blanket-filter every
+# detection class (person/vehicle counts, overlay, everything), which is a
+# much bigger behavior change than gating just these two action points.
+VEHICLE_ACTION_MIN_CONFIDENCE = _env_float("CAMAI_VEHICLE_ACTION_MIN_CONFIDENCE", 0.5)
+
+# Minimum primary-detector confidence a "person" box must carry to count as a
+# genuine rider when deciding whether a motorcycle gets a helmet-detection
+# pass at all (app/ai/helmet.py _rider_crops). Below this, a motorcycle with
+# no other qualifying person is treated as un-ridden and skipped entirely —
+# see the 2026-08-02 fix note there for why a parked bike was getting a crop
+# (and a hallucinated helmet/no_helmet call) even with zero real riders.
+HELMET_RIDER_MIN_PERSON_CONFIDENCE = _env_float("CAMAI_HELMET_RIDER_MIN_PERSON_CONFIDENCE", 0.5)
+
 # How long a published helmet result stays on the overlay. Slightly longer than
 # the submit cadence so boxes don't flicker between passes, short enough that a
 # dead worker's output disappears instead of going stale.

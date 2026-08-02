@@ -139,6 +139,55 @@ def test_nms_drops_overlapping_helmet_and_no_helmet_on_one_head():
 _YOLOX = os.path.join(os.path.dirname(__file__), "..", "yolox_tiny.onnx")
 
 
+def test_rider_crops_skip_unridden_motorcycle():
+    """A parked motorcycle with no person anywhere near it must get ZERO
+    crops — no crop means no model call, means no chance of a hallucinated
+    helmet/no_helmet on the bare bike. Regression test for the 2026-08-02
+    fix: previously a motorcycle with no matching person still fell through
+    to cropping around its own box."""
+    d = _bare_detector(class_map={0: "helmet", 1: "no_helmet"}, contract="single")
+    frame = np.zeros((480, 640, 3), np.uint8)
+    moto = [{"x1": 200, "y1": 200, "x2": 300, "y2": 320}]
+    assert d._rider_crops(frame, moto, []) == []
+
+
+def test_rider_crops_skip_low_confidence_person():
+    """A 'person' the primary detector wasn't confident about must not count
+    as a rider — same VEHICLE_ACTION_MIN_CONFIDENCE-style philosophy as the
+    helmet_violation association fix in analytics.py."""
+    d = _bare_detector(class_map={0: "helmet", 1: "no_helmet"}, contract="single")
+    frame = np.zeros((480, 640, 3), np.uint8)
+    moto = [{"x1": 200, "y1": 200, "x2": 300, "y2": 320}]
+    person = [{"x1": 205, "y1": 150, "x2": 295, "y2": 320, "confidence": 0.2}]
+    assert d._rider_crops(frame, moto, person) == []
+
+
+def test_rider_crops_reject_far_pedestrian():
+    """A confident, horizontally-aligned person standing far above the bike
+    (well outside ~1.2x its height) must not be treated as its rider — the
+    same unbounded-vertical-distance bug fixed in analytics.py's
+    _assoc_moto(), just in the crop-selection path instead of the alert
+    path."""
+    d = _bare_detector(class_map={0: "helmet", 1: "no_helmet"}, contract="single")
+    frame = np.zeros((480, 640, 3), np.uint8)
+    moto = [{"x1": 200, "y1": 260, "x2": 300, "y2": 320}]  # 60px tall bike
+    far_person = [{"x1": 220, "y1": 10, "x2": 280, "y2": 100, "confidence": 0.95}]
+    assert d._rider_crops(frame, moto, far_person) == []
+
+
+def test_rider_crops_accept_valid_rider():
+    """A confident person sitting on the bike, horizontally and vertically
+    aligned, produces exactly one crop covering both boxes."""
+    d = _bare_detector(class_map={0: "helmet", 1: "no_helmet"}, contract="single")
+    frame = np.zeros((480, 640, 3), np.uint8)
+    moto = [{"x1": 200, "y1": 200, "x2": 300, "y2": 320}]
+    rider = [{"x1": 210, "y1": 120, "x2": 290, "y2": 210, "confidence": 0.9}]
+    crops = d._rider_crops(frame, moto, rider)
+    assert len(crops) == 1
+    cx1, cy1, cx2, cy2 = crops[0]
+    assert cx1 < 210 and cy1 < 120 and cx2 > 290 and cy2 > 210
+
+
 @pytest.mark.skipif(not os.path.exists(_YOLOX), reason="yolox_tiny.onnx not present")
 def test_runtime_plumbing_runs_via_real_ort_session(tmp_path):
     """The RT-DETR run path (session load, provider select, letterbox preprocess,
@@ -159,7 +208,12 @@ def test_runtime_plumbing_runs_via_real_ort_session(tmp_path):
 
     frame = np.zeros((480, 640, 3), np.uint8)
     moto = [{"x1": 200, "y1": 200, "x2": 300, "y2": 320}]
-    person = [{"x1": 205, "y1": 150, "x2": 295, "y2": 320}]
+    # confidence must clear HELMET_RIDER_MIN_PERSON_CONFIDENCE or _rider_crops
+    # now skips this motorcycle entirely (no rider -> no crop -> no inference,
+    # see test_rider_crops_skip_unridden_motorcycle below) — that's correct
+    # behaviour, but this test's job is to prove the ORT plumbing runs, so it
+    # needs a person that actually qualifies as a rider.
+    person = [{"x1": 205, "y1": 150, "x2": 295, "y2": 320, "confidence": 0.9}]
     out = det.detect_on_riders(frame, moto, person)   # must not raise
     assert isinstance(out, list)
     assert det.last_error is None, det.last_error
