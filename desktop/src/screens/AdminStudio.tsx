@@ -27,9 +27,11 @@ import {
   Unlock,
   Eye,
   EyeOff,
+  Bell,
 } from "lucide-react";
 import clsx from "clsx";
 import { getSupabase } from "../lib/session";
+import { useAlertState } from "../components/alerts/AlertProvider";
 import { fnErrorMessage } from "../lib/fnError";
 import { isEngineOnline, mjpegStreamUrl } from "../lib/localEngine";
 import {
@@ -125,7 +127,16 @@ const ACCENT: Record<string, { text: string; bg: string; border: string; ring: s
   violet: { text: "text-violet-400", bg: "bg-violet-500/15", border: "border-violet-500/60", ring: "ring-violet-500/40" },
 };
 
-export default function AdminStudio({ onDeactivated }: { onDeactivated: () => void }) {
+export default function AdminStudio({
+  onDeactivated,
+  onOpenAlerts,
+}: {
+  onDeactivated: () => void;
+  /** Bell click — jumps to Workspace's Alerts tab. Undefined would just hide
+   *  the bell rather than render one that does nothing. */
+  onOpenAlerts?: () => void;
+}) {
+  const { unacked: unackedAlerts } = useAlertState();
   const [cameras, setCameras] = useState<Camera[]>([]);
   // Load state for the camera list so an empty sidebar is never a silent
   // mystery: distinguishes "still loading", "failed with an error", and
@@ -1193,10 +1204,27 @@ export default function AdminStudio({ onDeactivated }: { onDeactivated: () => vo
         <div className="flex flex-col flex-1 overflow-y-auto">
           <div className="flex items-center gap-2.5 px-4 py-4 border-b border-line">
             <img src="./favicon.svg" alt="CamAI" className="h-7 w-7 rounded-md" />
-            <div>
+            <div className="min-w-0 flex-1">
               <div className="text-sm font-semibold text-zinc-100">CamAI Zone Studio</div>
               <div className="text-[10px] text-accent font-medium uppercase tracking-wider">Enterprise Profiles</div>
             </div>
+            {/* Static, in-flow bell — never a floating overlay. Every alert is
+                shown on Workspace's Alerts tab only; this just says how many
+                are unacknowledged and jumps there. */}
+            {onOpenAlerts && (
+              <button
+                onClick={onOpenAlerts}
+                title={unackedAlerts > 0 ? `${unackedAlerts} unacknowledged alert${unackedAlerts === 1 ? "" : "s"}` : "Alerts"}
+                className="relative shrink-0 rounded-md p-1.5 text-zinc-400 transition hover:bg-surface-2 hover:text-zinc-200"
+              >
+                <Bell size={16} />
+                {unackedAlerts > 0 && (
+                  <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-[16px] items-center justify-center rounded-full bg-danger px-1 text-[9px] font-semibold text-white">
+                    {unackedAlerts > 99 ? "99+" : unackedAlerts}
+                  </span>
+                )}
+              </button>
+            )}
           </div>
           <div className="px-3 py-3">
             <div className="flex justify-between items-center text-[10px] uppercase font-bold tracking-wider text-zinc-500 mb-2">

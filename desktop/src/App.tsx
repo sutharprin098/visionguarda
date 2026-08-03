@@ -90,12 +90,17 @@ export default function App() {
   const [appType] = useState<"desktop" | "admin">(() => window.camai.config.appType);
   const [currentScreen, setCurrentScreen] = useState<"workspace" | "admin-studio">("workspace");
   const [bundle, setBundle] = useState<SyncBundle | null>(null);
-  // "Open Live Feed" clicked on an alert card in Admin Studio — the alert
-  // surface lives there now (see AlertProvider's renderUI below), so opening
-  // a camera live means switching screens AND telling Workspace which camera.
-  // Nonce so the same camera clicked twice in a row reopens the viewer both
-  // times rather than the second click being a no-op prop change.
+  // "Open Live Feed" clicked on an alert row in the Alerts page — opening a
+  // camera live means switching screens (if the click came from Admin
+  // Studio's bell) AND telling Workspace which camera. Nonce so the same
+  // camera clicked twice in a row reopens the viewer both times rather than
+  // the second click being a no-op prop change.
   const [pendingLiveCam, setPendingLiveCam] = useState<{ id: string; nonce: number } | null>(null);
+  // The notification bell, wherever it was clicked (Workspace's sidebar or
+  // Admin Studio's header), asked to land on the Alerts tab. Same nonce
+  // pattern: switching TO Workspace and bumping this in the same click has to
+  // work even if Workspace was already the visible screen.
+  const [openAlertsSignal, setOpenAlertsSignal] = useState<{ nonce: number } | null>(null);
 
   useEffect(() => {
     // No login screen, ever: try encrypted-vault auto-login; only fall back to
@@ -270,14 +275,12 @@ export default function App() {
         }
       >
       {/* Mounted once, above both screens: Workspace's camera tiles are what
-          actually call useAlertIngest() (that's where live telemetry is),
-          so this has to wrap Workspace for alerts to be generated at all —
-          but the alert UI itself (bell, stack, notification center, incident
-          window) is a Full-Admin/Admin-Studio concern, so renderUI is gated
-          on Admin Studio actually being the visible screen, not on Workspace.
-          Ingestion keeps running in the background regardless. */}
+          actually call useAlertIngest() (that's where live telemetry is), so
+          this has to wrap Workspace for alerts to be generated at all. It
+          renders nothing itself — the Alerts tab inside Workspace is the only
+          place any alert is ever shown — so ingestion runs identically
+          whichever screen is visible. */}
       <AlertProvider
-        renderUI={showAdmin}
         onOpenLiveFeed={(camId) => {
           setCurrentScreen("workspace");
           setPendingLiveCam({ id: camId, nonce: Date.now() });
@@ -295,6 +298,7 @@ export default function App() {
             // than offering a door that RLS will slam.
             onOpenAdminStudio={mayConfigure ? () => setCurrentScreen("admin-studio") : undefined}
             openLiveCam={pendingLiveCam}
+            openAlertsSignal={openAlertsSignal}
           />
         </div>
       )}
@@ -310,6 +314,10 @@ export default function App() {
               } else {
                 setCurrentScreen("workspace");
               }
+            }}
+            onOpenAlerts={() => {
+              setCurrentScreen("workspace");
+              setOpenAlertsSignal({ nonce: Date.now() });
             }}
           />
         </div>

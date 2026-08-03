@@ -190,6 +190,56 @@ export async function countEvidence(): Promise<number> {
   });
 }
 
+export async function deleteEvidence(id: string): Promise<void> {
+  const db = await openDb();
+  if (!db) return;
+  await new Promise<void>((resolve) => {
+    const req = tx(db, "readwrite").delete(id);
+    req.onsuccess = () => resolve();
+    req.onerror = () => resolve();
+  });
+}
+
+/**
+ * One older page of the vault, for the Alerts page's "load more" — newest
+ * first, strictly older than `beforeTs` when given. Filtering by camera or
+ * severity happens after the cursor read: the store holds at most MAX_RECORDS
+ * (2000), so a full-table scan per page is cheap and avoids a second index
+ * for a filter combination that changes every time the operator touches a
+ * dropdown.
+ */
+export async function listEvidencePage(opts: {
+  beforeTs?: number | null;
+  limit?: number;
+  cameraId?: string | null;
+  severity?: string | null;
+}): Promise<EvidenceRecord[]> {
+  const { beforeTs = null, limit = 50, cameraId = null, severity = null } = opts;
+  const db = await openDb();
+  if (!db) return [];
+  return new Promise((resolve) => {
+    const out: EvidenceRecord[] = [];
+    let cursorReq: IDBRequest<IDBCursorWithValue | null>;
+    try {
+      const range = beforeTs != null ? IDBKeyRange.upperBound(beforeTs, true) : null;
+      cursorReq = tx(db, "readonly").index("ts").openCursor(range, "prev");
+    } catch {
+      resolve([]);
+      return;
+    }
+    cursorReq.onsuccess = () => {
+      const cursor = cursorReq.result;
+      if (!cursor || out.length >= limit) return resolve(out);
+      const rec = cursor.value as EvidenceRecord;
+      if ((!cameraId || rec.cameraId === cameraId) && (!severity || rec.severity === severity)) {
+        out.push(rec);
+      }
+      cursor.continue();
+    };
+    cursorReq.onerror = () => resolve(out);
+  });
+}
+
 export async function clearEvidence(): Promise<void> {
   const db = await openDb();
   if (!db) return;

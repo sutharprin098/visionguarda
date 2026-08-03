@@ -17,8 +17,9 @@ import type { CaptureSource } from "../lib/bridge";
 import {
   ModuleState, loadModules, filterDetections,
 } from "../lib/aiModules";
-import { useAlertIngest } from "../components/alerts/AlertProvider";
+import { useAlertIngest, useAlertState } from "../components/alerts/AlertProvider";
 import { siteLabel } from "../components/alerts/alertUtils";
+import AlertsPage from "../components/alerts/AlertsPage";
 import { getTelegramConfig, invalidateTelegramConfig, sendTelegramTest } from "../lib/localTelegram";
 
 // Remembered across launches by name, not id — see startSharing().
@@ -47,17 +48,21 @@ export default function Workspace({
   onDeactivated,
   onOpenAdminStudio,
   openLiveCam,
+  openAlertsSignal,
 }: {
   bundle: SyncBundle;
   onDeactivated: () => void;
   /** Undefined when this user lacks cameras.manage — App decides, from the
    *  user's permissions rather than from which build is running. */
   onOpenAdminStudio?: () => void;
-  /** "Open Live Feed" clicked on an alert card in Admin Studio (the alert UI
-   *  lives there now, not here — see AlertProvider's renderUI). A nonce
-   *  because the operator can click the same camera's card twice in a row
-   *  and both have to reopen the fullscreen viewer, not just the first. */
+  /** "Open Live Feed" clicked from an alert row (this screen, or Admin
+   *  Studio's bell). A nonce because the operator can click the same
+   *  camera's card twice in a row and both have to reopen the fullscreen
+   *  viewer, not just the first. */
   openLiveCam?: { id: string; nonce: number } | null;
+  /** The notification bell, wherever it was clicked, asked to land on the
+   *  Alerts tab. A nonce for the same reason as openLiveCam. */
+  openAlertsSignal?: { nonce: number } | null;
 }) {
   const [tab, setTab] = useState<"cameras" | "alerts" | "settings" | "engine">("cameras");
   // Which camera is showing full-window, or null. Lifted to Workspace (not the
@@ -66,13 +71,19 @@ export default function Workspace({
   // mounted — a per-tile fullscreen element cannot do either.
   const [fullscreenCamId, setFullscreenCamId] = useState<string | null>(null);
 
-  // Admin Studio's alert cards can send an operator here to see the camera
-  // live (see App.tsx's onOpenLiveFeed) — keyed by nonce, not just id, so
-  // clicking the same camera's card twice in a row reopens the viewer both
-  // times rather than the second click being a no-op dependency change.
+  // An alert row's "Open Live Feed" can send an operator here to see the
+  // camera live — keyed by nonce, not just id, so clicking the same camera's
+  // card twice in a row reopens the viewer both times rather than the second
+  // click being a no-op dependency change.
   useEffect(() => {
     if (openLiveCam) setFullscreenCamId(openLiveCam.id);
   }, [openLiveCam]);
+
+  useEffect(() => {
+    if (openAlertsSignal) setTab("alerts");
+  }, [openAlertsSignal]);
+
+  const { unacked: unackedAlerts } = useAlertState();
 
   const [syncError, setSyncError] = useState(false);
   const [syncErrorDetails, setSyncErrorDetails] = useState<string | null>(null);
@@ -338,9 +349,9 @@ export default function Workspace({
 
   return (
     // AlertProvider is mounted once in App.tsx, wrapping both this screen and
-    // Admin Studio — this screen still ingests telemetry into it (see the
-    // useAlertIngest() calls in the camera tiles below), it just no longer
-    // renders the alert UI itself. See renderUI on AlertProvider for why.
+    // Admin Studio — this screen ingests telemetry into it (see the
+    // useAlertIngest() calls in the camera tiles below) and is the only place
+    // any alert is ever shown, on the Alerts tab (see AlertsPage.tsx).
     <div className="flex h-screen">
       {/* Covers the entire shell — sidebar, tabs, grid, stats, settings — with
           plain fixed positioning. The layout underneath is never torn down, so
@@ -358,10 +369,29 @@ export default function Workspace({
       <aside className="flex w-56 shrink-0 flex-col border-r border-line bg-surface-1">
         <div className="flex items-center gap-2.5 px-4 py-4">
           <img src="./favicon.svg" alt="CamAI" className="h-8 w-8 rounded-md" />
-          <div className="min-w-0">
+          <div className="min-w-0 flex-1">
             <div className="text-sm font-semibold text-zinc-100">CamAI Desktop</div>
             <div className="truncate text-xs text-zinc-500">{bundle.organization?.name}</div>
           </div>
+          {/* The notification bell. Static, in-flow, part of the sidebar that is
+              always on screen regardless of which tab is active — never a
+              floating overlay. It only ever does two things: show how many
+              alerts are unacknowledged, and jump to the Alerts tab. Every
+              alert itself is rendered on that tab and nowhere else. */}
+          {allowedTabs.includes("alerts") && (
+            <button
+              onClick={() => setTab("alerts")}
+              title={unackedAlerts > 0 ? `${unackedAlerts} unacknowledged alert${unackedAlerts === 1 ? "" : "s"}` : "Alerts"}
+              className="relative shrink-0 rounded-md p-1.5 text-zinc-400 transition hover:bg-surface-2 hover:text-zinc-200"
+            >
+              <Bell size={16} />
+              {unackedAlerts > 0 && (
+                <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-[16px] items-center justify-center rounded-full bg-danger px-1 text-[9px] font-semibold text-white">
+                  {unackedAlerts > 99 ? "99+" : unackedAlerts}
+                </span>
+              )}
+            </button>
+          )}
         </div>
         <nav className="flex-1 space-y-0.5 px-2 py-2">
           {navItems.map((n) => (
@@ -427,7 +457,7 @@ export default function Workspace({
           />
         </div>
         <div style={{ display: tab === "alerts" ? "block" : "none" }}>
-          <AlertsTab orgId={bundle.organization?.id ?? null} notifications={bundle.notifications} hasPermission={hasPermission} />
+          <AlertsTab orgId={bundle.organization?.id ?? null} hasPermission={hasPermission} active={tab === "alerts"} />
         </div>
         <div style={{ display: tab === "settings" ? "block" : "none" }} className="space-y-6">
           <Panel title="AI Profile & Rules">
@@ -1359,14 +1389,8 @@ function Panel({ title, children }: { title: string; children: React.ReactNode }
 }
 
 // ---------------------------------------------------------------------------
-// AlertsTab — Telegram connect (one-time connection code) + live alert feed
+// AlertsTab — Telegram connect (one-time connection code) + the Alerts page
 // ---------------------------------------------------------------------------
-const SEVERITY_COLORS: Record<string, string> = {
-  critical: "bg-red-500/15 border-red-500/40 text-red-400",
-  warning:  "bg-amber-500/15 border-amber-500/40 text-amber-400",
-  info:     "bg-sky-500/15 border-sky-500/40 text-sky-400",
-};
-const SEVERITY_ICON: Record<string, string> = { critical: "🔴", warning: "🟠", info: "🔵" };
 
 type TgConnState =
   | { phase: "idle" }
@@ -1430,19 +1454,15 @@ function LinkCodeCountdown({ expiresAt }: { expiresAt: string }) {
   return <span>{mm}:{ss}</span>;
 }
 
-function AlertsTab({ orgId, notifications, hasPermission }: { orgId: string | null; notifications: any[]; hasPermission: (perm: string) => boolean }) {
+function AlertsTab({ orgId, hasPermission, active }: { orgId: string | null; hasPermission: (perm: string) => boolean; active: boolean }) {
   const isAdmin = hasPermission("org.manage");
   const [connState, setConnState] = useState<TgConnState>({ phase: "loading" });
   const [generating, setGenerating] = useState(false);
   const [copied, setCopied] = useState(false);
 
-  // Engine alerts (local)
-  const [engineAlerts, setEngineAlerts] = useState<any[]>([]);
-  const [alertsLoading, setAlertsLoading] = useState(true);
-
   // Load connection status once, then keep it live via Supabase realtime (no polling)
   useEffect(() => {
-    let active = true;
+    let alive = true;
     async function checkConnection() {
       try {
         const sb = await getSupabase();
@@ -1451,7 +1471,7 @@ function AlertsTab({ orgId, notifications, hasPermission }: { orgId: string | nu
           .from("telegram_connections")
           .select("connected, chat_name, tg_username, connected_at")
           .maybeSingle();
-        if (!active) return;
+        if (!alive) return;
         if (data?.connected) {
           setConnState({
             phase: "connected",
@@ -1463,7 +1483,7 @@ function AlertsTab({ orgId, notifications, hasPermission }: { orgId: string | nu
           setConnState({ phase: "idle" });
         }
       } catch {
-        if (active) setConnState({ phase: "idle" });
+        if (alive) setConnState({ phase: "idle" });
       }
     }
     checkConnection();
@@ -1481,7 +1501,7 @@ function AlertsTab({ orgId, notifications, hasPermission }: { orgId: string | nu
           "postgres_changes" as any,
           { event: "*", schema: "public", table: "telegram_connections" },
           (payload: any) => {
-            if (!active) return;
+            if (!alive) return;
             const row = payload.new;
             if (row?.connected) {
               // Linked (or re-linked) — flip to Connected with no refresh.
@@ -1501,33 +1521,13 @@ function AlertsTab({ orgId, notifications, hasPermission }: { orgId: string | nu
     })();
 
     return () => {
-      active = false;
+      alive = false;
       (async () => {
         const sb = await getSupabase();
         if (channel) sb.removeChannel(channel);
       })();
     };
   }, [orgId]);
-
-  // Load engine alerts directly from local engine (no Supabase)
-  useEffect(() => {
-    let active = true;
-    async function fetchAlerts() {
-      try {
-        const res = await fetch("http://127.0.0.1:8000/api/alerts?limit=50", {
-          signal: AbortSignal.timeout(3000),
-        });
-        if (!res.ok) return;
-        const data = await res.json();
-        if (active) setEngineAlerts(Array.isArray(data) ? data.slice(0, 50) : []);
-      } catch { /* engine offline */ } finally {
-        if (active) setAlertsLoading(false);
-      }
-    }
-    fetchAlerts();
-    const id = setInterval(fetchAlerts, 5000);
-    return () => { active = false; clearInterval(id); };
-  }, []);
 
   // Mint a fresh, single-use connection code (server-side, cryptographically
   // random). "Generate New Code" invalidates the previous one automatically.
@@ -1763,62 +1763,9 @@ function AlertsTab({ orgId, notifications, hasPermission }: { orgId: string | nu
         </div>
       </div>
 
-      {/* Live Alert Feed */}
-      <div>
-        <div className="mb-3 flex items-center justify-between">
-          <h3 className="text-sm font-semibold text-zinc-100">Recent Detections</h3>
-          <span className="text-[10px] text-zinc-600">Local engine · refreshes every 5s</span>
-        </div>
-
-        {alertsLoading ? (
-          <div className="flex items-center gap-2 py-6 text-sm text-zinc-500">
-            <Loader2 size={14} className="animate-spin" /> Loading alerts…
-          </div>
-        ) : engineAlerts.length === 0 ? (
-          <div className="rounded-xl border border-line bg-surface-1 px-4 py-8 text-center">
-            <Bell size={28} className="mx-auto mb-2 text-zinc-600" />
-            <div className="text-sm text-zinc-500">No detections yet.</div>
-            <div className="mt-1 text-xs text-zinc-600">Alerts appear here when a camera detects something in a zone.</div>
-          </div>
-        ) : (
-          <div className="space-y-2">
-            {engineAlerts.map((a) => {
-              let d: Record<string, unknown> = {};
-              try { d = a.detail ? JSON.parse(a.detail) : (a.detail ?? {}); } catch { /* */ }
-              const severity = (d.severity as string) || "info";
-              const colorClass = SEVERITY_COLORS[severity] ?? SEVERITY_COLORS.info;
-              const icon = SEVERITY_ICON[severity] ?? "🔔";
-              const name = (d.detection_name as string) || a.alert_type?.replace(/_/g, " ") || "Detection";
-              return (
-                <div key={a.id} className={`rounded-lg border px-3 py-2.5 ${colorClass}`}>
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="min-w-0">
-                      <div className="text-xs font-semibold capitalize">{icon} {name}</div>
-                      <div className="mt-0.5 text-[10px] opacity-80 truncate">{a.message}</div>
-                    </div>
-                    <div className="shrink-0 text-right">
-                      <div className="text-[10px] opacity-70">{new Date(a.timestamp).toLocaleTimeString()}</div>
-                      {typeof d.confidence === "number" && (
-                        <div className="text-[10px] opacity-70">{Math.round((d.confidence as number) * 100)}%</div>
-                      )}
-                    </div>
-                  </div>
-                  {a.screenshot_path && (
-                    <div className="mt-2">
-                      <img
-                        src={`http://127.0.0.1:8000${a.screenshot_path}`}
-                        alt="Snapshot"
-                        className="w-full max-h-40 object-contain rounded border border-black/30 bg-black/20"
-                        onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
-                      />
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </div>
+      {/* The Alerts page. This is the only place an alert is ever rendered —
+          realtime, filterable, exportable — see AlertsPage.tsx. */}
+      <AlertsPage active={active} />
     </div>
   );
 }

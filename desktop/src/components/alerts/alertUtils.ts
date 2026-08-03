@@ -2,7 +2,12 @@
 // the one place that knows how to redraw detection boxes over a stored frame.
 
 import { useEffect, useState } from "react";
+import { Crosshair } from "lucide-react";
 import type { TelemetryDetection } from "../../lib/telemetry";
+import type { AlertEvent } from "../../lib/alertEngine";
+import type { TimelineEntry, Basis } from "../../lib/trackLedger";
+import { EVENT_CATALOG, ANALYTIC_EVENTS, type EventDef, type Severity } from "../../lib/alertCatalog";
+import type { EvidenceRecord } from "../../lib/evidenceStore";
 
 /** "just now" -> "4 sec ago" -> "2 min ago" -> clock time. Ticks itself. */
 export function useRelativeTime(ts: number): string {
@@ -195,4 +200,59 @@ export function drawFrameBoxes(
     ctx.fillText(label, x + 4, ly + 10.5);
     ctx.globalAlpha = 1;
   }
+}
+
+// --- vault rows -> AlertEvent -----------------------------------------------
+// The Alerts page shows one unified row type so it can filter, sort, select,
+// export and preview a realtime event and a page loaded from the evidence
+// vault identically — the vault row just carries `live: false` and whatever
+// object URLs the caller built from its stored Blobs.
+
+function defForRecord(rec: EvidenceRecord): EventDef {
+  const hit = EVENT_CATALOG[rec.sourceKey] ?? ANALYTIC_EVENTS[rec.sourceKey];
+  if (hit) return hit;
+  return {
+    title: rec.title || rec.sourceKey,
+    severity: (rec.severity as Severity) || "low",
+    icon: Crosshair,
+    group: rec.group || "Detection",
+    pad: { x: 0.2, top: 0.2, bottom: 0.2, aspect: 1 },
+  };
+}
+
+export function evidenceRecordToAlertEvent(
+  rec: EvidenceRecord,
+  cropUrl: string | null,
+  fullUrl: string | null,
+): AlertEvent {
+  const def = defForRecord(rec);
+  return {
+    id: rec.id,
+    ts: rec.ts,
+    cameraId: rec.cameraId,
+    cameraName: rec.cameraName,
+    siteName: rec.siteName,
+    def,
+    severity: (rec.severity as Severity) ?? def.severity,
+    sourceKey: rec.sourceKey,
+    confidence: rec.confidence,
+    trackId: rec.trackId,
+    bbox: rec.bbox,
+    meta: rec.meta,
+    cropUrl,
+    fullUrl,
+    frameDetections: rec.frameDetections as TelemetryDetection[],
+    acknowledged: rec.acknowledgedAt != null,
+    trackKey: null,
+    timeline: (rec.timeline ?? []).map((t): TimelineEntry => ({
+      ts: t.ts,
+      kind: t.kind as TimelineEntry["kind"],
+      label: t.label,
+      basis: t.basis as Basis,
+      trackKey: null,
+      detail: t.detail,
+    })),
+    live: false,
+    refreshes: rec.meta.refreshes ?? 0,
+  };
 }

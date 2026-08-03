@@ -141,7 +141,7 @@ export async function exportPngFile(event: AlertEvent, which: "crop" | "full"): 
 // --- PDF ---------------------------------------------------------------------
 
 /** Latin-1 bytes. PDF's base encoding for simple strings and all syntax. */
-function latin1(s: string): Uint8Array {
+export function latin1(s: string): Uint8Array {
   const out = new Uint8Array(s.length);
   for (let i = 0; i < s.length; i++) out[i] = s.charCodeAt(i) & 0xff;
   return out;
@@ -149,7 +149,7 @@ function latin1(s: string): Uint8Array {
 
 /** Escape for a PDF literal string, and strip anything outside Latin-1 so a
  *  stray character can never corrupt the file structure. */
-function pdfText(s: string): string {
+export function pdfText(s: string): string {
   return String(s ?? "")
     .replace(/[Ā-￿]/g, "?")
     .replace(/\\/g, "\\\\")
@@ -181,9 +181,38 @@ async function jpegForPdf(url: string | null): Promise<PdfImage | null> {
   return { bytes: new Uint8Array(await blob.arrayBuffer()), width: dims.w, height: dims.h };
 }
 
-const PAGE_W = 595.28; // A4 portrait, points
-const PAGE_H = 841.89;
-const MARGIN = 42;
+export const PAGE_W = 595.28; // A4 portrait, points
+export const PAGE_H = 841.89;
+export const MARGIN = 42;
+
+/**
+ * Serialise a flat list of PDF objects (1-based, in order) into a well-formed
+ * file with a correct xref table. Shared by the single-incident writer above
+ * and the multi-alert summary writer in alertsListExport.ts so neither one
+ * carries its own copy of "how does an xref table work".
+ */
+export function serializePdf(objects: Array<Uint8Array | string>, catalogNo: number): Blob {
+  const chunks: Uint8Array[] = [];
+  let offset = 0;
+  const add = (u: Uint8Array) => { chunks.push(u); offset += u.length; };
+
+  add(latin1("%PDF-1.4\n%\xE2\xE3\xCF\xD3\n"));
+  const offsets: number[] = [];
+  for (let i = 0; i < objects.length; i++) {
+    offsets.push(offset);
+    add(latin1(`${i + 1} 0 obj\n`));
+    const body = objects[i];
+    add(typeof body === "string" ? latin1(body) : body);
+    add(latin1("\nendobj\n"));
+  }
+  const xrefStart = offset;
+  let xref = `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`;
+  for (const o of offsets) xref += `${String(o).padStart(10, "0")} 00000 n \n`;
+  add(latin1(xref));
+  add(latin1(`trailer\n<</Size ${objects.length + 1}/Root ${catalogNo} 0 R>>\nstartxref\n${xrefStart}\n%%EOF\n`));
+
+  return new Blob(chunks as BlobPart[], { type: "application/pdf" });
+}
 
 /**
  * Build the incident PDF.
@@ -373,27 +402,7 @@ export async function exportPdf(event: AlertEvent, timeline: TimelineEntry[]): P
   objects[pagesNo - 1] =
     `<</Type/Pages/Kids[${pageNos.map((n) => `${n} 0 R`).join(" ")}]/Count ${pageNos.length}>>`;
 
-  // ---- serialise with a correct xref table ----
-  const chunks: Uint8Array[] = [];
-  let offset = 0;
-  const add = (u: Uint8Array) => { chunks.push(u); offset += u.length; };
-
-  add(latin1("%PDF-1.4\n%\xE2\xE3\xCF\xD3\n"));
-  const offsets: number[] = [];
-  for (let i = 0; i < objects.length; i++) {
-    offsets.push(offset);
-    add(latin1(`${i + 1} 0 obj\n`));
-    const body = objects[i];
-    add(typeof body === "string" ? latin1(body) : body);
-    add(latin1("\nendobj\n"));
-  }
-  const xrefStart = offset;
-  let xref = `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`;
-  for (const o of offsets) xref += `${String(o).padStart(10, "0")} 00000 n \n`;
-  add(latin1(xref));
-  add(latin1(`trailer\n<</Size ${objects.length + 1}/Root ${catalogNo} 0 R>>\nstartxref\n${xrefStart}\n%%EOF\n`));
-
-  triggerDownload(new Blob(chunks as BlobPart[], { type: "application/pdf" }), `${stemFor(event)}_incident.pdf`);
+  triggerDownload(serializePdf(objects, catalogNo), `${stemFor(event)}_incident.pdf`);
 }
 
 // --- JSON --------------------------------------------------------------------
