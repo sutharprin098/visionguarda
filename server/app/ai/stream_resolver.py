@@ -31,7 +31,9 @@ _capture_loop calls it on every reconnect.
 """
 from __future__ import annotations
 
+import ipaddress
 import re
+import socket
 import threading
 import time
 from urllib.parse import urlparse, parse_qs
@@ -115,6 +117,62 @@ def needs_resolution(url) -> bool:
     # Match subdomains too (m.youtube.com, gaming.youtube.com) without
     # matching a lookalike domain that merely ends in the same characters.
     return any(host == h or host.endswith("." + h) for h in _PAGE_HOSTS)
+
+
+# Protocols this engine actually decodes. A camera "source" using anything
+# else was never a real media address — FFmpeg's own protocol handlers
+# include several (concat:, subfile:, data:, file:) that were built for
+# trusted local pipelines, not for a string a portal user typed into a form.
+_ALLOWED_SCHEMES = {"rtsp", "rtsps", "rtmp", "rtmps", "http", "https"}
+
+
+def blocked_source_reason(url) -> "str | None":
+    """None if the engine may dial this address, else a short reason it must not.
+
+    Camera sources are routinely private-network addresses — 192.168.1.64,
+    10.0.0.5 — that is simply where CCTV cameras live, and this check must
+    never reject them (see app/camera_test.py's module docstring: rejecting
+    RFC1918 here would break the product for essentially every real
+    deployment). What must never be reachable through a "camera source" is
+    the class of address that was never a camera: loopback (a pivot back
+    into this machine's own services, including this engine's own control
+    API on 127.0.0.1) and link-local (169.254.169.254 is the near-universal
+    cloud instance-metadata address). A camera source is chosen by whoever
+    can add a camera in the portal — a lower trust level than whoever has
+    the engine's own control token — so this is a real trust boundary, not
+    a redundant check.
+    """
+    try:
+        s = str(url)
+    except Exception:
+        return None
+    if "://" not in s:
+        return None  # device index, bare path, etc. - not a network address
+    try:
+        parsed = urlparse(s)
+    except Exception:
+        return None
+    scheme = (parsed.scheme or "").lower()
+    if scheme and scheme not in _ALLOWED_SCHEMES:
+        return f"'{scheme}' is not a supported camera protocol"
+    host = parsed.hostname
+    if not host:
+        return None
+    try:
+        infos = socket.getaddrinfo(host, None)
+    except Exception:
+        # Unresolvable is not our call to make - the normal connect-failure
+        # path already reports this with a much better reason than we could.
+        return None
+    for info in infos:
+        raw_addr = info[4][0]
+        try:
+            addr = ipaddress.ip_address(raw_addr.split("%")[0])
+        except ValueError:
+            continue
+        if addr.is_loopback or addr.is_link_local or addr.is_unspecified:
+            return f"resolves to {raw_addr}, a loopback/link-local address (never a real camera)"
+    return None
 
 
 def _expiry_of(direct_url: str, info: dict) -> float:

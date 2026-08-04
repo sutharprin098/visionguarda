@@ -87,18 +87,36 @@ def _ocr_with(output, min_len=4):
     """A PlateOCR wired to a fake session (no real model)."""
     o = O.PlateOCR.__new__(O.PlateOCR)
     o.charset = CHARSET
+    o.charset_u = CHARSET.upper()
     o.last_error = None
     o.last_infer_ms = 0.0
     import threading
+    from collections import defaultdict
     o._lock = threading.Lock()
+    o.stats = defaultdict(int)
     o.session = _FakeSession(output)
     o._in_name = "input"
     o._channels = 1
+    o._in_h = 32
+    o._in_w = 100
+    o.fmt = O.plate_format.get_format(O.config.ANPR_COUNTRY)
+    o._cidx = {c: i + 1 for i, c in enumerate(o.charset_u)}
+    o._alpha_idx = [(c, i + 1) for i, c in enumerate(o.charset_u) if c.isalpha()]
+    o._digit_idx = [(c, i + 1) for i, c in enumerate(o.charset_u) if c.isdigit()]
     return o
 
 
 def test_read_returns_normalised_plate(monkeypatch):
     monkeypatch.setattr(O.config, "ANPR_OCR_MIN_LEN", 4)
+    # A synthetic all-black crop has zero edge content, i.e. it is "blurry" by
+    # the Laplacian-variance blur gate - irrelevant to what this test is
+    # actually exercising (the CTC-decode -> normalise pipeline), so disable
+    # that gate here rather than fabricate texture in the test image.
+    monkeypatch.setattr(O.config, "ANPR_BLUR_MIN", -1.0)
+    # "mh12ab" isn't a grammar-valid plate for any configured country format
+    # (real plates are longer) - this test is exercising CTC-decode ->
+    # normalise, not country-grammar validation, so don't gate on it here.
+    monkeypatch.setattr(O.config, "ANPR_REQUIRE_VALID_FORMAT", False)
     idxs = [cls("m"), cls("h"), cls("1"), cls("2"), cls("a"), cls("b")]
     ocr = _ocr_with(out_from(idxs))
     plate = np.zeros((30, 90, 3), np.uint8)

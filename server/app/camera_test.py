@@ -73,6 +73,8 @@ from urllib.parse import urlparse, quote, unquote
 
 import cv2
 
+from app.ai.stream_resolver import blocked_source_reason
+
 
 # ---------------------------------------------------------------------------
 # Result vocabulary
@@ -106,6 +108,7 @@ ERR_UNSUPPORTED_CODEC = "UNSUPPORTED_CODEC"
 ERR_DEVICE_NOT_FOUND = "DEVICE_NOT_FOUND"
 ERR_FILE_NOT_FOUND = "FILE_NOT_FOUND"
 ERR_PLAYLIST_INVALID = "PLAYLIST_INVALID"
+ERR_BLOCKED_ADDRESS = "BLOCKED_ADDRESS"
 
 # Phases the UI shows while the test runs.
 PHASE_RESOLVING = "Resolving..."
@@ -699,6 +702,20 @@ def run_test(
         ))
         return finish(False, ERR_DNS_FAILED,
                       f"'{hostname}' could not be resolved. Check the hostname or use an IP address.")
+
+    # Private-network camera addresses (192.168/16, 10/8, 172.16-31/12) are the
+    # entire point of this module (see the file docstring) and must stay
+    # allowed. Loopback and link-local are never a real camera and are the
+    # only addresses this test — reachable by anyone who can add a camera in
+    # the portal, not just whoever holds the engine's own control token —
+    # must refuse to touch at all, including this DNS-resolved TCP connect.
+    blocked = blocked_source_reason(full_url)
+    if blocked:
+        emit(PHASE_FAILED, Check(
+            id="dns", label="DNS resolution", status=FAIL, error_code=ERR_BLOCKED_ADDRESS,
+            detail=f"'{hostname}' {blocked}.",
+        ))
+        return finish(False, ERR_BLOCKED_ADDRESS, f"'{hostname}' {blocked}.")
 
     # ---- TCP connect (+ RTT) ----
     emit(PHASE_CONNECTING)

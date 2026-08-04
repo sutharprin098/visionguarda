@@ -184,3 +184,50 @@ def test_describe_does_not_leak_the_signed_url():
     label = sr.describe("https://www.youtube.com/watch?v=abc")
     assert "youtube.com" in label
     assert len(label) < 60
+
+
+# --- 5. blocked_source_reason (SSRF guard) ---------------------------------
+# A camera's source is set at portal/add-camera trust level, not engine
+# control-token trust level. Private LAN addresses (where every real camera
+# lives) must stay allowed; loopback and link-local (169.254.169.254 is the
+# near-universal cloud metadata address) must never be reachable through a
+# "camera source".
+
+def test_allows_a_real_lan_camera_address():
+    assert sr.blocked_source_reason("rtsp://admin:pass@192.168.1.64:554/stream1") is None
+
+
+def test_allows_10_and_172_16_ranges_too():
+    assert sr.blocked_source_reason("rtsp://10.0.0.5/stream1") is None
+    assert sr.blocked_source_reason("http://172.16.4.9/mjpeg") is None
+
+
+def test_allows_a_public_https_address():
+    assert sr.blocked_source_reason("https://example.com/live.m3u8") is None
+
+
+def test_blocks_loopback():
+    assert sr.blocked_source_reason("http://127.0.0.1:8010/api/cameras") is not None
+    assert sr.blocked_source_reason("rtsp://localhost/stream1") is not None
+
+
+def test_blocks_cloud_metadata_link_local_address():
+    assert sr.blocked_source_reason("http://169.254.169.254/latest/meta-data/") is not None
+
+
+def test_blocks_disallowed_scheme():
+    assert sr.blocked_source_reason("file:///etc/passwd") is not None
+
+
+def test_ignores_non_url_sources():
+    """Device indices and bare local paths never reach this check in
+    practice (callers gate on source_type first) but must not raise here."""
+    assert sr.blocked_source_reason("0") is None
+    assert sr.blocked_source_reason(0) is None
+    assert sr.blocked_source_reason("C:\\videos\\clip.mp4") is None
+
+
+def test_unresolvable_host_is_not_our_call_to_make():
+    """DNS failure is reported by the normal connect-failure path with a far
+    better reason than this guard could invent - it must not block here."""
+    assert sr.blocked_source_reason("rtsp://this-host-does-not-exist.invalid/stream1") is None

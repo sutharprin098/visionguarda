@@ -1472,6 +1472,18 @@ class PipelineCoordinator:
         if "://" not in src:
             return True
 
+        # SSRF guard: a camera's source is chosen at portal/add-camera trust
+        # level, not engine-control-token trust level (see
+        # stream_resolver.blocked_source_reason). Checked here, before the
+        # very first network touch on every open AND every reconnect, so a
+        # blocked source is never dialled even once.
+        blocked = stream_resolver.blocked_source_reason(src)
+        if blocked:
+            if self._health_status != "blocked":
+                print(f"[Cap-{self.camera_id}] Refusing to connect: {blocked}", flush=True)
+            self._health_status = "blocked"
+            return False
+
         from app.health_probe import probe_connection
         try:
             result = probe_connection(src, timeout=3.0)
@@ -1593,6 +1605,8 @@ class PipelineCoordinator:
         """
         if self._health_status == "online":
             return None
+        if self._health_status == "blocked":
+            return "This camera's address is not allowed (loopback/link-local address or unsupported protocol)."
         if self._resolve_error:
             return f"Stream link could not be resolved: {self._resolve_error}"
         if self.source_type == "screenshare":
@@ -1613,6 +1627,11 @@ class PipelineCoordinator:
         """Classifies a capture failure as connecting/offline/auth_failed/
         network_error. Probing (a real socket round-trip) is rate-limited —
         only re-run every few seconds, not on every fast retry tick."""
+        if self._health_status == "blocked":
+            # Set only by the SSRF guard in _preflight_network_source, which
+            # re-checks on every reconnect attempt on its own — nothing here
+            # should probe a host that was just refused.
+            return
         if self.source_type in ("usb", "webcam"):
             self._health_status = "offline" if self._cap_consecutive_failures >= 1 else "connecting"
             return

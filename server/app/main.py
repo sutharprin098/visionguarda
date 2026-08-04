@@ -5,6 +5,7 @@ import io
 import time
 import uuid
 import numpy as np
+from collections import deque
 from dataclasses import asdict
 from pathlib import PurePosixPath
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Depends, Header, UploadFile, File
@@ -23,6 +24,7 @@ from app.storage import (
 )
 from app.camera_manager import manager
 from app.ai.pipeline import get_detection_confidence, set_detection_confidence
+from app.ai.stream_resolver import blocked_source_reason
 from app.ai.tiling import get_tiling_settings, set_tiling_settings
 from app.ai.tile_governor import governor
 from app.gpu_monitor import get_gpu_usage
@@ -100,6 +102,21 @@ async def _reject_foreign_host_header(request, call_next):
 
 CONTROL_TOKEN_HEADER = "X-CamAI-Token"
 
+# Brute-force lockout for the token check below. Any local process can call
+# this endpoint at native loop speed, and compare_digest being constant-time
+# only protects against a *timing* side-channel — it does nothing to stop a
+# process that simply guesses many tokens in a row. _TOKEN_FAIL_MAX wrong
+# tokens within _TOKEN_FAIL_WINDOW_S trips a short lockout that rejects even
+# a CORRECT token for _TOKEN_LOCKOUT_S: the desktop app sends the right token
+# on effectively every call, so it never gets near the threshold, while a
+# guessing loop is throttled to a few dozen attempts per lockout cycle
+# instead of unbounded.
+_TOKEN_FAIL_WINDOW_S = 60.0
+_TOKEN_FAIL_MAX = 20
+_TOKEN_LOCKOUT_S = 30.0
+_token_fail_times: deque = deque(maxlen=_TOKEN_FAIL_MAX)
+_token_lockout_until = 0.0
+
 def require_control_token(x_camai_token: str = Header(default="", alias=CONTROL_TOKEN_HEADER)) -> None:
     """Reject configuration writes that don't come from the CamAI desktop app.
 
@@ -110,12 +127,21 @@ def require_control_token(x_camai_token: str = Header(default="", alias=CONTROL_
 
     Unset token => open, so a hand-started dev engine still works. compare_digest
     keeps the check constant-time; a plain == leaks the prefix by timing, which
-    matters here because the endpoint is reachable from any local process and can
-    be probed without limit.
+    matters here because the endpoint is reachable from any local process.
     """
     if not API_TOKEN:
         return
+    global _token_lockout_until
+    now = time.time()
+    if now < _token_lockout_until:
+        raise HTTPException(status_code=429,
+                            detail="Too many failed attempts. Try again shortly.")
     if not hmac.compare_digest(x_camai_token, API_TOKEN):
+        _token_fail_times.append(now)
+        while _token_fail_times and now - _token_fail_times[0] > _TOKEN_FAIL_WINDOW_S:
+            _token_fail_times.popleft()
+        if len(_token_fail_times) >= _TOKEN_FAIL_MAX:
+            _token_lockout_until = now + _TOKEN_LOCKOUT_S
         raise HTTPException(status_code=403, detail="Engine configuration is restricted to the CamAI application.")
 
 # Endpoints carrying this reject unauthorised callers before the handler runs.
@@ -763,6 +789,15 @@ async def upload_camera_video(file: UploadFile = File(...)):
 
 @app.post("/api/cameras", dependencies=control)
 def add_or_update_camera(payload: CameraConfigPayload):
+    # A camera's source is set at portal/add-camera trust level, not at the
+    # level of whoever holds this engine's own control token — reject a
+    # loopback/link-local/unsupported-scheme address before it is ever saved
+    # or dialled. Private LAN addresses (192.168/16 etc.) are the normal case
+    # for a real camera and are deliberately left alone (see
+    # app/ai/stream_resolver.blocked_source_reason).
+    blocked = blocked_source_reason(payload.source)
+    if blocked:
+        raise HTTPException(status_code=400, detail=f"Camera source rejected: {blocked}.")
     save_camera(
         payload.id,
         payload.name,

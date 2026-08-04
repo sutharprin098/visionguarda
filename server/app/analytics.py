@@ -792,7 +792,13 @@ class CameraAnalytics:
                 self.track_mpp[track_id] = (
                     mpp_raw if prev_mpp is None else 0.7 * prev_mpp + 0.3 * mpp_raw
                 )
-            mpp = self.track_mpp.get(track_id) or 0.025
+            # The 0.025 default is a smoothing fallback for a class that DOES
+            # have a real size prior (CLASS_HEIGHT_M) when this frame's own
+            # geometry check failed (bbox at the edge, too small). A class
+            # with no prior at all (traffic_light, stop_sign...) must never
+            # get a speed number from a generic guess — mpp stays None and
+            # the fallback estimate below is skipped for it entirely.
+            mpp = self.track_mpp.get(track_id) or (0.025 if class_name in CLASS_HEIGHT_M else None)
 
             speed_kmh = self.track_speeds.get(track_id)
             speed_calibrated = False
@@ -817,7 +823,14 @@ class CameraAnalytics:
                     self.track_last_world_m[track_id] = (now, world_pt)
 
             # 2. Fallback to Height Scale MPP Estimation if Homography not configured
-            if not speed_calibrated:
+            #
+            # This is an ESTIMATE (see the accuracy note above), never a
+            # calibrated measurement, regardless of how many consecutive
+            # frames refine it — speed_calibrated must stay False here so the
+            # speed-limit alert gates below keep requiring a real two-line
+            # gate. Skipped entirely for a class with no size prior (mpp is
+            # None), rather than falling back to a generic guess.
+            if not speed_calibrated and mpp is not None:
                 last_px = self.track_last_px.get(track_id)
                 if last_px is not None:
                     last_time, (last_cx_px, last_cy_px) = last_px
@@ -828,7 +841,6 @@ class CameraAnalytics:
                         filt = self.speed_filters.setdefault(track_id, _SpeedKalman1D())
                         speed_kmh = max(0.0, filt.update(raw_kmh))
                         self.track_speeds[track_id] = speed_kmh
-                        speed_calibrated = True
                         speed_source = "estimated"
                 self.track_last_px[track_id] = (now, (cx_px, cy_px))
                 self.speed_filters.setdefault(track_id, _SpeedKalman1D())
@@ -851,7 +863,11 @@ class CameraAnalytics:
             else:
                 det["speed"] = round(float(speed_kmh), 1)
                 det["speed_source"] = speed_source
-                det["speed_calibrated"] = True
+                # Must reflect the actual measurement source (True only for
+                # the homography branch above) - hardcoding True here was the
+                # bug that let a plain height-based estimate raise real
+                # speeding alerts (see the speed-limit gates further down).
+                det["speed_calibrated"] = speed_calibrated
 
             # Direction: 8-way compass label from recent screen-space motion.
             last_pt = self.track_history[track_id][-1] if self.track_history.get(track_id) else None

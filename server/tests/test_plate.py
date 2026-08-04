@@ -21,6 +21,7 @@ def _bare(contract="generic", conf=0.5, nms=0.3, input_size=(640, 640)):
     d.last_error = None
     d.input_size = input_size
     d._contract = contract
+    d._layout = None      # "xyxy" | "cxcywh", decided once - see PlateDetector.__init__
     return d
 
 
@@ -40,7 +41,10 @@ def test_gate_rejects_wide_painted_banner():
 
 
 def test_gate_rejects_too_small_to_ocr():
-    assert not P.gate_plate(0, 0, 30, 12, crop_w=400, crop_h=200)   # w < 40
+    # Stay comfortably below config.ANPR_MIN_PLATE_W rather than pinning this
+    # test to a specific threshold value.
+    assert P.config.ANPR_MIN_PLATE_W > 10
+    assert not P.gate_plate(0, 0, 10, 6, crop_w=400, crop_h=200)
 
 
 def test_gate_rejects_covering_most_of_vehicle():
@@ -128,15 +132,18 @@ def test_decode_lpd_score_and_box():
     assert (x1, x2) == pytest.approx((160.0, 240.0))   # 0.4*400, 0.6*400
     assert (y1, y2) == pytest.approx((90.0, 110.0))    # 0.45*200, 0.55*200
     # and it survives gating (aspect 4, w 80, area small)
-    final = d._finalise(raw, 400, 200, 0, 0)
+    final, reason = d._finalise(raw, 400, 200, 0, 0)
     assert len(final) == 1 and final[0]["class"] == "number_plate"
+    assert reason is None
     assert final[0]["plate_text"] is None               # OCR is a later stage
 
 
 def test_finalise_drops_ungated_candidate():
     d = _bare()
     raw = [{"_box": (0, 0, 300, 20), "_score": 0.9}]    # aspect 15 banner
-    assert d._finalise(raw, 400, 200, 0, 0) == []
+    final, reason = d._finalise(raw, 400, 200, 0, 0)
+    assert final == []
+    assert reason == P.FAIL_ASPECT
 
 
 # --- runtime plumbing smoke test (real ORT session) ------------------------

@@ -95,6 +95,11 @@ def test_encoded_password_round_trips_to_the_digest(monkeypatch):
     decode, so without an unquote the digest was computed over
     'p%40ss%2Fw0rd' while the camera hashed 'p@ss/w0rd' — a CORRECT password
     reported as AUTH_FAILED, blaming the operator for our own escaping."""
+    # The SSRF guard (blocked_source_reason) correctly refuses loopback in
+    # production — no real camera is ever the engine's own machine — but this
+    # test stands a fake RTSP server up on 127.0.0.1 to exercise the protocol
+    # logic without a real network device, so it must bypass that guard.
+    monkeypatch.setattr(ct, "blocked_source_reason", lambda url: None)
     cam = FakeRtspCamera(username="admin", password="p@ss/w0rd")
     try:
         res = ct.run_test("rtsp", host="127.0.0.1", port=cam.port,
@@ -346,9 +351,15 @@ def test_non_rtsp_service_on_the_port_is_not_a_password_problem():
 # ---------------------------------------------------------------------------
 # Error taxonomy — the "never say Connection Failed" guarantee
 # ---------------------------------------------------------------------------
-def test_connection_refused_is_distinct_from_blocked():
+def test_connection_refused_is_distinct_from_blocked(monkeypatch):
     """A refusal means something answered — that is a port mistake, not a
-    firewall. Collapsing the two sends operators down the wrong path."""
+    firewall. Collapsing the two sends operators down the wrong path.
+
+    ("blocked" here is PORT_BLOCKED, a firewall silently dropping the
+    connection — unrelated to the SSRF guard's own BLOCKED_ADDRESS, which
+    this test bypasses since it deliberately targets 127.0.0.1 to simulate
+    an unreachable port without a real network device.)"""
+    monkeypatch.setattr(ct, "blocked_source_reason", lambda url: None)
     s = socket.socket()
     s.bind(("127.0.0.1", 0))
     port = s.getsockname()[1]
@@ -358,6 +369,22 @@ def test_connection_refused_is_distinct_from_blocked():
     assert res.ok is False
     assert res.error_code == ct.ERR_CONNECTION_REFUSED
     assert str(port) in res.error_detail
+
+
+def test_run_test_refuses_a_loopback_address():
+    """The SSRF guard is real, not just present in stream_resolver: a portal
+    user who can trigger a connection test must never get this engine to open
+    a socket to itself or to another local service. No monkeypatch here —
+    this is the one test that must see the guard actually fire."""
+    res = ct.run_test("rtsp", host="127.0.0.1", port=54321)
+    assert res.ok is False
+    assert res.error_code == ct.ERR_BLOCKED_ADDRESS
+
+
+def test_run_test_refuses_cloud_metadata_address():
+    res = ct.run_test("http_mjpeg", host="169.254.169.254", port=80, path="/latest/meta-data/")
+    assert res.ok is False
+    assert res.error_code == ct.ERR_BLOCKED_ADDRESS
 
 
 def test_dns_failure_is_reported_as_dns():
