@@ -46,6 +46,7 @@ export default function FloorPlanView({ bundle, healthInfo, onSelectCamera }: Fl
   const [manualLng, setManualLng] = useState("");
   const [appStatus, setAppStatus] = useState<EngineAppStatus | null>(null);
   const [telemetryMap, setTelemetryMap] = useState<Record<string, CameraTelemetry>>({});
+  const [camHeadings, setCamHeadings] = useState<Record<string, number>>({});
   const markersRef = useRef<Map<string, any>>(new Map());
   const detMarkersRef = useRef<Map<string, any>>(new Map());
 
@@ -307,10 +308,20 @@ export default function FloorPlanView({ bundle, healthInfo, onSelectCamera }: Fl
         activeKeys.add(key);
 
         const cx = (det.bbox.x1 + det.bbox.x2) / 2;
-        const cy = det.bbox.y2; // Bottom center of bounding box
+        const cy = det.bbox.y2; // Bottom center of bounding box (road surface contact)
 
-        const objLat = cam.lat + (0.5 - cy) * fovScale;
-        const objLng = cam.lng + (cx - 0.5) * (fovScale * 1.3);
+        const heading = camHeadings[cam.id] ?? (cam.heading != null ? cam.heading : 0);
+        const angleRad = (heading * Math.PI) / 180;
+
+        const fovScale = 0.0006; // ~60m coverage distance
+        const distForward = (1.0 - cy) * fovScale;
+        const distLateral = (cx - 0.5) * fovScale * 1.3;
+
+        const dLat = distForward * Math.cos(angleRad) - distLateral * Math.sin(angleRad);
+        const dLng = distForward * Math.sin(angleRad) + distLateral * Math.cos(angleRad);
+
+        const objLat = cam.lat + dLat;
+        const objLng = cam.lng + dLng;
 
         const cls = (det.class || "").toLowerCase();
         const isPerson = cls.includes("person") || cls.includes("pedestrian") || cls.includes("human");
@@ -383,7 +394,7 @@ export default function FloorPlanView({ bundle, healthInfo, onSelectCamera }: Fl
         detMarkersRef.current.delete(key);
       }
     });
-  }, [telemetryMap, gisPlacedCameras]);
+  }, [telemetryMap, gisPlacedCameras, camHeadings]);
 
   const handleSaveManualCoords = async () => {
     if (!selectedGisCamId) return;
@@ -562,6 +573,54 @@ export default function FloorPlanView({ bundle, healthInfo, onSelectCamera }: Fl
                       <div className="text-[9px] text-zinc-400 uppercase font-semibold">Detections</div>
                       <div className="text-xs font-bold text-zinc-100">{selectedTelemetry?.detections?.length ?? 0}</div>
                     </div>
+                  </div>
+                </div>
+
+                {/* Camera Heading Calibration */}
+                <div className="rounded-lg bg-surface-2 p-3 border border-line/60 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <label className="text-[10px] font-bold text-zinc-300 uppercase tracking-wide">
+                      🧭 Camera Direction Angle
+                    </label>
+                    <span className="text-xs font-bold text-cyan-400 font-mono">
+                      {camHeadings[activeGisCamera.id] ?? (activeGisCamera.heading ?? 0)}°
+                    </span>
+                  </div>
+                  
+                  <input
+                    type="range"
+                    min="0"
+                    max="360"
+                    step="5"
+                    value={camHeadings[activeGisCamera.id] ?? (activeGisCamera.heading ?? 0)}
+                    onChange={(e) => {
+                      const val = parseInt(e.target.value, 10);
+                      setCamHeadings(prev => ({ ...prev, [activeGisCamera.id]: val }));
+                    }}
+                    className="w-full accent-accent cursor-pointer h-1.5 bg-zinc-800 rounded-lg"
+                  />
+
+                  <div className="grid grid-cols-4 gap-1 pt-1">
+                    {[
+                      { label: "⬆️ N", deg: 0 },
+                      { label: "➡️ E", deg: 90 },
+                      { label: "⬇️ S", deg: 180 },
+                      { label: "⬅️ W", deg: 270 }
+                    ].map(btn => (
+                      <button
+                        key={btn.deg}
+                        type="button"
+                        onClick={() => setCamHeadings(prev => ({ ...prev, [activeGisCamera.id]: btn.deg }))}
+                        className={clsx(
+                          "py-1 text-[9px] font-bold rounded border transition text-center",
+                          (camHeadings[activeGisCamera.id] ?? (activeGisCamera.heading ?? 0)) === btn.deg
+                            ? "bg-accent/20 border-accent text-accent"
+                            : "bg-zinc-900/60 border-line/40 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200"
+                        )}
+                      >
+                        {btn.label}
+                      </button>
+                    ))}
                   </div>
                 </div>
 
