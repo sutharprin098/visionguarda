@@ -364,9 +364,11 @@ export default function FloorPlanView({ bundle, healthInfo, onSelectCamera }: Fl
           </div>
         `;
 
+        const now = Date.now();
         const existingMarker = detMarkersRef.current.get(key);
         if (existingMarker) {
           existingMarker.setLatLng([objLat, objLng]);
+          existingMarker.lastSeen = now;
           const customIcon = L.divIcon({
             html,
             className: "live-moving-object-icon",
@@ -382,14 +384,18 @@ export default function FloorPlanView({ bundle, healthInfo, onSelectCamera }: Fl
             iconAnchor: [50, 13]
           });
           const marker = L.marker([objLat, objLng], { icon: customIcon }).addTo(map);
+          marker.lastSeen = now;
           detMarkersRef.current.set(key, marker);
         }
       });
     });
 
-    // Remove stale detection markers
+    // Clean up stale markers only if missing for more than 1.5 seconds (1500ms)
+    // Prevents transient zero-drops or single-frame inference skips from flickering markers
+    const now = Date.now();
     detMarkersRef.current.forEach((marker, key) => {
-      if (!activeKeys.has(key)) {
+      const lastSeen = marker.lastSeen || 0;
+      if (!activeKeys.has(key) && (now - lastSeen > 1500)) {
         try { map.removeLayer(marker); } catch { /* ignore */ }
         detMarkersRef.current.delete(key);
       }
