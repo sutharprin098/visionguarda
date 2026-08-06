@@ -26,6 +26,34 @@ const REPO_BLOB_BASE = `${REPO_URL}/blob/main/`;
 // actually published.
 const DEFAULT_FALLBACK_RELEASES: GithubRelease[] = [
   {
+    tag_name: "v1.0.2",
+    name: "CamAI Desktop v1.0.2 (Windows Release)",
+    version: "v1.0.2",
+    prerelease: false,
+    published_at: "2026-08-06T16:30:00Z",
+    asset_id: 103,
+    asset_name: "CamAI-Desktop-Setup-1.0.2.exe",
+    size_bytes: 651200000,
+    content_type: "application/octet-stream",
+    download_url: `${REPO_URL}/releases/download/v1.0.2/CamAI-Desktop-Setup-1.0.2.exe`,
+    checksum_sha256: "1f34fee1ed9a4fced1b9fcbb65d6a75f5243b4908b2ad77f826375532545e496",
+    release_notes: `
+### 🚀 Features & Performance Optimizations
+- **DirectML Acceleration Fix**: Eliminated 28-second DirectML JIT shader compilation stalls during ANPR plate detection and OCR model loading. Fallback to CPU/CUDA inference ensures sub-15ms model startup.
+- **Real-Time GIS Spatial Tracking**: Synchronized Leaflet open-street map tracking with 1:1 camera feed overlays, displaying live vehicle badges (\`🚗 CAR #83 (76%)\`, \`🚌 BUS #7 (84%)\`, \`🏍️ BIKE #30 (70%)\`, \`👤 PERSON #15\`).
+- **Compass Heading Angle Calibration**: Added 360° direction angle slider and quick compass controls (\`⬆️ N\`, \`➡️ E\`, \`⬇️ S\`, \`⬅️ W\`) to project live detections along exact real-world street alignments.
+- **1.5s Motion Persistence Decay**: Implemented intelligent track persistence to eliminate single-frame inference dropouts and marker flickering on the GIS map.
+
+### 🐛 Bug Fixes
+- Fixed engine supervisor process timeouts during ANPR detector initialization.
+- Fixed WebSocket heartbeat disconnects caused by synchronous shader compilation locks.
+- Resolved false-positive engine unreachable status on the desktop dashboard.
+
+### 🔒 Distribution
+- Unsigned Windows NSIS Installer bundled with local AI inference engine for 100% offline edge execution.
+    `,
+  },
+  {
     tag_name: "v1.0.1",
     name: "CamAI Desktop v1.0.1 (Windows Release)",
     version: "v1.0.1",
