@@ -213,6 +213,10 @@ class MultiTelemetryHub {
   private lastPongTs = 0;
   private lastPingTs = 0;
 
+  isConnected(): boolean {
+    return this.ws !== null && this.ws.readyState === WebSocket.OPEN;
+  }
+
   subscribe(cameraId: string, callback: (t: CameraTelemetry) => void): () => void {
     if (!this.listeners.has(cameraId)) {
       this.listeners.set(cameraId, new Set());

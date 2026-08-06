@@ -5,7 +5,7 @@ import clsx from "clsx";
 import { startRealtimeSync, DeactivatedError, SyncBundle } from "../lib/sync";
 import { syncAiModelToLocalEngine, syncAiConfidenceToLocalEngine, mjpegStreamUrl, resetLocalEngineState } from "../lib/localEngine";
 import { MediaShareSession, ShareStatus } from "../lib/mediaShare";
-import { TelemetrySession, TelemetryDetection, CameraTelemetry, TelemetryStatus, detectionsRenderEqual } from "../lib/telemetry";
+import { TelemetrySession, TelemetryDetection, CameraTelemetry, TelemetryStatus, detectionsRenderEqual, telemetryHub } from "../lib/telemetry";
 import type { ZoneProfileKey } from "../lib/zoneProfiles";
 import DetectionOverlay from "../components/DetectionOverlay";
 import PerformanceOverlay from "../components/PerformanceOverlay";
@@ -138,29 +138,46 @@ export default function Workspace({
       if (cancelled) return;
       let ok = false;
 
-      try {
-        const res = await fetch("http://127.0.0.1:8000/health", {
-          signal: AbortSignal.timeout(HEALTH_TIMEOUT_MS),
-          cache: "no-store",
-        });
-        if (res.ok) {
-          const data = await res.json();
-          ok = true;
-          misses = 0;
-          if (!cancelled) {
-            setHealthInfo({
-              online: true,
-              status: data.status || "ok",
-              ready: data.ready ?? false,
-              engine_status: data.engine_status || "unknown",
-              engine_error: data.engine_error || null,
-              model_loaded: data.model_loaded ?? false,
-              active_cameras: data.active_cameras ?? 0,
-            });
-            setConsecutiveMisses(0);
-          }
+      if (telemetryHub.isConnected()) {
+        ok = true;
+        misses = 0;
+        if (!cancelled) {
+          setHealthInfo((prev) => ({
+            online: true,
+            status: "ok",
+            ready: true,
+            engine_status: prev?.engine_status || "ready",
+            engine_error: null,
+            model_loaded: true,
+            active_cameras: prev?.active_cameras || bundle.cameras.length,
+          }));
+          setConsecutiveMisses(0);
         }
-      } catch { /* counted below — a throw here is just "no answer this time" */ }
+      } else {
+        try {
+          const res = await fetch("http://127.0.0.1:8000/health", {
+            signal: AbortSignal.timeout(HEALTH_TIMEOUT_MS),
+            cache: "no-store",
+          });
+          if (res.ok) {
+            const data = await res.json();
+            ok = true;
+            misses = 0;
+            if (!cancelled) {
+              setHealthInfo({
+                online: true,
+                status: data.status || "ok",
+                ready: data.ready ?? false,
+                engine_status: data.engine_status || "unknown",
+                engine_error: data.engine_error || null,
+                model_loaded: data.model_loaded ?? false,
+                active_cameras: data.active_cameras ?? 0,
+              });
+              setConsecutiveMisses(0);
+            }
+          }
+        } catch { /* counted below — a throw here is just "no answer this time" */ }
+      }
 
       if (!ok && !cancelled) {
         misses += 1;
