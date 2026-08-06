@@ -61,7 +61,7 @@ try:
 except Exception:  # pragma: no cover
     HAS_ORT = False
 
-_PROVIDER_PREF = ["CUDAExecutionProvider", "DmlExecutionProvider", "CPUExecutionProvider"]
+_PROVIDER_PREF = ["CUDAExecutionProvider", "CPUExecutionProvider"]
 _NEG = -1e30
 
 # Failure reasons, reported verbatim in telemetry and the debug log so an

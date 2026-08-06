@@ -66,7 +66,7 @@ CANON = (CANON_HELMET, CANON_NO_HELMET)
 
 # Provider preference: CUDA -> DirectML -> CPU. Only those actually present in
 # the installed onnxruntime build are offered; the rest fall through to CPU.
-_PROVIDER_PREF = ["CUDAExecutionProvider", "DmlExecutionProvider", "CPUExecutionProvider"]
+_PROVIDER_PREF = ["CUDAExecutionProvider", "CPUExecutionProvider"]
 
 
 def _canon(raw: str) -> Optional[str]:

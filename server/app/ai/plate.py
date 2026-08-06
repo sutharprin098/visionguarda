@@ -84,7 +84,7 @@ FAIL_TOO_SMALL = "plate_too_small"
 FAIL_ASPECT = "plate_bad_aspect"
 FAIL_AREA = "plate_too_large"
 
-_PROVIDER_PREF = ["CUDAExecutionProvider", "DmlExecutionProvider", "CPUExecutionProvider"]
+_PROVIDER_PREF = ["CUDAExecutionProvider", "CPUExecutionProvider"]
 
 # LPD-YuNet SSD config (OpenCV Zoo license_plate_detection_yunet).
 _LPD_W, _LPD_H = 320, 240
