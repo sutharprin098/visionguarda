@@ -128,9 +128,11 @@ const ACCENT: Record<string, { text: string; bg: string; border: string; ring: s
 };
 
 export default function AdminStudio({
+  orgId: initialOrgId,
   onDeactivated,
   onOpenAlerts,
 }: {
+  orgId?: string | null;
   onDeactivated: () => void;
   /** Bell click — jumps to Workspace's Alerts tab. Undefined would just hide
    *  the bell rather than render one that does nothing. */
@@ -138,6 +140,10 @@ export default function AdminStudio({
 }) {
   const { unacked: unackedAlerts } = useAlertState();
   const [cameras, setCameras] = useState<Camera[]>([]);
+  const camerasRef = useRef<Camera[]>([]);
+  useEffect(() => {
+    camerasRef.current = cameras;
+  }, [cameras]);
   // Load state for the camera list so an empty sidebar is never a silent
   // mystery: distinguishes "still loading", "failed with an error", and
   // "genuinely no cameras yet" — the last three were all just a blank list.
@@ -146,7 +152,13 @@ export default function AdminStudio({
   const [drawings, setDrawings] = useState<Drawing[]>([]);
   const [rules, setRules] = useState<Rule[]>([]);
   const [versions, setVersions] = useState<ConfigVersion[]>([]);
-  const [orgId, setOrgId] = useState<string | null>(null);
+  const [orgId, setOrgId] = useState<string | null>(initialOrgId ?? null);
+
+  useEffect(() => {
+    if (initialOrgId) {
+      setOrgId(initialOrgId);
+    }
+  }, [initialOrgId]);
 
   const [activeProfile, setActiveProfile] = useState<ZoneProfileKey | null>(null);
   const [features, setFeatures] = useState<ProfileFeatures>({});
@@ -202,24 +214,8 @@ export default function AdminStudio({
     let active = true;
     let channel: any = null;
 
-    async function loadData() {
+    async function loadCameras() {
       const sb = await getSupabase();
-      // Must filter by the signed-in user: profiles_read (0001) exposes every
-      // profile in the org, so an unfiltered .single() sees N rows and fails
-      // with PGRST116 the moment an org has a second user — silently leaving
-      // orgId null, which then blocks publishing.
-      const { data: auth } = await sb.auth.getUser();
-      if (!active) return;
-      if (!auth?.user) { console.error("[AdminStudio] no authenticated user; cannot resolve org"); return; }
-      const { data: profile, error: profErr } = await sb
-        .from("profiles").select("org_id").eq("id", auth.user.id).maybeSingle();
-      if (!active) return;
-      if (profErr) console.error("[AdminStudio] org lookup failed", profErr);
-      if (profile?.org_id) setOrgId(profile.org_id);
-
-      // .error is checked, not just .data — a blank camera list here used to be
-      // indistinguishable between "RLS/network error" and "no cameras yet",
-      // which is exactly how "cameras don't show in Admin Studio" reads.
       const { data: cams, error: camErr } = await sb.from("cameras").select("*");
       if (!active) return;
       if (camErr) {
@@ -238,22 +234,58 @@ export default function AdminStudio({
           return cams.length > 0 ? cams[0] : null;
         });
       }
+    }
+
+    async function loadConfigVersions() {
+      const sb = await getSupabase();
       const { data: vers } = await sb.from("config_versions").select("*").order("version", { ascending: false });
       if (!active) return;
       if (vers) setVersions(vers);
     }
 
-    loadData();
+    async function initializeStudio() {
+      const sb = await getSupabase();
+      try {
+        const { data: auth } = await sb.auth.getUser();
+        if (active && auth?.user) {
+          const { data: profile, error: profErr } = await sb
+            .from("profiles").select("org_id").eq("id", auth.user.id).maybeSingle();
+          if (active && !profErr && profile?.org_id) {
+            setOrgId(profile.org_id);
+          }
+        }
+      } catch (e) {
+        console.error("[AdminStudio] Failed to query auth session", e);
+      }
+
+      await Promise.all([loadCameras(), loadConfigVersions()]);
+    }
+
+    initializeStudio();
 
     // Subscribe to real-time additions/edits of cameras & configs
     getSupabase().then((sb) => {
       if (!active) return;
       channel = sb.channel("admin-studio-sync")
-        .on("postgres_changes", { event: "*", schema: "public", table: "cameras" }, () => {
-          loadData();
+        .on("postgres_changes", { event: "*", schema: "public", table: "cameras" }, (payload: any) => {
+          if (payload.eventType === "UPDATE" && payload.new) {
+            const currentCam = camerasRef.current.find(c => c.id === payload.new.id);
+            if (currentCam) {
+              const keysToCompare = ["name", "source_type", "zone_profile", "zones", "lines"] as const;
+              const onlyStatusChanged = keysToCompare.every(key => {
+                return JSON.stringify(payload.new[key]) === JSON.stringify(currentCam[key]);
+              });
+              if (onlyStatusChanged) {
+                setCameras(prev => prev.map(c => c.id === payload.new.id ? { ...c, status: payload.new.status } : c));
+                setSelectedCam(prev => prev && prev.id === payload.new.id ? { ...prev, status: payload.new.status } : prev);
+                return;
+              }
+            }
+          }
+          loadCameras();
         })
         .on("postgres_changes", { event: "*", schema: "public", table: "config_versions" }, () => {
-          loadData();
+          loadConfigVersions();
         })
         .subscribe();
     });

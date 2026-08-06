@@ -104,11 +104,14 @@ async function refreshWarmSession(): Promise<WarmSession> {
   }
 
   try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 4000);
     const res = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=refresh_token`, {
       method: "POST",
       headers: { "Content-Type": "application/json", apikey: ANON_KEY },
       body: JSON.stringify({ refresh_token: creds.refresh_token }),
-    });
+      signal: controller.signal,
+    }).finally(() => clearTimeout(timer));
     const body = (await res.json().catch(() => null)) as { access_token?: string } | null;
     if (!res.ok) {
       // 4xx means the refresh token itself is dead (revoked/rotated away) and
@@ -131,7 +134,7 @@ async function refreshWarmSession(): Promise<WarmSession> {
     }
     return { ok: true, session };
   } catch {
-    // Offline / DNS not up yet. Transient by definition.
+    // Offline / DNS not up yet / Timeout. Transient by definition.
     return { ok: false, reason: "retry" };
   }
 }

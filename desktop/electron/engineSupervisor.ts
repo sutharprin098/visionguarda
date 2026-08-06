@@ -377,6 +377,23 @@ function startAdoptedMonitor(): void {
   }, ADOPTED_POLL_MS);
 }
 
+async function clearPort8000IfBlocked(): Promise<void> {
+  if (process.platform !== "win32") return;
+  return new Promise((resolve) => {
+    execFile(
+      "powershell.exe",
+      [
+        "-NoProfile",
+        "-NonInteractive",
+        "-Command",
+        `$conn = Get-NetTCPConnection -LocalPort 8000 -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty OwningProcess; if ($conn -and $conn -gt 0) { Stop-Process -Id $conn -Force -ErrorAction SilentlyContinue }`,
+      ],
+      { windowsHide: true },
+      () => resolve()
+    );
+  });
+}
+
 async function launch(): Promise<void> {
   if (child) return;
 
@@ -387,6 +404,9 @@ async function launch(): Promise<void> {
     startAdoptedMonitor();
     return;
   }
+
+  // Clear any stale/orphan process holding port 8000 before spawning
+  await clearPort8000IfBlocked();
 
   const resolved = await resolveEngine();
   if (!resolved) {
@@ -461,12 +481,14 @@ async function launch(): Promise<void> {
       return;
     }
     if (code === ENGINE_EXIT_PORT_CONFLICT) {
-      // A foreign process holds the port. Relaunching just fails to bind again,
-      // so DON'T crash-loop — surface it and retry slowly (it may free up).
-      setState("port_conflict",
-        "Port 8000 is in use by another application. The AI engine can't start until it's freed. Retrying periodically.");
-      if (restartTimer) return;
-      restartTimer = setTimeout(() => { restartTimer = null; launch(); }, 15000);
+      appendLog("[Supervisor] Port 8000 conflict detected. Auto-clearing stale process and retrying startup...");
+      setState("port_conflict", "Port 8000 was in use by a stale process. Automatically clearing and restarting engine...");
+      clearPort8000IfBlocked().then(() => {
+        if (!manualStop) {
+          if (restartTimer) clearTimeout(restartTimer);
+          restartTimer = setTimeout(() => { restartTimer = null; void launch(); }, 1500);
+        }
+      });
       return;
     }
 

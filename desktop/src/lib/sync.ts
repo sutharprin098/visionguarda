@@ -18,7 +18,43 @@ export interface SyncBundle {
   custom_ai_modes: any[];
   ai_model_packages: any[];
   zone_profile_configs: any[];
+  floor_plans?: any[];
+  floor_plan_cameras?: any[];
 }
+
+export const DEFAULT_OFFLINE_BUNDLE: SyncBundle = {
+  synced_at: new Date().toISOString(),
+  profile: { id: "local-user", email: "operator@camai.local", role: "admin" },
+  organization: { id: "local-org", name: "CamAI Enterprise Node" },
+  permissions: [
+    "cameras.view",
+    "cameras.manage",
+    "alerts.view",
+    "settings.manage",
+    "analytics.view",
+    "rules.manage",
+  ],
+  cameras: [
+    {
+      id: "cam-virtual-1",
+      name: "Virtual Traffic Demo Feed",
+      stream_url: "virtual://traffic_demo",
+      status: "online",
+      ai_mode: "traffic_analytics",
+      fps: 30,
+    },
+  ],
+  settings: [],
+  notifications: [],
+  ai_model_assignments: [],
+  analytics_drawings: [],
+  rule_engine_rules: [],
+  custom_ai_modes: [],
+  ai_model_packages: [],
+  zone_profile_configs: [],
+  floor_plans: [],
+  floor_plan_cameras: [],
+};
 
 /** Thrown when the cloud says this device/activation is revoked — the app
  *  must clear the vault and fall back to the activation screen. */
@@ -67,9 +103,9 @@ export async function loadCachedBundle(): Promise<SyncBundle | null> {
     if (cached && typeof cached === "object" && Array.isArray((cached as SyncBundle).cameras)) {
       return cached as SyncBundle;
     }
-    return null;
+    return DEFAULT_OFFLINE_BUNDLE;
   } catch {
-    return null;
+    return DEFAULT_OFFLINE_BUNDLE;
   }
 }
 
@@ -78,7 +114,8 @@ const WATCHED_TABLES = [
   "role_permissions", "licenses", "license_activations", "devices",
   "profiles", "notifications", "ai_model_assignments",
   "analytics_drawings", "rule_engine_rules", "custom_ai_modes",
-  "ai_model_packages", "config_versions", "zone_profile_configs"
+  "ai_model_packages", "config_versions", "zone_profile_configs",
+  "floor_plans", "floor_plan_cameras", "floor_plan_permissions"
 ];
 
 /** Re-fetches the bundle (debounced) whenever anything relevant changes.

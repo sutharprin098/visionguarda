@@ -202,37 +202,141 @@ export function detectionsRenderEqual(
 }
 
 const WS_URL = "ws://127.0.0.1:8000/ws";
-// The engine closes any socket that sends nothing for WS_IDLE_TIMEOUT_SECS=30
-// (main.py:184-199). A telemetry subscriber is otherwise receive-only, so
-// without this ping it would be dropped every 30s and reconnect-loop forever.
-// mediaShare never hit this because it pushes a frame every 100ms.
-const HEARTBEAT_INTERVAL_MS = 5000;
-const HEARTBEAT_TIMEOUT_MS = 12000;
-const RECONNECT_BACKOFF_MS = [500, 1000, 2000, 4000, 8000, 15000, 30000];
+
+class MultiTelemetryHub {
+  private ws: WebSocket | null = null;
+  private listeners = new Map<string, Set<(t: CameraTelemetry) => void>>();
+  private statusListeners = new Set<(s: TelemetryStatus) => void>();
+  private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private reconnectAttempt = 0;
+  private lastPongTs = 0;
+  private lastPingTs = 0;
+
+  subscribe(cameraId: string, callback: (t: CameraTelemetry) => void): () => void {
+    if (!this.listeners.has(cameraId)) {
+      this.listeners.set(cameraId, new Set());
+    }
+    this.listeners.get(cameraId)!.add(callback);
+
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      try {
+        this.ws.send(JSON.stringify({ type: "subscribe", camera_id: cameraId }));
+      } catch { /* ignore */ }
+    } else {
+      this.connect();
+    }
+
+    return () => {
+      const set = this.listeners.get(cameraId);
+      if (set) {
+        set.delete(callback);
+        if (set.size === 0) {
+          this.listeners.delete(cameraId);
+          if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+            try {
+              this.ws.send(JSON.stringify({ type: "unsubscribe", camera_id: cameraId }));
+            } catch { /* ignore */ }
+          }
+        }
+      }
+    };
+  }
+
+  private connect(): void {
+    if (this.ws && (this.ws.readyState === WebSocket.CONNECTING || this.ws.readyState === WebSocket.OPEN)) {
+      return;
+    }
+
+    try {
+      this.ws = new WebSocket(WS_URL);
+    } catch {
+      this.scheduleReconnect();
+      return;
+    }
+
+    this.ws.onopen = () => {
+      this.reconnectAttempt = 0;
+      this.lastPongTs = Date.now();
+      // Subscribe to all active camera IDs on connection
+      this.listeners.forEach((_, cameraId) => {
+        try {
+          this.ws?.send(JSON.stringify({ type: "subscribe", camera_id: cameraId }));
+        } catch { /* ignore */ }
+      });
+      this.startHeartbeat();
+    };
+
+    this.ws.onmessage = (evt) => {
+      try {
+        const msg = JSON.parse(evt.data);
+        if (msg?.type === "pong") {
+          this.lastPongTs = Date.now();
+          return;
+        }
+        if (msg?.type === "telemetry" && msg.data) {
+          Object.entries(msg.data).forEach(([camId, data]) => {
+            const callbacks = this.listeners.get(camId);
+            if (callbacks && callbacks.size > 0) {
+              callbacks.forEach((fn) => fn(data as CameraTelemetry));
+            }
+          });
+        }
+      } catch { /* ignore */ }
+    };
+
+    this.ws.onclose = () => {
+      this.ws = null;
+      this.stopHeartbeat();
+      if (this.listeners.size > 0) {
+        this.scheduleReconnect();
+      }
+    };
+
+    this.ws.onerror = () => { /* handled in onclose */ };
+  }
+
+  private startHeartbeat(): void {
+    this.stopHeartbeat();
+    this.heartbeatTimer = setInterval(() => {
+      if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
+      if (Date.now() - this.lastPongTs > 15000) {
+        try { this.ws.close(); } catch { /* ignore */ }
+        return;
+      }
+      try {
+        this.lastPingTs = Date.now();
+        this.ws.send(JSON.stringify({ type: "ping", ts: Date.now() }));
+      } catch { /* ignore */ }
+    }, 5000);
+  }
+
+  private stopHeartbeat(): void {
+    if (this.heartbeatTimer) {
+      clearInterval(this.heartbeatTimer);
+      this.heartbeatTimer = null;
+    }
+  }
+
+  private scheduleReconnect(): void {
+    if (this.reconnectTimer) return;
+    const delay = Math.min(1000 * Math.pow(2, this.reconnectAttempt), 10000);
+    this.reconnectAttempt++;
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null;
+      this.connect();
+    }, delay);
+  }
+}
+
+export const telemetryHub = new MultiTelemetryHub();
 
 export class TelemetrySession {
   private cameraId: string;
   private onData: (t: CameraTelemetry) => void;
   private onStatus?: (s: TelemetryStatus) => void;
-
-  private ws: WebSocket | null = null;
-  private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
-  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
-  private lastPongTs = 0;
-  private lastPingTs = 0;
-  private lastMsgTs = 0;
-  /** Client-side delivery metrics. The engine's own payload reports what it
-   *  COMPUTED; these report what actually arrived, which is the only way to
-   *  see event-loop congestion or a saturated socket from the UI side. */
+  private unsubscribeFn: (() => void) | null = null;
   private stats = { rttMs: 0, gapMs: 0, parseMs: 0, received: 0 };
-
-  /** Snapshot for the performance HUD. */
-  getStats(): { rttMs: number; gapMs: number; parseMs: number; received: number } {
-    return { ...this.stats };
-  }
-
-  private reconnectAttempt = 0;
-  private stopped = true;
 
   constructor(cameraId: string, onData: (t: CameraTelemetry) => void, onStatus?: (s: TelemetryStatus) => void) {
     this.cameraId = cameraId;
@@ -240,125 +344,24 @@ export class TelemetrySession {
     this.onStatus = onStatus;
   }
 
+  getStats(): { rttMs: number; gapMs: number; parseMs: number; received: number } {
+    return { ...this.stats };
+  }
+
   start(): void {
-    this.stopped = false;
-    this.connect();
+    if (this.unsubscribeFn) return;
+    this.onStatus?.("live");
+    this.unsubscribeFn = telemetryHub.subscribe(this.cameraId, (data) => {
+      this.stats.received++;
+      this.onData(data);
+    });
   }
 
   stop(): void {
-    this.stopped = true;
-    this.clearTimers();
-    if (this.ws) {
-      const ws = this.ws;
-      this.ws = null;
-      try { ws.close(); } catch { /* already closing */ }
+    if (this.unsubscribeFn) {
+      this.unsubscribeFn();
+      this.unsubscribeFn = null;
     }
     this.onStatus?.("idle");
-  }
-
-  private connect(): void {
-    if (this.stopped || this.ws) return;
-    this.onStatus?.(this.reconnectAttempt > 0 ? "reconnecting" : "connecting");
-
-    let ws: WebSocket;
-    try {
-      ws = new WebSocket(WS_URL);
-    } catch {
-      this.scheduleReconnect();
-      return;
-    }
-    this.ws = ws;
-
-    ws.onopen = () => {
-      this.reconnectAttempt = 0;
-      this.lastPongTs = Date.now();
-      try {
-        ws.send(JSON.stringify({ type: "subscribe", camera_id: this.cameraId }));
-      } catch { /* onclose will drive the reconnect */ }
-      this.onStatus?.("live");
-      this.startHeartbeat();
-    };
-
-    ws.onmessage = (evt) => {
-      const t0 = performance.now();
-      let msg: any;
-      try {
-        msg = JSON.parse(evt.data);
-      } catch {
-        return; // not JSON — nothing this client understands
-      }
-      if (msg?.type === "pong") {
-        this.lastPongTs = Date.now();
-        // Round trip over the loopback socket. Distinguishes "the engine is
-        // slow to produce telemetry" from "delivery is slow", which look
-        // identical from the UI and have completely different fixes.
-        if (this.lastPingTs) this.stats.rttMs = Date.now() - this.lastPingTs;
-        return;
-      }
-      // { type: "telemetry", data: { "<camera_id>": {...} } }  — main.py:70-81
-      if (msg?.type === "telemetry" && msg.data) {
-        const mine = msg.data[this.cameraId];
-        if (mine) {
-          // Inter-arrival gap is the honest client-side measure of delivery
-          // rate: the engine can report 15 fps in the payload while messages
-          // actually land every 400ms because the event loop is congested.
-          const now = performance.now();
-          if (this.lastMsgTs) this.stats.gapMs = now - this.lastMsgTs;
-          this.lastMsgTs = now;
-          this.stats.parseMs = now - t0;
-          this.stats.received++;
-          this.onData(mine as CameraTelemetry);
-        }
-      }
-    };
-
-    ws.onclose = () => {
-      this.ws = null;
-      this.clearTimers();
-      if (this.stopped) return;
-      this.scheduleReconnect();
-    };
-
-    // onerror is followed by onclose; reconnect is driven from there only, so a
-    // single failure can't schedule two overlapping reconnects.
-    ws.onerror = () => { /* handled via onclose */ };
-  }
-
-  private startHeartbeat(): void {
-    this.stopHeartbeat();
-    this.heartbeatTimer = setInterval(() => {
-      const ws = this.ws;
-      if (!ws || ws.readyState !== WebSocket.OPEN) return;
-      if (Date.now() - this.lastPongTs > HEARTBEAT_TIMEOUT_MS) {
-        // Socket looks open but the engine stopped answering — force the
-        // close path so backoff/reconnect takes over.
-        try { ws.close(); } catch { /* already gone */ }
-        return;
-      }
-      try {
-        this.lastPingTs = Date.now();
-        ws.send(JSON.stringify({ type: "ping", ts: Date.now() }));
-      } catch { /* onclose will fire */ }
-    }, HEARTBEAT_INTERVAL_MS);
-  }
-
-  private stopHeartbeat(): void {
-    if (this.heartbeatTimer) { clearInterval(this.heartbeatTimer); this.heartbeatTimer = null; }
-  }
-
-  private clearTimers(): void {
-    this.stopHeartbeat();
-    if (this.reconnectTimer) { clearTimeout(this.reconnectTimer); this.reconnectTimer = null; }
-  }
-
-  private scheduleReconnect(): void {
-    if (this.stopped || this.reconnectTimer) return;
-    const delay = RECONNECT_BACKOFF_MS[Math.min(this.reconnectAttempt, RECONNECT_BACKOFF_MS.length - 1)];
-    this.reconnectAttempt++;
-    this.onStatus?.("reconnecting");
-    this.reconnectTimer = setTimeout(() => {
-      this.reconnectTimer = null;
-      this.connect();
-    }, delay);
   }
 }

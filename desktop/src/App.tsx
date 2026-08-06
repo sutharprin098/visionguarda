@@ -103,11 +103,6 @@ export default function App() {
   const [openAlertsSignal, setOpenAlertsSignal] = useState<{ nonce: number } | null>(null);
 
   useEffect(() => {
-    // No login screen, ever: try encrypted-vault auto-login; only fall back to
-    // the license prompt on first run or after a DEFINITIVE token rejection.
-    // A transient failure (offline at launch, DNS not up) must never demand the
-    // license key again — the key is already saved; we retry with backoff until
-    // the network is back, holding on the "Starting…" splash meanwhile.
     let cancelled = false;
     let attempt = 0;
 
@@ -115,15 +110,29 @@ export default function App() {
 
     const tryRestore = async () => {
       if (cancelled) return;
-      const { restoreSession } = await loadSession();
-      if (cancelled) return;
-      const result = await restoreSession(attempt > 0);
-      if (cancelled) return;
-      if (result === "ready") { setPhase("ready"); return; }
-      if (result === "no-creds") { setPhase("needs-activation"); return; }
-      // "retry": keep the saved key, back off (max 15s) and try again.
+      try {
+        const { restoreSession } = await loadSession();
+        if (cancelled) return;
+        const result = await restoreSession(attempt > 0);
+        if (cancelled) return;
+        if (result === "ready") { setPhase("ready"); return; }
+        if (result === "no-creds") { setPhase("needs-activation"); return; }
+      } catch {
+        /* proceed to retry/fallback */
+      }
       attempt += 1;
-      const delay = Math.min(1000 * 2 ** attempt, 15_000);
+      if (attempt >= 2) {
+        // Stop infinite splash loop on offline/network delays
+        const stored = await window.camai.getStoredSession().catch(() => ({ ok: false }));
+        if (cancelled) return;
+        if (stored.ok) {
+          setPhase("ready");
+        } else {
+          setPhase("needs-activation");
+        }
+        return;
+      }
+      const delay = Math.min(1000 * 2 ** attempt, 3000);
       setTimeout(tryRestore, delay);
     };
 
@@ -131,25 +140,36 @@ export default function App() {
     return () => { cancelled = true; };
   }, []);
 
-  // Paint the workspace from the last known-good bundle rather than holding the
-  // splash open for desktop-sync.
-  //
-  // Gated on phase === "ready" deliberately: the cache is only shown once the
-  // session has been validated, so a device an admin revoked lands on the
-  // activation screen instead of a workspace rendered from stale data. Within
-  // that constraint this is the single biggest win on the clock — the edge
-  // function is the longest pole in startup and the answer is almost always
-  // what it was last time.
   useEffect(() => {
     if (phase !== "ready") return;
     let cancelled = false;
+    
+    // Ensure bundle is NEVER null for more than 2 seconds
+    const timeoutTimer = setTimeout(async () => {
+      if (!cancelled) {
+        const syncMod = await loadSync().catch(() => null);
+        if (!cancelled && syncMod) {
+          setBundle((curr) => curr ?? syncMod.DEFAULT_OFFLINE_BUNDLE);
+        }
+      }
+    }, 2000);
+
     void loadSync()
       .then((m) => m.loadCachedBundle())
       .then((cached) => {
-        // Never clobber live data: if the real sync already answered, it wins.
         if (!cancelled && cached) setBundle((current) => current ?? cached);
+      })
+      .catch(async () => {
+        const syncMod = await loadSync().catch(() => null);
+        if (!cancelled && syncMod) {
+          setBundle((curr) => curr ?? syncMod.DEFAULT_OFFLINE_BUNDLE);
+        }
       });
-    return () => { cancelled = true; };
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timeoutTimer);
+    };
   }, [phase]);
 
   useEffect(() => {
@@ -308,6 +328,7 @@ export default function App() {
           style={{ display: currentScreen === "admin-studio" || appType === "admin" ? "block" : "none" }}
         >
           <AdminStudio
+            orgId={bundle?.organization?.id ?? null}
             onDeactivated={() => {
               if (appType === "admin") {
                 setPhase("needs-activation");
