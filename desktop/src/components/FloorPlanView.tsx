@@ -315,32 +315,41 @@ export default function FloorPlanView({ bundle, healthInfo, onSelectCamera }: Fl
         const cls = (det.class || "").toLowerCase();
         const isPerson = cls.includes("person") || cls.includes("pedestrian") || cls.includes("human");
         const isBike = cls.includes("motor") || cls.includes("bike") || cls.includes("cycle");
-        const iconSymbol = isPerson ? "👤" : isBike ? "🏍️" : "🚗";
-        const borderColor = isPerson ? "#818cf8" : isBike ? "#f59e0b" : "#22d3ee";
-        const labelColor = isPerson ? "#c7d2fe" : isBike ? "#fde68a" : "#a5f3fc";
+        const isBus = cls.includes("bus") || cls.includes("truck") || cls.includes("van");
+
+        const iconSymbol = isPerson ? "👤" : isBike ? "🏍️" : isBus ? "🚌" : "🚗";
+        const borderColor = isPerson ? "#818cf8" : isBike ? "#f59e0b" : isBus ? "#a855f7" : "#06b6d4";
+        const labelColor = isPerson ? "#c7d2fe" : isBike ? "#fde68a" : isBus ? "#e9d5ff" : "#cffafe";
+        
+        const classNameUpper = cls ? cls.toUpperCase() : "OBJ";
+        const trackIdText = det.track_id != null ? `#${det.track_id}` : "";
+        const confPercent = det.confidence != null ? `${Math.round(det.confidence * 100)}%` : "";
         const speedText = det.speed ? ` ${Math.round(det.speed)}km/h` : "";
 
         const html = `
           <div style="
             display: inline-flex;
             align-items: center;
-            gap: 3px;
-            background: rgba(10, 15, 30, 0.92);
-            backdrop-filter: blur(4px);
-            border: 1px solid ${borderColor};
-            box-shadow: 0 0 10px ${borderColor}80;
-            padding: 2px 6px;
-            border-radius: 12px;
-            font-family: system-ui, -apple-system, sans-serif;
+            gap: 4px;
+            background: rgba(10, 15, 30, 0.94);
+            backdrop-filter: blur(6px);
+            border: 1.5px solid ${borderColor};
+            box-shadow: 0 0 12px ${borderColor}aa;
+            padding: 3px 8px;
+            border-radius: 14px;
+            font-family: ui-sans-serif, system-ui, -apple-system, sans-serif;
             font-size: 10px;
-            font-weight: 700;
+            font-weight: 800;
             color: #ffffff;
             white-space: nowrap;
-            transition: all 0.3s ease-out;
+            letter-spacing: 0.02em;
+            transition: all 0.35s cubic-bezier(0.25, 1, 0.5, 1);
+            transform: translate(-50%, -50%);
           ">
-            <span>${iconSymbol}</span>
-            <span style="color: ${labelColor}">${det.track_id ? `#${det.track_id}` : cls}</span>
-            ${speedText ? `<span style="color: #fbbf24; font-size: 9px;">${speedText}</span>` : ''}
+            <span style="font-size: 11px;">${iconSymbol}</span>
+            <span style="color: ${labelColor}; text-transform: uppercase;">${classNameUpper} ${trackIdText}</span>
+            ${confPercent ? `<span style="color: #94a3b8; font-size: 9px; font-weight: 600;">${confPercent}</span>` : ''}
+            ${speedText ? `<span style="color: #fbbf24; font-size: 9px; font-weight: 700;">${speedText}</span>` : ''}
           </div>
         `;
 
@@ -350,16 +359,16 @@ export default function FloorPlanView({ bundle, healthInfo, onSelectCamera }: Fl
           const customIcon = L.divIcon({
             html,
             className: "live-moving-object-icon",
-            iconSize: [80, 24],
-            iconAnchor: [40, 12]
+            iconSize: [100, 26],
+            iconAnchor: [50, 13]
           });
           existingMarker.setIcon(customIcon);
         } else {
           const customIcon = L.divIcon({
             html,
             className: "live-moving-object-icon",
-            iconSize: [80, 24],
-            iconAnchor: [40, 12]
+            iconSize: [100, 26],
+            iconAnchor: [50, 13]
           });
           const marker = L.marker([objLat, objLng], { icon: customIcon }).addTo(map);
           detMarkersRef.current.set(key, marker);
