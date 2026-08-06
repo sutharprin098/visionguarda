@@ -4,6 +4,7 @@ import hmac
 import io
 import time
 import uuid
+import json
 import numpy as np
 from collections import deque
 from dataclasses import asdict
@@ -281,7 +282,7 @@ ws_manager = ConnectionManager()
 # legitimately quiet client — closing it lets the client's own reconnect
 # logic take over immediately instead of pushing frames into a socket that
 # looks open but is actually dead.
-WS_IDLE_TIMEOUT_SECS = 30.0
+WS_IDLE_TIMEOUT_SECS = 120.0
 
 def _ws_origin_allowed(websocket: WebSocket) -> bool:
     """Same allowlist the HTTP CORS middleware enforces, applied by hand.

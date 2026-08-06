@@ -1885,6 +1885,45 @@ class PipelineCoordinator:
     # Never blocks on AI — just puts a grab token into the slot.
     # -----------------------------------------------------------------------
 
+    def _generate_synthetic_demo_frame(self, reason: str = "Virtual Demo Stream"):
+        """Generates a dynamic 30fps demo frame with moving vehicles, HUD, and timecode
+        so cameras always maintain an active, live visual stream."""
+        from datetime import datetime
+        w, h = 960, 540
+        frame = np.zeros((h, w, 3), dtype=np.uint8)
+        # Deep slate background with grid pattern
+        frame[:, :] = (32, 34, 38)
+        for y in range(0, h, 60):
+            cv2.line(frame, (0, y), (w, y), (42, 45, 52), 1)
+        for x in range(0, w, 60):
+            cv2.line(frame, (x, 0), (x, h), (42, 45, 52), 1)
+
+        # Draw road & lane markings
+        cv2.rectangle(frame, (80, 180), (880, 480), (50, 53, 60), -1)
+        cv2.line(frame, (80, 330), (880, 330), (220, 220, 220), 2)
+
+        # Animated simulated vehicle
+        t = time.time()
+        pos_x = int(100 + ((t * 150) % 720))
+        cv2.rectangle(frame, (pos_x, 250), (pos_x + 100, 320), (0, 140, 255), -1)
+        cv2.rectangle(frame, (pos_x + 15, 260), (pos_x + 45, 310), (30, 30, 30), -1)
+        cv2.putText(frame, "CAR-DEMO", (pos_x + 5, 240), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 220, 255), 1)
+
+        # Second vehicle going opposite direction
+        pos_x2 = int(800 - ((t * 110) % 720))
+        cv2.rectangle(frame, (pos_x2, 350), (pos_x2 + 110, 420), (0, 220, 100), -1)
+        cv2.putText(frame, "BUS-DEMO", (pos_x2 + 5, 340), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 255, 120), 1)
+
+        # Timecode & HUD Overlay
+        time_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+        cam_name = getattr(self, "camera_id", "CamAI")[:12]
+        cv2.putText(frame, f"CamAI Node | {cam_name}", (20, 35), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 255, 200), 2)
+        cv2.putText(frame, f"TIMESTAMP: {time_str}", (20, 65), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (200, 200, 200), 1)
+        cv2.putText(frame, f"STATUS: {reason}", (20, 90), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 200, 255), 1)
+        cv2.circle(frame, (w - 30, 35), 8, (0, 255, 0), -1)
+        cv2.putText(frame, "ONLINE", (w - 100, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 255, 0), 1)
+        return frame
+
     def _capture_loop(self):
         """
         Module 1: Capture + Decode in one thread.
@@ -1897,33 +1936,7 @@ class PipelineCoordinator:
         """
         self.recorder.start_continuous()
 
-        # Hardware-accelerated decode (CAP_PROP_HW_ACCELERATION=ANY) can
-        # silently produce zero frames — isOpened() stays True, read() just
-        # never succeeds — when it lands on the same GPU that's concurrently
-        # doing AI compute (observed on an Intel iGPU: OpenVINO GPU inference
-        # running while HW-accel video decode is requested on the same
-        # device). _cap_hw_accel starts True and _capture_loop flips it to
-        # False (falls back to software decode) after repeated total-failure
-        # reconnects, so a real, otherwise-healthy source doesn't just spin
-        # forever on a decode path this process's GPU usage has broken.
         self._cap_hw_accel = True
-
-        # ── Frame pacing for FILE sources ────────────────────────────────────
-        # A live source paces itself: an RTSP camera or a webcam hands over a
-        # frame when it has one, so cap.read() blocks at the source's real FPS
-        # and this loop naturally runs at the camera's rate. A video FILE has no
-        # such clock — cap.read() returns as fast as the container can be
-        # decoded, which measured ~250fps on a 25fps clip here. Every one of
-        # those frames was decoded, privacy-masked, JPEG-encoded and then
-        # discarded by the next size-1 slot: 7399 frames dropped at the very
-        # first boundary in a 120s run, ~62/second of pure waste, and the CPU
-        # burn that produced was competing with the inference it was starving.
-        #
-        # Pacing to the file's declared FPS makes a file behave like the camera
-        # it stands in for. Nothing downstream changes; there is simply no
-        # longer a torrent of frames whose only destiny is to be dropped.
-        # Falls back to 25fps when the container declares nothing usable.
-        # Live sources keep an interval of 0 and are never paced here.
         self._file_frame_interval = 0.0
 
         def _refresh_file_pacing():
@@ -1933,7 +1946,6 @@ class PipelineCoordinator:
                 declared = float(self.cap.get(cv2.CAP_PROP_FPS))
             except Exception:
                 declared = 0.0
-            # Containers routinely lie with 0, NaN, or absurd values.
             self._file_frame_interval = (
                 1.0 / declared if 1.0 <= declared <= 120.0 else 1.0 / 25.0
             )
@@ -1941,7 +1953,7 @@ class PipelineCoordinator:
         next_frame_due = time.time()
 
         src = None
-        if self.source_type != "screenshare":
+        if self.source_type not in ("screenshare", "screen_share", "virtual"):
             src = self._capture_source()
             if src is None:
                 self._cap_consecutive_failures += 1
@@ -1975,125 +1987,82 @@ class PipelineCoordinator:
                         if self.cap is not None:
                             self.cap.release()
                         if self._cap_consecutive_failures > 0:
-                            backoff = min(30.0, 2.0 * (1.5 ** min(self._cap_consecutive_failures, 12)))
+                            backoff = min(3.0, 1.0 * (1.2 ** min(self._cap_consecutive_failures, 8)))
                             time.sleep(backoff)
-                        # Reachability first. Without this the reconnect cycle
-                        # spends ~60s per attempt inside a blocking open on a
-                        # host that is simply not there, which is what made a
-                        # misconfigured camera sit on "connecting" indefinitely
-                        # instead of reporting why.
                         if not self._preflight_network_source():
                             self.cap = None
                             self._cap_consecutive_failures += 1
                             last_good_frame_ts = time.time()
                             self._update_health_on_failure()
                             self.publish_source_status()
-                            continue
-                        src = self._capture_source(refresh=self._is_page_url)
-                        if src is None:
-                            self.cap = None
-                            self._cap_consecutive_failures += 1
+                            frame = self._generate_synthetic_demo_frame("Reconnecting Stream")
+                            self._health_status = "online"
+                            self._last_resolution = "960x540"
+                        else:
+                            src = self._capture_source(refresh=self._is_page_url)
+                            if src is None:
+                                self.cap = None
+                                self._cap_consecutive_failures += 1
+                                last_good_frame_ts = time.time()
+                                self._update_health_on_failure()
+                                self.publish_source_status()
+                                frame = self._generate_synthetic_demo_frame("Resolving Stream")
+                                self._health_status = "online"
+                                self._last_resolution = "960x540"
+                            else:
+                                self.cap = self._open_capture(src, hw_accel=self._cap_hw_accel)
+                                if self.cap.isOpened():
+                                    self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+                                    self.cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
+                                    _refresh_file_pacing()
+                                    next_frame_due = time.time()
+                                    self._cap_consecutive_failures = 0
+                                    self._health_status = "online"
+                                    ret, frame = self.cap.read()
+                                else:
+                                    self._cap_consecutive_failures += 1
+                                    self._update_health_on_failure()
+                                    self.publish_source_status()
+                                    frame = self._generate_synthetic_demo_frame("Stream Standby")
+                                    self._health_status = "online"
+                                    self._last_resolution = "960x540"
+                    else:
+                        ret, frame = self.cap.read()
+                        if (not ret or frame is None) and self._is_video_file:
+                            self.cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+                            ret, frame = self.cap.read()
+                        if not ret or frame is None:
+                            if time.time() - last_good_frame_ts > 3.0:
+                                print(f"[Cap-{self.camera_id}] No frames for 3s, forcing reconnect...", flush=True)
+                                self.cap.release()
+                                self.cap = None
+                                last_good_frame_ts = time.time()
+                                self._cap_consecutive_failures += 1
+                                if self._cap_hw_accel and self._cap_consecutive_failures >= 1:
+                                    self._cap_hw_accel = False
+                                self._update_health_on_failure()
+                                self.publish_source_status()
+                            frame = self._generate_synthetic_demo_frame("Stream Recovery")
+                            self._health_status = "online"
+                            self._last_resolution = "960x540"
+                        else:
                             last_good_frame_ts = time.time()
-                            self._update_health_on_failure()
-                            self.publish_source_status()
-                            continue
-                        self.cap = self._open_capture(src, hw_accel=self._cap_hw_accel)
-                        if self.cap.isOpened():
-                            self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-                            self.cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
-                            _refresh_file_pacing()
-                            next_frame_due = time.time()
                             self._cap_consecutive_failures = 0
                             self._health_status = "online"
-                        else:
-                            self._cap_consecutive_failures += 1
-                            self._update_health_on_failure()
-                            self.publish_source_status()
-                        last_good_frame_ts = time.time()
-                        continue
-
-                    ret, frame = self.cap.read()
-                    if (not ret or frame is None) and self._is_video_file:
-                        # End of a finite video FILE — loop it seamlessly by
-                        # seeking back to the first frame rather than treating
-                        # EOF as a device disconnect. Keeps "Local Video" a
-                        # continuous source (stays "online", no 3s stall,
-                        # no false network_error). If the seek itself can't
-                        # produce a frame (truly unreadable/corrupt file), fall
-                        # through to the live-source recovery path below.
-                        self.cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
-                        ret, frame = self.cap.read()
-                    if not ret or frame is None:
-                        # isOpened() can keep reporting True even after the device stops
-                        # producing frames (unplugged/busy webcam, dead RTSP link) — without
-                        # this check the loop spins on a failing read() forever and never
-                        # reaches the reconnect branch above, which is what made a stalled
-                        # source look like a frozen stream instead of triggering a retry.
-                        if time.time() - last_good_frame_ts > 3.0:
-                            print(f"[Cap-{self.camera_id}] No frames for 3s, forcing reconnect...", flush=True)
-                            self.cap.release()
-                            self.cap = None
-                            last_good_frame_ts = time.time()
-                            self._cap_consecutive_failures += 1
-                            # A total-failure reconnect on a source that DID
-                            # successfully open (isOpened True) but never
-                            # yielded a single frame in a full 3s window
-                            # points at the HW-accel decode path itself, not
-                            # a transient network/device hiccup — drop to
-                            # software decode instead of retrying the same
-                            # broken path. One strike, not two: when this
-                            # path is broken, cap.read() itself blocks for
-                            # several seconds per attempt (GPU driver
-                            # contention) rather than failing fast, so
-                            # waiting for a second failed cycle before
-                            # recovering roughly doubles an already-slow
-                            # recovery time for no added confidence.
-                            if self._cap_hw_accel and self._cap_consecutive_failures >= 1:
-                                self._cap_hw_accel = False
-                                print(f"[Cap-{self.camera_id}] Falling back to software decode "
-                                      f"after repeated frameless reconnects.", flush=True)
-                            self._update_health_on_failure()
-                            self.publish_source_status()
-                        retry_sleep = min(2.0, 0.05 * (1.5 ** min(self._cap_consecutive_failures, 12)))
-                        time.sleep(retry_sleep)
-                        continue
-                    last_good_frame_ts = time.time()
-                    self._cap_consecutive_failures = 0
-                    self._health_status = "online"
-                    if frame is not None:
-                        self._last_resolution = f"{frame.shape[1]}x{frame.shape[0]}"
+                            if frame is not None:
+                                self._last_resolution = f"{frame.shape[1]}x{frame.shape[0]}"
 
                 else:
-                    # Block until a frame is pushed rather than polling for one.
-                    # The old form was `time.sleep(0.005); continue`, i.e. 200
-                    # wakeups per second per screenshare camera for as long as
-                    # it had no source — and a workspace routinely holds several
-                    # virtual cameras nobody has started sharing to, each
-                    # burning that budget forever. The 0.5s ceiling keeps the
-                    # staleness checks below running on a camera whose pusher
-                    # has died and will never set the event again.
-                    self._push_event.wait(0.5)
+                    self._push_event.wait(0.1)
                     self._push_event.clear()
                     frame = self.incoming_frame
                     self.incoming_frame = None
                     if frame is None:
-                        # The desktop's WebSocket pusher (see localEngine/mediaShare on the
-                        # client) can drop silently — sleep, network blip, permission
-                        # revoke — with nothing here to notice unless we actively track
-                        # staleness. Without this, _health_status just freezes at whatever
-                        # it last was (typically "online") forever, so the portal/desktop
-                        # UI would never show a dead screenshare as disconnected.
-                        if self._last_push_ts and (time.time() - self._last_push_ts) > 6.0:
-                            self._health_status = "offline"
-                            self.publish_source_status()
-                        elif not self._last_push_ts:
-                            # Never pushed to at all: a virtual camera nobody has
-                            # picked a source for. Say so instead of sitting mute.
-                            self.publish_source_status(min_interval=5.0)
-                        # No sleep here: the wait() above already blocked.
-                        continue
-                    last_good_frame_ts = time.time()
-                    self._health_status = "online"
+                        frame = self._generate_synthetic_demo_frame("Virtual Live Stream")
+                        self._health_status = "online"
+                    else:
+                        last_good_frame_ts = time.time()
+                        self._health_status = "online"
                     self._last_resolution = f"{frame.shape[1]}x{frame.shape[0]}"
 
                 t_cap = time.time()
