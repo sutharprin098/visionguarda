@@ -272,6 +272,8 @@ function AddCameraForm({ camera, onDone }: { camera?: CameraRow; onDone: () => v
     // is stored) — editing starts blank; leaving them blank on save keeps
     // the existing encrypted connection untouched.
     host: "", port: DEFAULT_PORTS[camera?.source_type ?? "rtsp"] ?? "554", username: "", password: "", path: "", url: "",
+    lat: camera?.lat != null ? camera.lat.toString() : "",
+    lng: camera?.lng != null ? camera.lng.toString() : "",
   });
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -340,16 +342,47 @@ function AddCameraForm({ camera, onDone }: { camera?: CameraRow; onDone: () => v
   async function submit() {
     setBusy(true);
     setError("");
+
+    const latVal = form.lat.trim();
+    const lngVal = form.lng.trim();
+    if (latVal !== "" && isNaN(parseFloat(latVal))) {
+      setError("Latitude must be a valid number, or left blank.");
+      setBusy(false);
+      return;
+    }
+    if (lngVal !== "" && isNaN(parseFloat(lngVal))) {
+      setError("Longitude must be a valid number, or left blank.");
+      setBusy(false);
+      return;
+    }
+
     const { data, error } = await supabase.functions.invoke(isEdit ? "update-camera" : "add-camera", {
       body: isEdit
         ? { camera_id: camera!.id, name: form.name, site_id: form.site_id || null, ...(connectionTouched ? fields() : {}) }
         : { name: form.name, site_id: form.site_id || null, ...fields() },
     });
-    setBusy(false);
     if (error) {
+      setBusy(false);
       const detail = await getErrorMessage(error);
       return setError(detail || `Failed to ${isEdit ? "update" : "add"} camera — check the connection details and try again.`);
     }
+
+    const camera_id = isEdit ? camera!.id : data?.id;
+    if (camera_id) {
+      const { error: coordError } = await supabase
+        .from("cameras")
+        .update({
+          lat: latVal === "" ? null : parseFloat(latVal),
+          lng: lngVal === "" ? null : parseFloat(lngVal),
+        })
+        .eq("id", camera_id);
+      
+      if (coordError) {
+        console.error("Failed to update coordinates:", coordError.message);
+      }
+    }
+
+    setBusy(false);
     audit(isEdit ? "camera.update" : "camera.create", "camera", data?.id ?? form.name, { module: "cameras", new: { name: form.name, source_type: form.source_type } });
     onDone();
   }
@@ -503,6 +536,29 @@ function AddCameraForm({ camera, onDone }: { camera?: CameraRow; onDone: () => v
           {testState.deviceInfo.firmware ? ` (fw ${testState.deviceInfo.firmware})` : ""}
         </p>
       )}
+
+      {/* Optional GIS Coordinates */}
+      <div className="border-t border-line/45 pt-4 mt-2">
+        <h4 className="text-[10px] font-bold uppercase tracking-wider text-ink-3 mb-2.5">GIS Coordinates (Optional)</h4>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <Field label="Latitude" hint="e.g. 28.6139">
+            <input
+              className="input font-mono"
+              placeholder="Blank"
+              value={form.lat}
+              onChange={(e) => setForm({ ...form, lat: e.target.value })}
+            />
+          </Field>
+          <Field label="Longitude" hint="e.g. 77.2090">
+            <input
+              className="input font-mono"
+              placeholder="Blank"
+              value={form.lng}
+              onChange={(e) => setForm({ ...form, lng: e.target.value })}
+            />
+          </Field>
+        </div>
+      </div>
 
       {error && <p className="text-sm text-danger">{error}</p>}
       <button className="btn-primary w-full" onClick={submit} disabled={busy || !canSubmit}>

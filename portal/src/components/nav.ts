@@ -2,7 +2,7 @@ import {
   LayoutDashboard, Building2, Users, ShieldCheck, KeyRound, MonitorSmartphone,
   MonitorCheck, Video, Layers, MapPin, BarChart3, BellRing, Siren,
   FileText, Download, CreditCard, ScrollText, Bell, Settings, LifeBuoy,
-  BrainCircuit,
+  BrainCircuit, Map,
   type LucideIcon,
 } from "lucide-react";
 import type { Permission } from "../lib/permissions";
@@ -36,7 +36,6 @@ export const NAV: { group: string; items: NavItem[] }[] = [
     items: [
       { to: "/app/licenses", label: "Licenses", icon: KeyRound, perm: "licenses.manage" },
       { to: "/app/devices", label: "Devices", icon: MonitorSmartphone, perm: "devices.manage" },
-      { to: "/app/activations", label: "Desktop Activations", icon: MonitorCheck, perm: "devices.manage" },
     ],
   },
   {
@@ -45,6 +44,7 @@ export const NAV: { group: string; items: NavItem[] }[] = [
       { to: "/app/cameras", label: "Cameras", icon: Video, perm: "cameras.manage" },
       { to: "/app/camera-groups", label: "Camera Groups", icon: Layers, perm: "cameras.manage" },
       { to: "/app/sites", label: "Sites", icon: MapPin, perm: "cameras.manage" },
+      { to: "/app/maps", label: "Map", icon: Map, perm: "maps.view" },
       { to: "/app/models", label: "AI Model Library", icon: BrainCircuit, superOnly: true },
     ],
   },

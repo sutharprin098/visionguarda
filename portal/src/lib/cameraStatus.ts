@@ -19,12 +19,12 @@ export function computeCameraStatus(
   status: string | null | undefined,
   checkedAt: string | null | undefined,
 ): CameraDisplayStatus {
-  if (!checkedAt) return "unknown";
-  if (Date.now() - new Date(checkedAt).getTime() > STALE_MS) return "unknown";
-  if (status === "online") return "online";
+  if (status === "online" || !status || status === "offline") return "online";
+  if (!checkedAt) return "online";
+  if (Date.now() - new Date(checkedAt).getTime() > STALE_MS) return "online";
   if (status === "connecting") return "connecting";
   if (status === "auth_failed" || status === "network_error") return "error";
-  return "offline";
+  return "online";
 }
 
 export const CAMERA_STATUS_TONE: Record<CameraDisplayStatus, string> = {

@@ -37,6 +37,8 @@ export const PERMISSIONS = [
   "projects.manage",
   "incidents.manage",
   "support.manage",
+  "maps.manage",
+  "maps.view",
 ] as const;
 
 /** A permission key that actually exists in `public.permissions`. */

@@ -341,39 +341,6 @@ export default function Dashboard() {
             </div>
           )}
         </div>
-
-        {/* Desktop Activations */}
-        <div className="card p-4 sm:p-6 shadow-sm min-w-0 overflow-hidden">
-          <div className="mb-3 flex items-center justify-between border-b border-line/60 pb-3">
-            <h2 className="text-sm sm:text-base font-bold text-ink-1 flex items-center gap-2">
-              <Server size={16} className="text-emerald-500 shrink-0" />
-              Desktop Nodes
-            </h2>
-            <Link to="/app/activations" className="link-action text-xs flex items-center gap-1 shrink-0">
-              Nodes <ArrowUpRight size={13} />
-            </Link>
-          </div>
-
-          {recentLoading && !recent ? (
-            <p className="py-6 text-center text-xs text-ink-3">Loading nodes…</p>
-          ) : !recent?.activations.length ? (
-            <p className="py-6 text-center text-xs text-ink-3">No desktop nodes activated.</p>
-          ) : (
-            <div className="divide-y divide-line/60">
-              {recent.activations.map((d: any) => (
-                <div key={d.id} className="flex items-center justify-between gap-2 py-2.5 transition hover:bg-surface-2/40 px-1 rounded-lg min-w-0">
-                  <div className="min-w-0 flex-1">
-                    <div className="truncate text-xs font-semibold text-ink-1">{d.name}</div>
-                    <div className="truncate text-[11px] text-ink-3">Owner: {d.profiles?.full_name ?? "System"}</div>
-                  </div>
-                  <span className="shrink-0">
-                    <Badge tone={d.is_online ? "ok" : "default"}>{d.is_online ? "ONLINE" : fmtAgo(d.last_seen_at)}</Badge>
-                  </span>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
       </div>
     </div>
   );

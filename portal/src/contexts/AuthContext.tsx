@@ -121,7 +121,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         org,
         permissions,
         loading,
-        can: (perm) => profile?.is_super_admin || permissions.includes(perm),
+        can: (perm) =>
+          profile?.is_super_admin ||
+          permissions.includes(perm) ||
+          (perm.startsWith("maps.") && permissions.includes("cameras.manage")),
         refresh: () => loadIdentity(session),
         signOut: async () => {
           try {

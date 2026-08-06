@@ -27,7 +27,6 @@ const UsersPage = lazy(() => import("./pages/app/Users"));
 const RolesPage = lazy(() => import("./pages/app/Roles"));
 const LicensesPage = lazy(() => import("./pages/app/Licenses"));
 const DevicesPage = lazy(() => import("./pages/app/Devices"));
-const ActivationsPage = lazy(() => import("./pages/app/Activations"));
 const CamerasPage = lazy(() => import("./pages/app/Cameras"));
 const CameraGroupsPage = lazy(() => import("./pages/app/CameraGroups"));
 const SitesPage = lazy(() => import("./pages/app/Sites"));
@@ -41,6 +40,7 @@ const NotificationsPage = lazy(() => import("./pages/app/Notifications"));
 const SettingsPage = lazy(() => import("./pages/app/Settings"));
 const SupportPage = lazy(() => import("./pages/app/Support"));
 const ModelLibraryPage = lazy(() => import("./pages/app/ModelLibrary"));
+const MapsPage = lazy(() => import("./pages/app/Maps"));
 
 function Protected({ children }: { children: JSX.Element }) {
   const { session, loading } = useAuth();
@@ -79,10 +79,10 @@ export default function App() {
           <Route path="roles" element={<PermissionGuard perm="roles.manage" moduleName="Roles & Permissions"><RolesPage /></PermissionGuard>} />
           <Route path="licenses" element={<PermissionGuard perm="licenses.manage" moduleName="License Management"><LicensesPage /></PermissionGuard>} />
           <Route path="devices" element={<PermissionGuard perm="devices.manage" moduleName="Device Management"><DevicesPage /></PermissionGuard>} />
-          <Route path="activations" element={<PermissionGuard perm="devices.manage" moduleName="Desktop Activations"><ActivationsPage /></PermissionGuard>} />
           <Route path="cameras" element={<PermissionGuard perm="cameras.manage" moduleName="Cameras Grid"><CamerasPage /></PermissionGuard>} />
           <Route path="camera-groups" element={<PermissionGuard perm="cameras.manage" moduleName="Camera Groups"><CameraGroupsPage /></PermissionGuard>} />
           <Route path="sites" element={<PermissionGuard perm="cameras.manage" moduleName="Site Locations"><SitesPage /></PermissionGuard>} />
+          <Route path="maps" element={<PermissionGuard perm="maps.view" moduleName="Map"><MapsPage /></PermissionGuard>} />
           <Route path="models" element={<PermissionGuard perm="ai.configure" moduleName="AI Engine Models"><ModelLibraryPage /></PermissionGuard>} />
           <Route path="alerts" element={<PermissionGuard perm="alerts.view" moduleName="Real-Time Alerts"><AlertsPage /></PermissionGuard>} />
           <Route path="incidents" element={<PermissionGuard perm="alerts.view" moduleName="Incidents Desk"><IncidentsPage /></PermissionGuard>} />

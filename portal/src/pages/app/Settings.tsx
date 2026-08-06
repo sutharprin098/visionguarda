@@ -47,7 +47,7 @@ export default function SettingsPage() {
   }
 
   const tabs = hasOrgManage
-    ? ["My Profile", "Organization", "Branding", "AI Profiles", "SMTP", "Telegram", "Retention", "Webhook", "API Keys", "About"]
+    ? ["My Profile", "Organization", "Branding", "SMTP", "Telegram", "Retention", "Webhook", "API Keys", "About"]
     : ["My Profile", "About"];
 
   return (
@@ -58,7 +58,6 @@ export default function SettingsPage() {
         {tab === "My Profile" && <ProfileTab />}
         {tab === "Organization" && settings && <OrgTab settings={settings} onSave={save} />}
         {tab === "Branding" && settings && <BrandingTab settings={settings} onSave={save} />}
-        {tab === "AI Profiles" && <AiTab canConfigure={can("ai.configure")} />}
         {tab === "SMTP" && settings && <SmtpTab settings={settings} onSave={save} />}
         {tab === "Telegram" && <TelegramTab />}
         {tab === "Retention" && settings && <RetentionTab settings={settings} onSave={save} />}

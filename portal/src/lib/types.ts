@@ -127,6 +127,9 @@ export interface Camera {
   status: "online" | "offline" | "error";
   is_enabled: boolean;
   site_id: string | null;
+  lat?: number | null;
+  lng?: number | null;
+  heading_deg?: number | null;
   created_at: string;
 }
 
