@@ -55,7 +55,7 @@ Deno.serve(async (req: Request) => {
     }
   }
 
-  const [profile, org, roles, cameras, settings, notifications, aiModelAssignments, drawings, rules, customModes, modelPackages, zoneProfileConfigs] =
+  const [profile, org, roles, cameras, settings, notifications, aiModelAssignments, drawings, rules, customModes, modelPackages, zoneProfileConfigs, floorPlans, floorPlanCameras] =
     await Promise.all([
       db.from("profiles").select("*").eq("id", uid).maybeSingle(),
       db.from("organizations").select("*").maybeSingle(),
@@ -77,6 +77,8 @@ Deno.serve(async (req: Request) => {
       db.from("custom_ai_modes").select("*").eq("is_draft", false),
       db.from("ai_model_packages").select("*"),
       db.from("zone_profile_configs").select("*").eq("is_draft", false),
+      db.from("floor_plans").select("*"),
+      db.from("floor_plan_cameras").select("*"),
     ]);
 
   if (profile.error || !profile.data) return json({ error: "profile not found" }, 404);
@@ -104,5 +106,7 @@ Deno.serve(async (req: Request) => {
     custom_ai_modes: customModes.data ?? [],
     ai_model_packages: modelPackages.data ?? [],
     zone_profile_configs: zoneProfileConfigs.data ?? [],
+    floor_plans: floorPlans.data ?? [],
+    floor_plan_cameras: floorPlanCameras.data ?? [],
   });
 });
