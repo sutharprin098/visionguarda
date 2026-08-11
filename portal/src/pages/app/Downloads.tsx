@@ -30,27 +30,23 @@ const DEFAULT_FALLBACK_RELEASES: GithubRelease[] = [
     name: "CamAI Desktop v1.0.2 (Windows Release)",
     version: "v1.0.2",
     prerelease: false,
-    published_at: "2026-08-06T16:30:00Z",
+    published_at: "2026-08-11T10:30:00Z",
     asset_id: 103,
     asset_name: "CamAI-Desktop-Setup-1.0.2.exe",
-    size_bytes: 651200000,
+    size_bytes: 651025479,
     content_type: "application/octet-stream",
     download_url: `${REPO_URL}/releases/download/v1.0.2/CamAI-Desktop-Setup-1.0.2.exe`,
-    checksum_sha256: "1f34fee1ed9a4fced1b9fcbb65d6a75f5243b4908b2ad77f826375532545e496",
+    checksum_sha256: "d7bab93feacddd234570c8d71ff4979527085485dda33a48bfe6ae7309e99ac3",
     release_notes: `
-### 🚀 Features & Performance Optimizations
-- **DirectML Acceleration Fix**: Eliminated 28-second DirectML JIT shader compilation stalls during ANPR plate detection and OCR model loading. Fallback to CPU/CUDA inference ensures sub-15ms model startup.
-- **Real-Time GIS Spatial Tracking**: Synchronized Leaflet open-street map tracking with 1:1 camera feed overlays, displaying live vehicle badges (\`🚗 CAR #83 (76%)\`, \`🚌 BUS #7 (84%)\`, \`🏍️ BIKE #30 (70%)\`, \`👤 PERSON #15\`).
-- **Compass Heading Angle Calibration**: Added 360° direction angle slider and quick compass controls (\`⬆️ N\`, \`➡️ E\`, \`⬇️ S\`, \`⬅️ W\`) to project live detections along exact real-world street alignments.
-- **1.5s Motion Persistence Decay**: Implemented intelligent track persistence to eliminate single-frame inference dropouts and marker flickering on the GIS map.
+### 🚀 Stability & Performance Hardening
+- **Local Engine Supervisor Resilience**: Extended health probe timeout to 12s and adopted miss tolerance to 6 misses (30s). Added 750ms socket release delay to eliminate port 8000 TCP binding conflicts and crash loops.
+- **Screen Capture WGC Error Fix**: Disabled WindowsGraphicsCapture and enabled GDIWindowCapture fallback to eliminate C++ \`ProcessFrame failed (-2147467259)\` pipeline errors.
+- **Full-Width & Full-Screen UI Optimization**: Expanded single camera feed to fill 100% of workspace width and added a dedicated top-bar Full Screen action button.
+- **Synchronized Health Polling**: Standardized frontend liveness check thresholds (5 retries) to prevent false-positive unreachable state warnings during AI model compilation.
 
-### 🐛 Bug Fixes
-- Fixed engine supervisor process timeouts during ANPR detector initialization.
-- Fixed WebSocket heartbeat disconnects caused by synchronous shader compilation locks.
-- Resolved false-positive engine unreachable status on the desktop dashboard.
-
-### 🔒 Distribution
+### 🔒 Security & Distribution
 - Unsigned Windows NSIS Installer bundled with local AI inference engine for 100% offline edge execution.
+- Verified SHA-256: \`d7bab93feacddd234570c8d71ff4979527085485dda33a48bfe6ae7309e99ac3\`
     `,
   },
   {
