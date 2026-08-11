@@ -827,12 +827,36 @@ function CamerasView({
 
   const isEngineOffline = healthInfo !== null && (!healthInfo.online || !healthInfo.ready);
 
+  const gridLayoutClass =
+    cameras.length === 1
+      ? "grid-cols-1 w-full"
+      : cameras.length === 2
+      ? "grid-cols-1 lg:grid-cols-2 gap-4"
+      : "grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4";
+
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 w-full">
       {isEngineOffline && (
         <EngineDiagnosticPanel healthInfo={healthInfo} procStatus={procStatus} logs={logs} isPackaged={isPackaged} />
       )}
-      <div className="grid grid-cols-2 gap-4 xl:grid-cols-3">
+      
+      <div className="flex items-center justify-between rounded-lg border border-line bg-surface-1 px-4 py-2.5">
+        <div className="flex items-center gap-2">
+          <Video size={16} className="text-accent" />
+          <span className="text-sm font-semibold text-zinc-100">
+            {cameras.length === 1 ? `Live Camera: ${cameras[0].name}` : `Active Cameras (${cameras.length})`}
+          </span>
+        </div>
+        <button
+          onClick={() => onFullscreen(cameras[0].id)}
+          className="inline-flex items-center gap-2 rounded bg-accent px-3 py-1.5 text-xs font-semibold text-white shadow hover:bg-accent/80 transition"
+          title="Open Full Screen Monitor View (F11 / Double-Click)"
+        >
+          <Maximize2 size={14} /> Full Screen
+        </button>
+      </div>
+
+      <div className={`grid ${gridLayoutClass}`}>
         {cameras.map((c) => (
           <CameraTile
             key={c.id}
