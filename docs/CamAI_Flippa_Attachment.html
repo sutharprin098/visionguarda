@@ -1,0 +1,898 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>CamAI / VisionGuarda — Acquisition Overview & Technical Memorandum</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
+
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      font-family: 'Inter', sans-serif;
+      background: #f1f5f9;
+      color: #0f172a;
+      font-size: 13px;
+      line-height: 1.6;
+      padding: 40px 0;
+    }
+
+    .doc-container {
+      max-width: 900px;
+      margin: 0 auto;
+      background: #ffffff;
+      box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1);
+      border-radius: 8px;
+      overflow: hidden;
+    }
+
+    .page {
+      padding: 48px 56px;
+      border-bottom: 1px solid #e2e8f0;
+      position: relative;
+    }
+
+    .page:last-child {
+      border-bottom: none;
+    }
+
+    /* Print styling to force exact pages when printed to PDF */
+    @media print {
+      body { background: none; padding: 0; }
+      .doc-container { box-shadow: none; max-width: 100%; border-radius: 0; }
+      .page { page-break-after: always; padding: 40px 48px; border-bottom: none; }
+      .page:last-child { page-break-after: avoid; }
+    }
+
+    /* Header */
+    .header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      border-bottom: 3px solid #1e3a8a;
+      padding-bottom: 20px;
+      margin-bottom: 28px;
+    }
+    .logo-block h1 {
+      font-size: 28px;
+      font-weight: 800;
+      color: #1e3a8a;
+      letter-spacing: -0.5px;
+    }
+    .logo-block p {
+      font-size: 13px;
+      color: #475569;
+      margin-top: 4px;
+      font-weight: 500;
+    }
+    .badge-block {
+      text-align: right;
+    }
+    .badge {
+      display: inline-block;
+      background: #eff6ff;
+      border: 1px solid #bfdbfe;
+      color: #1d4ed8;
+      padding: 4px 12px;
+      border-radius: 4px;
+      font-size: 11px;
+      font-weight: 600;
+      margin-bottom: 6px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    .price-tag {
+      font-size: 24px;
+      font-weight: 800;
+      color: #1e3a8a;
+    }
+    .price-sub {
+      font-size: 12px;
+      color: #64748b;
+      font-weight: 500;
+    }
+
+    /* Typography */
+    h2.section-heading {
+      font-size: 15px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      color: #1e3a8a;
+      margin-top: 24px;
+      margin-bottom: 12px;
+      padding-bottom: 6px;
+      border-bottom: 1px solid #e2e8f0;
+    }
+
+    h3.sub-heading {
+      font-size: 12px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: #334155;
+      margin-top: 14px;
+      margin-bottom: 8px;
+    }
+
+    p {
+      margin-bottom: 10px;
+      color: #334155;
+    }
+
+    /* Tables */
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 10px;
+      margin-bottom: 16px;
+      font-size: 12px;
+    }
+    th, td {
+      padding: 9px 12px;
+      text-align: left;
+      border-bottom: 1px solid #e2e8f0;
+      vertical-align: top;
+    }
+    th {
+      background: #f8fafc;
+      font-weight: 600;
+      color: #1e293b;
+      border-top: 1px solid #cbd5e1;
+      border-bottom: 2px solid #cbd5e1;
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    td.td-highlight {
+      font-weight: 600;
+      color: #0f172a;
+    }
+    td.td-green { color: #15803d; font-weight: 600; }
+    td.td-orange { color: #c2410c; font-weight: 600; }
+    td.td-right { text-align: right; }
+
+    /* Callout & Alert Boxes */
+    .alert-box {
+      background: #f8fafc;
+      border-lft: 4px solid #3b82f6;
+      border: 1px solid #e2e8f0;
+      border-left: 4px solid #2563eb;
+      padding: 12px 16px;
+      border-radius: 4px;
+      margin: 14px 0;
+      font-size: 12px;
+    }
+    .alert-box.alert-warning {
+      border-left-color: #f97316;
+      background: #fff7ed;
+      border-color: #ffedd5;
+    }
+    .alert-box.alert-success {
+      border-left-color: #16a34a;
+      background: #f0fdf4;
+      border-color: #dcfce7;
+    }
+    .alert-box strong {
+      color: #0f172a;
+    }
+
+    /* Grids & Cards */
+    .info-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 12px;
+      margin-bottom: 16px;
+    }
+    .info-card {
+      background: #f8fafc;
+      border: 1px solid #e2e8f0;
+      border-radius: 6px;
+      padding: 12px 14px;
+    }
+    .info-card .label {
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: #64748b;
+      margin-bottom: 4px;
+    }
+    .info-card .value {
+      font-size: 18px;
+      font-weight: 800;
+      color: #1e3a8a;
+    }
+    .info-card .sub {
+      font-size: 11px;
+      color: #64748b;
+      margin-top: 2px;
+    }
+
+    .two-col {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+    }
+
+    /* Checklists */
+    .checklist {
+      list-style: none;
+      margin-bottom: 14px;
+    }
+    .checklist li {
+      padding: 5px 0;
+      border-bottom: 1px dashed #f1f5f9;
+      display: flex;
+      align-items: flex-start;
+      font-size: 12px;
+    }
+    .check-icon {
+      font-weight: 800;
+      margin-right: 8px;
+      min-width: 18px;
+    }
+    .check-icon.green { color: #16a34a; }
+    .check-icon.blue { color: #2563eb; }
+    .check-icon.orange { color: #ea580c; }
+
+    /* Footer */
+    .doc-footer {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-top: 30px;
+      padding-top: 12px;
+      border-top: 1px solid #e2e8f0;
+      font-size: 10px;
+      color: #94a3b8;
+    }
+  </style>
+</head>
+<body>
+
+<div class="doc-container">
+
+  <!-- PAGE 1: COVER & EXECUTIVE SUMMARY -->
+  <div class="page">
+    <div class="header">
+      <div class="logo-block">
+        <h1>CamAI / VisionGuarda</h1>
+        <p>Enterprise AI Video Analytics Platform — Technical Acquisition Memorandum</p>
+      </div>
+      <div class="badge-block">
+        <div class="badge">Pre-Revenue IP Acquisition</div>
+        <div class="price-tag">$60,000 USD</div>
+        <div class="price-sub">₹50,00,000 INR · Full Asset &amp; IP Transfer</div>
+      </div>
+    </div>
+
+    <h2 class="section-heading">1. Executive Summary</h2>
+    <p>
+      <strong>CamAI (VisionGuarda)</strong> is a modular, production-ready enterprise AI video analytics platform engineered for edge-first multi-camera surveillance, smart city traffic management, industrial safety, and perimeter security. 
+    </p>
+    <p>
+      This offering covers the full acquisition of the intellectual property, including complete source code across four decoupled software layers, 21 cloud edge functions, 44+ Postgres database migrations, 283 automated tests, 13+ technical architectural documents, and associated brand assets.
+    </p>
+
+    <div class="alert-box alert-success">
+      <strong>Commercial Positioning &amp; Asset Status:</strong>
+      <p style="margin-top:4px;">
+        CamAI is offered as a <strong>pre-revenue technology asset sale</strong>. It features zero legacy customer commitments, clean architectural code, zero identified AGPL runtime dependencies, and immediate white-label readiness for commercial OEMs, security integrators, and software platforms.
+      </p>
+    </div>
+
+    <h2 class="section-heading">2. Document Snapshot &amp; Verification Metrics</h2>
+    <div class="info-grid">
+      <div class="info-card">
+        <div class="label">Tracked Source Files</div>
+        <div class="value">384 Files</div>
+        <div class="sub">Across 4 core codebases</div>
+      </div>
+      <div class="info-card">
+        <div class="label">Server Test Suite</div>
+        <div class="value">283 Tests</div>
+        <div class="sub">100% pass across 19 modules</div>
+      </div>
+      <div class="info-card">
+        <div class="label">Tested Peak Inference</div>
+        <div class="value">57 FPS</div>
+        <div class="sub">Single-camera OpenVINO GPU</div>
+      </div>
+      <div class="info-card">
+        <div class="label">Cloud Edge Functions</div>
+        <div class="value">21 Functions</div>
+        <div class="sub">Multi-tenant Supabase backend</div>
+      </div>
+      <div class="info-card">
+        <div class="label">DB Schema Migrations</div>
+        <div class="value">44+ SQL Files</div>
+        <div class="sub">Full Postgres RLS isolation</div>
+      </div>
+      <div class="info-card">
+        <div class="label">Runtime Dependency Risk</div>
+        <div class="value">Zero AGPL</div>
+        <div class="sub">Apache-2.0 / MIT / BSD stack</div>
+      </div>
+    </div>
+
+    <h2 class="section-heading">3. Scope of Acquisition Inventory</h2>
+    <p>Subject to an executed acquisition agreement, the buyer receives 100% ownership of:</p>
+    <ul class="checklist">
+      <li><span class="check-icon blue">✓</span><span><strong>AI Inference &amp; Analytics Engine (<code>/server</code>):</strong> Python 3.10+ &amp; FastAPI backend supporting YOLOX object detection, original ByteTrack-style tracking, ANPR, speed estimation, and zone/line analytics.</span></li>
+      <li><span class="check-icon blue">✓</span><span><strong>Desktop Application (<code>/desktop</code>):</strong> Cross-platform Electron + React + TypeScript monitoring client featuring live camera grids, DPAPI license storage, and GIS interactive mapping.</span></li>
+      <li><span class="check-icon blue">✓</span><span><strong>Web Management Portal (<code>/portal</code>):</strong> React + Vite + Tailwind admin portal for organization multi-tenancy, remote camera administration, user role management, and analytics auditing.</span></li>
+      <li><span class="check-icon blue">✓</span><span><strong>Cloud Infrastructure (<code>/supabase</code>):</strong> Postgres schema with 44+ migration scripts, Row-Level Security policies, and 21 Deno/TypeScript Edge Functions.</span></li>
+      <li><span class="check-icon blue">✓</span><span><strong>Deployment Automation &amp; Documentation:</strong> PowerShell deployment scripts for automated cloud/bot provisioning and 13+ technical manuals.</span></li>
+    </ul>
+
+    <div class="doc-footer">
+      <span>CamAI / VisionGuarda Technical Acquisition Memorandum</span>
+      <span>Page 1</span>
+    </div>
+  </div>
+
+  <!-- PAGE 2: COMMERCIAL STATUS & SYSTEM CAPABILITIES -->
+  <div class="page">
+    <div class="header">
+      <div class="logo-block">
+        <h1>Commercial Status &amp; Product Capability</h1>
+        <p>Pre-Revenue Transparency &amp; Functional Breakdown</p>
+      </div>
+      <div class="badge-block">
+        <div class="badge">Section 2</div>
+      </div>
+    </div>
+
+    <h2 class="section-heading">4. Commercial Status &amp; Valuation Context</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>Metric</th>
+          <th>Status / Value</th>
+          <th>Classification &amp; Notes</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td class="td-highlight">Current Revenue / ARR / MRR</td>
+          <td class="td-highlight">$0.00</td>
+          <td><span class="check-icon green">Proven</span> Pre-revenue product. Clean slate for commercial launch.</td>
+        </tr>
+        <tr>
+          <td class="td-highlight">Active Customers</td>
+          <td class="td-highlight">0</td>
+          <td><span class="check-icon green">Proven</span> No legacy software debts or customer SLAs to honor.</td>
+        </tr>
+        <tr>
+          <td class="td-highlight">Indicative Replacement Effort</td>
+          <td class="td-highlight">$150,000 – $400,000</td>
+          <td><span class="check-icon orange">Projected</span> Estimated market cost to recreate equivalent codebase (3–4 senior engineers × 12 months). Not presented as valuation.</td>
+        </tr>
+        <tr>
+          <td class="td-highlight">Illustrative Contract Value (LTV)</td>
+          <td class="td-highlight">$14,000 – $90,000</td>
+          <td><span class="check-icon orange">Projected</span> Internal model projection for 10–200 camera deployments. Subject to buyer validation.</td>
+        </tr>
+        <tr>
+          <td class="td-highlight">Seller Asking Price</td>
+          <td class="td-highlight td-green">$60,000 USD</td>
+          <td>Fixed IP acquisition cost (Escrow.com preferred).</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div class="alert-box alert-warning">
+      <strong>Commercial Transparency Note:</strong>
+      <p style="margin-top:4px;">
+        External market numbers (such as the global video surveillance market projections) are provided solely for macro context and do not represent past performance or guaranteed revenue for CamAI.
+      </p>
+    </div>
+
+    <h2 class="section-heading">5. Functional Modules &amp; Implementation Matrix</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>Module</th>
+          <th>Implementation Details</th>
+          <th>Validation Status</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td class="td-highlight">YOLOX Object Detection</td>
+          <td>Multi-class detection (person, vehicle, bike, truck). Supports tiny, small, and medium model weights.</td>
+          <td><span class="check-icon green">Implemented / Tested</span></td>
+        </tr>
+        <tr>
+          <td class="td-highlight">ByteTrack-Style Tracking</td>
+          <td>Original Hungarian assignment + appearance ReID gallery for trajectory continuity across occlusions.</td>
+          <td><span class="check-icon green">Implemented / Tested</span></td>
+        </tr>
+        <tr>
+          <td class="td-highlight">Automatic Number Plate (ANPR)</td>
+          <td>LPD-YuNet license plate detector combined with CRNN character recognition engine.</td>
+          <td><span class="check-icon green">Implemented / Tested</span></td>
+        </tr>
+        <tr>
+          <td class="td-highlight">Helmet Compliance Worker</td>
+          <td>Asynchronous RT-DETR classification pipeline for helmet / no-helmet detection on two-wheeler crops.</td>
+          <td><span class="check-icon green">Implemented / Tested</span></td>
+        </tr>
+        <tr>
+          <td class="td-highlight">Homography Speed Engine</td>
+          <td>Kalman-smoothed speed estimation in km/h using 4-point real-world perspective calibration.</td>
+          <td><span class="check-icon green">Implemented / Tested</span></td>
+        </tr>
+        <tr>
+          <td class="td-highlight">GIS FloorPlan View</td>
+          <td>Leaflet/Mapbox map canvas rendering live tracked object markers with 1500ms telemetry heartbeat.</td>
+          <td><span class="check-icon green">Implemented / Tested</span></td>
+        </tr>
+        <tr>
+          <td class="td-highlight">Telegram Incident Bot</td>
+          <td>Automatic snapshot/alert dispatch to Telegram channels + 7 interactive remote polling commands.</td>
+          <td><span class="check-icon green">Implemented / Tested</span></td>
+        </tr>
+        <tr>
+          <td class="td-highlight">Adaptive Tile Governor</td>
+          <td>Dynamic inference resolution scaler (320–1280px) to balance GPU utilization between 70% and 90%.</td>
+          <td><span class="check-icon blue">Designed / Implemented</span></td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div class="doc-footer">
+      <span>CamAI / VisionGuarda Technical Acquisition Memorandum</span>
+      <span>Page 2</span>
+    </div>
+  </div>
+
+  <!-- PAGE 3: DEPLOYMENT MODES & FEATURES -->
+  <div class="page">
+    <div class="header">
+      <div class="logo-block">
+        <h1>Zone Profiles &amp; Feature Inventory</h1>
+        <p>Targeted AI Deployment Modes &amp; Analytics Capabilities</p>
+      </div>
+      <div class="badge-block">
+        <div class="badge">Section 3</div>
+      </div>
+    </div>
+
+    <h2 class="section-heading">6. Built-In Deployment Zone Profiles</h2>
+    <p>
+      Each camera stream can be configured with an active <strong>Zone Profile</strong> (AI Mode) from the cloud portal or desktop client. Selecting a profile filters active detection classes at the pipeline layer, narrowing overlays, telemetry, and alerts live without restarting the inference engine.
+    </p>
+
+    <table>
+      <thead>
+        <tr>
+          <th>Zone Profile</th>
+          <th>Target Deployment</th>
+          <th>Active Class Filter</th>
+          <th>Primary Analytical Focus</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td class="td-highlight" style="color:#1d4ed8;">🚦 Traffic Mode</td>
+          <td>Highways, urban intersections, toll corridors</td>
+          <td>Vehicle, Person, Traffic Light, Stop Sign, Helmet, No-Helmet, Number Plate</td>
+          <td>Speed estimation, ANPR plate OCR, helmet enforcement, lane counting, directional flow.</td>
+        </tr>
+        <tr>
+          <td class="td-highlight" style="color:#15803d;">🔒 Security Mode</td>
+          <td>Perimeters, access gates, commercial buildings</td>
+          <td>Vehicle, Person, Backpack, Handbag, Suitcase, Umbrella, Face</td>
+          <td>Perimeter intrusion, loitering, abandoned object detection, face detection, crowd density.</td>
+        </tr>
+        <tr>
+          <td class="td-highlight" style="color:#b45309;">🏭 Factory Mode</td>
+          <td>Manufacturing floors, warehouses, industrial sites</td>
+          <td>Vehicle, Person, Face</td>
+          <td>Worker counting, restricted area intrusion, schedule-gated monitoring, privacy masking.</td>
+        </tr>
+        <tr>
+          <td class="td-highlight" style="color:#6b21a8;">⚙️ Custom Mode</td>
+          <td>Specialized commercial installations</td>
+          <td>All producible YOLOX COCO classes</td>
+          <td>Custom polygon zone rules, tripwire line crossing, dwell time thresholds, occupancy limits.</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h2 class="section-heading">7. Per-Camera Feature Controls (Profile Features)</h2>
+    <div class="two-col">
+      <div>
+        <h3 class="sub-heading">Analytics &amp; Detection Capabilities</h3>
+        <ul class="checklist">
+          <li><span class="check-icon blue">✓</span><span><strong>Person &amp; Vehicle Counting:</strong> Live in/out directional line counters with sub-frame interpolation.</span></li>
+          <li><span class="check-icon blue">✓</span><span><strong>Homography Speed Gate:</strong> Converts pixel displacement to ground-plane meters via 4-point homography matrix.</span></li>
+          <li><span class="check-icon blue">✓</span><span><strong>Object Left Behind:</strong> Triggers alerts when items (backpacks/suitcases) remain unassociated with a person beyond 15s.</span></li>
+          <li><span class="check-icon blue">✓</span><span><strong>Object Removed:</strong> Detects removal of tracked static items from monitored regions.</span></li>
+          <li><span class="check-icon blue">✓</span><span><strong>Crowd Density Monitor:</strong> 4×4 spatial grid evaluation measuring people density per cell (moderate/high/critical).</span></li>
+        </ul>
+      </div>
+      <div>
+        <h3 class="sub-heading">Operational &amp; Privacy Controls</h3>
+        <ul class="checklist">
+          <li><span class="check-icon blue">✓</span><span><strong>Schedule Gating:</strong> Time-window enforcement (Always, Business Hours, Night, or Custom cron).</span></li>
+          <li><span class="check-icon blue">✓</span><span><strong>Privacy Masking:</strong> User-drawn polygon zones that suppress inference overlays for regulatory compliance.</span></li>
+          <li><span class="check-icon blue">✓</span><span><strong>Lane Assignment:</strong> Polygon lane bounds assigning vehicle track IDs to specific roadway lanes.</span></li>
+          <li><span class="check-icon blue">✓</span><span><strong>Motion Heatmap:</strong> 32×32 spatial occupancy accumulation grid over continuous video sessions.</span></li>
+          <li><span class="check-icon blue">✓</span><span><strong>Direction Compass:</strong> 8-way directional compass vectoring (N/NE/E/SE/S/SW/W/NW) per tracked entity.</span></li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="doc-footer">
+      <span>CamAI / VisionGuarda Technical Acquisition Memorandum</span>
+      <span>Page 3</span>
+    </div>
+  </div>
+
+  <!-- PAGE 4: PERFORMANCE BENCHMARKS & ARCHITECTURE -->
+  <div class="page">
+    <div class="header">
+      <div class="logo-block">
+        <h1>Performance Benchmarks &amp; Architecture</h1>
+        <p>Empirical Hardware Test Results &amp; System Decoupling</p>
+      </div>
+      <div class="badge-block">
+        <div class="badge">Section 4</div>
+      </div>
+    </div>
+
+    <h2 class="section-heading">8. Documented Performance Benchmarks</h2>
+    <p>
+      The figures below represent empirical test data logged during hardware validation runs. Performance varies based on camera resolution, active detection modules, hardware execution provider, and stream concurrency.
+    </p>
+
+    <table>
+      <thead>
+        <tr>
+          <th>Tested Configuration</th>
+          <th>Stream Count</th>
+          <th>Inference FPS</th>
+          <th>Pipeline Latency</th>
+          <th>Logged Errors</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td class="td-highlight">OpenVINO GPU (Discrete GPU)</td>
+          <td>1 Stream</td>
+          <td class="td-green">57 FPS</td>
+          <td>5.7 ms</td>
+          <td class="td-green">0 Errors</td>
+        </tr>
+        <tr>
+          <td class="td-highlight">CPU-only Mode (x86_64)</td>
+          <td>1 Stream</td>
+          <td>31 FPS</td>
+          <td>131.0 ms</td>
+          <td class="td-green">0 Errors</td>
+        </tr>
+        <tr>
+          <td class="td-highlight">Concurrent Multi-Stream GPU</td>
+          <td>4 Streams</td>
+          <td>4.0 – 4.5 FPS / stream</td>
+          <td>266.0 ms</td>
+          <td class="td-green">0 Errors</td>
+        </tr>
+        <tr>
+          <td class="td-highlight">Intel UHD 620 iGPU (Full ANPR)</td>
+          <td>1 Stream</td>
+          <td>9 – 11 FPS</td>
+          <td>Not Documented</td>
+          <td class="td-green">0 Errors</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div class="alert-box alert-warning">
+      <strong>Performance Disclaimer:</strong>
+      <p style="margin-top:4px;">
+        These benchmark results reflect specific test configurations and do not constitute a universal production guarantee. Throughput in production depends on buyer-selected hardware, camera bitrates, and active analytical workloads.
+      </p>
+    </div>
+
+    <h2 class="section-heading">9. Architectural Decoupling &amp; Scalability Targets</h2>
+    <div class="two-col">
+      <div>
+        <h3 class="sub-heading">Decoupled Video &amp; Telemetry Pipeline</h3>
+        <p>
+          CamAI decouples live MJPEG video streaming from AI inference telemetry. The MJPEG video feed runs asynchronously at the camera's native frame rate. AI detection bounding boxes and analytics are overlayed via WebSocket JSON telemetry. 
+        </p>
+        <p>
+          <strong>Benefit:</strong> Heavy inference loads or temporary processing spikes degrade overlay latency slightly but <em>never block or freeze the live video display</em>.
+        </p>
+      </div>
+      <div>
+        <h3 class="sub-heading">Scalability Status &amp; Targets</h3>
+        <ul class="checklist">
+          <li><span class="check-icon green">✓</span><span><strong>Validated Benchmark:</strong> Demonstrated multi-stream execution on 1 to 4 concurrent RTSP streams per edge instance.</span></li>
+          <li><span class="check-icon orange">⚠</span><span><strong>Large-Scale Deployment Target:</strong> Architecture designed for 100–500 camera enterprise installations via multi-edge node clustering.</span></li>
+          <li><span class="check-icon orange">⚠</span><span><strong>Validation Requirement:</strong> Production scale beyond 4 concurrent streams requires buyer load testing during due diligence.</span></li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="doc-footer">
+      <span>CamAI / VisionGuarda Technical Acquisition Memorandum</span>
+      <span>Page 4</span>
+    </div>
+  </div>
+
+  <!-- PAGE 5: SECURITY AUDIT & THIRD-PARTY LICENSING -->
+  <div class="page">
+    <div class="header">
+      <div class="logo-block">
+        <h1>Security Review &amp; Third-Party IP Inventory</h1>
+        <p>Internal Assessment Audit &amp; Legal Dependency Disclosure</p>
+      </div>
+      <div class="badge-block">
+        <div class="badge">Section 5</div>
+      </div>
+    </div>
+
+    <h2 class="section-heading">10. Internal Security Assessment &amp; Remediation</h2>
+    <p>
+      A comprehensive internal security review covering OWASP Top 10 and ASVS guidelines was performed on July 25, 2026 across 326 source files (~19k LOC). 33 of 38 identified findings were remediated during that pass.
+    </p>
+
+    <table>
+      <thead>
+        <tr>
+          <th>Security Assessment Domain</th>
+          <th>Baseline Score</th>
+          <th>Post-Remediation Score</th>
+          <th>Key Controls Applied</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td class="td-highlight">Overall System Security Score</td>
+          <td>41 / 100</td>
+          <td class="td-green">82 / 100</td>
+          <td>Internal assessment metric (not third-party certification).</td>
+        </tr>
+        <tr>
+          <td class="td-highlight">Authorization &amp; Multi-Tenancy (RLS)</td>
+          <td>30 / 100</td>
+          <td class="td-green">90 / 100</td>
+          <td>Fixed privilege escalation in <code>profiles</code> table via trigger lock.</td>
+        </tr>
+        <tr>
+          <td class="td-highlight">API &amp; Pipeline Security</td>
+          <td>62 / 100</td>
+          <td class="td-green">84 / 100</td>
+          <td>Loopback restriction + <code>X-CamAI-Token</code> header protection.</td>
+        </tr>
+        <tr>
+          <td class="td-highlight">Data Protection &amp; Credentials</td>
+          <td>72 / 100</td>
+          <td class="td-green">78 / 100</td>
+          <td>AES-256-GCM encryption for RTSP camera connection strings.</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div class="alert-box alert-warning">
+      <strong>Open Audit Items &amp; Due Diligence Notice:</strong>
+      <p style="margin-top:4px;">
+        The security score of 82/100 reflects an internal review and is not an external third-party security certification. Five items (including Electron lifecycle management and model signing key rotation) remain open for buyer review during technical due diligence.
+      </p>
+    </div>
+
+    <h2 class="section-heading">11. Documented Third-Party License Inventory</h2>
+    <p>
+      All models and software libraries utilized in the runtime path were selected for commercial redistribution compatibility.
+    </p>
+
+    <table>
+      <thead>
+        <tr>
+          <th>Component / Model</th>
+          <th>Declared License Type</th>
+          <th>Commercial Use &amp; Redistribution Status</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td class="td-highlight">YOLOX Object Detector</td>
+          <td>Apache-2.0</td>
+          <td>Permissive commercial license. Free of AGPL copyleft requirements.</td>
+        </tr>
+        <tr>
+          <td class="td-highlight">YuNet Face / Plate Localizer</td>
+          <td>MIT License</td>
+          <td>Permissive commercial license. Fully open for commercial integration.</td>
+        </tr>
+        <tr>
+          <td class="td-highlight">CRNN License Plate OCR</td>
+          <td>Apache-2.0</td>
+          <td>Permissive text recognition model stack.</td>
+        </tr>
+        <tr>
+          <td class="td-highlight">RT-DETR Helmet Classifier</td>
+          <td>Apache-2.0</td>
+          <td>Permissive transformer-based detection architecture.</td>
+        </tr>
+        <tr>
+          <td class="td-highlight">FastAPI / Uvicorn / PyTorch</td>
+          <td>MIT / BSD</td>
+          <td>Standard open-source commercial stack components.</td>
+        </tr>
+        <tr>
+          <td class="td-highlight">ByteTrack-Style Tracker</td>
+          <td>Original Implementation</td>
+          <td>Source-code claim by seller; subject to buyer IP verification.</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div class="alert-box alert-success">
+      <strong>Privacy &amp; GDPR Compliance Support:</strong>
+      <p style="margin-top:4px;">
+        CamAI includes technical privacy controls (polygon privacy masking, exclusion zones, append-only audit logging, and tenant isolation). Regulatory compliance (GDPR/HIPAA) depends on buyer deployment configuration and local legal jurisdiction.
+      </p>
+    </div>
+
+    <div class="doc-footer">
+      <span>CamAI / VisionGuarda Technical Acquisition Memorandum</span>
+      <span>Page 5</span>
+    </div>
+  </div>
+
+  <!-- PAGE 6: PROVEN VS REQUIRES VALIDATION & DUE DILIGENCE -->
+  <div class="page">
+    <div class="header">
+      <div class="logo-block">
+        <h1>Validation Summary &amp; Due Diligence Checklist</h1>
+        <p>Clear Audit Boundary &amp; Buyer Verification Framework</p>
+      </div>
+      <div class="badge-block">
+        <div class="badge">Section 6</div>
+      </div>
+    </div>
+
+    <h2 class="section-heading">12. Technical Validation Summary</h2>
+    <div class="two-col">
+      <div>
+        <h3 class="sub-heading" style="color:#16a34a;">Verified &amp; Proven Today</h3>
+        <ul class="checklist">
+          <li><span class="check-icon green">✓</span><span>384 tracked source files across 4 clean project repositories.</span></li>
+          <li><span class="check-icon green">✓</span><span>283 server-side unit/integration tests passing (100% pass rate).</span></li>
+          <li><span class="check-icon green">✓</span><span>57 FPS peak single-camera inference benchmark logged.</span></li>
+          <li><span class="check-icon green">✓</span><span>21 Supabase Edge Functions &amp; 44+ Postgres migration scripts.</span></li>
+          <li><span class="check-icon green">✓</span><span>DPAPI encrypted local hardware license fingerprinting.</span></li>
+          <li><span class="check-icon green">✓</span><span>Interactive GIS Leaflet map telemetry visualization.</span></li>
+          <li><span class="check-icon green">✓</span><span>Automated Telegram alert dispatch + 7 remote bot commands.</span></li>
+        </ul>
+      </div>
+      <div>
+        <h3 class="sub-heading" style="color:#ea580c;">Requires Buyer Validation</h3>
+        <ul class="checklist">
+          <li><span class="check-icon orange">⚠</span><span>Multi-camera scalability beyond 4 concurrent test streams.</span></li>
+          <li><span class="check-icon orange">⚠</span><span>Commercial market adoption, customer acquisition, and ARR.</span></li>
+          <li><span class="check-icon orange">⚠</span><span>Independent third-party penetration test and certification.</span></li>
+          <li><span class="check-icon orange">⚠</span><span>Full legal Software Bill of Materials (SBOM) and IP audit.</span></li>
+          <li><span class="check-icon orange">⚠</span><span>Speed estimation accuracy across varying camera angles/elevations.</span></li>
+          <li><span class="check-icon orange">⚠</span><span>Long-term continuous execution under extreme weather/night conditions.</span></li>
+        </ul>
+      </div>
+    </div>
+
+    <h2 class="section-heading">13. Buyer Due Diligence Checklist</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>Category</th>
+          <th>Specific Due Diligence Verification Tasks</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td class="td-highlight">Technical Audit</td>
+          <td>
+            □ Execute <code>pytest</code> test suite (283 tests)<br/>
+            □ Run <code>production_readiness_report.py</code> benchmark script<br/>
+            □ Validate multi-camera stream stability on target buyer GPUs<br/>
+            □ Verify electron desktop build pipeline and DPAPI storage
+          </td>
+        </tr>
+        <tr>
+          <td class="td-highlight">Security Audit</td>
+          <td>
+            □ Review Supabase Postgres RLS policies (44+ migrations)<br/>
+            □ Perform static security scan on Edge Functions and API server<br/>
+            □ Inspect AES-256-GCM camera credential encryption key lifecycle
+          </td>
+        </tr>
+        <tr>
+          <td class="td-highlight">Legal &amp; IP Audit</td>
+          <td>
+            □ Conduct Software Bill of Materials (SBOM) dependency scan<br/>
+            □ Verify model weights provenance (YOLOX, YuNet, RT-DETR)<br/>
+            □ Confirm assignment of contributor rights and trademark availability
+          </td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div class="doc-footer">
+      <span>CamAI / VisionGuarda Technical Acquisition Memorandum</span>
+      <span>Page 6</span>
+    </div>
+  </div>
+
+  <!-- PAGE 7: DAY 1 HANDOVER & ACQUISITION TERMS -->
+  <div class="page">
+    <div class="header">
+      <div class="logo-block">
+        <h1>Day-1 Deployment &amp; Acquisition Terms</h1>
+        <p>Operational Handover Plan &amp; Legal Disclaimers</p>
+      </div>
+      <div class="badge-block">
+        <div class="badge">Section 7</div>
+      </div>
+    </div>
+
+    <h2 class="section-heading">14. Day-1 Technical Handover Workflow</h2>
+    <ul class="checklist">
+      <li><span class="check-icon blue">1</span><span><strong>Repository Transfer:</strong> Git repository ownership and commit history transferred to buyer's organization.</span></li>
+      <li><span class="check-icon blue">2</span><span><strong>Supabase Cloud Setup:</strong> Buyer creates fresh Supabase project; applies 44+ migrations via <code>supabase db push</code>.</span></li>
+      <li><span class="check-icon blue">3</span><span><strong>Edge Function Deployment:</strong> Deploy 21 Edge Functions and configure secrets (AES key, SMTP, Telegram).</span></li>
+      <li><span class="check-icon blue">4</span><span><strong>Portal &amp; Desktop Build:</strong> Deploy React portal to buyer hosting (Vercel/Netlify) and compile Electron Windows installer.</span></li>
+      <li><span class="check-icon blue">5</span><span><strong>AI Engine Execution:</strong> Install Python requirements on edge hardware and initiate <code>run_engine.py</code>.</span></li>
+      <li><span class="check-icon blue">6</span><span><strong>Technical Walkthrough:</strong> 1-to-2 hour live walkthrough call with the seller to review codebase architecture and operational setup.</span></li>
+    </ul>
+
+    <h2 class="section-heading">15. Acquisition Terms &amp; Asking Price</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>Term</th>
+          <th>Detail</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td class="td-highlight">Asking Price</td>
+          <td class="td-highlight td-green">$60,000 USD / ₹50,00,000 INR</td>
+        </tr>
+        <tr>
+          <td class="td-highlight">Payment Structure</td>
+          <td>Escrow.com or buyer-approved legal escrow mechanism.</td>
+        </tr>
+        <tr>
+          <td class="td-highlight">Included Rights</td>
+          <td>Full IP transfer, complete source code, database schemas, brand rights, documentation.</td>
+        </tr>
+        <tr>
+          <td class="td-highlight">Post-Sale Support</td>
+          <td>Includes technical handover call + 14 days of asynchronous Q&amp;A support during environment setup.</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h2 class="section-heading">16. Mandatory Legal Disclaimer</h2>
+    <div class="alert-box">
+      <p style="font-size:11px; color:#475569;">
+        <strong>Disclaimer:</strong> All technical, performance, licensing, security, and commercial information in this memorandum is provided solely for acquisition evaluation purposes and reflects the documented state of the project at the listing date. Performance figures represent specific test configurations. Financial projections and replacement estimations are illustrative and do not represent historical cash flows. Statements regarding IP ownership, licensing, and legal rights remain subject to documentary verification and the terms of an executed acquisition agreement. Buyers are advised to conduct independent technical, legal, security, and commercial due diligence prior to closing.
+      </p>
+    </div>
+
+    <div class="doc-footer">
+      <span>CamAI / VisionGuarda Technical Acquisition Memorandum</span>
+      <span>Page 7</span>
+    </div>
+  </div>
+
+</div>
+
+</body>
+</html>

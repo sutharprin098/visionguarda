@@ -170,9 +170,11 @@ if (!gotTheLock) {
     }
   });
 
-  // Suppress Chromium internal C++ log spam (such as wgc_capture_session.cc ProcessFrame errors during screen capture)
+  // Suppress Chromium internal C++ log spam and prevent WGC capture session errors
   app.commandLine.appendSwitch("log-level", "3");
   app.commandLine.appendSwitch("disable-logging");
+  app.commandLine.appendSwitch("disable-features", "WindowsGraphicsCapture,MediaFoundationVideoCapture");
+  app.commandLine.appendSwitch("enable-features", "GDIWindowCapture");
 
   if (process.env.CAMAI_REMOTE_DEBUG) app.commandLine.appendSwitch("remote-debugging-port", process.env.CAMAI_REMOTE_DEBUG);
 

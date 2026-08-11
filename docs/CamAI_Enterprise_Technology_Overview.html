@@ -1,0 +1,1527 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>CamAI — Enterprise AI Video Analytics Platform | Technology Overview</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
+
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: #e2e8f0;
+      color: #0f172a;
+      font-size: 13px;
+      line-height: 1.6;
+      padding: 30px 0;
+    }
+
+    .doc-container {
+      max-width: 920px;
+      margin: 0 auto;
+      background: #ffffff;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.12);
+      border-radius: 4px;
+      overflow: hidden;
+    }
+
+    .page {
+      padding: 52px 60px;
+      border-bottom: 2px solid #cbd5e1;
+      position: relative;
+      background: #ffffff;
+    }
+
+    .page:last-child {
+      border-bottom: none;
+    }
+
+    @media print {
+      body { background: none; padding: 0; }
+      .doc-container { box-shadow: none; max-width: 100%; border-radius: 0; }
+      .page { page-break-after: always; padding: 44px 52px; border-bottom: none; }
+      .page:last-child { page-break-after: avoid; }
+    }
+
+    /* Header */
+    .header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      border-bottom: 2px solid #1e3a8a;
+      padding-bottom: 20px;
+      margin-bottom: 30px;
+    }
+    .logo-block h1 {
+      font-size: 26px;
+      font-weight: 800;
+      color: #1e3a8a;
+      letter-spacing: -0.5px;
+      text-transform: uppercase;
+    }
+    .logo-block p {
+      font-size: 13px;
+      color: #475569;
+      margin-top: 3px;
+      font-weight: 600;
+    }
+    .meta-block {
+      text-align: right;
+    }
+    .doc-badge {
+      display: inline-block;
+      background: #0f172a;
+      color: #ffffff;
+      padding: 5px 14px;
+      border-radius: 3px;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.8px;
+      text-transform: uppercase;
+    }
+    .doc-submeta {
+      font-size: 11px;
+      color: #64748b;
+      margin-top: 6px;
+      font-weight: 500;
+    }
+
+    /* Headings */
+    h2.section-title {
+      font-size: 16px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      color: #1e3a8a;
+      margin-top: 24px;
+      margin-bottom: 14px;
+      padding-bottom: 6px;
+      border-bottom: 1px solid #e2e8f0;
+    }
+
+    h3.sub-title {
+      font-size: 13px;
+      font-weight: 700;
+      color: #1e293b;
+      margin-top: 16px;
+      margin-bottom: 8px;
+      text-transform: uppercase;
+      letter-spacing: 0.4px;
+    }
+
+    p {
+      margin-bottom: 12px;
+      color: #334155;
+    }
+
+    /* Visual Diagram Boxes */
+    .architecture-diagram {
+      background: #f8fafc;
+      border: 1px solid #cbd5e1;
+      border-radius: 6px;
+      padding: 20px;
+      margin: 18px 0;
+    }
+
+    .diagram-flow {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .diagram-node {
+      background: #ffffff;
+      border: 1px solid #94a3b8;
+      border-top: 3px solid #1e3a8a;
+      border-radius: 4px;
+      padding: 10px 12px;
+      text-align: center;
+      flex: 1;
+    }
+    .diagram-node .node-title {
+      font-size: 11px;
+      font-weight: 700;
+      color: #0f172a;
+      text-transform: uppercase;
+    }
+    .diagram-node .node-desc {
+      font-size: 10px;
+      color: #64748b;
+      margin-top: 3px;
+    }
+    .diagram-arrow {
+      font-size: 14px;
+      font-weight: 700;
+      color: #2563eb;
+    }
+
+    /* Tables */
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 12px;
+      margin-bottom: 18px;
+      font-size: 12px;
+    }
+    th, td {
+      padding: 10px 12px;
+      text-align: left;
+      border-bottom: 1px solid #e2e8f0;
+      vertical-align: top;
+    }
+    th {
+      background: #f1f5f9;
+      font-weight: 700;
+      color: #0f172a;
+      border-top: 1px solid #cbd5e1;
+      border-bottom: 2px solid #94a3b8;
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    td.highlight {
+      font-weight: 600;
+      color: #0f172a;
+    }
+    td.verified { color: #16a34a; font-weight: 600; }
+    td.target { color: #d97706; font-weight: 600; }
+
+    /* Cards & Grids */
+    .card-grid-3 {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 12px;
+      margin: 16px 0;
+    }
+    .card-grid-2 {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+      margin: 16px 0;
+    }
+    .metric-card {
+      background: #f8fafc;
+      border: 1px solid #e2e8f0;
+      border-left: 4px solid #1e3a8a;
+      border-radius: 4px;
+      padding: 14px;
+    }
+    .metric-card .card-label {
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: #64748b;
+    }
+    .metric-card .card-value {
+      font-size: 19px;
+      font-weight: 800;
+      color: #0f172a;
+      margin-top: 4px;
+    }
+    .metric-card .card-sub {
+      font-size: 11px;
+      color: #475569;
+      margin-top: 2px;
+    }
+
+    /* Callouts */
+    .note-box {
+      background: #f8fafc;
+      border: 1px solid #e2e8f0;
+      border-left: 4px solid #2563eb;
+      padding: 12px 16px;
+      border-radius: 4px;
+      margin: 16px 0;
+      font-size: 12px;
+    }
+    .note-box.warning {
+      border-left-color: #d97706;
+      background: #fffbe6;
+      border-color: #fef08a;
+    }
+    .note-box.success {
+      border-left-color: #16a34a;
+      background: #f0fdf4;
+      border-color: #bbf7d0;
+    }
+
+    /* Checklists */
+    .item-list {
+      list-style: none;
+      margin-bottom: 14px;
+    }
+    .item-list li {
+      padding: 6px 0;
+      border-bottom: 1px solid #f1f5f9;
+      display: flex;
+      align-items: flex-start;
+      font-size: 12px;
+    }
+    .bullet-tag {
+      font-weight: 700;
+      min-width: 22px;
+      color: #1e3a8a;
+    }
+
+    /* UI Screenshot Showcases */
+    .ui-screenshot-card {
+      background: #f8fafc;
+      border: 1px solid #cbd5e1;
+      border-radius: 6px;
+      padding: 14px;
+      margin: 18px 0;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+    }
+    .ui-screenshot-card img {
+      width: 100%;
+      height: auto;
+      border-radius: 4px;
+      border: 1px solid #94a3b8;
+      box-shadow: 0 6px 16px rgba(0, 0, 0, 0.1);
+      display: block;
+    }
+    .ui-screenshot-caption {
+      font-size: 11px;
+      color: #334155;
+      font-weight: 600;
+      margin-top: 10px;
+      text-align: center;
+      line-height: 1.4;
+    }
+    .ui-screenshot-tag {
+      display: inline-block;
+      background: #1e3a8a;
+      color: #ffffff;
+      padding: 2px 8px;
+      border-radius: 3px;
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+      margin-right: 6px;
+    }
+
+    /* Footer */
+    .footer {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-top: 36px;
+      padding-top: 14px;
+      border-top: 1px solid #e2e8f0;
+      font-size: 10px;
+      color: #94a3b8;
+    }
+  </style>
+</head>
+<body>
+
+<div class="doc-container">
+
+  <!-- ===================================================
+       PAGE 1: COVER & EXECUTIVE OVERVIEW
+  =================================================== -->
+  <div class="page">
+    <div class="header">
+      <div class="logo-block">
+        <h1>CamAI / VisionGuarda</h1>
+        <p>Enterprise AI Video Analytics Platform</p>
+      </div>
+      <div class="meta-block">
+        <div class="doc-badge">Strategic Technology Briefing</div>
+        <div class="doc-submeta">Commercialization &amp; IP Opportunity</div>
+      </div>
+    </div>
+
+    <div style="margin: 40px 0; text-align: left;">
+      <h2 style="font-size: 24px; color: #0f172a; font-weight: 800; line-height: 1.3;">
+        Technology Overview &amp; Commercialization Briefing
+      </h2>
+      <p style="font-size: 14px; color: #475569; margin-top: 10px; line-height: 1.6;">
+        A deployable edge-to-cloud video analytics platform designed to convert existing CCTV, RTSP, and NVR camera infrastructure into an intelligent real-time monitoring, analytical, and incident management ecosystem.
+      </p>
+    </div>
+
+    <h2 class="section-title">1. Executive Overview</h2>
+    <p>
+      <strong>CamAI (VisionGuarda)</strong> is a modular software platform engineered to deliver real-time artificial intelligence capabilities across video surveillance networks. The system bridges edge inference engines with cloud administration, providing end-to-end management for multi-camera deployments without requiring custom firmware modifications to underlying camera hardware.
+    </p>
+    <p>
+      The complete software asset is structured across four primary architectural layers:
+    </p>
+    <div class="card-grid-2">
+      <div class="metric-card">
+        <div class="card-label">Layer 1: AI Engine</div>
+        <div class="card-sub">Python 3.10+ / FastAPI service handling RTSP capture, YOLOX detection, ByteTrack-style tracking, ANPR, and telemetry streaming.</div>
+      </div>
+      <div class="metric-card">
+        <div class="card-label">Layer 2: Desktop Client</div>
+        <div class="card-sub">Electron + React workstation application providing live camera grids, interactive GIS mapping, DPAPI license vault, and incident tracking.</div>
+      </div>
+      <div class="metric-card">
+        <div class="card-label">Layer 3: Cloud Backend</div>
+        <div class="card-sub">Multi-tenant Supabase Postgres database with 44+ migration scripts, Row-Level Security, and 21 Deno/TypeScript Edge Functions.</div>
+      </div>
+      <div class="metric-card">
+        <div class="card-label">Layer 4: Web Admin Portal</div>
+        <div class="card-sub">Browser-based SaaS administration portal (React + Vite) for organization, camera, user role, and license management.</div>
+      </div>
+    </div>
+
+    <div class="note-box">
+      <strong>Purpose of Document:</strong> This briefing provides corporate development, engineering leadership, product management, and technical M&amp;A teams with a clear structural overview of the CamAI codebase, implemented features, empirical performance benchmarks, and potential integration pathways.
+    </div>
+
+    <!-- UI Screenshot 1: Public Web Portal Landing Hero -->
+    <div class="ui-screenshot-card">
+      <img src="assets/landing_hero.png" alt="CamAI Enterprise Public Web Portal & Landing Interface" />
+      <div class="ui-screenshot-caption">
+        <span class="ui-screenshot-tag">Figure 1</span>
+        <strong>CamAI Enterprise SaaS Web Portal &amp; Landing Page:</strong> Zero-cloud egress architecture showcase featuring native RTSP/ONVIF integration, NVIDIA CUDA / TensorRT acceleration badges, and trial onboarding workflow.
+      </div>
+    </div>
+
+    <div class="footer">
+      <span>CamAI / VisionGuarda — Strategic Technology Briefing</span>
+      <span>Page 1</span>
+    </div>
+  </div>
+
+  <!-- ===================================================
+       PAGE 2: WHAT IS CAMAI?
+  =================================================== -->
+  <div class="page">
+    <div class="header">
+      <div class="logo-block">
+        <h1>Product Definition &amp; Architecture</h1>
+        <p>Complete Application Stack vs. Standalone AI Models</p>
+      </div>
+      <div class="meta-block">
+        <div class="doc-badge">Section 2</div>
+      </div>
+    </div>
+
+    <h2 class="section-title">2. What is CamAI?</h2>
+    <p>
+      CamAI is not merely a standalone object detection model or a computer vision research script. It is a <strong>complete enterprise software application platform</strong> built around real-time inference pipelines. It encompasses device provisioning, multi-tenant isolation, real-time alert dispatching, workstation user interfaces, and administrative controls.
+    </p>
+
+    <div class="architecture-diagram">
+      <h3 class="sub-title" style="margin-top:0; text-align:center; margin-bottom:14px;">End-to-End Data &amp; Telemetry Pipeline</h3>
+      <div class="diagram-flow">
+        <div class="diagram-node">
+          <div class="node-title">Camera / NVR</div>
+          <div class="node-desc">RTSP / USB Streams</div>
+        </div>
+        <div class="diagram-arrow">→</div>
+        <div class="diagram-node">
+          <div class="node-title">AI Engine</div>
+          <div class="node-desc">YOLOX + Tracker</div>
+        </div>
+        <div class="diagram-arrow">→</div>
+        <div class="diagram-node">
+          <div class="node-title">Desktop Client</div>
+          <div class="node-desc">Live View + GIS</div>
+        </div>
+        <div class="diagram-arrow">→</div>
+        <div class="diagram-node">
+          <div class="node-title">Cloud Backend</div>
+          <div class="node-desc">Supabase + Edge</div>
+        </div>
+        <div class="diagram-arrow">→</div>
+        <div class="diagram-node">
+          <div class="node-title">Web Portal</div>
+          <div class="node-desc">SaaS Management</div>
+        </div>
+      </div>
+      <div style="text-align:center; margin-top:12px; font-size:11px; color:#64748b;">
+        * Edge alerts fan out asynchronously to Telegram channels &amp; email SMTP gateways via Edge Functions.
+      </div>
+    </div>
+
+    <h2 class="section-heading">3. Key Platform Components</h2>
+    <ul class="item-list">
+      <li><span class="bullet-tag">[1]</span><span><strong>Inference &amp; Tracking Engine:</strong> Real-time frame processing supporting concurrent object detection, multi-target trajectory association, and specialized analytical workers (ANPR, Speed, Helmet).</span></li>
+      <li><span class="bullet-tag">[2]</span><span><strong>Camera &amp; Stream Manager:</strong> Automatic stream recovery, RTSP reconnection handling, synthetic frame fallbacks, and connection string encryption.</span></li>
+      <li><span class="bullet-tag">[3]</span><span><strong>Rule &amp; Incident Engine:</strong> Configurable spatial polygon zones, tripwire line crossing, dwell time accumulation, and threshold-based alert triggers.</span></li>
+      <li><span class="bullet-tag">[4]</span><span><strong>Licensing &amp; Device Binding:</strong> Cryptographic license key management with hardware fingerprinting (CPU, motherboard, Windows MachineGuid) and DPAPI-encrypted token vaults.</span></li>
+      <li><span class="bullet-tag">[5]</span><span><strong>GIS Spatial Visualization:</strong> Real-time floor plan and outdoor map rendering using Leaflet canvas for spatial tracking of detected entities.</span></li>
+    </ul>
+
+    <!-- UI Screenshot 2: Telemetry & Edge Intelligence Command Center -->
+    <div class="ui-screenshot-card">
+      <img src="assets/welcome_dashboard.png" alt="CamAI Edge Telemetry & Video Intelligence Command Suite" />
+      <div class="ui-screenshot-caption">
+        <span class="ui-screenshot-tag">Figure 2</span>
+        <strong>Enterprise Command Suite — Video Telemetry &amp; Edge Intelligence Dashboard:</strong> Real-time system state monitoring showing active team personnel, camera nodes, connected desktop engines, license validity, 24h AI event metrics, and system load status.
+      </div>
+    </div>
+
+    <div class="footer">
+      <span>CamAI / VisionGuarda — Strategic Technology Briefing</span>
+      <span>Page 2</span>
+    </div>
+  </div>
+
+  <!-- ===================================================
+       PAGE 3: TECHNOLOGY STACK & THIRD-PARTY LICENSES
+  =================================================== -->
+  <div class="page">
+    <div class="header">
+      <div class="logo-block">
+        <h1>Technology Stack &amp; License Inventory</h1>
+        <p>Engineered Infrastructure &amp; Commercial Redistribution Rights</p>
+      </div>
+      <div class="meta-block">
+        <div class="doc-badge">Section 3</div>
+      </div>
+    </div>
+
+    <h2 class="section-title">4. Codebase &amp; Technology Stack</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>Layer</th>
+          <th>Primary Technologies</th>
+          <th>Architectural Purpose</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td class="highlight">AI Inference Server</td>
+          <td>Python 3.10+, FastAPI, PyTorch, OpenCV, OpenVINO, ONNX Runtime</td>
+          <td>High-throughput stream capture, frame decoding, tensor inference, and WebSocket telemetry generation.</td>
+        </tr>
+        <tr>
+          <td class="highlight">Algorithms &amp; Models</td>
+          <td>YOLOX, RT-DETR, LPD-YuNet, CRNN, ByteTrack-style Tracker</td>
+          <td>Multi-class detection, transformer-based classification, plate localization, OCR, and trajectory matching.</td>
+        </tr>
+        <tr>
+          <td class="highlight">Desktop Workstation</td>
+          <td>Electron, React 18, TypeScript, Vite, Tailwind CSS, Leaflet GIS</td>
+          <td>Cross-platform operator interface, hardware-accelerated video rendering, and offline configuration vault.</td>
+        </tr>
+        <tr>
+          <td class="highlight">Cloud &amp; Database</td>
+          <td>Supabase, PostgreSQL 15, Row-Level Security, Deno Edge Functions</td>
+          <td>Multi-tenant data isolation, central administration, remote configuration push, and webhook integrations.</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h2 class="section-heading">5. Documented Third-Party License Inventory</h2>
+    <p>
+      Components utilized in the production runtime path were selected to ensure compatibility with commercial OEM bundling and software distribution.
+    </p>
+
+    <table>
+      <thead>
+        <tr>
+          <th>Component / Dependency</th>
+          <th>Declared Open-Source License</th>
+          <th>Distribution Compliance Status</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td class="highlight">YOLOX Object Detector</td>
+          <td>Apache License 2.0</td>
+          <td>Permissive commercial license; no copyleft requirements.</td>
+        </tr>
+        <tr>
+          <td class="highlight">YuNet Plate &amp; Face Detector</td>
+          <td>MIT License</td>
+          <td>Permissive commercial license.</td>
+        </tr>
+        <tr>
+          <td class="highlight">CRNN License Plate OCR</td>
+          <td>Apache License 2.0</td>
+          <td>Permissive commercial license.</td>
+        </tr>
+        <tr>
+          <td class="highlight">RT-DETR Classifier Engine</td>
+          <td>Apache License 2.0</td>
+          <td>Permissive commercial license.</td>
+        </tr>
+        <tr>
+          <td class="highlight">FastAPI / OpenCV / OpenVINO</td>
+          <td>MIT / Apache 2.0 / BSD</td>
+          <td>Standard permissive industry open-source stack.</td>
+        </tr>
+        <tr>
+          <td class="highlight">ByteTrack-Style Tracker</td>
+          <td>Original Implementation Claim</td>
+          <td>Seller source-code implementation; subject to buyer IP verification.</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div class="note-box warning">
+      <strong>Due Diligence Requirement:</strong> The license inventory above reflects the documented state at listing. Buyers should perform an independent Software Bill of Materials (SBOM) and dependency tree scan during technical due diligence.
+    </div>
+
+    <div class="footer">
+      <span>CamAI / VisionGuarda — Strategic Technology Briefing</span>
+      <span>Page 3</span>
+    </div>
+  </div>
+
+  <!-- ===================================================
+       PAGE 4: AI CAPABILITIES & ANALYTICAL MATRIX
+  =================================================== -->
+  <div class="page">
+    <div class="header">
+      <div class="logo-block">
+        <h1>AI Capabilities &amp; Analytics Matrix</h1>
+        <p>Implemented Computer Vision &amp; Analytical Features</p>
+      </div>
+      <div class="meta-block">
+        <div class="doc-badge">Section 4</div>
+      </div>
+    </div>
+
+    <h2 class="section-title">6. Detection, Tracking &amp; Analytical Capabilities</h2>
+    <p>
+      The platform features a multi-tiered computer vision pipeline capable of running concurrent analytical workers depending on hardware availability and active camera profile configuration.
+    </p>
+
+    <div class="card-grid-3">
+      <div class="metric-card">
+        <div class="card-label">Detection Classes</div>
+        <div class="card-sub" style="margin-top:6px;">
+          • Person &amp; Face<br/>
+          • Car, Bus, Truck, Motorcycle<br/>
+          • Bicycle &amp; Helmet Compliance<br/>
+          • License Plates (ANPR)<br/>
+          • Bags, Backpacks, Suitcases
+        </div>
+      </div>
+      <div class="metric-card">
+        <div class="card-label">Tracking Algorithms</div>
+        <div class="card-sub" style="margin-top:6px;">
+          • Multi-Target Tracking<br/>
+          • Re-Identification Gallery<br/>
+          • Occlusion Trajectory Recovery<br/>
+          • 8-Way Vector Heading<br/>
+          • Dwell &amp; Dwell Time Accumulator
+        </div>
+      </div>
+      <div class="metric-card">
+        <div class="card-label">Analytical Workers</div>
+        <div class="card-sub" style="margin-top:6px;">
+          • Homography Speed (km/h)<br/>
+          • ANPR OCR Engine<br/>
+          • 4×4 Crowd Density Grid<br/>
+          • Abandoned / Removed Object<br/>
+          • Motion Occupancy Heatmap
+        </div>
+      </div>
+    </div>
+
+    <h2 class="section-heading">7. Analytical Feature Breakdown</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>Feature Module</th>
+          <th>Implementation Description</th>
+          <th>Primary Analytical Output</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td class="highlight">Homography Speed Engine</td>
+          <td>Calculates real-world speed (km/h) via 4-point ground-plane perspective matrix and Kalman smoothing.</td>
+          <td>Vehicle velocity measurement, over-speed alert triggers.</td>
+        </tr>
+        <tr>
+          <td class="highlight">ANPR Plate Pipeline</td>
+          <td>Combines YuNet localized text cropping with CRNN character extraction.</td>
+          <td>Alphanumeric license plate string, confidence score, crop image.</td>
+        </tr>
+        <tr>
+          <td class="highlight">Helmet Compliance Worker</td>
+          <td>Sub-crops two-wheeler riders and runs RT-DETR classification.</td>
+          <td>Helmet / No-Helmet status flag, violation evidence snapshot.</td>
+        </tr>
+        <tr>
+          <td class="highlight">Crowd Density Evaluator</td>
+          <td>Divides camera view into spatial cells and computes person headcount per region.</td>
+          <td>Density severity (Moderate, High, Critical), occupancy threshold alerts.</td>
+        </tr>
+        <tr>
+          <td class="highlight">Abandoned Object Worker</td>
+          <td>Monitors unassociated luggage items stationary for &gt;15 seconds.</td>
+          <td>Unattended object alarm, temporal bounding box overlay.</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div class="footer">
+      <span>CamAI / VisionGuarda — Strategic Technology Briefing</span>
+      <span>Page 4</span>
+    </div>
+  </div>
+
+  <!-- ===================================================
+       PAGE 5: DEPLOYMENT ZONE PROFILES
+  =================================================== -->
+  <div class="page">
+    <div class="header">
+      <div class="logo-block">
+        <h1>Target Deployment Zone Profiles</h1>
+        <p>Configurable Camera AI Modes for Targeted Operational Environments</p>
+      </div>
+      <div class="meta-block">
+        <div class="doc-badge">Section 5</div>
+      </div>
+    </div>
+
+    <h2 class="section-title">8. Implemented Zone Profiles (AI Modes)</h2>
+    <p>
+      CamAI allows operators to assign specialized <strong>Zone Profiles</strong> on a per-camera basis. Assigning a profile narrows the active detection class set at the engine layer, optimizing GPU allocation and eliminating irrelevant telemetry.
+    </p>
+
+    <table>
+      <thead>
+        <tr>
+          <th>Zone Profile</th>
+          <th>Target Operational Environment</th>
+          <th>Active Analytical Features</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td class="highlight" style="color:#1d4ed8;">🚦 Traffic Mode</td>
+          <td>Highways, urban intersections, toll plazas, arterial roads</td>
+          <td>Vehicle classification, ANPR plate reading, homography speed estimation, helmet compliance, lane counting, stop-line violations.</td>
+        </tr>
+        <tr>
+          <td class="highlight" style="color:#15803d;">🔒 Security Mode</td>
+          <td>Perimeters, corporate campuses, financial institutions, ATMs</td>
+          <td>Perimeter line-crossing, loitering detection, face detection, abandoned bag identification, crowd density evaluation.</td>
+        </tr>
+        <tr>
+          <td class="highlight" style="color:#b45309;">🏭 Factory Mode</td>
+          <td>Manufacturing facilities, warehouses, hazardous industrial zones</td>
+          <td>Worker headcount, restricted zone intrusion, schedule-gated monitoring, privacy masking of non-work areas.</td>
+        </tr>
+        <tr>
+          <td class="highlight" style="color:#6b21a8;">⚙️ Custom Mode</td>
+          <td>Specialized commercial installations &amp; custom rules</td>
+          <td>User-defined polygon zones, custom tripwire rules, custom dwell time thresholds, multi-class COCO tracking.</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div class="note-box">
+      <strong>Target Deployment Framing:</strong> The profile configurations described above represent implemented software capabilities designed for these environments. Actual operational performance is subject to site-specific camera positioning, lighting, and hardware sizing.
+    </div>
+
+    <!-- UI Screenshot 3: RTSP Camera Provisioning Modal & GIS Coordinates -->
+    <div class="ui-screenshot-card">
+      <img src="assets/add_camera_rtsp_modal.png" alt="CamAI RTSP Stream Provisioning & GIS Coordinates Modal" />
+      <div class="ui-screenshot-caption">
+        <span class="ui-screenshot-tag">Figure 3</span>
+        <strong>RTSP Camera Provisioning Modal &amp; GIS Spatial Binding:</strong> Configurable stream modal supporting custom RTSP endpoints (`192.168.1.64:554/Streaming/Channels/101`), credentials, connection test diagnostic verification, and optional GIS latitude/longitude spatial coordinates.
+      </div>
+    </div>
+
+    <div class="footer">
+      <span>CamAI / VisionGuarda — Strategic Technology Briefing</span>
+      <span>Page 5</span>
+    </div>
+  </div>
+
+  <!-- ===================================================
+       PAGE 6: ENTERPRISE USE CASES & INDUSTRY MATRIX
+  =================================================== -->
+  <div class="page">
+    <div class="header">
+      <div class="logo-block">
+        <h1>Enterprise Application Matrix</h1>
+        <p>Target Industry Opportunities &amp; Value Propositions</p>
+      </div>
+      <div class="meta-block">
+        <div class="doc-badge">Section 6</div>
+      </div>
+    </div>
+
+    <h2 class="section-title">9. Target Industry Opportunities</h2>
+
+    <table>
+      <thead>
+        <tr>
+          <th>Industry Segment</th>
+          <th>Operational Challenge</th>
+          <th>CamAI Target Capability</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td class="highlight">Smart City &amp; Municipalities</td>
+          <td>Manual monitoring of city-wide CCTV networks; traffic congestion.</td>
+          <td>Traffic flow counting, ANPR plate logging, speed enforcement telemetry.</td>
+        </tr>
+        <tr>
+          <td class="highlight">Highways &amp; Toll Operators</td>
+          <td>Speed enforcement and toll lane compliance monitoring.</td>
+          <td>Homography speed gates, automated vehicle classification, plate recognition.</td>
+        </tr>
+        <tr>
+          <td class="highlight">Industrial &amp; Manufacturing</td>
+          <td>Worker safety compliance and restricted hazardous area monitoring.</td>
+          <td>Restricted zone intrusion alerts, worker headcount, schedule-gated rules.</td>
+        </tr>
+        <tr>
+          <td class="highlight">Financial &amp; Banking Premises</td>
+          <td>Perimeter security, ATM loitering, and branch crowd control.</td>
+          <td>Loitering detection, face detection, unattended object alerts.</td>
+        </tr>
+        <tr>
+          <td class="highlight">Parking Operators</td>
+          <td>Automated entry/exit tracking and lot fill occupancy.</td>
+          <td>Entry/Exit ANPR logging, visual slot occupancy scoring, GIS lot fill map.</td>
+        </tr>
+        <tr>
+          <td class="highlight">Security Systems OEMs</td>
+          <td>Lack of in-house AI software to bundle with camera hardware.</td>
+          <td>Full white-label branding, zero-cloud edge processing, rapid OEM integration.</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div class="footer">
+      <span>CamAI / VisionGuarda — Strategic Technology Briefing</span>
+      <span>Page 6</span>
+    </div>
+  </div>
+
+  <!-- ===================================================
+       PAGE 7: PLATFORM VS MODEL
+  =================================================== -->
+  <div class="page">
+    <div class="header">
+      <div class="logo-block">
+        <h1>Integrated Platform Value</h1>
+        <p>Commercial Infrastructure Built Around AI Engines</p>
+      </div>
+      <div class="meta-block">
+        <div class="doc-badge">Section 7</div>
+      </div>
+    </div>
+
+    <h2 class="section-title">10. Why CamAI is a Platform, Not Just a Model</h2>
+    <p>
+      A common bottleneck in computer vision commercialization is the gap between a trained detection model and an enterprise-ready software product. CamAI fills this gap by delivering the complete application wrapper, database, licensing, and user management infrastructure required to operate a commercial product.
+    </p>
+
+    <div class="card-grid-2">
+      <div class="metric-card" style="border-left-color: #cbd5e1;">
+        <div class="card-label">Standalone AI Model (Research)</div>
+        <div class="card-sub" style="margin-top:6px;">
+          • Accepts video file input<br/>
+          • Outputs raw bounding box coordinates<br/>
+          • Requires manual Python scripts to run<br/>
+          • No user management or security<br/>
+          • No database or persistent storage<br/>
+          • No multi-camera management UI
+        </div>
+      </div>
+      <div class="metric-card" style="border-left-color: #16a34a;">
+        <div class="card-label">CamAI Enterprise Platform</div>
+        <div class="card-sub" style="margin-top:6px;">
+          • Multi-camera RTSP/NVR stream decoding<br/>
+          • Multi-tenant Postgres RLS database isolation<br/>
+          • Hardware-bound licensing &amp; DPAPI encryption<br/>
+          • Interactive Desktop &amp; Web Admin Portals<br/>
+          • Automated Telegram &amp; SMTP incident dispatch<br/>
+          • Append-only security audit logging
+        </div>
+      </div>
+    </div>
+
+    <div class="note-box success">
+      <strong>Engineering Takeaway:</strong> The commercial asset value of CamAI lies in its integrated application software, multi-tenant cloud architecture, database schema, and operational workflows—enabling immediate commercialization by an enterprise buyer.
+    </div>
+
+    <div class="footer">
+      <span>CamAI / VisionGuarda — Strategic Technology Briefing</span>
+      <span>Page 7</span>
+    </div>
+  </div>
+
+  <!-- ===================================================
+       PAGE 8: DECOUPLED ARCHITECTURE
+  =================================================== -->
+  <div class="page">
+    <div class="header">
+      <div class="logo-block">
+        <h1>System Architecture &amp; Stream Decoupling</h1>
+        <p>High-Throughput Streaming &amp; Telemetry Synchronization</p>
+      </div>
+      <div class="meta-block">
+        <div class="doc-badge">Section 8</div>
+      </div>
+    </div>
+
+    <h2 class="section-title">11. Decoupled Video &amp; Telemetry Architecture</h2>
+    <p>
+      To prevent heavy AI model inference from degrading live video viewability, CamAI utilizes an architecturally <strong>decoupled streaming model</strong>.
+    </p>
+
+    <div class="note-box">
+      <strong>Architectural Principle:</strong> The live MJPEG video stream (running at the camera's native framerate) and the WebSocket AI telemetry stream (bounding boxes, analytical events) operate on separate asynchronous threads. If AI processing experiences transient load spikes, inference overlays adjust dynamically while the primary video stream remains uninterrupted.
+    </div>
+
+    <h2 class="section-heading">12. Four-Tier Software Structure</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>Component</th>
+          <th>Location</th>
+          <th>Core Responsibility</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td class="highlight">AI Inference Server</td>
+          <td><code>/server</code></td>
+          <td>Frame capture, YOLOX detection, ByteTrack tracking, worker analytics, WebSocket telemetry broadcast.</td>
+        </tr>
+        <tr>
+          <td class="highlight">Desktop Workstation</td>
+          <td><code>/desktop</code></td>
+          <td>Operator grid view, Leaflet GIS floorplan, incident center, local hardware DPAPI licensing vault.</td>
+        </tr>
+        <tr>
+          <td class="highlight">Cloud Backend</td>
+          <td><code>/supabase</code></td>
+          <td>Postgres 15 DB, Row-Level Security policies, 21 Edge Functions for license and alert management.</td>
+        </tr>
+        <tr>
+          <td class="highlight">Web Management Portal</td>
+          <td><code>/portal</code></td>
+          <td>SaaS dashboard for organization administration, camera provisioning, user role management, downloads.</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div class="footer">
+      <span>CamAI / VisionGuarda — Strategic Technology Briefing</span>
+      <span>Page 8</span>
+    </div>
+  </div>
+
+  <!-- ===================================================
+       PAGE 9: ENTERPRISE MANAGEMENT & LICENSING
+  =================================================== -->
+  <div class="page">
+    <div class="header">
+      <div class="logo-block">
+        <h1>Enterprise Governance &amp; Licensing</h1>
+        <p>Multi-Tenancy, Role-Based Access Control, and License Security</p>
+      </div>
+      <div class="meta-block">
+        <div class="doc-badge">Section 9</div>
+      </div>
+    </div>
+
+    <h2 class="section-title">13. Multi-Tenant Organization Security</h2>
+    <p>
+      CamAI is designed as a true multi-tenant SaaS architecture. Customer data, cameras, alerts, and users are logically segregated at the PostgreSQL database layer using <strong>Row-Level Security (RLS)</strong> policies.
+    </p>
+
+    <div class="card-grid-2">
+      <div class="metric-card">
+        <div class="card-label">Role-Based Access Control (RBAC)</div>
+        <div class="card-sub" style="margin-top:6px;">
+          • <strong>Admin / Owner:</strong> Full org control, camera management, user invitations, licensing.<br/>
+          • <strong>Operator:</strong> Live monitoring, alert acknowledgment, camera configuration.<br/>
+          • <strong>Viewer:</strong> Read-only access to live streams and historical alerts.
+        </div>
+      </div>
+      <div class="metric-card">
+        <div class="card-label">Hardware Licensing Security</div>
+        <div class="card-sub" style="margin-top:6px;">
+          • SHA-256 hardware device fingerprinting (CPU, motherboard, Windows MachineGuid).<br/>
+          • DPAPI local token vault via Electron safeStorage.<br/>
+          • Remote device deactivation and instant configuration revocation.
+        </div>
+      </div>
+    </div>
+
+    <h2 class="section-heading">14. Cloud Edge Functions (21 Modules)</h2>
+    <p>
+      The cloud backend incorporates 21 Deno/TypeScript Edge Functions handling asynchronous security, administration, and alerting operations, including <code>activate-license</code>, <code>desktop-sync</code>, <code>invite-user</code>, <code>notify-telegram</code>, and <code>test-camera</code>.
+    </p>
+
+    <!-- UI Screenshot 4: Licensing Management Table & Hardware Binding -->
+    <div class="ui-screenshot-card">
+      <img src="assets/licenses_table.png" alt="CamAI Hardware-Bound Cryptographic Licensing Suite" />
+      <div class="ui-screenshot-caption">
+        <span class="ui-screenshot-tag">Figure 4</span>
+        <strong>Enterprise Command Suite — Cryptographic License Security Vault:</strong> Central management table showing SHA-256 hashed license keys, assigned organization accounts, trial/commercial tier, device limits (0/1), active status, lifetime expiration, and instant remote revocation/reset controls.
+      </div>
+    </div>
+
+    <div class="footer">
+      <span>CamAI / VisionGuarda — Strategic Technology Briefing</span>
+      <span>Page 9</span>
+    </div>
+  </div>
+
+  <!-- ===================================================
+       PAGE 10: PERFORMANCE EVIDENCE & BENCHMARKS
+  =================================================== -->
+  <div class="page">
+    <div class="header">
+      <div class="logo-block">
+        <h1>Empirical Performance Evidence</h1>
+        <p>Documented Hardware Benchmarks &amp; Testing Configuration Notes</p>
+      </div>
+      <div class="meta-block">
+        <div class="doc-badge">Section 10</div>
+      </div>
+    </div>
+
+    <h2 class="section-title">15. Documented Hardware Benchmarks</h2>
+    <p>
+      The performance figures below represent logged empirical measurements from test runs executed on defined hardware configurations.
+    </p>
+
+    <table>
+      <thead>
+        <tr>
+          <th>Hardware &amp; Execution Environment</th>
+          <th>Stream Concurrency</th>
+          <th>Measured Inference FPS</th>
+          <th>Pipeline Latency</th>
+          <th>Logged Errors</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td class="highlight">OpenVINO GPU (Discrete GPU)</td>
+          <td>1 Stream</td>
+          <td class="verified">57 FPS</td>
+          <td>5.7 ms</td>
+          <td class="verified">0 Errors</td>
+        </tr>
+        <tr>
+          <td class="highlight">CPU-Only Execution Mode (x86_64)</td>
+          <td>1 Stream</td>
+          <td>31 FPS</td>
+          <td>131.0 ms</td>
+          <td class="verified">0 Errors</td>
+        </tr>
+        <tr>
+          <td class="highlight">Concurrent Multi-Stream GPU</td>
+          <td>4 Streams</td>
+          <td>4.0 – 4.5 FPS / stream</td>
+          <td>266.0 ms</td>
+          <td class="verified">0 Errors</td>
+        </tr>
+        <tr>
+          <td class="highlight">Intel UHD 620 iGPU (ANPR Stack)</td>
+          <td>1 Stream</td>
+          <td>9 – 11 FPS</td>
+          <td>Not Documented</td>
+          <td class="verified">0 Errors</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div class="note-box warning">
+      <strong>Benchmark Disclaimer:</strong> Performance varies based on camera resolution, active detection modules, hardware execution provider, stream count, and deployment conditions. These figures represent measured results from documented test configurations and should not be interpreted as a universal production guarantee.
+    </div>
+
+    <div class="footer">
+      <span>CamAI / VisionGuarda — Strategic Technology Briefing</span>
+      <span>Page 10</span>
+    </div>
+  </div>
+
+  <!-- ===================================================
+       PAGE 11: ENGINEERING MATURITY
+  =================================================== -->
+  <div class="page">
+    <div class="header">
+      <div class="logo-block">
+        <h1>Engineering Maturity &amp; Codebase Scope</h1>
+        <p>Quantitative Codebase Indicators &amp; Architectural Assets</p>
+      </div>
+      <div class="meta-block">
+        <div class="doc-badge">Section 11</div>
+      </div>
+    </div>
+
+    <h2 class="section-title">16. Codebase Metrics</h2>
+    <div class="card-grid-3">
+      <div class="metric-card">
+        <div class="card-label">Source File Count</div>
+        <div class="card-value">384 Files</div>
+        <div class="card-sub">Tracked across 4 repositories</div>
+      </div>
+      <div class="metric-card">
+        <div class="card-label">Server Unit Tests</div>
+        <div class="card-value">283 Tests</div>
+        <div class="card-sub">100% pass across 19 modules</div>
+      </div>
+      <div class="metric-card">
+        <div class="card-label">Technical Documentation</div>
+        <div class="card-value">13+ Docs</div>
+        <div class="card-sub">Architectural &amp; API manuals</div>
+      </div>
+    </div>
+
+    <h2 class="section-heading">17. Implemented Operational Tools</h2>
+    <ul class="item-list">
+      <li><span class="bullet-tag">✓</span><span><strong>Automated Testing Harness:</strong> Automated PyTest suite covering pipeline initialization, tracker state, analytics rules, and API endpoints.</span></li>
+      <li><span class="bullet-tag">✓</span><span><strong>Database Migrations:</strong> 44+ versioned PostgreSQL SQL scripts defining tables, triggers, and RLS policies.</span></li>
+      <li><span class="bullet-tag">✓</span><span><strong>Deployment Automation:</strong> PowerShell deployment scripts (<code>deploy_supabase.ps1</code>) for edge function compilation and environment setup.</span></li>
+    </ul>
+
+    <div class="note-box">
+      <strong>Engineering Context:</strong> These indicators demonstrate the physical scope of the software asset built by the seller; they do not by themselves constitute customer adoption or market validation.
+    </div>
+
+    <!-- UI Screenshot 5: Desktop Installer Hub & Checksum Verification -->
+    <div class="ui-screenshot-card">
+      <img src="assets/downloads_screen.png" alt="CamAI Desktop Workstation Release Hub & Installer Download" />
+      <div class="ui-screenshot-caption">
+        <span class="ui-screenshot-tag">Figure 5</span>
+        <strong>Enterprise Command Suite — Desktop Release &amp; Offline Installer Hub:</strong> Workstation download manager providing direct Windows x64 setup executable (`CamAI-Desktop-Setup-1.0.1.exe`, 620.8 MB), bundled offline AI engine configuration, and cryptographic SHA-256 checksum verification (`bb344a5...335dad1`).
+      </div>
+    </div>
+
+    <div class="footer">
+      <span>CamAI / VisionGuarda — Strategic Technology Briefing</span>
+      <span>Page 11</span>
+    </div>
+  </div>
+
+  <!-- ===================================================
+       PAGE 12: SECURITY AND DATA PROTECTION
+  =================================================== -->
+  <div class="page">
+    <div class="header">
+      <div class="logo-block">
+        <h1>Security Assessment &amp; Controls</h1>
+        <p>Internal Security Review &amp; Data Protection Mechanisms</p>
+      </div>
+      <div class="meta-block">
+        <div class="doc-badge">Section 12</div>
+      </div>
+    </div>
+
+    <h2 class="section-title">18. Internal Security Assessment</h2>
+    <p>
+      An internal security audit was conducted on July 25, 2026 covering 326 source files against OWASP Top 10 and ASVS guidelines. 33 of 38 identified findings were remediated during that pass.
+    </p>
+
+    <table>
+      <thead>
+        <tr>
+          <th>Assessment Domain</th>
+          <th>Baseline Score</th>
+          <th>Post-Remediation Score</th>
+          <th>Key Controls Applied</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td class="highlight">Overall Security Score</td>
+          <td>41 / 100</td>
+          <td class="verified">82 / 100</td>
+          <td>Internal evaluation metric (not third-party certification).</td>
+        </tr>
+        <tr>
+          <td class="highlight">Authorization &amp; Multi-Tenancy</td>
+          <td>30 / 100</td>
+          <td class="verified">90 / 100</td>
+          <td>Postgres RLS policy hardening &amp; trigger lockouts.</td>
+        </tr>
+        <tr>
+          <td class="highlight">API &amp; Pipeline Security</td>
+          <td>62 / 100</td>
+          <td class="verified">84 / 100</td>
+          <td>Loopback bindings &amp; <code>X-CamAI-Token</code> header enforcement.</td>
+        </tr>
+        <tr>
+          <td class="highlight">Credential Encryption</td>
+          <td>72 / 100</td>
+          <td class="verified">78 / 100</td>
+          <td>AES-256-GCM encryption for camera connection strings.</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div class="note-box warning">
+      <strong>Audit Disclosure:</strong> The scores above reflect an internal engineering assessment and do not constitute an independent third-party penetration testing certification. Five open items remain documented for review during due diligence.
+    </div>
+
+    <div class="footer">
+      <span>CamAI / VisionGuarda — Strategic Technology Briefing</span>
+      <span>Page 12</span>
+    </div>
+  </div>
+
+  <!-- ===================================================
+       PAGE 13: COMMERCIALIZATION OPPORTUNITIES
+  =================================================== -->
+  <div class="page">
+    <div class="header">
+      <div class="logo-block">
+        <h1>Commercialization Pathways</h1>
+        <p>Flexible Structures for Strategic Buyers &amp; Technology Partners</p>
+      </div>
+      <div class="meta-block">
+        <div class="doc-badge">Section 13</div>
+      </div>
+    </div>
+
+    <h2 class="section-title">19. Transaction &amp; Commercialization Models</h2>
+    <p>
+      CamAI is available for commercial transaction under flexible structures depending on the strategic objectives, distribution reach, and vertical focus of the acquiring party.
+    </p>
+
+    <table>
+      <thead>
+        <tr>
+          <th>Commercialization Pathway</th>
+          <th>Structure Description</th>
+          <th>Ideal Strategic Counterparty</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td class="highlight">Full Technology Acquisition</td>
+          <td>Complete assignment of all intellectual property, source code, repositories, branding, and deployment assets.</td>
+          <td>Corporate buyers seeking full asset ownership and exclusive global control.</td>
+        </tr>
+        <tr>
+          <td class="highlight">Exclusive Regional / Vertical License</td>
+          <td>Exclusive commercial licensing rights granted for a specific geographic region (e.g., North America, Gulf) or industry vertical.</td>
+          <td>Established regional system integrators &amp; enterprise software distributors.</td>
+        </tr>
+        <tr>
+          <td class="highlight">OEM / White-Label Integration</td>
+          <td>License to rebrand, bundle, and distribute CamAI software embedded within hardware or camera products.</td>
+          <td>CCTV manufacturers, NVR OEMs, and physical security hardware vendors.</td>
+        </tr>
+        <tr>
+          <td class="highlight">Strategic Joint Venture / Partnership</td>
+          <td>Co-commercialization agreement pairing the CamAI platform with an partner's enterprise sales channel.</td>
+          <td>Managed security service providers &amp; government IT contractors.</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div class="footer">
+      <span>CamAI / VisionGuarda — Strategic Technology Briefing</span>
+      <span>Page 13</span>
+    </div>
+  </div>
+
+  <!-- ===================================================
+       PAGE 14: TARGET BUYER CATEGORIES
+  =================================================== -->
+  <div class="page">
+    <div class="header">
+      <div class="logo-block">
+        <h1>Target Buyer Profile &amp; Value Alignment</h1>
+        <p>Strategic Categories Well-Positioned to Leverage CamAI</p>
+      </div>
+      <div class="meta-block">
+        <div class="doc-badge">Section 14</div>
+      </div>
+    </div>
+
+    <h2 class="section-title">20. Strategic Counterparty Profiles</h2>
+
+    <div class="card-grid-2">
+      <div class="metric-card">
+        <div class="card-label">CCTV &amp; NVR Hardware OEMs</div>
+        <div class="card-sub" style="margin-top:6px;">
+          Instantly add an in-house "AI Analytics" software suite to hardware camera lines without multi-year R&amp;D delays.
+        </div>
+      </div>
+      <div class="metric-card">
+        <div class="card-label">Video Management System (VMS) Vendors</div>
+        <div class="card-sub" style="margin-top:6px;">
+          Enhance existing VMS video recording platforms with edge analytics, speed detection, ANPR, and automated alerting.
+        </div>
+      </div>
+      <div class="metric-card">
+        <div class="card-label">Smart City &amp; Traffic System Integrators</div>
+        <div class="card-sub" style="margin-top:6px;">
+          Acquire a deployable software layer for municipal traffic enforcement, highway monitoring, and toll plaza projects.
+        </div>
+      </div>
+      <div class="metric-card">
+        <div class="card-label">Managed Security Service Providers (MSSP)</div>
+        <div class="card-sub" style="margin-top:6px;">
+          Deploy central multi-tenant camera monitoring services with remote Telegram incident dispatch for commercial clients.
+        </div>
+      </div>
+    </div>
+
+    <div class="footer">
+      <span>CamAI / VisionGuarda — Strategic Technology Briefing</span>
+      <span>Page 14</span>
+    </div>
+  </div>
+
+  <!-- ===================================================
+       PAGE 15: COMMERCIAL INTEGRATION PATHWAYS
+  =================================================== -->
+  <div class="page">
+    <div class="header">
+      <div class="logo-block">
+        <h1>Integration &amp; Product Expansion</h1>
+        <p>Technical Pathways for Commercial Productization</p>
+      </div>
+      <div class="meta-block">
+        <div class="doc-badge">Section 15</div>
+      </div>
+    </div>
+
+    <h2 class="section-title">21. Product Expansion Opportunities</h2>
+    <p>
+      An acquiring strategic partner can commercialize or extend the CamAI platform through several documented software extension points:
+    </p>
+
+    <ul class="item-list">
+      <li><span class="bullet-tag">→</span><span><strong>Custom AI Model Ingestion:</strong> Replace or supplement YOLOX/YuNet with buyer-proprietary ONNX or TensorRT models via the standardized inference interface.</span></li>
+      <li><span class="bullet-tag">→</span><span><strong>VMS API Connector:</strong> Integrate telemetry WebSockets into existing enterprise VMS platforms (e.g., Milestone, Genetec) via standard REST webhooks.</span></li>
+      <li><span class="bullet-tag">→</span><span><strong>Custom Edge Hardware Bundling:</strong> Package the Python AI server onto dedicated Linux/Windows edge gateway devices (NVIDIA Jetson, Intel NUC).</span></li>
+      <li><span class="bullet-tag">→</span><span><strong>SaaS Billing Gateway:</strong> Connect the 21 Supabase Edge Functions to commercial billing platforms (Stripe/Chargebee) for automated monthly subscription management.</span></li>
+    </ul>
+
+    <div class="footer">
+      <span>CamAI / VisionGuarda — Strategic Technology Briefing</span>
+      <span>Page 15</span>
+    </div>
+  </div>
+
+  <!-- ===================================================
+       PAGE 16: PROVEN VS REQUIRES VALIDATION
+  =================================================== -->
+  <div class="page">
+    <div class="header">
+      <div class="logo-block">
+        <h1>Validation &amp; Credibility Framework</h1>
+        <p>Transparent Boundaries Between Proven Assets &amp; Due Diligence Items</p>
+      </div>
+      <div class="meta-block">
+        <div class="doc-badge">Section 16</div>
+      </div>
+    </div>
+
+    <h2 class="section-title">22. Technical Credibility Matrix</h2>
+
+    <table>
+      <thead>
+        <tr>
+          <th>Verified &amp; Implemented Assets</th>
+          <th>Items Subject to Buyer Due Diligence</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td class="verified">✓ 384 tracked source files across 4 codebases</td>
+          <td class="target">⚠ Multi-camera scale beyond 4 concurrent streams</td>
+        </tr>
+        <tr>
+          <td class="verified">✓ 283 passing unit and integration tests</td>
+          <td class="target">⚠ Historical commercial revenue &amp; customer adoption</td>
+        </tr>
+        <tr>
+          <td class="verified">✓ 57 FPS single-camera benchmark logged</td>
+          <td class="target">⚠ Independent third-party security certification</td>
+        </tr>
+        <tr>
+          <td class="verified">✓ 21 Supabase Edge Functions &amp; 44+ SQL migrations</td>
+          <td class="target">⚠ Third-party model weight provenance audit</td>
+        </tr>
+        <tr>
+          <td class="verified">✓ Hardware DPAPI license key binding vault</td>
+          <td class="target">⚠ Speed accuracy verification across extreme camera angles</td>
+        </tr>
+        <tr>
+          <td class="verified">✓ Real-time Leaflet GIS mapping &amp; Telegram bot</td>
+          <td class="target">⚠ Regulatory compliance for specific deployment jurisdictions</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div class="footer">
+      <span>CamAI / VisionGuarda — Strategic Technology Briefing</span>
+      <span>Page 16</span>
+    </div>
+  </div>
+
+  <!-- ===================================================
+       PAGE 17: TECHNICAL DUE DILIGENCE CHECKLIST
+  =================================================== -->
+  <div class="page">
+    <div class="header">
+      <div class="logo-block">
+        <h1>Buyer Technical Due Diligence Framework</h1>
+        <p>Recommended Verification Checklist for Engineering &amp; Legal Teams</p>
+      </div>
+      <div class="meta-block">
+        <div class="doc-badge">Section 17</div>
+      </div>
+    </div>
+
+    <h2 class="section-title">23. Technical Due Diligence Checklist</h2>
+
+    <table>
+      <thead>
+        <tr>
+          <th>Audit Category</th>
+          <th>Recommended Buyer Review Tasks</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td class="highlight">Codebase &amp; Testing</td>
+          <td>
+            □ Execute complete PyTest suite (283 server tests)<br/>
+            □ Run hardware benchmark script (<code>production_readiness_report.py</code>)<br/>
+            □ Build Electron desktop app and inspect DPAPI safeStorage integration
+          </td>
+        </tr>
+        <tr>
+          <td class="highlight">Security &amp; Architecture</td>
+          <td>
+            □ Inspect PostgreSQL Row-Level Security policies across 44+ migrations<br/>
+            □ Verify AES-256-GCM encryption for RTSP camera connection strings<br/>
+            □ Review loopback bindings for local AI server REST endpoints
+          </td>
+        </tr>
+        <tr>
+          <td class="highlight">Legal &amp; IP Inventory</td>
+          <td>
+            □ Perform Software Bill of Materials (SBOM) dependency scan<br/>
+            □ Verify open-source model weights (YOLOX, YuNet, RT-DETR)<br/>
+            □ Confirm assignment of contributor code rights and domain assets
+          </td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div class="footer">
+      <span>CamAI / VisionGuarda — Strategic Technology Briefing</span>
+      <span>Page 17</span>
+    </div>
+  </div>
+
+  <!-- ===================================================
+       PAGE 18: NEXT STEPS & CONFIDENTIALITY
+  =================================================== -->
+  <div class="page">
+    <div class="header">
+      <div class="logo-block">
+        <h1>Next Steps &amp; Confidential Evaluation</h1>
+        <p>Process for Qualified Corporate &amp; Strategic Counterparties</p>
+      </div>
+      <div class="meta-block">
+        <div class="doc-badge">Section 18</div>
+      </div>
+    </div>
+
+    <h2 class="section-title">24. Engagement Process</h2>
+    <p>
+      Qualified strategic counterparties, CCTV OEMs, and corporate development teams are invited to evaluate the CamAI platform through the following structured steps:
+    </p>
+
+    <ul class="item-list">
+      <li><span class="bullet-tag">Step 1</span><span><strong>Confidential Introduction:</strong> Initial discussion to review strategic fit and operational alignment.</span></li>
+      <li><span class="bullet-tag">Step 2</span><span><strong>Live Product Demonstration:</strong> Guided live demonstration of the AI Engine, Desktop Client, Cloud Portal, and Telegram Bot.</span></li>
+      <li><span class="bullet-tag">Step 3</span><span><strong>Architecture &amp; Code Review:</strong> Technical briefing with engineering leadership covering codebase structure and deployment options.</span></li>
+      <li><span class="bullet-tag">Step 4</span><span><strong>Technical Due Diligence:</strong> Access to test repository, benchmark scripts, and documentation for verification.</span></li>
+      <li><span class="bullet-tag">Step 5</span><span><strong>Commercial Alignment:</strong> Discussion of transaction structure (Full IP Acquisition, Licensing, or OEM Partnership).</span></li>
+    </ul>
+
+    <h2 class="section-heading">25. Confidentiality &amp; Legal Disclaimer</h2>
+    <div class="note-box">
+      <p style="font-size:11px; color:#475569; margin-bottom:0;">
+        <strong>Confidential Briefing Disclaimer:</strong> This document contains technical and architectural information describing the CamAI / VisionGuarda software platform as of August 2026. This document is provided solely for technical evaluation and strategic discussion. Performance benchmarks represent empirical results from specific test configurations. Mention of potential enterprise use cases or market applications does not constitute historical customer revenue or production deployment claims. All IP rights, licensing, security posture, and legal terms remain subject to documentary verification and definitive agreements.
+      </p>
+    </div>
+
+    <div class="footer">
+      <span>CamAI / VisionGuarda — Strategic Technology Briefing</span>
+      <span>Page 18</span>
+    </div>
+  </div>
+
+  <!-- ===================================================
+       PAGE 19: COMPREHENSIVE UI SHOWCASE GALLERY
+  =================================================== -->
+  <div class="page">
+    <div class="header">
+      <div class="logo-block">
+        <h1>Visual Product Showcase &amp; User Interface Gallery</h1>
+        <p>Production Screenshots of Web Portal, Desktop Client &amp; Admin Suite</p>
+      </div>
+      <div class="meta-block">
+        <div class="doc-badge">Section 19</div>
+      </div>
+    </div>
+
+    <h2 class="section-title">26. Complete Software Interface Gallery</h2>
+    <p>
+      Below is a comprehensive visual compilation of the live, production-compiled CamAI software interfaces across the public SaaS landing portal, administrator edge command suite, stream provisioning engine, cryptographic licensing vault, and desktop release distribution hub.
+    </p>
+
+    <div class="card-grid-2">
+      <div class="ui-screenshot-card" style="margin: 6px 0;">
+        <img src="assets/landing_hero.png" alt="CamAI Landing Page" />
+        <div class="ui-screenshot-caption">
+          <strong>1. Public SaaS Landing &amp; On-Prem Grid</strong>
+        </div>
+      </div>
+      <div class="ui-screenshot-card" style="margin: 6px 0;">
+        <img src="assets/welcome_dashboard.png" alt="CamAI Admin Dashboard" />
+        <div class="ui-screenshot-caption">
+          <strong>2. Edge Telemetry Command Center</strong>
+        </div>
+      </div>
+      <div class="ui-screenshot-card" style="margin: 6px 0;">
+        <img src="assets/add_camera_rtsp_modal.png" alt="CamAI RTSP Provisioning" />
+        <div class="ui-screenshot-caption">
+          <strong>3. RTSP Camera &amp; GIS Config Modal</strong>
+        </div>
+      </div>
+      <div class="ui-screenshot-card" style="margin: 6px 0;">
+        <img src="assets/licenses_table.png" alt="CamAI Licensing Vault" />
+        <div class="ui-screenshot-caption">
+          <strong>4. SHA-256 Cryptographic License Vault</strong>
+        </div>
+      </div>
+    </div>
+
+    <div class="ui-screenshot-card" style="margin-top: 12px;">
+      <img src="assets/downloads_screen.png" alt="CamAI Desktop Installer Release Hub" />
+      <div class="ui-screenshot-caption">
+        <strong>5. Workstation Release Hub — Windows Offline Desktop Setup (620.8 MB) &amp; SHA-256 Checksum</strong>
+      </div>
+    </div>
+
+    <div class="footer">
+      <span>CamAI / VisionGuarda — Strategic Technology Briefing</span>
+      <span>Page 19</span>
+    </div>
+  </div>
+
+</div>
+
+</body>
+</html>

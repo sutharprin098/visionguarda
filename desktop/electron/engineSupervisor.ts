@@ -119,11 +119,11 @@ let getWin: () => BrowserWindow | null = () => null;
 // requiring several consecutive misses (see Workspace.tsx, HEALTH_TIMEOUT_MS /
 // MISSES_BEFORE_OFFLINE). This is the same judgement applied to the process
 // that can actually restart the engine.
-const HEALTH_TIMEOUT_MS = 8000;
+const HEALTH_TIMEOUT_MS = 12000;
 
-// Consecutive failed probes before the adopted engine is presumed gone. One
-// miss is noise; three misses spread over ADOPTED_POLL_MS is a pattern.
-const ADOPTED_MISSES_BEFORE_TAKEOVER = 3;
+// Consecutive failed probes before the adopted engine is presumed gone.
+// 6 misses spread over ADOPTED_POLL_MS (30s) prevents premature kill under load.
+const ADOPTED_MISSES_BEFORE_TAKEOVER = 6;
 const ADOPTED_POLL_MS = 5000;
 
 function checkEngineRunning(): Promise<boolean> {
@@ -386,7 +386,7 @@ async function clearPort8000IfBlocked(): Promise<void> {
         "-NoProfile",
         "-NonInteractive",
         "-Command",
-        `$conn = Get-NetTCPConnection -LocalPort 8000 -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty OwningProcess; if ($conn -and $conn -gt 0) { Stop-Process -Id $conn -Force -ErrorAction SilentlyContinue }`,
+        `$conn = Get-NetTCPConnection -LocalPort 8000 -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty OwningProcess; if ($conn -and $conn -gt 0) { Stop-Process -Id $conn -Force -ErrorAction SilentlyContinue; Start-Sleep -Milliseconds 750 }`,
       ],
       { windowsHide: true },
       () => resolve()

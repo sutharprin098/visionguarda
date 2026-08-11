@@ -124,12 +124,12 @@ export default function Workspace({
     // Now: one request in flight at a time, the next scheduled only after the
     // previous settles, a deadline that reflects how slow this thing legitimately
     // gets, and enough consecutive failures to mean something.
-    const HEALTH_TIMEOUT_MS = 8000;
+    const HEALTH_TIMEOUT_MS = 12000;
     const POLL_AFTER_OK_MS = 2000;
-    const POLL_AFTER_FAIL_MS = 1000;
-    // ~3 failed probes back to back. Anything less and an engine that is merely
-    // busy reads as an engine that is gone.
-    const MISSES_BEFORE_OFFLINE = 3;
+    const POLL_AFTER_FAIL_MS = 1500;
+    // ~5 failed probes back to back (60s total tolerance). Anything less and an engine that is merely
+    // busy loading models or compiling openvino backend reads as offline.
+    const MISSES_BEFORE_OFFLINE = 5;
 
     let timer: ReturnType<typeof setTimeout> | null = null;
     let misses = 0;
