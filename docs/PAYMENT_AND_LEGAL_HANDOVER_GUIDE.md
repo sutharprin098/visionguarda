@@ -1,4 +1,4 @@
-# CamAI (VisionGuarda) - ₹50 Lakhs ($60,000 USD) Payment & Legal Handover Guide
+# CamAI - ₹50 Lakhs ($60,000 USD) Payment & Legal Handover Guide
 
 This guide details the exact process for safely receiving a high-value payment (₹50 Lakhs / $60,000 USD) when selling the **CamAI** project IP and codebase without any risk of fraud or non-payment.
 

@@ -1,6 +1,6 @@
-# CamAI (VisionGuarda) - Full Acquisition & Project Sale Listing Kit
+# CamAI - Full Acquisition & Project Sale Listing Kit
 
-This document contains everything needed to list and sell the **CamAI / VisionGuarda** IP, codebase, and complete project on marketplaces like Acquire.com, Flippa, or via direct buyer outreach.
+This document contains everything needed to list and sell the **CamAI Enterprise** IP, codebase, and complete project on marketplaces like Acquire.com, Flippa, or via direct buyer outreach.
 
 ---
 
