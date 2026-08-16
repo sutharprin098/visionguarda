@@ -987,7 +987,9 @@ const CameraTile = memo(function CameraTile({ camera: c, site, engineOnline, onF
   // (still connecting, tile just mounted), which must not flash a fault banner.
   // Only a payload that positively reports a non-online capture state counts.
   const sourceFault =
-    telemetry?.health_status != null && telemetry.health_status !== "online";
+    telemetry?.health_status != null &&
+    telemetry.health_status !== "online" &&
+    telemetry.health_status !== "connecting";
 
   // `!paused` drops the MJPEG connection while the viewer covers this tile.
   //
@@ -1419,16 +1421,21 @@ const CameraTile = memo(function CameraTile({ camera: c, site, engineOnline, onF
               Stop Share
             </button>
           )}
-          <span
-            className={clsx(
-              "rounded-full px-2 py-0.5 text-[10px] font-medium",
-              sharingType !== null
-                ? SHARE_STATUS_TONES[shareStatus]
-                : STATUS_TONES[c.status] ?? "bg-surface-3 text-zinc-500",
-            )}
-          >
-            {sharingType !== null ? SHARE_STATUS_LABELS[shareStatus] : STATUS_LABELS[c.status] ?? c.status}
-          </span>
+          {(() => {
+            const effectiveStatus = telemetry?.health_status ?? c.status ?? "offline";
+            return (
+              <span
+                className={clsx(
+                  "rounded-full px-2 py-0.5 text-[10px] font-medium",
+                  sharingType !== null
+                    ? SHARE_STATUS_TONES[shareStatus]
+                    : STATUS_TONES[effectiveStatus] ?? "bg-surface-3 text-zinc-500",
+                )}
+              >
+                {sharingType !== null ? SHARE_STATUS_LABELS[shareStatus] : STATUS_LABELS[effectiveStatus] ?? effectiveStatus}
+              </span>
+            );
+          })()}
         </div>
       </div>
     </div>

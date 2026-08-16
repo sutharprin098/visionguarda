@@ -3238,8 +3238,21 @@ class PipelineCoordinator:
         # hw_accel=False forces software decode — see _capture_loop's
         # fallback logic: HW-accel decode can silently yield zero frames
         # when it shares a GPU with concurrent AI compute on that device.
+        if isinstance(src, str) and src.startswith("rtsp://"):
+            try:
+                from urllib.parse import urlparse
+                parsed = urlparse(src)
+                if not parsed.path:
+                    src = src + "/"
+            except Exception:
+                pass
+
         accel_mode = cv2.VIDEO_ACCELERATION_ANY if hw_accel else cv2.VIDEO_ACCELERATION_NONE
-        params = [cv2.CAP_PROP_HW_ACCELERATION, accel_mode]
+        params = [
+            cv2.CAP_PROP_HW_ACCELERATION, accel_mode,
+            cv2.CAP_PROP_OPEN_TIMEOUT_MSEC, 5000,
+            cv2.CAP_PROP_READ_TIMEOUT_MSEC, 5000,
+        ]
 
         # Try only the backends that can actually serve this kind of source.
         # The old list ran all four for everything, which cost real time in

@@ -250,6 +250,11 @@ def _extract(url: str) -> _Resolved:
         # here stalls the camera instead of letting the loop back off.
         "retries": 1,
         "extractor_retries": 1,
+        "extractor_args": {
+            "youtube": {
+                "player_client": ["android", "web", "tv"]
+            }
+        },
     }
     try:
         with yt_dlp.YoutubeDL(opts) as ydl:

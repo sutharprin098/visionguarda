@@ -26,6 +26,26 @@ const REPO_BLOB_BASE = `${REPO_URL}/blob/main/`;
 // actually published.
 const DEFAULT_FALLBACK_RELEASES: GithubRelease[] = [
   {
+    tag_name: "v1.0.3",
+    name: "CamAI Desktop v1.0.3 (Windows Release)",
+    version: "v1.0.3",
+    prerelease: false,
+    published_at: "2026-08-16T12:00:00Z",
+    asset_id: 104,
+    asset_name: "CamAI-Desktop-Setup-1.0.3.exe",
+    size_bytes: 651025479,
+    content_type: "application/octet-stream",
+    download_url: `${REPO_URL}/releases/download/v1.0.3/CamAI-Desktop-Setup-1.0.3.exe`,
+    checksum_sha256: "c0c9c27d7bafdc95d242147223bda9f98503c6e4dca256f58a4533de1d40e880",
+    release_notes: `
+### 🚀 Stream Stability & RTSP Hardening
+- **Fast Connection & Reconnect**: Implemented explicit 5-second open and read timeouts to prevent thread hangs on unreachable streams.
+- **RTSP Path Normalization**: Auto-appends trailing slashes to bare RTSP targets for full compatibility with Android RTSP servers (pedroSG94).
+- **Zero Black-Screen Tiles**: Fixed UI status filter logic in Workspace.tsx so streams in connecting status render live video immediately.
+- **YouTube Extraction Hardening**: Enhanced yt-dlp stream resolver with multi-client fallbacks (Android, Web, TV) to bypass YouTube playback restrictions.
+    `,
+  },
+  {
     tag_name: "v1.0.2",
     name: "CamAI Desktop v1.0.2 (Windows Release)",
     version: "v1.0.2",

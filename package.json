@@ -1,6 +1,6 @@
 {
   "name": "camai-root",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "private": true,
   "scripts": {
     "dev": "concurrently \"npm.cmd run dev --prefix server\" \"npm.cmd run dev --prefix portal\" --names \"server,portal\" --prefix-colors \"cyan,magenta\"",
