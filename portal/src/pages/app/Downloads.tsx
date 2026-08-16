@@ -26,6 +26,26 @@ const REPO_BLOB_BASE = `${REPO_URL}/blob/main/`;
 // actually published.
 const DEFAULT_FALLBACK_RELEASES: GithubRelease[] = [
   {
+    tag_name: "v1.0.4",
+    name: "CamAI Desktop v1.0.4 (Windows Release)",
+    version: "v1.0.4",
+    prerelease: false,
+    published_at: "2026-08-16T18:00:00Z",
+    asset_id: 105,
+    asset_name: "CamAI-Desktop-Setup-1.0.4.exe",
+    size_bytes: 651025479,
+    content_type: "application/octet-stream",
+    download_url: `${REPO_URL}/releases/download/v1.0.4/CamAI-Desktop-Setup-1.0.4.exe`,
+    checksum_sha256: "4bfe5948f1a2f064c6ea486bb06d93e89e331ea0fa64ed03f346e81b0cb53653",
+    release_notes: `
+### 🚀 Complete Production Stability & Enterprise Reliability (v1.0.4)
+- **Instant Workspace Synchronization**: Integrated **Refresh Workspace (🔄)** control for zero-latency manual re-sync of cameras, zones, and rules from the database.
+- **Zero Black-Screen Assurance**: Built-in 1-click **Virtual Stream Fallback** button on camera tiles to prevent blank states when network RTSP sources disconnect.
+- **End-to-End RTSP Connection Hardening**: Hardened OpenCV 5s open/read timeouts, path slashes, and automated retry loops.
+- **Containerized Server Deployment**: Embedded production-ready \`Dockerfile\` and \`docker-compose.yml\` for engine deployment with integrated health checks.
+    `,
+  },
+  {
     tag_name: "v1.0.3",
     name: "CamAI Desktop v1.0.3 (Windows Release)",
     version: "v1.0.3",
