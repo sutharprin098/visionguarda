@@ -1994,10 +1994,10 @@ class PipelineCoordinator:
                             self._cap_consecutive_failures += 1
                             last_good_frame_ts = time.time()
                             self._update_health_on_failure()
-                            self.publish_source_status()
                             frame = self._generate_synthetic_demo_frame("Reconnecting Stream")
-                            self._health_status = "online"
+                            self._health_status = "connecting"
                             self._last_resolution = "960x540"
+                            self.publish_source_status()
                         else:
                             src = self._capture_source(refresh=self._is_page_url)
                             if src is None:
@@ -2005,10 +2005,10 @@ class PipelineCoordinator:
                                 self._cap_consecutive_failures += 1
                                 last_good_frame_ts = time.time()
                                 self._update_health_on_failure()
-                                self.publish_source_status()
                                 frame = self._generate_synthetic_demo_frame("Resolving Stream")
-                                self._health_status = "online"
+                                self._health_status = "connecting"
                                 self._last_resolution = "960x540"
+                                self.publish_source_status()
                             else:
                                 self.cap = self._open_capture(src, hw_accel=self._cap_hw_accel)
                                 if self.cap.isOpened():
@@ -2022,10 +2022,10 @@ class PipelineCoordinator:
                                 else:
                                     self._cap_consecutive_failures += 1
                                     self._update_health_on_failure()
-                                    self.publish_source_status()
                                     frame = self._generate_synthetic_demo_frame("Stream Standby")
-                                    self._health_status = "online"
+                                    self._health_status = "connecting"
                                     self._last_resolution = "960x540"
+                                    self.publish_source_status()
                     else:
                         ret, frame = self.cap.read()
                         if (not ret or frame is None) and self._is_video_file:
@@ -2041,10 +2041,10 @@ class PipelineCoordinator:
                                 if self._cap_hw_accel and self._cap_consecutive_failures >= 1:
                                     self._cap_hw_accel = False
                                 self._update_health_on_failure()
-                                self.publish_source_status()
                             frame = self._generate_synthetic_demo_frame("Stream Recovery")
-                            self._health_status = "online"
+                            self._health_status = "connecting"
                             self._last_resolution = "960x540"
+                            self.publish_source_status()
                         else:
                             last_good_frame_ts = time.time()
                             self._cap_consecutive_failures = 0

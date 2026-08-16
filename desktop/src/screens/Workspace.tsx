@@ -1325,18 +1325,34 @@ const CameraTile = memo(function CameraTile({ camera: c, site, engineOnline, onF
             payload (pipeline.source_error_text). Show it. */}
         {showSourceFault && (
           // pr-12 keeps the text clear of the fullscreen button in the corner.
-          <div className="absolute inset-x-0 bottom-0 z-20 flex items-start gap-2 bg-black/80 py-2 pl-2.5 pr-12 text-left">
-            <AlertTriangle size={14} className="mt-px shrink-0 text-warn" />
-            <div className="min-w-0">
-              <div className="text-[11px] font-semibold text-zinc-100">
-                No video from this source — AI is not running on it
-              </div>
-              {telemetry?.source_error && (
-                <div className="mt-0.5 text-[10px] leading-snug text-zinc-400">
-                  {telemetry.source_error}
+          <div className="absolute inset-x-0 bottom-0 z-20 flex items-center justify-between gap-2 bg-black/85 py-2 pl-2.5 pr-12 text-left">
+            <div className="flex items-start gap-2 min-w-0">
+              <AlertTriangle size={14} className="mt-px shrink-0 text-warn" />
+              <div className="min-w-0">
+                <div className="text-[11px] font-semibold text-zinc-100">
+                  No video from this source — AI is not running on it
                 </div>
-              )}
+                {telemetry?.source_error && (
+                  <div className="mt-0.5 text-[10px] leading-snug text-zinc-400 truncate max-w-[240px]" title={telemetry.source_error}>
+                    {telemetry.source_error}
+                  </div>
+                )}
+              </div>
             </div>
+            <button
+              onClick={async () => {
+                try {
+                  const sb = await getSupabase();
+                  await sb.from("cameras").update({ source_type: "virtual" }).eq("id", c.id);
+                } catch (err) {
+                  console.error("Failed to switch camera to virtual source", err);
+                }
+              }}
+              className="shrink-0 rounded bg-indigo-600/80 px-2 py-1 text-[10px] font-semibold text-white hover:bg-indigo-500 transition-colors shadow"
+              title="Switch camera to built-in virtual demo stream"
+            >
+              Virtual Stream
+            </button>
           </div>
         )}
 

@@ -36,7 +36,7 @@ const DEFAULT_FALLBACK_RELEASES: GithubRelease[] = [
     size_bytes: 651025479,
     content_type: "application/octet-stream",
     download_url: `${REPO_URL}/releases/download/v1.0.3/CamAI-Desktop-Setup-1.0.3.exe`,
-    checksum_sha256: "c0c9c27d7bafdc95d242147223bda9f98503c6e4dca256f58a4533de1d40e880",
+    checksum_sha256: "7515ba1a2d8e6120cea803d7c42226df3744daf2cb1292a7a000145f66791d5a",
     release_notes: `
 ### 🚀 Stream Stability & RTSP Hardening
 - **Fast Connection & Reconnect**: Implemented explicit 5-second open and read timeouts to prevent thread hangs on unreachable streams.
