@@ -847,13 +847,22 @@ function CamerasView({
             {cameras.length === 1 ? `Live Camera: ${cameras[0].name}` : `Active Cameras (${cameras.length})`}
           </span>
         </div>
-        <button
-          onClick={() => onFullscreen(cameras[0].id)}
-          className="inline-flex items-center gap-2 rounded bg-accent px-3 py-1.5 text-xs font-semibold text-white shadow hover:bg-accent/80 transition"
-          title="Open Full Screen Monitor View (F11 / Double-Click)"
-        >
-          <Maximize2 size={14} /> Full Screen
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => window.location.reload()}
+            className="inline-flex items-center gap-1.5 rounded bg-surface-2 border border-line px-3 py-1.5 text-xs font-semibold text-zinc-200 shadow hover:bg-surface-3 transition"
+            title="Sync & Refresh workspace configuration from database"
+          >
+            <RotateCw size={13} /> Refresh Workspace
+          </button>
+          <button
+            onClick={() => onFullscreen(cameras[0].id)}
+            className="inline-flex items-center gap-2 rounded bg-accent px-3 py-1.5 text-xs font-semibold text-white shadow hover:bg-accent/80 transition"
+            title="Open Full Screen Monitor View (F11 / Double-Click)"
+          >
+            <Maximize2 size={14} /> Full Screen
+          </button>
+        </div>
       </div>
 
       <div className={`grid ${gridLayoutClass}`}>

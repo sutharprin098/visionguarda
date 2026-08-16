@@ -36,13 +36,14 @@ const DEFAULT_FALLBACK_RELEASES: GithubRelease[] = [
     size_bytes: 651025479,
     content_type: "application/octet-stream",
     download_url: `${REPO_URL}/releases/download/v1.0.3/CamAI-Desktop-Setup-1.0.3.exe`,
-    checksum_sha256: "7515ba1a2d8e6120cea803d7c42226df3744daf2cb1292a7a000145f66791d5a",
+    checksum_sha256: "739535826d057717a6c6b743db7e0cedc7ca4a70f32050e3b17756b0f528daae",
     release_notes: `
-### 🚀 Stream Stability & RTSP Hardening
-- **Fast Connection & Reconnect**: Implemented explicit 5-second open and read timeouts to prevent thread hangs on unreachable streams.
+### 🚀 Stream Stability, UI Sync & Docker Engine Deployment
+- **Workspace Instant Refresh**: Added a dedicated **Refresh Workspace (🔄)** button to instantly re-sync camera configurations, zone rules, and live telemetry from the database without restarting.
+- **Virtual Stream Fallback**: Embedded a 1-click **"Virtual Stream"** button on camera fault banners to immediately launch an active 30fps virtual demo stream whenever an external stream link is unreachable.
+- **Fast Connection & Reconnect**: Implemented explicit 5-second open/read timeouts to prevent capture thread hangs on unresponsive network streams.
 - **RTSP Path Normalization**: Auto-appends trailing slashes to bare RTSP targets for full compatibility with Android RTSP servers (pedroSG94).
-- **Zero Black-Screen Tiles**: Fixed UI status filter logic in Workspace.tsx so streams in connecting status render live video immediately.
-- **YouTube Extraction Hardening**: Enhanced yt-dlp stream resolver with multi-client fallbacks (Android, Web, TV) to bypass YouTube playback restrictions.
+- **Docker Engine Containerization**: Included high-performance Dockerfile and docker-compose orchestration in \`server/\` for zero-setup containerized engine execution.
     `,
   },
   {
