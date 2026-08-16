@@ -26,6 +26,26 @@ const REPO_BLOB_BASE = `${REPO_URL}/blob/main/`;
 // actually published.
 const DEFAULT_FALLBACK_RELEASES: GithubRelease[] = [
   {
+    tag_name: "v1.0.5",
+    name: "CamAI Desktop v1.0.5 (Windows Release)",
+    version: "v1.0.5",
+    prerelease: false,
+    published_at: "2026-08-16T21:45:00Z",
+    asset_id: 106,
+    asset_name: "CamAI-Desktop-Setup-1.0.5.exe",
+    size_bytes: 651025479,
+    content_type: "application/octet-stream",
+    download_url: `${REPO_URL}/releases/download/v1.0.5/CamAI-Desktop-Setup-1.0.5.exe`,
+    checksum_sha256: "8255137e1cc7c7c38d67dccc82c17e9072ba1ed61ea14327d0aba10116d8c601",
+    release_notes: `
+### ⚡ High Performance Grid & Seamless Fullscreen Transition (v1.0.5)
+- **Zero Black Screen in Grid / Normal View**: Resolved state evaluation where camera streams turned black in non-fullscreen grid tiles.
+- **Seamless Fullscreen & Minimize Transitions**: Fixed socket reconnection behavior when toggling between grid view and full-window mode.
+- **Zero Socket Thrashing & Reduced Latency**: Eliminated repetitive DOM key remounts and CORS handshake retries, freeing HTTP socket pools for zero-lag rendering.
+- **Auto Cache-Busting Reconnect**: Added automated smooth stream re-acquisition on network blips.
+    `,
+  },
+  {
     tag_name: "v1.0.4",
     name: "CamAI Desktop v1.0.4 (Windows Release)",
     version: "v1.0.4",

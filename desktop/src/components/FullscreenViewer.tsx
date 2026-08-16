@@ -71,7 +71,11 @@ export default function FullscreenViewer({
   // The engine positively reports this camera's capture as not-online. A null
   // health_status means "nothing heard yet", which must not read as a fault.
   const sourceFault =
-    telemetry?.health_status != null && telemetry.health_status !== "online";
+    telemetry?.health_status === "offline" ||
+    telemetry?.health_status === "auth_failed" ||
+    telemetry?.health_status === "network_error" ||
+    telemetry?.health_status === "error" ||
+    telemetry?.health_status === "source_gone";
 
   // ---- OS-level window fullscreen (enhancement, not a dependency) ----------
   //
@@ -177,16 +181,22 @@ export default function FullscreenViewer({
   // max_width 320..1920. It is simply not applied automatically here, because
   // no operator asked to trade frames for pixels.
 
-  const handleImageError = () => {
+  const handleImageError = (e: React.SyntheticEvent<HTMLImageElement>) => {
     if (imgCors && !corsProvenRef.current) {
       log("stream refused CORS — retrying without it (snapshots unavailable)", { cameraId });
       setImgCors(false);
-      return;
     }
     log("stream image error, retrying...", { cameraId, retryCount });
+    const target = e.currentTarget;
     setTimeout(() => {
-      setRetryCount((c) => c + 1);
-    }, 1000);
+      if (target && target.src) {
+        try {
+          const url = new URL(target.src);
+          url.searchParams.set("_t", String(Date.now()));
+          target.src = url.toString();
+        } catch { /* ignore */ }
+      }
+    }, 1500);
   };
 
   // ---- camera switching without leaving fullscreen -------------------------

@@ -994,31 +994,18 @@ const CameraTile = memo(function CameraTile({ camera: c, site, engineOnline, onF
   // The engine reached the camera's source but got no usable video. Explicitly
   // NOT "telemetry is null": that just means we haven't heard anything yet
   // (still connecting, tile just mounted), which must not flash a fault banner.
-  // Only a payload that positively reports a non-online capture state counts.
+  // Only a payload that positively reports a hard offline/error state counts.
   const sourceFault =
-    telemetry?.health_status != null &&
-    telemetry.health_status !== "online" &&
-    telemetry.health_status !== "connecting";
+    telemetry?.health_status === "offline" ||
+    telemetry?.health_status === "auth_failed" ||
+    telemetry?.health_status === "network_error" ||
+    telemetry?.health_status === "error" ||
+    telemetry?.health_status === "source_gone";
 
   // `!paused` drops the MJPEG connection while the viewer covers this tile.
-  //
-  // `!sourceFault` is the load-bearing half of the connection-budget fix. An
-  // MJPEG <img> pins one of Chromium's six connections per host for as long as
-  // its response is open, and a camera with no video has nothing to send — so
-  // pointing an <img> at one buys a blank picture at the cost of a connection
-  // every other engine request has to queue behind. Six dead cameras used to
-  // exhaust the budget outright, stalling /health and /api/status and making a
-  // perfectly healthy engine look unreachable on EVERY camera.
-  //
-  // The engine now also ends a frameless stream after a grace window
-  // (main.py, get_mjpeg_stream), but that alone is not sufficient: the <img>
-  // retries on error, so the connection would simply be reopened, occupying the
-  // slot for most of every cycle. Not asking for the stream in the first place
-  // is what actually frees it. Telemetry keeps arriving on the WebSocket, so
-  // the moment the source recovers (health_status flips to "online") the stream
-  // is requested again — no manual retry, no stale blank tile.
+  // `engineOnline !== false` ensures stream renders even if health status fetch is pending.
   const showStream =
-    engineOnline && !streamFailed && !isScreenShareCam && !paused && !sourceFault;
+    engineOnline !== false && !streamFailed && !isScreenShareCam && !paused && !sourceFault;
 
   // Show the reason banner for a real camera whose source is faulted, and for a
   // screen share that WAS running and has stopped being pushed. Not for an
@@ -1243,37 +1230,28 @@ const CameraTile = memo(function CameraTile({ camera: c, site, engineOnline, onF
           />
         ) : showStream ? (
           <img
-            // Remounting on retry (rather than reassigning .src on the live
-            // element) is what lets the crossOrigin attribute change at all —
-            // it is only read when the request is made.
-            key={`${c.id}:${streamAttempt}:${imgCors ? "cors" : "plain"}`}
+            key={c.id}
             ref={imgRef}
-            // Requesting the stream with CORS is what makes the smart snapshot
-            // possible: without it the engine's frames taint the canvas and
-            // toBlob() throws SecurityError. config.py already allowlists this
-            // renderer's origin, so the engine answers with a matching
-            // Access-Control-Allow-Origin and nothing changes for the stream
-            // itself. If that ever fails, the error handler below remounts
-            // without the attribute — the live view is never sacrificed for a
-            // snapshot feature; the alerts simply arrive without an image.
             crossOrigin={imgCors ? "anonymous" : undefined}
             src={mjpegStreamUrl(c.id)}
             alt={c.name}
             className={mediaClass}
             onLoad={() => { corsProvenRef.current = imgCors; }}
-            onError={() => {
-              // An error before a single frame has ever arrived in CORS mode is
-              // the one that might BE the CORS handshake: drop it and remount
-              // at once. Any error after a frame has landed is an ordinary
-              // stream drop (engine restart, camera reconnect) — retry as
-              // before and keep CORS, or we would permanently lose snapshots
-              // on this tile for an unrelated blip.
+            onError={(e) => {
               if (imgCors && !corsProvenRef.current) {
                 console.warn(`[Alerts] stream for ${c.id} refused CORS — snapshots disabled for this tile`);
                 setImgCors(false);
-                return;
               }
-              setTimeout(() => setStreamAttempt((n) => n + 1), 1000);
+              const target = e.currentTarget;
+              setTimeout(() => {
+                if (target && target.src) {
+                  try {
+                    const url = new URL(target.src);
+                    url.searchParams.set("_t", String(Date.now()));
+                    target.src = url.toString();
+                  } catch { /* ignore */ }
+                }
+              }, 1500);
             }}
           />
         ) : isScreenShareCam ? (
