@@ -215,6 +215,39 @@ const alertRules: FeatureDef = {
   params: [],
 };
 
+const nightVisionFeature: FeatureDef = {
+  key: "night_vision_zero_dce",
+  label: "Zero-DCE Night-Vision AI",
+  description: "Real-time low-light restoration for dark night drone & CCTV footage. Boosts low-light frame contrast automatically before detection.",
+  group: "Detection",
+  defaultEnabled: true,
+  params: [
+    {
+      key: "mode",
+      label: "Enhancement Mode",
+      type: "select",
+      options: [
+        { value: "auto", label: "🌙 Auto-Luminance Gated (Night Only)" },
+        { value: "on", label: "💡 Always On (Manually Forced)" },
+        { value: "off", label: "🚫 Disabled" },
+      ],
+      default: "auto",
+      help: "Auto mode triggers Zero-DCE only when scene brightness falls below threshold.",
+    },
+    {
+      key: "threshold",
+      label: "Dark Scene Threshold",
+      type: "slider",
+      min: 10,
+      max: 180,
+      step: 5,
+      unit: "lum",
+      default: 80,
+      help: "Trigger threshold for auto mode (0-255 mean luminance).",
+    },
+  ],
+};
+
 // ============================================================
 // TRAFFIC
 // ============================================================
@@ -226,6 +259,8 @@ const TRAFFIC: ProfileDef = {
   accent: "sky",
   groupOrder: ["Detection", "Tracking & Counting", "Events & Violations", "Analytics", "ROI & Zones", "Schedule", "Alerts"],
   features: [
+    nightVisionFeature,
+
     {
       key: "lane_detection", label: "Lane Detection", group: "Detection", requiresGeometry: "zone", defaultEnabled: true,
       drawTool: { label: "Lane", purpose: "lane" },
@@ -393,6 +428,8 @@ const SECURITY: ProfileDef = {
   accent: "rose",
   groupOrder: ["Detection", "Events & Violations", "Analytics", "Tracking & Counting", "Recognition", "Safety", "ROI & Zones", "Schedule", "Alerts"],
   features: [
+    nightVisionFeature,
+
     {
       key: "person_detection", label: "Person Detection", group: "Detection", defaultEnabled: true,
       description: "Detect people across the frame.",
@@ -519,8 +556,10 @@ const FACTORY: ProfileDef = {
   accent: "amber",
   groupOrder: ["Safety", "Detection", "Tracking & Counting", "Events & Violations", "Analytics", "ROI & Zones", "Alerts"],
   features: [
+    nightVisionFeature,
     {
       // defaultEnabled removed: a compliance feature must not be on by default
+
       // when nothing can produce a compliance finding.
       key: "ppe_detection", label: "PPE Detection", group: "Safety",
       description: "Verify workers wear the required personal protective equipment.",
@@ -627,8 +666,10 @@ const CUSTOM: ProfileDef = {
   accent: "violet",
   groupOrder: ["Detection", "Events & Violations", "ROI & Zones", "Alerts"],
   features: [
+    nightVisionFeature,
     {
       key: "custom_detection", label: "Detection Zone", group: "Detection", requiresGeometry: "zone", defaultEnabled: true,
+
       description: "Run object detection inside any drawn zone.",
       params: [confidence(0.4), classes(COCO_CLASSES, ["person"])],
     },

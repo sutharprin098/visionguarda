@@ -24,7 +24,7 @@ let registered = new Set<string>();
 // userData by the supervisor.
 let controlTokenCache: string | null = null;
 
-async function controlHeaders(): Promise<Record<string, string>> {
+export async function controlHeaders(): Promise<Record<string, string>> {
   const base = { "Content-Type": "application/json" };
   if (controlTokenCache === null) {
     try {
@@ -37,6 +37,7 @@ async function controlHeaders(): Promise<Record<string, string>> {
   // accepts the write anyway — sending the header regardless keeps one path.
   return controlTokenCache ? { ...base, "X-CamAI-Token": controlTokenCache } : base;
 }
+
 
 export function mjpegStreamUrl(cameraId: string): string {
   return `${ENGINE_BASE}/api/cameras/${cameraId}/stream`;
@@ -258,11 +259,15 @@ async function doSyncCamerasToLocalEngine(
     const linesStr = cam.lines || "[]";
     const camRules = rules.filter((r) => r.camera_id === cam.id);
     const rulesStr = JSON.stringify(camRules);
-    const activeProfile = cam.zone_profile || null;
-    const profileConfig = zoneProfileConfigs.find(
+    const activeProfile = cam.zone_profile || "security";
+    let profileConfig = zoneProfileConfigs.find(
       (c) => c.camera_id === cam.id && c.profile === activeProfile
     );
+    if (!profileConfig) {
+      profileConfig = zoneProfileConfigs.find((c) => c.camera_id === cam.id);
+    }
     const profileFeaturesStr = profileConfig ? JSON.stringify(profileConfig.features) : "{}";
+
     const camUpdatedAt = cam.updated_at || "";
 
     // Admin edited the camera row (RTSP URL, source, type, name, or its

@@ -33,7 +33,8 @@ import clsx from "clsx";
 import { getSupabase } from "../lib/session";
 import { useAlertState } from "../components/alerts/AlertProvider";
 import { fnErrorMessage } from "../lib/fnError";
-import { isEngineOnline, mjpegStreamUrl } from "../lib/localEngine";
+import { isEngineOnline, mjpegStreamUrl, controlHeaders } from "../lib/localEngine";
+
 import {
   History,
   circleRadiusPx,
@@ -385,42 +386,76 @@ export default function AdminStudio({
     await loadProfileConfig(selectedCam, profileKey);
   }
 
-  // ---- feature config persistence (debounced) --------------
-  const persistFeatures = useCallback((next: ProfileFeatures) => {
-    if (saveTimer.current) clearTimeout(saveTimer.current);
-    setSavingConfig(true);
-    saveTimer.current = setTimeout(async () => {
-      try {
-        const sb = await getSupabase();
-        if (configId) {
-          await sb.from("zone_profile_configs").update({ features: next, is_draft: true }).eq("id", configId);
-        } else if (selectedCam && activeProfile) {
-          const { data } = await sb
-            .from("zone_profile_configs")
-            .upsert(
-              { org_id: orgId, camera_id: selectedCam.id, profile: activeProfile, features: next, is_draft: true },
-              { onConflict: "camera_id,profile" },
-            )
-            .select()
-            .single();
-          if (data?.id) setConfigId(data.id);
+  // Instant engine sync (0ms delay for live real-time preview)
+  const syncEngineDirectly = useCallback(
+    (next: ProfileFeatures) => {
+      if (!selectedCam?.id) return;
+      void (async () => {
+        try {
+          await fetch(`http://127.0.0.1:8000/api/cameras/${selectedCam.id}/config`, {
+            method: "POST",
+            headers: await controlHeaders(),
+            body: JSON.stringify({
+              zones: JSON.stringify(drawings.filter((d) => d.geometry_type === "zone")),
+              lines: JSON.stringify(drawings.filter((d) => d.geometry_type === "line")),
+              rules: JSON.stringify(rules),
+              zone_profile: activeProfile || "security",
+              profile_features: JSON.stringify(next),
+            }),
+          });
+        } catch {
+          /* engine sync best effort */
         }
-      } catch (e) {
-        console.error("Failed to persist feature config:", e);
-      } finally {
-        setSavingConfig(false);
-      }
-    }, 600);
-  }, [configId, selectedCam, activeProfile, orgId]);
+      })();
+    },
+    [selectedCam?.id, drawings, rules, activeProfile],
+  );
+
+  // ---- feature config persistence (debounced) --------------
+  const persistFeatures = useCallback(
+    (next: ProfileFeatures) => {
+      if (saveTimer.current) clearTimeout(saveTimer.current);
+      setSavingConfig(true);
+      saveTimer.current = setTimeout(async () => {
+        try {
+          const sb = await getSupabase();
+          if (configId) {
+            await sb.from("zone_profile_configs").update({ features: next, is_draft: true }).eq("id", configId);
+          } else if (selectedCam && activeProfile) {
+            const { data } = await sb
+              .from("zone_profile_configs")
+              .upsert(
+                { org_id: orgId, camera_id: selectedCam.id, profile: activeProfile, features: next, is_draft: true },
+                { onConflict: "camera_id,profile" },
+              )
+              .select()
+              .single();
+            if (data?.id) setConfigId(data.id);
+          }
+
+          // Also trigger direct sync inside debounced save
+          syncEngineDirectly(next);
+        } catch (e) {
+          console.error("Failed to persist feature config:", e);
+        } finally {
+          setSavingConfig(false);
+        }
+      }, 600);
+    },
+    [configId, selectedCam, activeProfile, orgId, syncEngineDirectly],
+  );
 
   function updateFeature(featureKey: string, updater: (v: ProfileFeatures[string]) => ProfileFeatures[string]) {
     setFeatures((prev) => {
       const current = prev[featureKey] ?? { enabled: false, params: {} };
       const next = { ...prev, [featureKey]: updater(current) };
+      syncEngineDirectly(next);
       persistFeatures(next);
       return next;
     });
   }
+
+
 
   const toggleFeature = (key: string) => updateFeature(key, (v) => ({ ...v, enabled: !v.enabled }));
   const setParam = (key: string, paramKey: string, value: unknown) =>
