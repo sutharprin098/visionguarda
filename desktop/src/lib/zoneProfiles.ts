@@ -242,7 +242,7 @@ const nightVisionFeature: FeatureDef = {
       max: 180,
       step: 5,
       unit: "lum",
-      default: 80,
+      default: 140,
       help: "Trigger threshold for auto mode (0-255 mean luminance).",
     },
   ],

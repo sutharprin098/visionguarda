@@ -1458,10 +1458,7 @@ export default function AdminStudio({
               </div>
             ) : (
               <div className="relative aspect-video max-h-full max-w-full rounded border border-line overflow-hidden shadow-2xl bg-zinc-950">
-                {engineOnline && !streamFailed ? (
-                  // key: force a fresh MJPEG connection per camera. Without it React
-                  // reuses the element and the browser can keep serving the previous
-                  // camera's open multipart response.
+                {engineOnline ? (
                   <img
                     key={selectedCam.id}
                     ref={videoRef}
@@ -1469,26 +1466,23 @@ export default function AdminStudio({
                     alt=""
                     className="h-full w-full object-contain pointer-events-none"
                     onLoad={() => setStreamFailed(false)}
-                    onError={() => setStreamFailed(true)}
+                    onError={(e) => {
+                      setStreamFailed(true);
+                      const target = e.currentTarget;
+                      setTimeout(() => {
+                        if (target) {
+                          try {
+                            const base = mjpegStreamUrl(selectedCam.id);
+                            target.src = `${base}?_t=${Date.now()}`;
+                          } catch { /* ignore */ }
+                        }
+                      }, 1000);
+                    }}
                   />
                 ) : (
-                  // A broken <img> renders its alt text, so this used to show the
-                  // word "Live" in the corner and nothing else — indistinguishable
-                  // from an unfinished screen. Say which of the two things is
-                  // actually wrong instead.
                   <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-zinc-900/90 px-6 text-center text-zinc-500">
                     <Video size={36} />
-                    {!engineOnline ? (
-                      <span className="text-xs">Local AI engine offline — drawing still works on the grid</span>
-                    ) : (
-                      <>
-                        <span className="text-xs text-zinc-300">No live stream for {selectedCam.name}</span>
-                        <span className="text-[11px]">
-                          The engine is running but isn't decoding this camera. Check the
-                          source is reachable in Engine Health. Drawing still works.
-                        </span>
-                      </>
-                    )}
+                    <span className="text-xs">Local AI engine offline — drawing still works on the grid</span>
                   </div>
                 )}
                 <canvas
