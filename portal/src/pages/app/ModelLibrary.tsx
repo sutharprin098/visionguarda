@@ -7,7 +7,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Navigate } from "react-router-dom";
 import {
   Cpu, HardDrive, MemoryStick, Boxes, Pencil, Trash2, Plus, Search,
-  Car, Shield, Factory,
+  Car, Shield, Factory, Radio,
 } from "lucide-react";
 import clsx from "clsx";
 import { supabase } from "../../lib/supabase";
@@ -15,7 +15,7 @@ import { useAuth } from "../../contexts/AuthContext";
 import { audit } from "../../lib/audit";
 import { PageHeader, Badge, Kpi, Modal, ConfirmDialog, Field, Empty } from "../../components/ui";
 
-type ProfileKey = "traffic" | "security" | "factory" | "custom";
+type ProfileKey = "traffic" | "security" | "factory" | "drone" | "custom";
 
 interface ModelRow {
   id: string;
@@ -56,6 +56,7 @@ const PROFILES: { key: ProfileKey; label: string; icon: typeof Car; cls: string 
   { key: "traffic", label: "Traffic", icon: Car, cls: "border-sky-500/60 bg-sky-500/15 text-sky-400" },
   { key: "security", label: "Security", icon: Shield, cls: "border-rose-500/60 bg-rose-500/15 text-rose-400" },
   { key: "factory", label: "Factory", icon: Factory, cls: "border-amber-500/60 bg-amber-500/15 text-amber-400" },
+  { key: "drone", label: "Drone", icon: Radio, cls: "border-emerald-500/60 bg-emerald-500/15 text-emerald-400" },
   { key: "custom", label: "Custom", icon: Boxes, cls: "border-violet-500/60 bg-violet-500/15 text-violet-400" },
 ];
 

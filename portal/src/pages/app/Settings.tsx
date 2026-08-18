@@ -304,7 +304,7 @@ function AiTab({ canConfigure }: { canConfigure: boolean }) {
     return found ? found.value : fallback;
   };
 
-  const [activeProfile, setActiveProfile] = useState<"traffic" | "security" | "factory" | "custom">("traffic");
+  const [activeProfile, setActiveProfile] = useState<"traffic" | "security" | "factory" | "drone" | "custom">("traffic");
 
   // Traffic form state
   const [trafficDetections, setTrafficDetections] = useState({
@@ -361,6 +361,24 @@ function AiTab({ canConfigure }: { canConfigure: boolean }) {
   });
   const [factorySensitivity, setFactorySensitivity] = useState<"low" | "medium" | "high">("high");
 
+  // Drone form state
+  const [droneDetections, setDroneDetections] = useState({
+    small_vehicle_tracking: true,
+    aerial_pedestrian: true,
+    high_altitude_tiling: true,
+    traffic_flow: true,
+  });
+  const [droneObjects, setDroneObjects] = useState({
+    car: true,
+    pedestrian: true,
+    van: true,
+    truck: true,
+    bus: true,
+    motorcycle: true,
+    bicycle: true,
+  });
+  const [droneSensitivity, setDroneSensitivity] = useState<"low" | "medium" | "high">("high");
+
   // Custom form state
   const [customDetections, setCustomDetections] = useState<string[]>(["person", "vehicle"]);
   const [customObjects, setCustomObjects] = useState<string[]>(["car", "person", "bag"]);
@@ -369,7 +387,7 @@ function AiTab({ canConfigure }: { canConfigure: boolean }) {
   // Load from db
   useEffect(() => {
     if (current && current.length > 0) {
-      const prof = getSetting("ai.profile", "traffic") as "traffic" | "security" | "factory" | "custom";
+      const prof = getSetting("ai.profile", "traffic") as "traffic" | "security" | "factory" | "drone" | "custom";
       setActiveProfile(prof);
 
       const tc = getSetting("ai.traffic_config", null);
@@ -393,6 +411,13 @@ function AiTab({ canConfigure }: { canConfigure: boolean }) {
         if (fc.sensitivity) setFactorySensitivity(fc.sensitivity);
       }
 
+      const dc = getSetting("ai.drone_config", null);
+      if (dc) {
+        setDroneDetections({ ...droneDetections, ...dc.detections });
+        setDroneObjects({ ...droneObjects, ...dc.objects });
+        if (dc.sensitivity) setDroneSensitivity(dc.sensitivity);
+      }
+
       const cc = getSetting("ai.custom_config", null);
       if (cc) {
         if (cc.detections) setCustomDetections(cc.detections);
@@ -406,10 +431,6 @@ function AiTab({ canConfigure }: { canConfigure: boolean }) {
     if (!org) return;
     setBusy(true);
 
-    // Resolve model name and properties based on active profile and sensitivity.
-    // These are ai_model_packages.name values (see migration 0030) — the
-    // catalog's segmentation entry was retired with the YOLOX swap, so the
-    // top sensitivity tier now maps to the most accurate detector instead.
     let resolvedModel = "CamAI Engine M"; // Default high quality detection
     let activeSensitivity: "low" | "medium" | "high" = "high";
 
@@ -419,16 +440,21 @@ function AiTab({ canConfigure }: { canConfigure: boolean }) {
       activeSensitivity = securitySensitivity;
     } else if (activeProfile === "factory") {
       activeSensitivity = factorySensitivity;
+    } else if (activeProfile === "drone") {
+      activeSensitivity = droneSensitivity;
+      resolvedModel = "yolov8_visdrone.onnx";
     } else if (activeProfile === "custom") {
       activeSensitivity = customSensitivity;
     }
 
-    if (activeSensitivity === "low") {
-      resolvedModel = "CamAI Engine Tiny";
-    } else if (activeSensitivity === "medium") {
-      resolvedModel = "CamAI Engine S";
-    } else {
-      resolvedModel = "CamAI Engine M";
+    if (activeProfile !== "drone") {
+      if (activeSensitivity === "low") {
+        resolvedModel = "CamAI Engine Tiny";
+      } else if (activeSensitivity === "medium") {
+        resolvedModel = "CamAI Engine S";
+      } else {
+        resolvedModel = "CamAI Engine M";
+      }
     }
 
     // Special factory logic: if factory PPE is checked, use PPE Detection model
@@ -448,11 +474,17 @@ function AiTab({ canConfigure }: { canConfigure: boolean }) {
         .map(([obj]) => obj === "bag" ? "handbag" : obj);
     } else if (activeProfile === "factory") {
       resolvedClasses = ["person", "helmet", "vest", "gloves", "shoes"];
+    } else if (activeProfile === "drone") {
+      resolvedClasses = Object.entries(droneObjects)
+        .filter(([_, enabled]) => enabled)
+        .map(([obj]) => obj);
     } else {
       resolvedClasses = customObjects;
     }
 
-    const resolvedConfidence = activeSensitivity === "low" ? 0.25 : activeSensitivity === "medium" ? 0.40 : 0.55;
+    const resolvedConfidence = activeProfile === "drone"
+      ? (activeSensitivity === "low" ? 0.15 : activeSensitivity === "medium" ? 0.20 : 0.30)
+      : (activeSensitivity === "low" ? 0.25 : activeSensitivity === "medium" ? 0.40 : 0.55);
 
     const trafficConfigObj = {
       detections: trafficDetections,
@@ -472,6 +504,12 @@ function AiTab({ canConfigure }: { canConfigure: boolean }) {
       sensitivity: factorySensitivity,
     };
 
+    const droneConfigObj = {
+      detections: droneDetections,
+      objects: droneObjects,
+      sensitivity: droneSensitivity,
+    };
+
     const customConfigObj = {
       detections: customDetections,
       objects: customObjects,
@@ -486,10 +524,28 @@ function AiTab({ canConfigure }: { canConfigure: boolean }) {
       { org_id: org.id, scope: "org", key: "ai.traffic_config", value: trafficConfigObj as any },
       { org_id: org.id, scope: "org", key: "ai.security_config", value: securityConfigObj as any },
       { org_id: org.id, scope: "org", key: "ai.factory_config", value: factoryConfigObj as any },
+      { org_id: org.id, scope: "org", key: "ai.drone_config", value: droneConfigObj as any },
       { org_id: org.id, scope: "org", key: "ai.custom_config", value: customConfigObj as any },
     ];
 
     await supabase.from("settings").upsert(rows, { onConflict: "org_id,scope,key" });
+
+    // Hot-swap local AI engine backend dynamically if engine is running
+    try {
+      await fetch("http://localhost:8000/api/model/select", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ model_name: resolvedModel }),
+      });
+      await fetch("http://localhost:8000/api/detection/confidence", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ confidence: resolvedConfidence }),
+      });
+    } catch {
+      // Local engine not running in browser dev mode — saved to cloud settings DB for desktop sync
+    }
+
     audit("ai.profile.update", "settings", "org", {
       module: "settings",
       new: {
@@ -510,6 +566,7 @@ function AiTab({ canConfigure }: { canConfigure: boolean }) {
     { id: "traffic", label: "Traffic", desc: "For highway, roads, speed checking, and vehicle flow management." },
     { id: "security", label: "Security", desc: "For perimeter security, intrusion detection, loitering, and fire alerts." },
     { id: "factory", label: "Factory", desc: "For employee safety monitoring, PPE compliance, and forklift tracking." },
+    { id: "drone", label: "Drone / Aerial", desc: "For UAV high-altitude overhead surveillance, small vehicle & person tracking (VisDrone AI)." },
     { id: "custom", label: "Custom", desc: "Define your own business-specific tracking rules and event processing." },
   ] as const;
 
@@ -733,6 +790,68 @@ function AiTab({ canConfigure }: { canConfigure: boolean }) {
         </div>
       )}
 
+      {/* Drone Profile Settings */}
+      {activeProfile === "drone" && (
+        <div className="space-y-4 rounded-lg border border-line bg-surface-1/50 p-4">
+          <h4 className="text-xs font-semibold text-ink-1 uppercase tracking-wider">Drone Aerial Configuration (VisDrone Engine)</h4>
+          
+          <div className="space-y-2">
+            <label className="text-xs font-medium text-ink-2">Aerial Detection Modes</label>
+            <div className="grid grid-cols-2 gap-2">
+              {Object.keys(droneDetections).map((k) => (
+                <label key={k} className="flex items-center gap-2 text-xs text-ink-1 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    disabled={!canConfigure}
+                    checked={(droneDetections as any)[k]}
+                    onChange={(e) => setDroneDetections({ ...droneDetections, [k]: e.target.checked })}
+                    className="rounded border-line bg-surface-2 text-accent focus:ring-accent accent-accent"
+                  />
+                  <span className="capitalize">{k.replace(/_/g, " ")}</span>
+                </label>
+              ))}
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            <label className="text-xs font-medium text-ink-2">Tracked Overhead Classes</label>
+            <div className="grid grid-cols-3 gap-2">
+              {Object.keys(droneObjects).map((k) => (
+                <label key={k} className="flex items-center gap-2 text-xs text-ink-1 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    disabled={!canConfigure}
+                    checked={(droneObjects as any)[k]}
+                    onChange={(e) => setDroneObjects({ ...droneObjects, [k]: e.target.checked })}
+                    className="rounded border-line bg-surface-2 text-accent focus:ring-accent accent-accent"
+                  />
+                  <span className="capitalize">{k.replace(/_/g, " ")}</span>
+                </label>
+              ))}
+            </div>
+          </div>
+
+          <div className="space-y-1.5 pt-2">
+            <label className="text-xs font-medium text-ink-2">Drone Small-Object Sensitivity</label>
+            <div className="flex gap-1 bg-surface-2 p-0.5 rounded-md border border-line max-w-xs">
+              {SENSITIVITIES.map((s) => (
+                <button
+                  key={s}
+                  type="button"
+                  disabled={!canConfigure}
+                  onClick={() => setDroneSensitivity(s)}
+                  className={`flex-1 py-1 text-center text-[10px] font-semibold uppercase rounded transition ${
+                    droneSensitivity === s ? "bg-accent text-white" : "text-ink-3 hover:text-ink-1"
+                  }`}
+                >
+                  {s}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Custom Profile Settings */}
       {activeProfile === "custom" && (
         <div className="space-y-4 rounded-lg border border-line bg-surface-1/50 p-4">
@@ -815,12 +934,99 @@ function AiTab({ canConfigure }: { canConfigure: boolean }) {
         </div>
       )}
 
+      {/* Zero-DCE Night Vision Enhancement Panel */}
+      <div className="space-y-4 rounded-lg border border-line bg-surface-1/50 p-4">
+        <div className="flex items-center justify-between">
+          <div>
+            <h4 className="text-xs font-semibold text-ink-1 uppercase tracking-wider">Zero-DCE Night-Vision AI Enhancement</h4>
+            <p className="text-[11px] text-ink-3 mt-0.5">Zero-Reference Deep Curve Estimation dynamically boosts low-light exposure on night CCTV/Drone feeds for accurate detection.</p>
+          </div>
+          <label className="relative inline-flex items-center cursor-pointer">
+            <input
+              type="checkbox"
+              disabled={!canConfigure}
+              defaultChecked={true}
+              onChange={async (e) => {
+                try {
+                  await fetch("http://localhost:8000/api/enhancement/zero_dce", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ enabled: e.target.checked }),
+                  });
+                } catch {}
+              }}
+              className="sr-only peer"
+            />
+            <div className="w-9 h-5 bg-surface-2 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-accent"></div>
+          </label>
+        </div>
+
+        <div className="grid grid-cols-2 gap-4 pt-1 border-t border-line/60">
+          <div>
+            <label className="text-xs font-medium text-ink-2">Trigger Mode</label>
+            <div className="flex gap-2 mt-1">
+              <button
+                type="button"
+                onClick={async () => {
+                  try {
+                    await fetch("http://localhost:8000/api/enhancement/zero_dce", {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({ auto_mode: true }),
+                    });
+                  } catch {}
+                }}
+                className="px-3 py-1 text-xs rounded border border-accent bg-accent/15 text-accent font-medium"
+              >
+                Auto-Luminance Gated
+              </button>
+              <button
+                type="button"
+                onClick={async () => {
+                  try {
+                    await fetch("http://localhost:8000/api/enhancement/zero_dce", {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({ auto_mode: false }),
+                    });
+                  } catch {}
+                }}
+                className="px-3 py-1 text-xs rounded border border-line bg-surface-2 text-ink-2 hover:text-ink-1"
+              >
+                Always On
+              </button>
+            </div>
+          </div>
+          <div>
+            <label className="text-xs font-medium text-ink-2">Dark Scene Luminance Threshold (10 - 100)</label>
+            <input
+              type="range"
+              min="10"
+              max="100"
+              defaultValue="65"
+              disabled={!canConfigure}
+              onChange={async (e) => {
+                try {
+                  await fetch("http://localhost:8000/api/enhancement/zero_dce", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ threshold: parseFloat(e.target.value) }),
+                  });
+                } catch {}
+              }}
+              className="w-full mt-2 accent-accent bg-surface-2 rounded-lg cursor-pointer"
+            />
+          </div>
+        </div>
+      </div>
+
       {canConfigure && (
         <div className="flex items-center gap-3 pt-2">
           <SaveButton onClick={save} busy={busy} />
           {saved && <span className="text-sm text-ok">Saved ✓ — desktops re-sync automatically</span>}
         </div>
       )}
+
     </div>
   );
 }
