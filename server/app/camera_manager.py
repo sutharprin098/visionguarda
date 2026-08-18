@@ -83,11 +83,23 @@ class CameraManager:
                 # size on an iGPU, else the default). This pays the one-time GPU
                 # kernel compile here, inside the startup grace window, rather
                 # than on the first camera frame.
-                warm = getattr(self.yolo_backend, "static_imgsz", None) or 320
+                warm = getattr(self.yolo_backend, "static_imgsz", None) or (640 if getattr(self.yolo_backend, "is_visdrone", False) else 320)
                 dummy_img = np.zeros((warm, warm, 3), dtype=np.uint8)
                 tensor, _ = self.yolo_backend.preprocess(dummy_img, warm)
                 self.yolo_backend.run_inference(tensor)
                 print(f"[CameraManager] Initial AI backend {self.selected_model_name} loaded successfully.", flush=True)
+
+                # Initialize Zero-DCE Auto-Gated Night Vision from config
+                try:
+                    from app.config import ZERO_DCE_ENABLED, ZERO_DCE_THRESHOLD
+                    from app.ai.enhancer import zero_dce
+                    zero_dce.enabled = ZERO_DCE_ENABLED
+                    zero_dce.auto_mode = True  # Auto-gated based on luminance
+                    zero_dce.threshold = ZERO_DCE_THRESHOLD
+                    print(f"[CameraManager] Zero-DCE Auto Night-Vision initialized (enabled={zero_dce.enabled}, auto_mode=True, threshold={zero_dce.threshold}).", flush=True)
+                except Exception as e:
+                    print(f"[CameraManager] Zero-DCE setup notice: {e}", flush=True)
+
                 self.startup_status = "ready"
             except Exception as e:
                 self.startup_status = "failed"
@@ -293,7 +305,8 @@ class CameraManager:
             self._apply_hardware_profile(new_backend)
             # Warm up at the backend's real inference size (pinned static size on
             # an iGPU, else default) so the one-time GPU compile happens here.
-            warm = getattr(new_backend, "static_imgsz", None) or 320
+            warm = getattr(new_backend, "static_imgsz", None) or (640 if getattr(new_backend, "is_visdrone", False) else 320)
+
             dummy_img = np.zeros((warm, warm, 3), dtype=np.uint8)
             tensor, _ = new_backend.preprocess(dummy_img, warm)
             new_backend.run_inference(tensor)

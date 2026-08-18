@@ -2140,6 +2140,26 @@ class PipelineCoordinator:
                             pts_px = np.array([[p[0] * w, p[1] * h] for p in pts], dtype=np.int32)
                             cv2.fillPoly(frame, [pts_px], (0, 0, 0))
 
+                # ── Zero-DCE Night-Vision AI Enhancement (Per-Camera Controlled) ───────
+                try:
+                    from app.ai.enhancer import zero_dce
+                    nv_cfg = self.profile_features.get("night_vision_zero_dce", {})
+                    is_enabled = nv_cfg.get("enabled", True)
+                    params = nv_cfg.get("params", {}) if isinstance(nv_cfg.get("params"), dict) else {}
+                    mode = params.get("mode", getattr(self, "zero_dce_mode", "auto"))
+                    thresh = float(params.get("threshold", getattr(self, "zero_dce_threshold", 110.0)))
+
+                    if is_enabled and mode != "off":
+                        force_on = (mode == "on")
+                        frame, _ = zero_dce.enhance(frame, override_threshold=thresh, force_enable=force_on)
+                        data["frame"] = frame
+                except Exception as e:
+                    print(f"[Zero-DCE Err] {e}", flush=True)
+
+
+
+
+
                 # ── Hand the frame to the AI stage FIRST ─────────────────────────
                 # JPEG encode measures ~9ms on this hardware and the privacy
                 # masking above must precede it, but neither is something the
@@ -2277,9 +2297,17 @@ class PipelineCoordinator:
                 inf_frame = frame
                 rh, rw    = orig_h, orig_w
 
+            # ── Zero-DCE Low-Light / Night-Vision AI Enhancement ──────────────────────
+            try:
+                from app.ai.enhancer import zero_dce
+                inf_frame, dce_stats = zero_dce.enhance(inf_frame)
+            except Exception:
+                pass
+
             # Detect motion inside the effective ROI crop to avoid motion outside ROI
             # forcing unnecessary inference passes and lowering FPS.
             motion  = self._detect_motion(inf_frame)
+
 
             self._ai_frame_count = getattr(self, "_ai_frame_count", 0) + 1
 

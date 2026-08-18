@@ -47,6 +47,15 @@ CONFIDENCE_THRESHOLD = 0.3
 IOU_THRESHOLD = 0.5
 INFERENCE_SIZE = 320  # Fast inference size
 
+# Zero-DCE Low-Light / Night-Vision AI Settings
+ZERO_DCE_ENABLED = os.getenv("CAMAI_ZERO_DCE", "true").strip().lower() in ("1", "true", "yes", "on")
+try:
+    ZERO_DCE_THRESHOLD = float(os.getenv("CAMAI_ZERO_DCE_THRESHOLD", "80.0"))
+except ValueError:
+    ZERO_DCE_THRESHOLD = 80.0
+
+
+
 # --- Intel integrated-GPU static-shape pin ---------------------------------
 # On an Intel iGPU (UHD/Iris) OpenVINO recompiles GPU kernels PER input shape,
 # each compile costing 9-16s and emitting Intel-Graphics-Compiler ("CISA")

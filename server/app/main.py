@@ -622,6 +622,44 @@ def set_confidence(payload: ConfidencePayload):
     return {"success": True, "confidence": applied}
 
 
+class ZeroDCEPayload(BaseModel):
+    enabled: Optional[bool] = None
+    auto_mode: Optional[bool] = None
+    threshold: Optional[float] = None
+
+
+@app.post("/api/enhancement/zero_dce", dependencies=control)
+def configure_zero_dce(payload: ZeroDCEPayload):
+    """Configure Zero-DCE Low-Light Night-Vision AI Enhancement."""
+    from app.ai.enhancer import zero_dce
+    if payload.enabled is not None:
+        zero_dce.enabled = payload.enabled
+    if payload.auto_mode is not None:
+        zero_dce.auto_mode = payload.auto_mode
+    if payload.threshold is not None:
+        zero_dce.threshold = max(10.0, min(200.0, float(payload.threshold)))
+    return {
+        "success": True,
+        "enabled": zero_dce.enabled,
+        "auto_mode": zero_dce.auto_mode,
+        "threshold": zero_dce.threshold,
+        "is_onnx_loaded": zero_dce.is_loaded,
+    }
+
+
+@app.get("/api/enhancement/zero_dce/status")
+def get_zero_dce_status():
+    from app.ai.enhancer import zero_dce
+    return {
+        "enabled": zero_dce.enabled,
+        "auto_mode": zero_dce.auto_mode,
+        "threshold": zero_dce.threshold,
+        "is_onnx_loaded": zero_dce.is_loaded,
+        "model_path": zero_dce.model_path,
+    }
+
+
+
 class TilingPayload(BaseModel):
     """Invisible AI Zoom Engine knobs. Every field optional — a request patches
     only what it sends, so a UI with one slider need not round-trip the rest."""

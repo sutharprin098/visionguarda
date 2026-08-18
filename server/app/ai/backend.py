@@ -123,6 +123,20 @@ COCO_CLASS_MAP = {
 }
 CLASS_IDS_OF_INTEREST = list(COCO_CLASS_MAP.keys())
 
+VISDRONE_CLASS_MAP = {
+    0: "person",       # pedestrian
+    1: "person",       # people
+    2: "bicycle",      # bicycle
+    3: "car",          # car
+    4: "truck",        # van
+    5: "truck",        # truck
+    6: "motorcycle",   # tricycle
+    7: "motorcycle",   # awning-tricycle
+    8: "bus",          # bus
+    9: "motorcycle",   # motorcycle
+}
+
+
 # Generous per-class geometric plausibility bounds, applied to every
 # detection before it ever reaches the tracker. Deliberately loose — this
 # rejects only truly degenerate boxes (sub-pixel noise, corrupted
@@ -234,6 +248,7 @@ class EngineBackend:
         # because the pre/postprocess for it is first-party and a buyer holding
         # an Ultralytics licence can drop their own yolo11 export straight in.
         self.is_yolox = "yolox" in os.path.basename(model_name).lower()
+        self.is_visdrone = "visdrone" in os.path.basename(model_name).lower()
         self.backend_type = None  # 'openvino', 'onnx'
         self.backend_device = None  # 'GPU', 'CPU', 'CUDA', etc.
         # When non-None, this backend is compiled for ONE fixed input side S and
@@ -478,6 +493,14 @@ class EngineBackend:
         # faster than the dynamic-shape kernel. S is clamped to a multiple of 32
         # for the YOLOX detection head. CPU keeps dynamic shapes (it compiles per
         # shape cheaply and benefits from adaptive resolution).
+        # Check model native input shape
+        try:
+            in_pshape = model.input(0).partial_shape
+            if in_pshape.is_static and len(in_pshape.to_shape()) == 4:
+                self.static_imgsz = int(in_pshape.to_shape()[2])
+        except Exception:
+            pass
+
         if target_device == "GPU":
             try:
                 from app.config import IGPU_STATIC_IMGSZ
@@ -489,12 +512,10 @@ class EngineBackend:
                       f"shape [1,3,{s},{s}] (one cached kernel, no runtime "
                       f"recompiles).", flush=True)
             except Exception as e:
-                # A reshape failure must not block model load — fall back to the
-                # dynamic-shape compile (slower/riskier on iGPU, but functional).
-                self.static_imgsz = None
                 self.is_igpu = False
                 print(f"[AI Backend] Warning: static reshape failed ({e}); "
-                      f"falling back to dynamic input shape.", flush=True)
+                      f"using model shape (static={self.static_imgsz}).", flush=True)
+
 
         # Persist compiled kernels to disk. Without this, GPU in particular
         # re-runs shape-specific kernel JIT compilation (documented
@@ -894,18 +915,23 @@ class EngineBackend:
         y2 = y_center + h / 2
 
         boxes = np.stack([x1, y1, x2, y2], axis=1)
-        class_ids_of_interest = CLASS_IDS_OF_INTEREST
-        scores_interest = out0[:, 4:84][:, class_ids_of_interest]
-
-        max_score_idx = np.argmax(scores_interest, axis=1)
-        max_scores = np.max(scores_interest, axis=1)
-        max_class_ids = np.array(class_ids_of_interest)[max_score_idx]
+        if self.is_visdrone:
+            scores_interest = out0[:, 4:14]
+            max_score_idx = np.argmax(scores_interest, axis=1)
+            max_scores = np.max(scores_interest, axis=1)
+            max_class_ids = max_score_idx
+        else:
+            class_ids_of_interest = CLASS_IDS_OF_INTEREST
+            scores_interest = out0[:, 4:84][:, class_ids_of_interest]
+            max_score_idx = np.argmax(scores_interest, axis=1)
+            max_scores = np.max(scores_interest, axis=1)
+            max_class_ids = np.array(class_ids_of_interest)[max_score_idx]
 
         keep_idx = max_scores > conf_threshold
         boxes = boxes[keep_idx]
         scores = max_scores[keep_idx]
         class_ids = max_class_ids[keep_idx]
-        coeffs = out0[keep_idx, 84:116]
+        coeffs = out0[keep_idx, 84:116] if out0.shape[1] > 84 else np.zeros((len(boxes), 0))
 
         if len(boxes) == 0:
             t_post = (time.time() - t0) * 1000
@@ -925,7 +951,7 @@ class EngineBackend:
         # output at all — nothing to decode masks from, and skipping this
         # matmul+sigmoid+per-box contour extraction is most of why the
         # detection-only path is measurably cheaper than the seg path.
-        has_masks = output1 is not None
+        has_masks = output1 is not None and coeffs.shape[1] > 0
         if has_masks:
             proto = np.squeeze(output1, axis=0)
             proto_h, proto_w = proto.shape[1], proto.shape[2]
@@ -955,7 +981,12 @@ class EngineBackend:
             if ox2 <= ox1 or oy2 <= oy1:
                 continue
 
-            class_name = COCO_CLASS_MAP.get(cls_id, "unknown")
+            class_name = (
+                VISDRONE_CLASS_MAP.get(cls_id, "unknown")
+                if self.is_visdrone
+                else COCO_CLASS_MAP.get(cls_id, "unknown")
+            )
+
             if not _passes_geometry_filter(class_name, ox1, oy1, ox2, oy2, geom_w, geom_h):
                 continue
             detections.append({
