@@ -56,26 +56,25 @@ class ZeroDCEEnhancer:
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         return float(np.mean(gray))
 
-    def _enhance_curves_lut(self, mean_lum: float, thresh: float, iterations: int = 8, target_lum: float = 160.0) -> np.ndarray:
+    def _enhance_curves_lut(self, mean_lum: float, thresh: float, iterations: int = 4, target_lum: float = 135.0) -> np.ndarray:
         """
-        Ultra-fast C-speed Lookup Table (LUT) solver for 8-stage Zero-DCE curve equation:
-        LE_n(x) = LE_{n-1}(x) + A_n * LE_{n-1}(x) * (1 - LE_{n-1}(x))
-        Executes in sub-millisecond time (<1ms) instead of multi-second full-frame matrix math.
+        Ultra-fast C-speed Lookup Table (LUT) solver for Zero-DCE curve equation:
+        LE_n(x) = LE_{n-1}(x) + A * LE_{n-1}(x) * (1 - LE_{n-1}(x))
+        Applies smooth Zero-Reference tone-curve mapping with highlight protection.
         """
         lut_in = np.linspace(0.0, 1.0, 256, dtype=np.float32)
         mean_norm = mean_lum / 255.0
         
-        # Calculate brightness deficit relative to healthy target (target_lum = 160.0)
-        target = max(130.0, target_lum)
-        deficit = max(0.45, (target - mean_lum) / target)
+        # Calculate brightness deficit relative to target (target_lum = 135.0)
+        target = max(110.0, target_lum)
+        deficit = max(0.0, (target - mean_lum) / target)
         
-        # Adaptive parameter A curve
-        alpha = 0.85 * deficit * (1.0 - mean_norm)
-        a_lut = alpha * (1.0 - lut_in)
+        # Zero-DCE curve alpha parameter (0.10 - 0.25 max) to avoid blowing out city lights/highlights
+        alpha = min(0.25, 0.16 * (1.0 + 1.2 * deficit) * (1.0 - mean_norm))
         
         enhanced_lut = lut_in.copy()
         for _ in range(iterations):
-            enhanced_lut = enhanced_lut + a_lut * enhanced_lut * (1.0 - enhanced_lut)
+            enhanced_lut = enhanced_lut + alpha * enhanced_lut * (1.0 - enhanced_lut)
         
         return (np.clip(enhanced_lut, 0.0, 1.0) * 255.0).astype(np.uint8)
 
@@ -110,13 +109,11 @@ class ZeroDCEEnhancer:
             stats["latency_ms"] = round((time.time() - t0) * 1000.0, 2)
             return frame, stats
 
-
         with self.lock:
             # 1. Neural Zero-DCE inference if ONNX model is loaded
             if self.is_loaded and self.onnx_session:
                 try:
                     h, w = frame.shape[:2]
-                    # Resize to 256x256 for fast parameter estimation
                     small = cv2.resize(frame, (256, 256))
                     blob = small.astype(np.float32) / 255.0
                     blob = np.transpose(blob, (2, 0, 1))[None, ...]
@@ -124,8 +121,7 @@ class ZeroDCEEnhancer:
                     input_name = self.onnx_session.get_inputs()[0].name
                     out = self.onnx_session.run(None, {input_name: blob})[0]
 
-                    # Zero-DCE outputs 8 sets of 3-channel parameter maps
-                    if out.shape[1] == 24:  # 8 iterations * 3 channels
+                    if out.shape[1] == 24:
                         a_maps = out[0]
                         orig_norm = frame.astype(np.float32) / 255.0
                         enhanced = orig_norm
@@ -140,9 +136,13 @@ class ZeroDCEEnhancer:
                 except Exception as e:
                     print(f"[Zero-DCE] ONNX inference notice ({e}); using fast solver.", flush=True)
 
-            # 2. Sub-millisecond LUT Zero-DCE curve transformation solver
-            lut_8bit = self._enhance_curves_lut(mean_lum, thresh, iterations=8)
-            enhanced_bgr = cv2.LUT(frame, lut_8bit)
+            # 2. Sub-millisecond Color-Preserving Luminance Zero-DCE Curve Solver
+            ycrcb = cv2.cvtColor(frame, cv2.COLOR_BGR2YCrCb)
+            y_channel = ycrcb[:, :, 0]
+            
+            lut_y = self._enhance_curves_lut(mean_lum, thresh, iterations=4, target_lum=135.0)
+            ycrcb[:, :, 0] = cv2.LUT(y_channel, lut_y)
+            enhanced_bgr = cv2.cvtColor(ycrcb, cv2.COLOR_YCrCb2BGR)
             
             stats["zero_dce_applied"] = True
             stats["method"] = "lut_curve_solver"
