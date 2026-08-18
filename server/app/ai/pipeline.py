@@ -1986,46 +1986,33 @@ class PipelineCoordinator:
                     if self.cap is None or not self.cap.isOpened():
                         if self.cap is not None:
                             self.cap.release()
-                        if self._cap_consecutive_failures > 0:
-                            backoff = min(3.0, 1.0 * (1.2 ** min(self._cap_consecutive_failures, 8)))
-                            time.sleep(backoff)
-                        if not self._preflight_network_source():
                             self.cap = None
+                        
+                        # Non-blocking reconnect throttling: attempt physical capture open every 2 seconds
+                        now_ts = time.time()
+                        if not hasattr(self, "_last_reconnect_attempt") or (now_ts - getattr(self, "_last_reconnect_attempt", 0) > 2.0):
+                            self._last_reconnect_attempt = now_ts
+                            if self._preflight_network_source():
+                                src = self._capture_source(refresh=self._is_page_url)
+                                if src:
+                                    self.cap = self._open_capture(src, hw_accel=self._cap_hw_accel)
+                                    if self.cap and self.cap.isOpened():
+                                        self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+                                        self.cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
+                                        _refresh_file_pacing()
+                                        next_frame_due = time.time()
+                                        self._cap_consecutive_failures = 0
+                                        self._health_status = "online"
+                                        ret, frame = self.cap.read()
+
+                        if self.cap is None or not self.cap.isOpened():
                             self._cap_consecutive_failures += 1
-                            last_good_frame_ts = time.time()
                             self._update_health_on_failure()
-                            frame = self._generate_synthetic_demo_frame("Reconnecting Stream")
+                            frame = self._generate_synthetic_demo_frame(f"Camera {self.camera_id[:4]} Standby")
                             self._health_status = "connecting"
                             self._last_resolution = "960x540"
                             self.publish_source_status()
-                        else:
-                            src = self._capture_source(refresh=self._is_page_url)
-                            if src is None:
-                                self.cap = None
-                                self._cap_consecutive_failures += 1
-                                last_good_frame_ts = time.time()
-                                self._update_health_on_failure()
-                                frame = self._generate_synthetic_demo_frame("Resolving Stream")
-                                self._health_status = "connecting"
-                                self._last_resolution = "960x540"
-                                self.publish_source_status()
-                            else:
-                                self.cap = self._open_capture(src, hw_accel=self._cap_hw_accel)
-                                if self.cap.isOpened():
-                                    self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-                                    self.cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
-                                    _refresh_file_pacing()
-                                    next_frame_due = time.time()
-                                    self._cap_consecutive_failures = 0
-                                    self._health_status = "online"
-                                    ret, frame = self.cap.read()
-                                else:
-                                    self._cap_consecutive_failures += 1
-                                    self._update_health_on_failure()
-                                    frame = self._generate_synthetic_demo_frame("Stream Standby")
-                                    self._health_status = "connecting"
-                                    self._last_resolution = "960x540"
-                                    self.publish_source_status()
+                            time.sleep(0.033)  # Maintain smooth 30fps playback during standby/recovery
                     else:
                         ret, frame = self.cap.read()
                         if (not ret or frame is None) and self._is_video_file:
@@ -2045,6 +2032,7 @@ class PipelineCoordinator:
                             self._health_status = "connecting"
                             self._last_resolution = "960x540"
                             self.publish_source_status()
+                            time.sleep(0.033)
                         else:
                             last_good_frame_ts = time.time()
                             self._cap_consecutive_failures = 0
@@ -2146,8 +2134,12 @@ class PipelineCoordinator:
                     nv_cfg = self.profile_features.get("night_vision_zero_dce", {})
                     is_enabled = nv_cfg.get("enabled", True)
                     params = nv_cfg.get("params", {}) if isinstance(nv_cfg.get("params"), dict) else {}
-                    mode = params.get("mode", getattr(self, "zero_dce_mode", "auto"))
-                    thresh = float(params.get("threshold", getattr(self, "zero_dce_threshold", 110.0)))
+                    mode = str(params.get("mode", getattr(self, "zero_dce_mode", "auto"))).lower()
+                    raw_thresh = params.get("threshold", getattr(self, "zero_dce_threshold", 140.0))
+                    try:
+                        thresh = float(raw_thresh)
+                    except (ValueError, TypeError):
+                        thresh = 140.0
 
                     if is_enabled and mode != "off":
                         force_on = (mode == "on")

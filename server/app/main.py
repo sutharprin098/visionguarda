@@ -890,6 +890,12 @@ def update_camera_analytics(camera_id: str, payload: CameraAnalyticsPayload):
         payload.profile_features or "{}"
     )
     
+    # Ensure camera thread is running
+    if camera_id not in manager.camera_threads:
+        cam_full = get_camera(camera_id)
+        if cam_full:
+            manager.start_camera_thread(cam_full)
+
     # Update live thread on-the-fly
     manager.update_camera_analytics_config(
         camera_id, 
@@ -931,6 +937,11 @@ def set_camera_recording(camera_id: str, payload: CameraRecordingPayload):
 def get_camera_telemetry(camera_id: str):
     thread = manager.camera_threads.get(camera_id)
     if not thread:
+        cam_full = get_camera(camera_id)
+        if cam_full:
+            manager.start_camera_thread(cam_full)
+            thread = manager.camera_threads.get(camera_id)
+    if not thread:
         raise HTTPException(status_code=404, detail="Camera thread not running")
     return thread.latest_telemetry
 
@@ -938,6 +949,11 @@ def get_camera_telemetry(camera_id: str):
 @app.get("/api/cameras/{camera_id}/stream")
 async def get_mjpeg_stream(camera_id: str):
     thread = manager.camera_threads.get(camera_id)
+    if not thread:
+        cam_full = get_camera(camera_id)
+        if cam_full:
+            manager.start_camera_thread(cam_full)
+            thread = manager.camera_threads.get(camera_id)
     if not thread:
         raise HTTPException(status_code=404, detail="Camera thread not running or inactive")
 
