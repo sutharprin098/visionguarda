@@ -26,6 +26,26 @@ const REPO_BLOB_BASE = `${REPO_URL}/blob/main/`;
 // actually published.
 const DEFAULT_FALLBACK_RELEASES: GithubRelease[] = [
   {
+    tag_name: "v1.0.6",
+    name: "CamAI Desktop v1.0.6 (Windows Release)",
+    version: "v1.0.6",
+    prerelease: false,
+    published_at: "2026-08-18T19:15:00Z",
+    asset_id: 107,
+    asset_name: "CamAI-Desktop-Setup-1.0.6.exe",
+    size_bytes: 651028234,
+    content_type: "application/octet-stream",
+    download_url: `${REPO_URL}/releases/download/v1.0.6/CamAI-Desktop-Setup-1.0.6.exe`,
+    checksum_sha256: "316eaa0c25b1ea6065798ba05d4e79f00839217463d298220ccd28e00e4427fa",
+    release_notes: `
+### 🌙 Color-Preserving Zero-DCE Night Vision & Zero-Blackout Stream Auto-Reconnect (v1.0.6)
+- **Zero Color Shifting Night-Vision AI**: Refactored Zero-DCE tone curve solver to operate strictly on Y-channel (Luminance) in YCrCb color space, eliminating all neon green/blue pixel distortions and over-exposure while preserving 100% natural colors.
+- **Persistent Viewport & Auto-Reconnect**: Fixed Admin Studio stream error state handling to keep the stream viewport permanently mounted and auto-reconnect every 1s on network hiccups without unmounting into a black card.
+- **Non-Blocking 30 FPS Synthetic Stream Recovery**: Capture thread emissions during network stream reconnects now generate smooth 30 FPS standby frames, keeping MJPEG connections alive and responsive at all times.
+- **Auto-Launch Inactive Camera Threads**: FastAPI endpoints auto-launch inactive camera background threads upon stream request, resolving 404 stream errors.
+    `,
+  },
+  {
     tag_name: "v1.0.5",
     name: "CamAI Desktop v1.0.5 (Windows Release)",
     version: "v1.0.5",
