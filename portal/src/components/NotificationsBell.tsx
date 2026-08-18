@@ -69,7 +69,7 @@ export default function NotificationsBell() {
           the left edge on a narrow phone. Clamped to the viewport minus the
           shell's gutters so the panel always lands on screen. */}
       {open && (
-        <div className="card absolute right-0 top-10 z-40 w-80 max-w-[calc(100vw-2rem)] overflow-hidden shadow-xl">
+        <div className="card absolute right-0 top-full mt-2 z-50 w-80 max-w-[calc(100vw-2rem)] overflow-hidden shadow-2xl border border-line">
           <div className="flex items-center justify-between border-b border-line px-3 py-2">
             <span className="text-xs font-semibold uppercase tracking-wider text-ink-3">Notifications</span>
             {!!unread?.length && (

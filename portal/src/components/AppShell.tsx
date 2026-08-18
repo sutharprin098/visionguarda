@@ -151,7 +151,7 @@ export default function AppShell() {
       {/* Main Content Viewport */}
       <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
         {/* Top Navbar Header */}
-        <header className="flex h-14 shrink-0 items-center justify-between gap-3 border-b border-line/60 bg-surface-1/80 px-4 backdrop-blur-md sm:px-6">
+        <header className="relative z-30 flex h-14 shrink-0 items-center justify-between gap-3 border-b border-line/60 bg-surface-1/80 px-4 backdrop-blur-md sm:px-6">
           <div className="flex items-center gap-3">
             <button
               className="rounded-xl p-2 text-ink-3 transition hover:bg-surface-2 hover:text-ink-1 md:hidden"
