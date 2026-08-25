@@ -55,6 +55,7 @@ const COLORS: Record<string, string> = {
   helmet: "#22c55e",      // compliant rider — green
   no_helmet: "#ef4444",   // violation — red, reads as an alert
   number_plate: "#eab308", // amber — reads against vehicle cyan
+  micro_motion: "#00ff66", // vibrant neon green for subtle motion
   other: "#8b5cf6",
 };
 
@@ -90,11 +91,19 @@ function colorFor(det: TelemetryDetection): string {
   if (c === "helmet") return COLORS.helmet;
   if (c === "no_helmet") return COLORS.no_helmet;
   if (c === "number_plate") return COLORS.number_plate;
+  if (c === "micro_motion") return COLORS.micro_motion;
   return COLORS.other;
 }
 
 /** Label for one detection: CLASS #ID  [SPEED km/h]. */
 function labelFor(det: TelemetryDetection): string {
+  if (det.class === "micro_motion") {
+    const title = det.label || "SUBTLE MOTION";
+    const idStr = det.track_id != null ? ` #${String(det.track_id).padStart(2, '0')}` : "";
+    const confStr = ` ${Math.round(det.confidence * 100)}%`;
+    return `${title.toUpperCase()}${idStr}${confStr}`;
+  }
+
   if (det.label) {
     const idStr = det.track_id != null ? ` #${String(det.track_id).padStart(2, '0')}` : "";
     return `${det.label}${idStr}`;

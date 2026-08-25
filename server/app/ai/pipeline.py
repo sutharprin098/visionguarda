@@ -2468,32 +2468,6 @@ class PipelineCoordinator:
                 except Exception as e:
                     print(f"[CustomDetector Err] {e}", flush=True)
 
-                # ── Micro Motion Detection Engine ─────────────────────────────
-                if self.zone_profile == "micro_motion":
-                    try:
-                        if not hasattr(self, "_micro_motion_detector") or self._micro_motion_detector is None:
-                            from app.ai.screen_motion_detector import ScreenMicroMotionDetector
-                            self._micro_motion_detector = ScreenMicroMotionDetector(
-                                min_area=12, max_area=20000, threshold_value=15
-                            )
-                        mm_dets = self._micro_motion_detector.detect(frame)
-                        for md in mm_dets:
-                            b = md["bbox"]
-                            detections.append({
-                                "class": "micro_motion",
-                                "confidence": round(float(md["confidence"]), 2),
-                                "bbox": {
-                                    "x1": b[0],
-                                    "y1": b[1],
-                                    "x2": b[0] + b[2],
-                                    "y2": b[1] + b[3],
-                                },
-                            })
-                            if masks_polygons is not None:
-                                masks_polygons.append([])
-                    except Exception as e:
-                        print(f"[MicroMotion Err] {e}", flush=True)
-
                 # ── Strict polygon ROI gate: cameras with one or more drawn zones
                 # only detect/track/analyze objects whose centroid or feet position
                 # falls inside the union of those admin-defined polygons.
@@ -2787,6 +2761,33 @@ class PipelineCoordinator:
                     self._stage_errors["anpr"] = worker.last_error
                     worker.last_error = None
             t_anpr = (time.perf_counter() - t_anpr0) * 1000
+
+            # ── Micro Motion pass: Runs independent of ByteTrack ────────────
+            if self.zone_profile == "micro_motion":
+                try:
+                    if not hasattr(self, "_micro_motion_detector") or self._micro_motion_detector is None:
+                        from app.ai.screen_motion_detector import ScreenMicroMotionDetector
+                        self._micro_motion_detector = ScreenMicroMotionDetector(
+                            min_area=10, max_area=25000, threshold_value=12
+                        )
+                    mm_dets = self._micro_motion_detector.detect(frame)
+                    for idx, md in enumerate(mm_dets):
+                        b = md["bbox"]
+                        detections.append({
+                            "class": "micro_motion",
+                            "confidence": round(float(md["confidence"]), 2),
+                            "track_id": 901 + idx,
+                            "bbox": {
+                                "x1": b[0],
+                                "y1": b[1],
+                                "x2": b[0] + b[2],
+                                "y2": b[1] + b[3],
+                            },
+                            "label": md.get("tag", "MICRO MOTION"),
+                        })
+                        masks.append([])
+                except Exception as e:
+                    print(f"[MicroMotion Err] {e}", flush=True)
 
             # ── Apply the zone profile to what this camera reports ──────────
             # Must happen here, not only inside analytics.update(): that method
