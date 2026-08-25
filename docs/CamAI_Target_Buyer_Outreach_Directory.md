@@ -1,5 +1,8 @@
 # CamAI Enterprise — B2B Target Buyer Lead Directory & Cold Email Playbook
 
+> 🌐 **Website:** https://camai.princesite.in  
+> 📖 **Technology Overview:** https://camai-enterprise-overview.vercel.app  
+
 > [!IMPORTANT]
 > **Purpose:** This directory identifies high-intent B2B target buyers (CCTV Hardware OEMs, Smart City System Integrators, VMS Software Vendors, and Managed Security Providers) for selling or licensing the **CamAI Enterprise Platform IP**.
 > 
@@ -42,25 +45,29 @@
 ```text
 Hi {First_Name},
 
-I noticed {Company_Name}'s growing presence in commercial surveillance hardware. Many hardware OEMs face a common bottleneck: buyers now demand in-house edge AI analytics (ANPR, Speed Homography, Zone Intrusion, Vehicle Counting) directly bundled with NVRs and desktop software without long R&D cycles.
+I am reaching out regarding a strategic technology asset acquisition. {Company_Name} can directly acquire 100% full source code ownership of CamAI—a turnkey, high-performance, edge-accelerated AI video analytics and VMS platform.
 
-We have built CamAI Enterprise—a production-ready, modular AI Video Analytics Platform featuring:
-• YOLOX + ByteTrack multi-class detection (57 FPS GPU / 31 FPS CPU)
-• Real-Time ANPR OCR & Homography Speed Gates (km/h)
-• Electron Desktop Workstation with DPAPI licensing vault & GIS floorplan canvas
-• Supabase Cloud Architecture with 21 Edge Functions & Telegram incident bot
-• 100% complete source code, 283 unit tests, and comprehensive tech documentation
+The engine features 4 ready-to-deploy analytical modes:
+1. Traffic Mode: Vehicle license plate recognition (ANPR), speed gates (ground-plane homography), and helmet compliance.
+2. Security Mode: Interactive polygon tripwires, loitering/restricted zone entry, and intrusion alerts.
+3. Factory Mode: Industrial workspace safety compliance, worker presence, and face detection.
+4. Drone Mode: Unmanned aerial surveillance, vehicle and personnel tracking from heights.
 
-We are currently evaluating strategic options (Full IP Asset Sale or Exclusive OEM Licensing).
+Key Highlights:
+• Live Incident Alerts: Asynchronous alerts sent directly to Telegram channels with violation crops & metadata.
+• Decoupled Core: Video decoding is isolated from AI telemetry, preventing stream lag.
+• Complete Workspace: Includes Electron Desktop client, Next.js web portal, FastAPI server, and Supabase DB.
+• Zero-Cloud Egress: Runs 100% offline with cryptographic hardware-bound licensing.
 
-Would you be open to a brief 10-minute technical review call or receiving our confidential Technology Overview memorandum?
+Technology Overview: https://camai-enterprise-overview.vercel.app
+Live Demo Website: https://camai.princesite.in
 
 Best regards,
 
-[Your Name]
-Founder / Lead Developer, CamAI Enterprise
-[Your Phone Number / WhatsApp]
-[Link to Documentation / Video Demo]
+Prince
+Founder / Lead Developer, CamAI Enterprise (University of Delhi Student)
+Phone/WhatsApp: +91 95097 06699
+Email: official.princesuthar@gmail.com
 ```
 
 ---
@@ -71,25 +78,28 @@ Founder / Lead Developer, CamAI Enterprise
 ```text
 Hi {First_Name},
 
-When executing large-scale CCTV & Smart City infrastructure projects, system integrators often spend months stitching together third-party analytics and licensing systems.
+We have built CamAI Enterprise—a deployable edge-to-cloud video intelligence suite designed for municipal traffic enforcement, highway monitoring, and campus security. We are offering 100% full source code ownership and white-labeling rights.
 
-We developed CamAI Enterprise, a deployable edge-to-cloud video intelligence suite designed for municipal traffic enforcement, highway monitoring, and campus security.
+The engine features 4 ready-to-deploy analytical modes:
+1. Traffic Mode: Vehicle license plate recognition (ANPR), speed gates (ground-plane homography), and helmet compliance.
+2. Security Mode: Interactive polygon tripwires, loitering/restricted zone entry, and intrusion alerts.
+3. Factory Mode: Industrial workspace safety compliance, worker presence, and face detection.
+4. Drone Mode: Unmanned aerial surveillance, vehicle and personnel tracking from heights.
 
-Key Capabilities Ready for Integration:
-1. Zero-Cloud Egress Edge Processing: MJPEG video decoders + decoupled WebSocket telemetry.
-2. Zone Studio: Interactive polygon boundary drawing, tripwire crossing, & dwell time alerts.
-3. Automated Evidence Dispatch: Real-time incident delivery to mobile Telegram channels with full resolution crop & speed metadata.
-4. Cryptographic Hardware Licensing: SHA-256 machine binding with offline desktop vault.
+Key Highlights:
+• Live Incident Alerts: Asynchronous alerts sent directly to Telegram channels with violation crops & metadata.
+• Decoupled Core: Video decoding is isolated from AI telemetry, preventing stream lag.
+• Complete Workspace: Includes Electron Desktop client, Next.js web portal, FastAPI server, and Supabase DB.
+• Zero-Cloud Egress: Runs 100% offline with cryptographic hardware-bound licensing.
 
-We are offering full source code ownership / commercial white-label deployment rights.
-
-Are you available for a quick 10-minute product demonstration this week?
+Technology Overview: https://camai-enterprise-overview.vercel.app
+Live Demo Website: https://camai.princesite.in
 
 Warm regards,
 
-[Your Name]
-CamAI Enterprise Technologies
-[Your Contact Number]
+Prince
+CamAI Enterprise Technologies (University of Delhi Student)
+Contact Number: +91 95097 06699 | official.princesuthar@gmail.com
 ```
 
 ---

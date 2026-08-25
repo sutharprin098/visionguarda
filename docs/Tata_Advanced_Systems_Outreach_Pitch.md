@@ -1,5 +1,8 @@
 # Strategic Defense & Enterprise Outreach: Tata Advanced Systems Limited (TASL)
 
+> 🌐 **Website:** https://camai.princesite.in  
+> 📖 **Technology Overview:** https://camai-enterprise-overview.vercel.app  
+
 > [!IMPORTANT]
 > **Target Account:** Tata Advanced Systems Limited (TASL) & Tata Defense/Aerospace Leadership  
 > **Key Decision Makers:**  
@@ -43,27 +46,29 @@ Tata Advanced Systems Limited (TASL) requires **100% On-Premise, Zero-Cloud Egre
 ```text
 Dear Mr. Sukaran,
 
-I follow Tata Advanced Systems' pioneering work in defense surveillance, aerostructures, and perimeter protection systems.
+I follow Tata Advanced Systems' pioneering work in defense surveillance. We have engineered CamAI—an indigenous, 100% on-premise Edge AI Video Analytics platform built for zero-cloud egress.
 
-We have engineered CamAI Enterprise—an indigenous, 100% on-premise Edge AI Video Analytics platform designed specifically for high-security environments where zero cloud data egress is strictly mandatory.
+The engine features 4 ready-to-deploy analytical modes:
+1. Traffic Mode: Vehicle license plate recognition (ANPR), speed gates (ground-plane homography), and helmet compliance.
+2. Security Mode: Interactive polygon tripwires, loitering/restricted zone entry, and intrusion alerts.
+3. Factory Mode: Industrial workspace safety compliance, worker presence, and face detection.
+4. Drone Mode: Unmanned aerial surveillance, vehicle and personnel tracking from heights.
 
-Key Capabilities Ready for Defense & Base Security Integration:
-• High-Throughput Edge Inference: YOLOX + ByteTrack multi-class detection (57 FPS GPU / 31 FPS CPU).
-• Zone Studio & Intrusion Alerting: Interactive multi-vertex polygon zones, perimeter tripwires, and restricted area loitering accumulation.
-• Autonomous Optical Tracking & ANPR: Ground-plane homography vehicle speed estimation (km/h) + localized plate OCR.
-• Standalone Desktop Command Center: Hardware-bound DPAPI encrypted licensing, Leaflet GIS spatial mapping, and instant alert dispatch.
-• Turnkey Asset: 100% full source code ownership, 283 verified unit tests, and comprehensive engineering documentation.
+Key Highlights:
+• Live Incident Alerts: Asynchronous alerts sent directly to Telegram channels with violation crops & metadata.
+• Decoupled Core: Video decoding is isolated from AI telemetry, preventing stream lag.
+• Standalone Desktop Command Center: Hardware-bound DPAPI encrypted licensing & GIS floorplan.
+• Turnkey Asset: 100% full source code ownership, 283 verified unit tests, and complete documentation.
 
-We are currently evaluating strategic IP acquisition and technology licensing partnerships with premier Indian defense systems integrators.
-
-Would you or your technology leadership team at TASL be open to a brief 10-minute technical demonstration or receiving our confidential Technology Overview memorandum?
+Technology Overview: https://camai-enterprise-overview.vercel.app
+Live Demo Website: https://camai.princesite.in
 
 Warm regards,
 
-[Your Name]
-Lead Architect & Founder, CamAI Enterprise
-[Your Mobile / WhatsApp Number]
-[Your Email Address]
+Prince
+Lead Architect & Founder, CamAI Enterprise (University of Delhi Student)
+Mobile/WhatsApp: +91 95097 06699
+Email: official.princesuthar@gmail.com
 ```
 
 ---
@@ -75,29 +80,29 @@ Lead Architect & Founder, CamAI Enterprise
 ```text
 Dear Mr. Sukaran Singh,
 
-I am reaching out regarding a strategic technology asset that aligns directly with Tata Advanced Systems’ defense surveillance, perimeter protection, and tactical facility monitoring capabilities.
+I am reaching out regarding a strategic, defense-aligned software asset. CamAI is a production-ready, modular AI Video Analytics Software Platform built for zero-cloud egress deployment. We are offering 100% complete source code ownership and IP transfer.
 
-Many defense and infrastructure contractors face a key challenge: integrating real-time computer vision analytics without relying on commercial cloud infrastructure or foreign third-party software stack dependencies.
+The engine features 4 ready-to-deploy analytical modes:
+1. Traffic Mode: Vehicle license plate recognition (ANPR), speed gates (ground-plane homography), and helmet compliance.
+2. Security Mode: Interactive polygon tripwires, loitering/restricted zone entry, and intrusion alerts.
+3. Factory Mode: Industrial workspace safety compliance, worker presence, and face detection.
+4. Drone Mode: Unmanned aerial surveillance, vehicle and personnel tracking from heights.
 
-We have built CamAI Enterprise—a production-ready, modular AI Video Analytics Software Platform built for zero-cloud egress deployment.
+Key Highlights:
+• Live Incident Alerts: Asynchronous alerts sent directly to Telegram channels with violation crops & metadata.
+• Decoupled Core: Video decoding is isolated from AI telemetry, preventing stream lag.
+• Complete Workspace: Includes Electron Desktop client, Next.js web portal, FastAPI server, and Supabase DB.
+• Cryptographic Licensing: Electron desktop app with local, hardware-bound DPAPI licensing.
 
-Platform Highlights & Technical Inventory:
-1. Multi-Stream Edge Pipeline: Hardware-accelerated frame decoding supporting concurrent YOLOX object detection, multi-target trajectory matching, and OpenVINO acceleration.
-2. Zone Studio & Tactical Analytics: Interactive perimeter polygon boundary creation, tripwire line crossing, abandoned object detection, and homography speed calculation.
-3. Decoupled Architecture: Live RTSP video decoding runs independently from AI telemetry WebSockets, guaranteeing zero stream stutter even under peak GPU load.
-4. Offline Workstation Command Suite: Electron + React desktop application with DPAPI hardware-bound license vault and live GIS floorplan spatial rendering.
-5. Automated Mobile Incident Dispatch: Asynchronous edge alert delivery featuring instant evidence crops, speed metadata, and action triggers.
-
-We are offering complete source code assignment, intellectual property rights, unit test harnesses (283 passing tests), and full technical documentation to a qualified defense technology leader.
-
-Would you be open to receiving our 18-page technical due-diligence briefing file (`CamAI_Enterprise_Technology_Overview.html`), or scheduling a 10-minute live demonstration with your technical team?
+Technology Overview: https://camai-enterprise-overview.vercel.app
+Live Demo Website: https://camai.princesite.in
 
 Sincerely,
 
-[Your Name]
-Founder & Developer, CamAI Enterprise
-[Your Mobile Number]
-[Your Email Address]
+Prince
+Founder & Developer, CamAI Enterprise (University of Delhi Student)
+Mobile: +91 95097 06699
+Email: official.princesuthar@gmail.com
 ```
 
 ---
