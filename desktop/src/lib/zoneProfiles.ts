@@ -11,7 +11,7 @@
 //   { "<feature_key>": { "enabled": bool, "params": { ... } } }
 // ============================================================
 
-export type ZoneProfileKey = "traffic" | "security" | "factory" | "custom";
+export type ZoneProfileKey = "traffic" | "security" | "factory" | "micro_motion" | "custom";
 
 export type ParamType =
   | "toggle"
@@ -656,6 +656,32 @@ const FACTORY: ProfileDef = {
 };
 
 // ============================================================
+// MICRO MOTION — High sensitivity CCTV screen motion HUD
+// ============================================================
+const MICRO_MOTION: ProfileDef = {
+  key: "micro_motion",
+  label: "Micro Motion",
+  tagline: "Subtle CCTV movement & HUD",
+  description: "Detect micro-movements, rodents, insects, birds, and distant motion in low-light CCTV video replay streams.",
+  accent: "amber",
+  groupOrder: ["Detection", "Analytics", "ROI & Zones", "Schedule", "Alerts"],
+  features: [
+    nightVisionFeature,
+    {
+      key: "micro_motion_hud",
+      label: "Micro Motion Detection HUD",
+      group: "Detection",
+      defaultEnabled: true,
+      description: "Temporal difference micro-motion highlight for CCTV video replay windows.",
+      params: [confidence(0.2)],
+    },
+    roiEditor,
+    scheduleFeature,
+    alertRules,
+  ],
+};
+
+// ============================================================
 // CUSTOM — free-form building blocks, unlimited zones
 // ============================================================
 const CUSTOM: ProfileDef = {
@@ -706,10 +732,11 @@ export const ZONE_PROFILES: Record<ZoneProfileKey, ProfileDef> = {
   traffic: TRAFFIC,
   security: SECURITY,
   factory: FACTORY,
+  micro_motion: MICRO_MOTION,
   custom: CUSTOM,
 };
 
-export const PROFILE_ORDER: ZoneProfileKey[] = ["traffic", "security", "factory", "custom"];
+export const PROFILE_ORDER: ZoneProfileKey[] = ["traffic", "security", "factory", "micro_motion", "custom"];
 
 // ---- config value helpers ----------------------------------
 

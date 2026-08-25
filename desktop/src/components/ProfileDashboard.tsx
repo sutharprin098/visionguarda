@@ -138,6 +138,16 @@ function tilesFor(profile: ZoneProfileKey | null, t: CameraTelemetry): Tile[] {
     // detector that does not exist.
   }
 
+  if (profile === "micro_motion") {
+    return [
+      { label: "Subtle Motion", value: String(t.items ?? 0) },
+      { label: "Detections", value: String((t.detections ?? []).length) },
+      { label: "People", value: String(t.people ?? 0) },
+      { label: "Vehicles", value: String(t.vehicles ?? 0) },
+      fps,
+    ];
+  }
+
   // custom / unset — no template, so report what the engine reports.
   return [
     { label: "People", value: String(t.people ?? 0) },

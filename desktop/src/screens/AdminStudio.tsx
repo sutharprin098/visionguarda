@@ -118,6 +118,7 @@ const PROFILE_ICON: Record<ZoneProfileKey, typeof Car> = {
   traffic: Car,
   security: Shield,
   factory: Factory,
+  micro_motion: Eye,
   custom: Boxes,
 };
 
