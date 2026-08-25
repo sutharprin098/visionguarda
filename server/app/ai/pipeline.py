@@ -2024,6 +2024,15 @@ class PipelineCoordinator:
                         if (not ret or frame is None) and self._is_video_file:
                             self.cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
                             ret, frame = self.cap.read()
+                            if not ret or frame is None:
+                                try:
+                                    self.cap.release()
+                                    self.cap = self._open_capture(src, hw_accel=self._cap_hw_accel)
+                                    if self.cap and self.cap.isOpened():
+                                        ret, frame = self.cap.read()
+                                except Exception:
+                                    pass
+
                         if not ret or frame is None:
                             if time.time() - last_good_frame_ts > 3.0:
                                 print(f"[Cap-{self.camera_id}] No frames for 3s, forcing reconnect...", flush=True)
@@ -2035,19 +2044,22 @@ class PipelineCoordinator:
                                     self._cap_hw_accel = False
                                 self._update_health_on_failure()
                             frame = self._generate_synthetic_demo_frame("Stream Recovery")
-                            self._health_status = "connecting"
+                            if self._health_status != "connecting":
+                                self._health_status = "connecting"
+                                self.publish_source_status()
                             self._last_resolution = "960x540"
-                            self.publish_source_status()
                             time.sleep(0.033)
                         else:
                             last_good_frame_ts = time.time()
                             self._cap_consecutive_failures = 0
-                            self._health_status = "online"
+                            if self._health_status != "online":
+                                self._health_status = "online"
+                                self.publish_source_status()
                             if frame is not None:
                                 self._last_resolution = f"{frame.shape[1]}x{frame.shape[0]}"
 
                 else:
-                    self._push_event.wait(0.1)
+                    self._push_event.wait(0.033)
                     self._push_event.clear()
                     frame = self.incoming_frame
                     self.incoming_frame = None
