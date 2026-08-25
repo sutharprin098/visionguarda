@@ -2763,7 +2763,11 @@ class PipelineCoordinator:
             t_anpr = (time.perf_counter() - t_anpr0) * 1000
 
             # ── Micro Motion pass: Runs independent of ByteTrack ────────────
-            if self.zone_profile == "micro_motion":
+            _is_micro = self.zone_profile == "micro_motion" or (
+                isinstance(self.profile_features, dict) and
+                self.profile_features.get("micro_motion_hud", {}).get("enabled", False)
+            )
+            if _is_micro:
                 try:
                     if not hasattr(self, "_micro_motion_detector") or self._micro_motion_detector is None:
                         from app.ai.screen_motion_detector import ScreenMicroMotionDetector

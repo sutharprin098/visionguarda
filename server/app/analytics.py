@@ -7,7 +7,7 @@ from app import config
 # Classes treated as "items" for abandoned-object detection — anything that
 # isn't a person or vehicle and can plausibly be left behind. Must stay in
 # sync with the classes enabled in app/ai/backend.py's COCO_CLASS_MAP.
-ITEM_CLASSES = {"backpack", "handbag", "suitcase", "umbrella", "micro_motion"}
+ITEM_CLASSES = {"backpack", "handbag", "suitcase", "umbrella"}
 VEHICLE_CLASSES = {
     "car", "bus", "truck", "motorcycle", "bicycle", "van",
     "auto_rickshaw", "auto", "rickshaw", "tractor", "emergency_vehicle",
@@ -21,7 +21,7 @@ def _object_category(class_name: str) -> str:
     """person | vehicle | item | infrastructure | other — used everywhere a detection needs to be
     bucketed for counting/alerting so item-class detections (added for
     abandoned-object detection) don't silently get miscounted as vehicles."""
-    if class_name in ITEM_CLASSES:
+    if class_name in ITEM_CLASSES or class_name == "micro_motion":
         return "item"
     if class_name in VEHICLE_CLASSES:
         return "vehicle"
@@ -115,6 +115,7 @@ def filter_by_features(detections, features):
         else:
             disabled |= owned
     drop = disabled - enabled
+    drop.discard("micro_motion")
     if not drop:
         return detections
     return [d for d in detections if d.get("class") not in drop]
