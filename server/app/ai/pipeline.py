@@ -2051,16 +2051,11 @@ class PipelineCoordinator:
                             self.cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
                             ret, frame = self.cap.read()
                             if not ret or frame is None:
-                                try:
-                                    self.cap.release()
-                                    self.cap = self._open_capture(src, hw_accel=self._cap_hw_accel)
-                                    if self.cap and self.cap.isOpened():
-                                        ret, frame = self.cap.read()
-                                except Exception:
-                                    pass
+                                self.cap.set(cv2.CAP_PROP_POS_MSEC, 0)
+                                ret, frame = self.cap.read()
 
                         if not ret or frame is None:
-                            if time.time() - last_good_frame_ts > 3.0:
+                            if not self._is_video_file and time.time() - last_good_frame_ts > 3.0:
                                 print(f"[Cap-{self.camera_id}] No frames for 3s, forcing reconnect...", flush=True)
                                 self.cap.release()
                                 self.cap = None

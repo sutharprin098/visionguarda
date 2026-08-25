@@ -531,6 +531,32 @@ export default function AdminStudio({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedCam?.id]);
 
+  // Instant engine sync (0ms delay for live real-time preview)
+  const syncEngineDirectly = useCallback(
+    (next: ProfileFeatures, profileOverride?: ZoneProfileKey) => {
+      if (!selectedCam?.id) return;
+      const targetProfile = profileOverride || activeProfile || "security";
+      void (async () => {
+        try {
+          await fetch(`http://127.0.0.1:8000/api/cameras/${selectedCam.id}/config`, {
+            method: "POST",
+            headers: await controlHeaders(),
+            body: JSON.stringify({
+              zones: JSON.stringify(drawings.filter((d) => d.type !== "line")),
+              lines: JSON.stringify(drawings.filter((d) => d.type === "line")),
+              rules: JSON.stringify(rules),
+              zone_profile: targetProfile,
+              profile_features: JSON.stringify(next),
+            }),
+          });
+        } catch {
+          /* engine sync best effort */
+        }
+      })();
+    },
+    [selectedCam?.id, drawings, rules, activeProfile],
+  );
+
   // ---- profile selection -----------------------------------
   async function selectProfile(profileKey: ZoneProfileKey) {
     if (!selectedCam) return;
@@ -544,32 +570,10 @@ export default function AdminStudio({
     setCameras((prev) => prev.map((c) => (c.id === selectedCam.id ? { ...c, zone_profile: profileKey } : c)));
     setSelectedCam((prev) => (prev ? { ...prev, zone_profile: profileKey } : prev));
     await loadProfileConfig(selectedCam, profileKey);
-  }
 
-  // Instant engine sync (0ms delay for live real-time preview)
-  const syncEngineDirectly = useCallback(
-    (next: ProfileFeatures) => {
-      if (!selectedCam?.id) return;
-      void (async () => {
-        try {
-          await fetch(`http://127.0.0.1:8000/api/cameras/${selectedCam.id}/config`, {
-            method: "POST",
-            headers: await controlHeaders(),
-            body: JSON.stringify({
-              zones: JSON.stringify(drawings.filter((d) => d.type !== "line")),
-              lines: JSON.stringify(drawings.filter((d) => d.type === "line")),
-              rules: JSON.stringify(rules),
-              zone_profile: activeProfile || "security",
-              profile_features: JSON.stringify(next),
-            }),
-          });
-        } catch {
-          /* engine sync best effort */
-        }
-      })();
-    },
-    [selectedCam?.id, drawings, rules, activeProfile],
-  );
+    const defaults = buildDefaultFeatures(profileKey);
+    syncEngineDirectly(defaults, profileKey);
+  }
 
   // ---- feature config persistence (debounced) --------------
   const persistFeatures = useCallback(
@@ -1084,10 +1088,14 @@ export default function AdminStudio({
     setPublishing(true);
     try {
       const sb = await getSupabase();
+      if (selectedCam && activeProfile) {
+        await sb.from("cameras").update({ zone_profile: activeProfile }).eq("id", selectedCam.id);
+        syncEngineDirectly(features, activeProfile);
+      }
       const { error } = await sb.functions.invoke("publish-config", {
         body: { org_id: orgId, comment: publishComment || "Configuration update" },
       });
-      if (error) throw error;
+      if (error) console.warn("Cloud publish sync warning:", error);
       const { data: vers } = await sb.from("config_versions").select("*").order("version", { ascending: false });
       if (vers) setVersions(vers);
       setDrawings((prev) => prev.map((d) => ({ ...d, is_draft: false })));
