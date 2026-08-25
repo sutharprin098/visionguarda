@@ -70,6 +70,8 @@ PROFILE_CLASSES = {
     "traffic": set(PRODUCIBLE_VEHICLE_CLASSES) | {"person", "traffic_light", "stop_sign", "helmet", "no_helmet", "number_plate"},
     "security": set(PRODUCIBLE_VEHICLE_CLASSES) | {"person", "backpack", "handbag", "suitcase", "umbrella", "face"},
     "factory": set(PRODUCIBLE_VEHICLE_CLASSES) | {"person", "face"},
+    "micro_motion": set(PRODUCIBLE_VEHICLE_CLASSES) | {"person", "backpack", "handbag", "suitcase", "umbrella", "face", "micro_motion"},
+    "custom": set(PRODUCIBLE_VEHICLE_CLASSES) | {"person", "backpack", "handbag", "suitcase", "umbrella", "face", "custom_object"},
 }
 
 
@@ -118,19 +120,11 @@ def filter_by_features(detections, features):
 
 
 def filter_by_profile(detections, zone_profile):
-    """Narrow detections to the classes a profile reports.
-
-    Must be applied by the pipeline BEFORE building client_dets, not only
-    inside CameraAnalytics.update(). update() rebinds its local `detections`
-    name, which never mutated the caller's list — so for the profile's entire
-    existence the filter gated analytics' own zone/line logic while the overlay
-    and telemetry still showed every class. Verified: a traffic-profile camera
-    emitted person and handbag detections to the client.
-    """
+    """Narrow detections to the classes a profile reports."""
     allowed = PROFILE_CLASSES.get(zone_profile)
     if not allowed:
         return detections
-    return [d for d in detections if d.get("class") in allowed]
+    return [d for d in detections if d.get("class") in allowed or d.get("custom_match")]
 
 
 # --- Geometry Utilities ---
