@@ -371,8 +371,10 @@ export default function AdminStudio({
         setCameras(cams);
         setSelectedCam((prev) => {
           if (prev && cams.some((c) => c.id === prev.id)) {
-            // Keep the selected camera intact, but update its fields
-            return cams.find((c) => c.id === prev.id) || prev;
+            const fetched = cams.find((c) => c.id === prev.id) || prev;
+            const savedProf = typeof localStorage !== "undefined" ? localStorage.getItem(`cam_profile_${prev.id}`) : null;
+            const activeProf = savedProf || prev.zone_profile;
+            return activeProf ? { ...fetched, zone_profile: activeProf } : fetched;
           }
           return cams.length > 0 ? cams[0] : null;
         });
@@ -510,7 +512,8 @@ export default function AdminStudio({
       const { data: ruleList } = await sb.from("rule_engine_rules").select("*").eq("camera_id", cam.id).is("deleted_at", null);
       setRules(ruleList ?? []);
 
-      const prof = (cam.zone_profile as ZoneProfileKey) || null;
+      const savedProf = typeof localStorage !== "undefined" ? (localStorage.getItem(`cam_profile_${cam.id}`) as ZoneProfileKey | null) : null;
+      const prof = savedProf || (cam.zone_profile as ZoneProfileKey) || "micro_motion";
       setActiveProfile(prof);
       if (prof) await loadProfileConfig(cam, prof);
       else { setFeatures({}); setConfigId(null); }
@@ -564,6 +567,12 @@ export default function AdminStudio({
     setActivePoints([]);
     setDrawMode("view");
     setDrawBinding(null);
+
+    try {
+      if (typeof localStorage !== "undefined") {
+        localStorage.setItem(`cam_profile_${selectedCam.id}`, profileKey);
+      }
+    } catch {}
 
     const sb = await getSupabase();
     await sb.from("cameras").update({ zone_profile: profileKey }).eq("id", selectedCam.id);
