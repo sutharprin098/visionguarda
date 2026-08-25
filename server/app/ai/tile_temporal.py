@@ -210,6 +210,13 @@ class TemporalFusion:
         if not getattr(settings, "verify_enabled", True):
             return "accept"
 
+        try:
+            from app.ai.custom_detector import has_active_custom_models
+            if has_active_custom_models():
+                return "accept"
+        except Exception:
+            pass
+
         hi = float(getattr(settings, "verify_accept_conf", 0.95))
         mid = float(getattr(settings, "verify_second_pass_conf", 0.80))
         lo = float(getattr(settings, "verify_history_conf", 0.60))

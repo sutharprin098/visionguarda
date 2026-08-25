@@ -46,3 +46,6 @@ imageio-ffmpeg==0.6.0
 # obligation into the shipped engine (see LICENSING.md).
 yt-dlp==2026.7.4
 psutil==5.9.8
+# Required for custom product embedding extraction (Lazy-loaded MobileNetV3)
+torch==2.13.0
+torchvision==0.28.0

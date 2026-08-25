@@ -130,7 +130,7 @@ REQUIRE_GPU = os.getenv("CAMAI_REQUIRE_GPU", "").strip().lower() in ("1", "true"
 #
 # Set CAMAI_MJPEG_MAX_FPS=0 to disable the cap entirely, or lower it on a
 # machine running many cameras where preview smoothness matters less than CPU.
-MJPEG_MAX_FPS = float(os.getenv("CAMAI_MJPEG_MAX_FPS", "30"))
+MJPEG_MAX_FPS = float(os.getenv("CAMAI_MJPEG_MAX_FPS", "15"))
 
 # Recording settings
 RECORDING_FPS = 10

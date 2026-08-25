@@ -134,7 +134,8 @@ def test_custom_and_unset_do_not_narrow(profile):
 #   face                  -> app/ai/face.py   (YuNet, MIT)
 #   helmet / no_helmet    -> app/ai/helmet.py (RT-DETR helmet model)
 #   number_plate          -> app/ai/plate.py  (plate detector + CRNN OCR)
-NON_COCO_PRODUCIBLE = {"face", "helmet", "no_helmet", "number_plate"}
+#   custom_object         -> app/ai/custom_detector.py (Few-Shot Visual Similarity)
+NON_COCO_PRODUCIBLE = {"face", "helmet", "no_helmet", "number_plate", "custom_object"}
 
 
 def test_profiles_only_promise_classes_something_can_produce():

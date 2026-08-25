@@ -82,6 +82,7 @@ function colorFor(det: TelemetryDetection): string {
     return "#ef4444";               // Red (> 80 km/h)
   }
 
+  if (det.custom_match) return "#a855f7";
   if (["car", "truck", "bus", "van", "auto_rickshaw", "tractor", "emergency_vehicle"].includes(c)) return COLORS.vehicle;
   if (["motorcycle", "bicycle"].includes(c)) return COLORS.twowheeler;
   if (c === "person") return COLORS.person;
@@ -94,6 +95,11 @@ function colorFor(det: TelemetryDetection): string {
 
 /** Label for one detection: CLASS #ID  [SPEED km/h]. */
 function labelFor(det: TelemetryDetection): string {
+  if (det.label) {
+    const idStr = det.track_id != null ? ` #${String(det.track_id).padStart(2, '0')}` : "";
+    return `${det.label}${idStr}`;
+  }
+
   if (det.class === "number_plate" && det.plate_text) {
     return `${det.plate_text} ${Math.round(det.confidence * 100)}%`;
   }

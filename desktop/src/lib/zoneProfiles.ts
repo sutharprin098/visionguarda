@@ -99,7 +99,7 @@ export interface FeatureDef {
    */
   unavailable?: string;
   /** Special panels rendered by the UI instead of a param card. */
-  kind?: "feature" | "roi_editor" | "schedule" | "alerts";
+  kind?: "feature" | "roi_editor" | "schedule" | "alerts" | "custom_model_registration";
   params: FeatureParam[];
 }
 
@@ -672,6 +672,14 @@ const CUSTOM: ProfileDef = {
 
       description: "Run object detection inside any drawn zone.",
       params: [confidence(0.4), classes(COCO_CLASSES, ["person"])],
+    },
+    {
+      key: "custom_model_registration",
+      label: "Custom Product Visual Registration",
+      description: "Upload reference images to train a custom detection model for this camera.",
+      group: "Detection",
+      kind: "custom_model_registration",
+      params: [],
     },
     {
       key: "custom_counting", label: "Counting Zone", group: "Tracking & Counting", requiresGeometry: "line",

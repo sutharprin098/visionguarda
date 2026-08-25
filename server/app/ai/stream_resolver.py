@@ -252,20 +252,25 @@ def _extract(url: str) -> _Resolved:
         "extractor_retries": 1,
         "extractor_args": {
             "youtube": {
-                "player_client": ["android", "web", "tv"]
+                "player_client": ["mweb", "ios", "web", "tv", "android"]
             }
         },
     }
+    info = None
     try:
         with yt_dlp.YoutubeDL(opts) as ydl:
             info = ydl.extract_info(url, download=False)
     except Exception as e:
-        # yt-dlp's message already names the reason (private, geo-blocked,
-        # ended, members-only). Strip its "ERROR: " prefix and any non-ASCII:
-        # this goes to a Windows console whose code page mangles it.
-        msg = str(e).replace("ERROR: ", "").strip()
-        msg = msg.encode("ascii", "ignore").decode()
-        raise StreamResolveError(msg[:200] or "extraction failed")
+        # Fallback retry without restrictive player_client if first pass fails
+        try:
+            opts_fallback = dict(opts)
+            opts_fallback.pop("extractor_args", None)
+            with yt_dlp.YoutubeDL(opts_fallback) as ydl:
+                info = ydl.extract_info(url, download=False)
+        except Exception as e2:
+            msg = str(e2).replace("ERROR: ", "").strip()
+            msg = msg.encode("ascii", "ignore").decode()
+            raise StreamResolveError(msg[:200] or "extraction failed")
 
     if not info:
         raise StreamResolveError("no stream information returned")

@@ -260,7 +260,7 @@ export default function FullscreenViewer({
           connection open for a source the engine says has no video. The reason
           banner below explains it, and telemetry keeps flowing on the WebSocket
           so recovery re-requests the stream on its own. */}
-      {!streamFailed && !sourceFault ? (
+      {!streamFailed ? (
         <img
           key={`${cameraId}_${retryCount}_${imgCors ? "cors" : "plain"}`}
           ref={imgRef}
@@ -288,7 +288,7 @@ export default function FullscreenViewer({
       {/* Mounted whenever the stream is, not only while boxes exist — a canvas
           that unmounts on every empty frame has to re-measure itself before it
           can draw the next non-empty one. */}
-      {!streamFailed && !sourceFault && (
+      {!streamFailed && (
         <DetectionOverlay
           detections={shown}
           mediaRef={imgRef as React.RefObject<HTMLImageElement>}

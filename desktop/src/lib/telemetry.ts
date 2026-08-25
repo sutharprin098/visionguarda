@@ -78,6 +78,8 @@ export interface TelemetryDetection {
   /** OCR-read plate number, on number_plate detections only. null when the
    *  plate was localised but not read (no OCR model, or OCR failed). */
   plate_text?: string | null;
+  custom_match?: boolean;
+  label?: string;
   bbox: { x1: number; y1: number; x2: number; y2: number };
 }
 
@@ -189,7 +191,9 @@ export function detectionsRenderEqual(
       p.speed !== q.speed ||
       p.overspeed !== q.overspeed ||
       p.speed_limit !== q.speed_limit ||
-      p.plate_text !== q.plate_text
+      p.plate_text !== q.plate_text ||
+      p.custom_match !== q.custom_match ||
+      p.label !== q.label
     ) return false;
     if (
       Math.abs(p.bbox.x1 - q.bbox.x1) > EPS ||

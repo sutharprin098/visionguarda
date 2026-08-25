@@ -146,8 +146,10 @@ def system():
 def performance():
     """Aggregate live performance for the dashboard gauges."""
     running = [t for t in manager.camera_threads.values() if t.running]
-    avg_fps = round(sum(t.latest_telemetry.get("fps", 0) for t in running) / len(running), 1) if running else 0.0
-    avg_latency = round(sum(t.latest_telemetry.get("latency", 0) for t in running) / len(running), 1) if running else 0.0
+    online_cams = [t for t in running if getattr(t, "_health_status", "") == "online"]
+    target_cams = online_cams if online_cams else running
+    avg_fps = round(sum(t.latest_telemetry.get("fps", 0) for t in target_cams) / len(target_cams), 1) if target_cams else 0.0
+    avg_latency = round(sum(t.latest_telemetry.get("latency", 0) for t in target_cams) / len(target_cams), 1) if target_cams else 0.0
     cpu, mem = _proc_metrics()
     return {
         "avg_fps": avg_fps,

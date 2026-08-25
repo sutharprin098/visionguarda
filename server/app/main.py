@@ -1210,6 +1210,73 @@ def export_traffic_logs(format: str = "csv", camera_id: Optional[str] = None, is
         )
 
 
+from fastapi import Form
+
+class ModelToggleRequest(BaseModel):
+    active: bool
+
+@app.get("/api/custom_models")
+def list_custom_models_api():
+    """Lists all registered custom product models."""
+    from app.ai.custom_detector import list_custom_models
+    return {"models": list_custom_models()}
+
+
+@app.post("/api/custom_models/register", dependencies=control)
+async def register_custom_model_api(
+    name: Optional[str] = Form("Custom Product"),
+    files: List[UploadFile] = File(...)
+):
+    """Registers custom model embeddings for a named product from uploaded reference images."""
+    from app.ai.custom_detector import register_custom_model
+    try:
+        images_data = []
+        for file in files:
+            content = await file.read()
+            images_data.append(content)
+        
+        meta = await asyncio.to_thread(register_custom_model, name, images_data)
+        return {"success": True, "registered_count": meta["reference_count"], "model": meta}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to register custom model: {str(e)}")
+
+
+@app.post("/api/custom_model/register", dependencies=control)
+async def register_custom_model_legacy_api(
+    name: Optional[str] = Form("Custom Product"),
+    files: List[UploadFile] = File(...)
+):
+    return await register_custom_model_api(name=name, files=files)
+
+
+@app.post("/api/custom_models/{model_id}/toggle", dependencies=control)
+def toggle_custom_model_api(model_id: str, req: ModelToggleRequest):
+    """Toggles active state of a custom model."""
+    from app.ai.custom_detector import toggle_custom_model
+    try:
+        updated = toggle_custom_model(model_id, req.active)
+        return {"success": True, "model": updated}
+    except Exception as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+@app.delete("/api/custom_models/{model_id}", dependencies=control)
+def delete_custom_model_api(model_id: str):
+    """Deletes a custom model by ID."""
+    from app.ai.custom_detector import delete_custom_model
+    try:
+        res = delete_custom_model(model_id)
+        return res
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/custom_model/status")
+def get_custom_model_status_api():
+    """Gets status of custom models."""
+    from app.ai.custom_detector import get_custom_model_status
+    return get_custom_model_status()
+
 
 if __name__ == "__main__":
     import os

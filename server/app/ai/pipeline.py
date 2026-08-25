@@ -1117,17 +1117,20 @@ class _Slot:
         return self._ready.is_set()
 
 
-def _fps(ts_deque: deque, window: float = 2.0) -> float:
-    """Sliding-window FPS from a timestamp deque (trims in-place from the left).
-
-    Backed by a maxlen deque (see PipelineCoordinator.__init__) so even if the
-    stage that normally calls this dies, the deque itself can never grow past
-    its maxlen — memory stays bounded independent of whether trimming happens.
-    """
+def _fps(ts_deque: deque, window: float = 3.0) -> float:
+    """Sliding-window FPS from a timestamp deque (trims in-place from the left)."""
     now = time.time()
     while ts_deque and now - ts_deque[0] > window:
         ts_deque.popleft()
-    return len(ts_deque) / window if len(ts_deque) > 1 else 0.0
+    if len(ts_deque) < 2:
+        return 0.0
+    if now - ts_deque[-1] > 1.5:
+        return 0.0
+    span = ts_deque[-1] - ts_deque[0]
+    if span <= 0.0:
+        return 0.0
+    calc_fps = (len(ts_deque) - 1) / span
+    return min(60.0, calc_fps)
 
 
 # ---------------------------------------------------------------------------
@@ -1264,7 +1267,7 @@ class PipelineCoordinator:
         # Display-only encode knobs, mutable at runtime via update_display_config().
         # Plain int/float attributes are fine to read/write without a lock here —
         # this only affects how Module 2 encodes the MJPEG preview, never the AI path.
-        self.display_max_width = 960
+        self.display_max_width = 640
         self.jpeg_quality = 65
 
         # ── Per-stage FPS sliding windows ───────────────────────────────────
@@ -1555,6 +1558,9 @@ class PipelineCoordinator:
         cannot accidentally serve a snapshot that has been sitting unchanged
         since the last retry cycle, up to 30s ago at full backoff.
         """
+        cur_cap_fps = _fps(self._cap_ts)
+        cur_tel_fps = _fps(self._tel_ts)
+        reported_fps = round(max(cur_cap_fps, cur_tel_fps), 1)
         self.latest_telemetry.update({
             "health_status": self._health_status,
             "source_error": self.source_error_text(),
@@ -1564,7 +1570,7 @@ class PipelineCoordinator:
             "status": self._health_status,
             "detections": [], "masks": [], "tracks": [],
             "people": 0, "vehicles": 0,
-            "fps": 0.0, "camera_fps": 0.0,
+            "fps": reported_fps, "camera_fps": round(cur_cap_fps, 1),
         })
 
     def publish_source_status(self, min_interval: float = 2.0):
@@ -1940,7 +1946,7 @@ class PipelineCoordinator:
         self._file_frame_interval = 0.0
 
         def _refresh_file_pacing():
-            if not self._is_video_file or self.cap is None:
+            if (not self._is_video_file and not getattr(self, "_is_page_url", False)) or self.cap is None:
                 return
             try:
                 declared = float(self.cap.get(cv2.CAP_PROP_FPS))
@@ -2301,32 +2307,18 @@ class PipelineCoordinator:
             motion  = self._detect_motion(inf_frame)
 
 
+            # Keyframe Subsampling (Phase 1 Optimization):
+            # Run heavy YOLO GPU inference every 3rd frame (Keyframe N=3) or on force_infer sync.
+            # Intermediate frames skip GPU inference, allowing ByteTrack Kalman filter
+            # in tracking_loop to extrapolate track positions forward seamlessly while
+            # maintaining full pipeline frame rate.
             self._ai_frame_count = getattr(self, "_ai_frame_count", 0) + 1
+            keyframe_interval = max(1, int(os.getenv("CAMAI_AI_KEYFRAME_INTERVAL", "3")))
 
-            # Dynamic GPU auto-optimization (Requirement 9):
-            # Monitor GPU pressure via resource governor and adapt detection frequency
-            governor_snap = governor.snapshot()
-            gpu_headroom = governor_snap.get("headroom", 1.0)
+            force_infer = (time.time() - self._last_infer_ts) > self._FORCE_INFER_INTERVAL
 
-            if gpu_headroom >= 0.7:
-                infer_interval = 2  # Low GPU load: infer every 2nd frame when tracking (2x-3x FPS boost)
-            elif gpu_headroom >= 0.3:
-                infer_interval = 2
-            else:
-                infer_interval = 3  # High GPU load (>90%): throttle inference frequency to keep GPU in 70-90% sweet spot
-
-            # NOTE: motion was already computed above (right after the ROI crop).
-            # Do NOT recompute it here: _detect_motion() stores the current frame
-            # as its reference, so a second call this frame diffs the frame
-            # against itself and returns False almost every time — which silently
-            # suppressed motion-triggered inference and left detection firing only
-            # on the 1s force-infer timer (objects took ~1s to appear).
-            force_infer  = (time.time() - self._last_infer_ts) > self._FORCE_INFER_INTERVAL
-            
-            if motion or force_infer:
+            if force_infer or (self._ai_frame_count % keyframe_interval == 1):
                 should_infer = True
-            elif self._n_active_tracks > 0:
-                should_infer = (self._ai_frame_count % infer_interval == 0)
             else:
                 should_infer = False
 
@@ -2416,6 +2408,27 @@ class PipelineCoordinator:
                             for p in poly
                         ])
                     masks_polygons = scaled
+
+                # ── Custom Visual Embedding Matcher ───────────────────────────
+                try:
+                    from app.ai.custom_detector import match_crop, has_active_custom_models
+                    if self.zone_profile == "custom" or has_active_custom_models():
+                        for det in detections:
+                            b = det["bbox"]
+                            x1 = max(0, min(orig_w - 1, int(b["x1"])))
+                            y1 = max(0, min(orig_h - 1, int(b["y1"])))
+                            x2 = max(0, min(orig_w - 1, int(b["x2"])))
+                            y2 = max(0, min(orig_h - 1, int(b["y2"])))
+                            crop = frame[y1:y2, x1:x2]
+                            if crop.size > 0:
+                                is_match, similarity, matched_name = match_crop(crop, threshold=0.38)
+                                if is_match and matched_name:
+                                    det["class"] = matched_name
+                                    det["confidence"] = round(float(similarity), 2)
+                                    det["custom_match"] = True
+                                    det["label"] = f"{matched_name} ({int(similarity * 100)}%)"
+                except Exception as e:
+                    print(f"[CustomDetector Err] {e}", flush=True)
 
                 # ── Strict polygon ROI gate: cameras with one or more drawn zones
                 # only detect/track/analyze objects whose centroid or feet position
@@ -3069,7 +3082,7 @@ class PipelineCoordinator:
                 # Per-stage FPS
                 "camera_fps":    round(cap_fps, 1),
                 "decode_fps":    round(dec_fps, 1),
-                "inference_fps": round(ai_fps,  1) if data["motion"] else 0.0,
+                "inference_fps": round(ai_fps,  1),
                 "tracking_fps":  round(trk_fps, 1),
 
                 # Per-stage latency & timing breakdown

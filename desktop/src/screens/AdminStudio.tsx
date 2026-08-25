@@ -28,6 +28,7 @@ import {
   Eye,
   EyeOff,
   Bell,
+  Upload,
 } from "lucide-react";
 import clsx from "clsx";
 import { getSupabase } from "../lib/session";
@@ -171,6 +172,146 @@ export default function AdminStudio({
   const [activePoints, setActivePoints] = useState<number[][]>([]);
   const [editingDrawingId, setEditingDrawingId] = useState<string | null>(null);
 
+  // Custom Product Visual Registration State & Handlers
+  const [customImages, setCustomImages] = useState<{ file: File; preview: string }[]>([]);
+  const [customModelName, setCustomModelName] = useState("Cardboard Box");
+  const [isTraining, setIsTraining] = useState(false);
+  const [customModelsList, setCustomModelsList] = useState<Array<{ id: string; name: string; active: boolean; reference_count: number; created_at: number }>>([]);
+  const [modelStatus, setModelStatus] = useState<{ registered: boolean; reference_count: number; timestamp: number | null }>({
+    registered: false,
+    reference_count: 0,
+    timestamp: null,
+  });
+  const createdUrls = useRef<string[]>([]);
+
+  const fetchCustomModels = useCallback(async () => {
+    try {
+      const res = await fetch("http://localhost:8000/api/custom_models");
+      if (res.ok) {
+        const data = await res.json();
+        setCustomModelsList(data.models || []);
+      }
+    } catch (err) {
+      console.warn("Failed to fetch custom models:", err);
+    }
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      createdUrls.current.forEach(url => {
+        try {
+          URL.revokeObjectURL(url);
+        } catch (e) {}
+      });
+    };
+  }, []);
+
+  const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!e.target.files) return;
+    const newFiles = Array.from(e.target.files).map(file => {
+      const url = URL.createObjectURL(file);
+      createdUrls.current.push(url);
+      return { file, preview: url };
+    });
+    setCustomImages(prev => [...prev, ...newFiles]);
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    if (!e.dataTransfer.files) return;
+    const newFiles = Array.from(e.dataTransfer.files).map(file => {
+      const url = URL.createObjectURL(file);
+      createdUrls.current.push(url);
+      return { file, preview: url };
+    });
+    setCustomImages(prev => [...prev, ...newFiles]);
+  };
+
+  const removeImage = (index: number) => {
+    setCustomImages(prev => {
+      const updated = [...prev];
+      try {
+        URL.revokeObjectURL(updated[index].preview);
+      } catch (e) {}
+      updated.splice(index, 1);
+      return updated;
+    });
+  };
+
+  const handleTrainAndSave = async () => {
+    if (customImages.length < 1) {
+      alert("Please upload at least 1 image to register the product.");
+      return;
+    }
+    if (!customModelName.trim()) {
+      alert("Please enter a model name (e.g. Cardboard Box).");
+      return;
+    }
+    setIsTraining(true);
+    try {
+      const formData = new FormData();
+      formData.append("name", customModelName.trim());
+      customImages.forEach(img => {
+        formData.append("files", img.file);
+      });
+
+      const res = await fetch("http://localhost:8000/api/custom_models/register", {
+        method: "POST",
+        body: formData,
+      });
+
+      if (!res.ok) {
+        throw new Error(await res.text() || "Failed to register custom model.");
+      }
+
+      const data = await res.json();
+      await fetchCustomModels();
+      
+      customImages.forEach(img => {
+        try {
+          URL.revokeObjectURL(img.preview);
+        } catch (e) {}
+      });
+      setCustomImages([]);
+      
+      alert(`Success! Saved custom model '${data.model.name}' with ${data.registered_count} reference images. Model is now active on live streams.`);
+    } catch (err: any) {
+      console.error(err);
+      alert(err.message || "Failed to register custom model.");
+    } finally {
+      setIsTraining(false);
+    }
+  };
+
+  const handleToggleModel = async (modelId: string, currentActive: boolean) => {
+    try {
+      const res = await fetch(`http://localhost:8000/api/custom_models/${modelId}/toggle`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ active: !currentActive }),
+      });
+      if (res.ok) {
+        fetchCustomModels();
+      }
+    } catch (err) {
+      console.error("Failed to toggle model active state:", err);
+    }
+  };
+
+  const handleDeleteModel = async (modelId: string, modelName: string) => {
+    if (!confirm(`Are you sure you want to delete model '${modelName}'?`)) return;
+    try {
+      const res = await fetch(`http://localhost:8000/api/custom_models/${modelId}`, {
+        method: "DELETE",
+      });
+      if (res.ok) {
+        fetchCustomModels();
+      }
+    } catch (err) {
+      console.error("Failed to delete model:", err);
+    }
+  };
+
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
 
   // Alert rule builder
@@ -305,6 +446,24 @@ export default function AdminStudio({
     };
   }, []);
 
+  useEffect(() => {
+    async function fetchStatus() {
+      try {
+        const res = await fetch("http://localhost:8000/api/custom_model/status");
+        if (res.ok) {
+          const data = await res.json();
+          setModelStatus(data);
+        }
+      } catch (err) {
+        console.warn("Could not fetch custom model status in AdminStudio:", err);
+      }
+    }
+    if (activeProfile === "custom" && selectedCam) {
+      fetchStatus();
+      fetchCustomModels();
+    }
+  }, [activeProfile, selectedCam, fetchCustomModels]);
+
   // ---- per-camera load: drawings, rules, profile config ----
   const loadProfileConfig = useCallback(async (cam: Camera, profileKey: ZoneProfileKey) => {
     const sb = await getSupabase();
@@ -396,8 +555,8 @@ export default function AdminStudio({
             method: "POST",
             headers: await controlHeaders(),
             body: JSON.stringify({
-              zones: JSON.stringify(drawings.filter((d) => d.geometry_type === "zone")),
-              lines: JSON.stringify(drawings.filter((d) => d.geometry_type === "line")),
+              zones: JSON.stringify(drawings.filter((d) => d.type !== "line")),
+              lines: JSON.stringify(drawings.filter((d) => d.type === "line")),
               rules: JSON.stringify(rules),
               zone_profile: activeProfile || "security",
               profile_features: JSON.stringify(next),
@@ -1246,6 +1405,170 @@ export default function AdminStudio({
     );
   }
 
+  function renderCustomModelRegistrationPanel() {
+    const activeCount = customModelsList.filter(m => m.active).length;
+    return (
+      <div className="space-y-3">
+        {/* Upload & Train Card */}
+        <div className="space-y-2.5 p-3 rounded border border-line bg-surface-0">
+          <div className="text-[10px] uppercase font-bold tracking-wider text-zinc-400">
+            Train New Product Model
+          </div>
+
+          <div>
+            <label className="block text-[10px] font-semibold text-zinc-400 mb-1">Product Model Name</label>
+            <input
+              type="text"
+              value={customModelName}
+              onChange={(e) => setCustomModelName(e.target.value)}
+              placeholder="e.g. Cardboard Box, Parle-G, Blue Bottle"
+              className="w-full rounded border border-line bg-surface-2 px-2.5 py-1.5 text-xs text-zinc-200 focus:outline-none focus:border-accent"
+            />
+          </div>
+
+          <div
+            onDragOver={(e) => e.preventDefault()}
+            onDrop={handleDrop}
+            className="flex flex-col items-center justify-center border border-dashed border-line rounded-lg p-3 bg-surface-2/40 hover:bg-surface-2/60 transition cursor-pointer relative"
+            onClick={() => document.getElementById("studio-file-upload")?.click()}
+          >
+            <input
+              id="studio-file-upload"
+              type="file"
+              multiple
+              accept="image/jpeg,image/png"
+              onChange={handleImageChange}
+              className="hidden"
+            />
+            <Upload size={16} className="text-zinc-400 mb-1" />
+            <span className="text-[11px] font-semibold text-zinc-300">Upload Reference Images</span>
+            <span className="text-[9px] text-zinc-500 mt-0.5 text-center">
+              Drag reference images here, or click to browse (JPEG/PNG)
+            </span>
+          </div>
+
+          {/* Previews Grid */}
+          {customImages.length > 0 && (
+            <div className="space-y-1.5">
+              <div className="flex justify-between items-center text-[10px]">
+                <span className="font-medium text-zinc-300">Selected Images ({customImages.length})</span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    customImages.forEach(img => {
+                      try {
+                        URL.revokeObjectURL(img.preview);
+                      } catch (e) {}
+                    });
+                    setCustomImages([]);
+                  }}
+                  className="text-danger hover:underline font-semibold"
+                >
+                  Clear All
+                </button>
+              </div>
+              <div className="grid grid-cols-6 gap-1.5">
+                {customImages.map((img, i) => (
+                  <div key={i} className="relative group aspect-square rounded overflow-hidden border border-line bg-surface-2">
+                    <img src={img.preview} alt="Preview" className="w-full h-full object-cover" />
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        removeImage(i);
+                      }}
+                      className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition duration-150"
+                    >
+                      <Trash size={10} className="text-white" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Build & Save Button */}
+          <div className="flex justify-end pt-1">
+            <button
+              type="button"
+              onClick={handleTrainAndSave}
+              disabled={isTraining || customImages.length === 0}
+              className="w-full inline-flex items-center justify-center gap-1.5 rounded bg-accent px-3 py-2 text-xs font-semibold text-white shadow hover:bg-accent/80 transition disabled:opacity-50"
+            >
+              {isTraining ? (
+                <>
+                  <svg className="animate-spin h-3.5 w-3.5 text-white" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                  </svg>
+                  <span>Extracting Embeddings...</span>
+                </>
+              ) : (
+                <span>Train & Save Model</span>
+              )}
+            </button>
+          </div>
+        </div>
+
+        {/* Registered Models List */}
+        <div className="space-y-2 p-3 rounded border border-line bg-surface-0">
+          <div className="flex items-center justify-between mb-1">
+            <span className="text-[10px] uppercase font-bold tracking-wider text-zinc-400">
+              Registered Custom Models ({customModelsList.length})
+            </span>
+            <span className="text-[9px] font-medium text-ok">
+              {activeCount} Active
+            </span>
+          </div>
+
+          {customModelsList.length === 0 ? (
+            <div className="text-[10px] text-zinc-500 py-3 text-center italic">
+              No custom models trained yet. Upload images above to create one.
+            </div>
+          ) : (
+            <div className="space-y-2 max-h-60 overflow-y-auto pr-1">
+              {customModelsList.map((m) => (
+                <div key={m.id} className="flex items-center justify-between p-2 rounded border border-line bg-surface-2/40 hover:bg-surface-2/80 transition">
+                  <div className="min-w-0 flex-1 pr-2">
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-xs font-semibold text-zinc-200 truncate">{m.name}</span>
+                      <span className="text-[9px] px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-400 font-mono">
+                        {m.reference_count} img{m.reference_count === 1 ? "" : "s"}
+                      </span>
+                    </div>
+                    <div className="text-[9px] text-zinc-500 mt-0.5">
+                      ID: {m.id}
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => handleToggleModel(m.id, m.active)}
+                      className={`px-2 py-0.5 text-[9px] font-semibold rounded transition ${
+                        m.active ? "bg-ok/20 text-ok border border-ok/30" : "bg-zinc-800 text-zinc-400 hover:text-zinc-200"
+                      }`}
+                    >
+                      {m.active ? "Active" : "Inactive"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteModel(m.id, m.name)}
+                      className="text-zinc-500 hover:text-danger p-1 transition"
+                      title="Delete Model"
+                    >
+                      <Trash size={12} />
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
   // ---- grouped feature rendering ---------------------------
   const profileDef = activeProfile ? ZONE_PROFILES[activeProfile] : null;
   const accent = profileDef ? ACCENT[profileDef.accent] : ACCENT.sky;
@@ -1537,6 +1860,7 @@ export default function AdminStudio({
                         {groupFeatures.map((f) =>
                           f.kind === "roi_editor" ? <div key={f.key}>{renderRoiPanel()}</div>
                           : f.kind === "alerts" ? <div key={f.key}>{renderAlertsPanel()}</div>
+                          : f.kind === "custom_model_registration" ? <div key={f.key}>{renderCustomModelRegistrationPanel()}</div>
                           : renderFeatureCard(f),
                         )}
                       </div>

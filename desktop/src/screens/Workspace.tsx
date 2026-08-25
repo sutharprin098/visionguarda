@@ -94,6 +94,8 @@ export default function Workspace({
   const [logs, setLogs] = useState<string[]>([]);
   const [consecutiveMisses, setConsecutiveMisses] = useState(0);
 
+  const activeProfile = bundle?.settings.find((s) => s.scope === "org" && s.key === "ai.profile")?.value || "Traffic";
+
   useEffect(() => {
     let cancelled = false;
 
@@ -1004,8 +1006,9 @@ const CameraTile = memo(function CameraTile({ camera: c, site, engineOnline, onF
 
   // `!paused` drops the MJPEG connection while the viewer covers this tile.
   // `engineOnline !== false` ensures stream renders even if health status fetch is pending.
+  // Keep stream element active during source fault so synthetic standby/recovery stream renders with live telemetry overlays.
   const showStream =
-    engineOnline !== false && !streamFailed && !isScreenShareCam && !paused && !sourceFault;
+    engineOnline !== false && !streamFailed && !isScreenShareCam && !paused;
 
   // Show the reason banner for a real camera whose source is faulted, and for a
   // screen share that WAS running and has stopped being pushed. Not for an
@@ -1330,7 +1333,25 @@ const CameraTile = memo(function CameraTile({ camera: c, site, engineOnline, onF
               onClick={async () => {
                 try {
                   const sb = await getSupabase();
-                  await sb.from("cameras").update({ source_type: "virtual" }).eq("id", c.id);
+                  await sb.from("cameras").update({ source_type: "virtual", type: "virtual" }).eq("id", c.id);
+                  try {
+                    await fetch("http://127.0.0.1:8000/api/cameras", {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({
+                        id: c.id,
+                        name: c.name,
+                        type: "virtual",
+                        source: "virtual",
+                        is_active: true,
+                        zones: c.zones || "[]",
+                        lines: c.lines || "[]",
+                        rules: c.rules || "[]"
+                      })
+                    });
+                  } catch (e) {
+                    console.log("[VirtualStream] Local engine camera switch notice:", e);
+                  }
                 } catch (err) {
                   console.error("Failed to switch camera to virtual source", err);
                 }
