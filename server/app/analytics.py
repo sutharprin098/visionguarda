@@ -7,7 +7,7 @@ from app import config
 # Classes treated as "items" for abandoned-object detection — anything that
 # isn't a person or vehicle and can plausibly be left behind. Must stay in
 # sync with the classes enabled in app/ai/backend.py's COCO_CLASS_MAP.
-ITEM_CLASSES = {"backpack", "handbag", "suitcase", "umbrella"}
+ITEM_CLASSES = {"backpack", "handbag", "suitcase", "umbrella", "micro_motion"}
 VEHICLE_CLASSES = {
     "car", "bus", "truck", "motorcycle", "bicycle", "van",
     "auto_rickshaw", "auto", "rickshaw", "tractor", "emergency_vehicle",

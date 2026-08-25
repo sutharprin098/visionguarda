@@ -126,3 +126,20 @@ class ScreenMicroMotionDetector:
 
         self.last_motion_detections = detections
         return annotated_frame, detections
+
+    def detect(self, frame: np.ndarray) -> List[Dict[str, Any]]:
+        """
+        Runs micro-motion detection on frame and returns standardized detection list:
+        [{'bbox': [x, y, w, h], 'confidence': float, 'class': 'micro_motion', 'tag': str}]
+        """
+        _, dets = self.process_frame(frame)
+        result = []
+        for d in dets:
+            box = d["box"]
+            result.append({
+                "bbox": [box[0], box[1], box[2], box[3]],
+                "confidence": d.get("confidence", 0.85),
+                "class": "micro_motion",
+                "tag": d.get("tag", "Micro Motion")
+            })
+        return result
