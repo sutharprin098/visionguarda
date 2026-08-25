@@ -90,6 +90,7 @@ FEATURE_CLASSES = {
     "object_removed": set(ITEM_CLASSES),
     "traffic_light_violation": {"traffic_light"},
     "stop_line_violation": {"stop_sign"},
+    "micro_motion_hud": {"micro_motion"},
 }
 
 

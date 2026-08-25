@@ -29,21 +29,18 @@ def create_sample_cctv_video(output_path="test_cctv_motion.mp4", duration_sec=10
     for f in range(num_frames):
         frame = bg.copy()
         
-        # Add CCTV grain / noise
-        noise = np.random.normal(0, 4, (height, width, 3)).astype(np.uint8)
-        frame = cv2.add(frame, noise)
-
         # 1. Simulate Rodent (Mouse/Rat) moving quickly across floor
         rx += 3.5 if f < 150 else -2.5
         ry += np.sin(f * 0.2) * 1.5
         r_x_int, r_y_int = int(rx), int(ry)
-        cv2.ellipse(frame, (r_x_int, r_y_int), (7, 4), 15, 0, 360, (60, 65, 60), -1) # Mouse body
+        # Bright high-contrast mouse on dark floor
+        cv2.ellipse(frame, (r_x_int, r_y_int), (10, 6), 15, 0, 360, (220, 220, 220), -1)
 
         # 2. Simulate Insect/Moth fluttering around camera IR light
         ix += np.sin(f * 0.5) * 6
         iy += np.cos(f * 0.7) * 5
         i_x_int, i_y_int = int(ix), int(iy)
-        cv2.circle(frame, (i_x_int, i_y_int), 3, (160, 170, 160), -1) # Fluttering insect
+        cv2.circle(frame, (i_x_int, i_y_int), 4, (255, 255, 255), -1)
 
         # 3. Add timestamp overlay
         timestamp_str = f"CAM_04 NIGHT_IR  2026-08-25 02:14:{10 + (f // fps):02d}"
