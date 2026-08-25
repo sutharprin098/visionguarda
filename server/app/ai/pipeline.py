@@ -1892,35 +1892,61 @@ class PipelineCoordinator:
     # -----------------------------------------------------------------------
 
     def _generate_synthetic_demo_frame(self, reason: str = "Virtual Demo Stream"):
-        """Generates a dynamic 30fps demo frame with moving vehicles, HUD, and timecode
-        so cameras always maintain an active, live visual stream."""
+        """Generates a dynamic 30fps CCTV demo frame with realistic micro-motion or streams test_cctv_motion.mp4."""
         from datetime import datetime
+
+        # 1. Prefer streaming real test_cctv_motion.mp4 if available
+        test_video_path = os.path.abspath("test_cctv_motion.mp4")
+        if os.path.exists(test_video_path):
+            try:
+                if not hasattr(self, "_demo_video_cap") or self._demo_video_cap is None or not self._demo_video_cap.isOpened():
+                    self._demo_video_cap = cv2.VideoCapture(test_video_path)
+                ret_demo, demo_frame = self._demo_video_cap.read()
+                if not ret_demo or demo_frame is None:
+                    self._demo_video_cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+                    ret_demo, demo_frame = self._demo_video_cap.read()
+                if ret_demo and demo_frame is not None:
+                    return cv2.resize(demo_frame, (960, 540))
+            except Exception as e:
+                print(f"[DemoFrame Err] {e}", flush=True)
+
         w, h = 960, 540
         frame = np.zeros((h, w, 3), dtype=np.uint8)
-        # Deep slate background with grid pattern
+
+        if self.zone_profile == "micro_motion":
+            # Low-light CCTV warehouse IR environment
+            frame[:, :] = (25, 28, 25)
+            cv2.rectangle(frame, (100, 100), (300, 400), (35, 40, 35), -1)
+            cv2.rectangle(frame, (650, 80), (880, 480), (30, 35, 30), -1)
+
+            t = time.time()
+            # Rodent moving across floor
+            rx = int(150 + ((t * 80) % 650))
+            ry = int(450 + np.sin(t * 3) * 10)
+            cv2.ellipse(frame, (rx, ry), (10, 6), 15, 0, 360, (220, 220, 220), -1)
+            cv2.putText(frame, "RODENT", (rx - 20, ry - 12), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 255, 64), 1)
+
+            # Fluttering insect near top
+            ix = int(700 + np.sin(t * 4) * 40)
+            iy = int(150 + np.cos(t * 5) * 30)
+            cv2.circle(frame, (ix, iy), 4, (255, 255, 255), -1)
+            cv2.putText(frame, "INSECT", (ix - 18, iy - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 255, 64), 1)
+
+            time_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+            cv2.putText(frame, f"CAM_04 NIGHT_IR  {time_str}", (20, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (200, 200, 200), 1)
+            return frame
+
+        # Deep slate background for fallback
         frame[:, :] = (32, 34, 38)
         for y in range(0, h, 60):
             cv2.line(frame, (0, y), (w, y), (42, 45, 52), 1)
         for x in range(0, w, 60):
             cv2.line(frame, (x, 0), (x, h), (42, 45, 52), 1)
 
-        # Draw road & lane markings
-        cv2.rectangle(frame, (80, 180), (880, 480), (50, 53, 60), -1)
-        cv2.line(frame, (80, 330), (880, 330), (220, 220, 220), 2)
-
-        # Animated simulated vehicle
         t = time.time()
         pos_x = int(100 + ((t * 150) % 720))
         cv2.rectangle(frame, (pos_x, 250), (pos_x + 100, 320), (0, 140, 255), -1)
-        cv2.rectangle(frame, (pos_x + 15, 260), (pos_x + 45, 310), (30, 30, 30), -1)
-        cv2.putText(frame, "CAR-DEMO", (pos_x + 5, 240), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 220, 255), 1)
 
-        # Second vehicle going opposite direction
-        pos_x2 = int(800 - ((t * 110) % 720))
-        cv2.rectangle(frame, (pos_x2, 350), (pos_x2 + 110, 420), (0, 220, 100), -1)
-        cv2.putText(frame, "BUS-DEMO", (pos_x2 + 5, 340), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 255, 120), 1)
-
-        # Timecode & HUD Overlay
         time_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
         cam_name = getattr(self, "camera_id", "CamAI")[:12]
         cv2.putText(frame, f"CamAI Node | {cam_name}", (20, 35), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 255, 200), 2)
