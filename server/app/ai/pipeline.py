@@ -1895,9 +1895,10 @@ class PipelineCoordinator:
         """Generates a dynamic 30fps CCTV demo frame with realistic micro-motion or streams test_cctv_motion.mp4."""
         from datetime import datetime
 
-        # 1. Prefer streaming real test_cctv_motion.mp4 if available
+        # 1. Stream test_cctv_motion.mp4 ONLY for virtual/demo camera sources
         test_video_path = os.path.abspath("test_cctv_motion.mp4")
-        if os.path.exists(test_video_path):
+        is_virtual = (self.source_type == "virtual" or "test_cctv" in str(self.source).lower())
+        if is_virtual and os.path.exists(test_video_path):
             try:
                 if not hasattr(self, "_demo_video_cap") or self._demo_video_cap is None or not self._demo_video_cap.isOpened():
                     self._demo_video_cap = cv2.VideoCapture(test_video_path)
@@ -2171,7 +2172,9 @@ class PipelineCoordinator:
                 try:
                     from app.ai.enhancer import zero_dce
                     nv_cfg = self.profile_features.get("night_vision_zero_dce", {})
-                    is_enabled = nv_cfg.get("enabled", True)
+                    if not nv_cfg and "night_vision" in self.profile_features:
+                        nv_cfg = self.profile_features.get("night_vision", {})
+                    is_enabled = nv_cfg.get("enabled", True) if isinstance(nv_cfg, dict) else True
                     params = nv_cfg.get("params", {}) if isinstance(nv_cfg.get("params"), dict) else {}
                     mode = str(params.get("mode", getattr(self, "zero_dce_mode", "auto"))).lower()
                     raw_thresh = params.get("threshold", getattr(self, "zero_dce_threshold", 140.0))
@@ -2181,7 +2184,7 @@ class PipelineCoordinator:
                         thresh = 140.0
 
                     if is_enabled and mode != "off":
-                        force_on = (mode == "on")
+                        force_on = (mode == "on") or (self.zone_profile in ("micro_motion", "night_vision"))
                         frame, _ = zero_dce.enhance(frame, override_threshold=thresh, force_enable=force_on)
                         data["frame"] = frame
                 except Exception as e:

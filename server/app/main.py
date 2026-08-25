@@ -874,21 +874,33 @@ def remove_camera(camera_id: str):
 def update_camera_analytics(camera_id: str, payload: CameraAnalyticsPayload):
     cam = get_camera(camera_id)
     if not cam:
-        raise HTTPException(status_code=404, detail="Camera not found")
-        
-    # Update SQLite
-    save_camera(
-        cam["id"],
-        cam["name"],
-        cam["type"],
-        cam["source"],
-        cam["is_active"],
-        payload.zones,
-        payload.lines,
-        payload.rules or "[]",
-        payload.zone_profile,
-        payload.profile_features or "{}"
-    )
+        # Auto-create camera in local database for newly added Supabase cameras
+        save_camera(
+            camera_id,
+            f"Camera {camera_id[:6]}",
+            "virtual",
+            "test_cctv_motion.mp4",
+            1,
+            payload.zones,
+            payload.lines,
+            payload.rules or "[]",
+            payload.zone_profile,
+            payload.profile_features or "{}"
+        )
+    else:
+        # Update existing SQLite camera record
+        save_camera(
+            cam["id"],
+            cam["name"],
+            cam["type"],
+            cam["source"],
+            cam["is_active"],
+            payload.zones,
+            payload.lines,
+            payload.rules or "[]",
+            payload.zone_profile,
+            payload.profile_features or "{}"
+        )
     
     # Ensure camera thread is running
     if camera_id not in manager.camera_threads:
