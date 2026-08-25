@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Verify CamAI SaaS Ad Video</title>
+  <style>
+    body {
+      background: #0b0f19;
+      color: #e2e8f0;
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      margin: 0;
+      padding: 20px;
+      text-align: center;
+    }
+    h1 {
+      font-size: 22px;
+      color: #38bdf8;
+      margin-bottom: 10px;
+    }
+    .video-container {
+      max-width: 960px;
+      margin: 0 auto 20px auto;
+      background: #000;
+      border-radius: 8px;
+      overflow: hidden;
+      border: 1px solid #334155;
+    }
+    video {
+      width: 100%;
+      display: block;
+    }
+    .controls {
+      margin-bottom: 20px;
+    }
+    button {
+      background: #0284c7;
+      color: #fff;
+      border: none;
+      padding: 8px 16px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-weight: bold;
+      margin: 5px;
+      transition: background 0.2s;
+    }
+    button:hover {
+      background: #0369a1;
+    }
+    .info {
+      font-size: 14px;
+      color: #94a3b8;
+    }
+  </style>
+</head>
+<body>
+  <h1>Verify CamAI SaaS Ad Video</h1>
+  
+  <div class="video-container">
+    <video id="demoVideo" src="/videos/CamAI_Product_Demo_Final.mp4" muted controls></video>
+  </div>
+  
+  <div class="controls">
+    <button onclick="seekTo(4)">1. Opening Logo (4s)</button>
+    <button onclick="seekTo(15)">2. AI Detection HUD (15s)</button>
+    <button onclick="seekTo(32)">3. Portal Telemetry (32s)</button>
+    <button onclick="seekTo(48)">4. Permissions Region (48s)</button>
+    <button onclick="seekTo(60)">5. Telegram Notification (60s)</button>
+    <button onclick="seekTo(78)">6. Feature Showcase Grid (78s)</button>
+    <button onclick="seekTo(85)">7. Outro End Card (85s)</button>
+  </div>
+  
+  <p class="info">Click each button to seek the video to the specified timestamp to capture keyframe screenshots.</p>
+
+  <script>
+    const v = document.getElementById('demoVideo');
+    function seekTo(sec) {
+      v.currentTime = sec;
+    }
+  </script>
+</body>
+</html>
