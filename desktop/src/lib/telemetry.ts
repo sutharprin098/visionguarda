@@ -147,6 +147,13 @@ export interface CameraTelemetry {
   /** Operator-readable reason the source has no video, null while healthy.
    *  Built by pipeline.PipelineCoordinator.source_error_text(). */
   source_error?: string | null;
+  /** Real-time Zero-DCE night-vision low-light enhancement telemetry. */
+  night_vision?: {
+    zero_dce_applied: boolean;
+    mean_luminance: number;
+    method: string;
+    latency_ms: number;
+  };
 }
 
 /**

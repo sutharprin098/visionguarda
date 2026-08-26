@@ -10,9 +10,9 @@ class ScreenMicroMotionDetector:
     including rodents, insects, birds, vegetation shifts, and distant human motion.
     """
     def __init__(self, 
-                 min_area: int = 15, 
+                 min_area: int = 8, 
                  max_area: int = 25000, 
-                 threshold_value: int = 18, 
+                 threshold_value: int = 8, 
                  blur_kernel: Tuple[int, int] = (15, 15),
                  history_frames: int = 3):
         self.min_area = min_area
@@ -46,6 +46,10 @@ class ScreenMicroMotionDetector:
         self.frame_buffer.append(blurred)
         if len(self.frame_buffer) > self.history_frames:
             self.frame_buffer.pop(0)
+
+        # Clear buffer if frame dimensions change mid-stream
+        if self.frame_buffer and self.frame_buffer[0].shape != blurred.shape:
+            self.frame_buffer = [blurred]
 
         # Need at least 2 frames to calculate motion difference
         if len(self.frame_buffer) < 2:

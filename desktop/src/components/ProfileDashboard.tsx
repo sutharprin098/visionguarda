@@ -46,6 +46,19 @@ function countClass(t: CameraTelemetry, ...classes: string[]): number {
 function tilesFor(profile: ZoneProfileKey | null, t: CameraTelemetry): Tile[] {
   const c = t.counters ?? {};
   const fps = { label: "FPS", value: fmt(t.fps) };
+  
+  const nv = t.night_vision;
+  let nvVal = "Standby";
+  if (nv) {
+    if (nv.zero_dce_applied) {
+      nvVal = `Active (${nv.mean_luminance}L)`;
+    } else if (nv.method === "off") {
+      nvVal = "Off";
+    } else {
+      nvVal = `Idle (${nv.mean_luminance}L)`;
+    }
+  }
+  const nvTile: Tile = { label: "Night Vision", value: nvVal, hint: nv?.zero_dce_applied ? "Zero-DCE low-light enhancement active" : "Luminance monitoring" };
 
   if (profile === "traffic") {
     // Average speed is only meaningful once a speed gate has calibrated a
@@ -144,6 +157,7 @@ function tilesFor(profile: ZoneProfileKey | null, t: CameraTelemetry): Tile[] {
       { label: "Detections", value: String((t.detections ?? []).length) },
       { label: "People", value: String(t.people ?? 0) },
       { label: "Vehicles", value: String(t.vehicles ?? 0) },
+      nvTile,
       fps,
     ];
   }
@@ -153,6 +167,7 @@ function tilesFor(profile: ZoneProfileKey | null, t: CameraTelemetry): Tile[] {
     { label: "People", value: String(t.people ?? 0) },
     { label: "Vehicles", value: String(t.vehicles ?? 0) },
     { label: "Items", value: String(t.items ?? 0) },
+    nvTile,
     fps,
   ];
 }

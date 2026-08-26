@@ -98,7 +98,8 @@ function colorFor(det: TelemetryDetection): string {
 /** Label for one detection: CLASS #ID  [SPEED km/h]. */
 function labelFor(det: TelemetryDetection): string {
   if (det.class === "micro_motion") {
-    const title = det.label || "SUBTLE MOTION";
+    const rawTitle = det.label || "SUBTLE MOTION";
+    const title = rawTitle === "MICRO MOTION" ? "SUBTLE MOTION" : rawTitle;
     const idStr = det.track_id != null ? ` #${String(det.track_id).padStart(2, '0')}` : "";
     const confStr = ` ${Math.round(det.confidence * 100)}%`;
     return `${title.toUpperCase()}${idStr}${confStr}`;

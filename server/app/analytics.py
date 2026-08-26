@@ -118,7 +118,7 @@ def filter_by_features(detections, features):
     drop.discard("micro_motion")
     if not drop:
         return detections
-    return [d for d in detections if d.get("class") not in drop]
+    return [d for d in detections if d.get("class") not in drop or d.get("class") == "micro_motion"]
 
 
 def filter_by_profile(detections, zone_profile):
@@ -126,7 +126,7 @@ def filter_by_profile(detections, zone_profile):
     allowed = PROFILE_CLASSES.get(zone_profile)
     if not allowed:
         return detections
-    return [d for d in detections if d.get("class") in allowed or d.get("custom_match")]
+    return [d for d in detections if d.get("class") in allowed or d.get("custom_match") or d.get("class") == "micro_motion"]
 
 
 # --- Geometry Utilities ---

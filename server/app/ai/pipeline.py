@@ -876,7 +876,7 @@ class ByteTracker:
 # seconds, not iterations, for the same reason the tracker ages in seconds: at
 # 5 iterations this was 0.2s on a healthy loop and 4s on a stalled one, so a
 # ghost box outlived its object by whatever the pipeline load happened to be.
-COAST_RENDER_SECONDS = 5 * REF_DT
+COAST_RENDER_SECONDS = 1.5
 
 
 def resolve_emitted_detections(tracker, tracks_raw, detections, masks,
@@ -1496,10 +1496,13 @@ class PipelineCoordinator:
 
         if result == "network_error":
             self._health_status = "network_error"
-            # ASCII only: this goes to a Windows console whose code page mangles
-            # non-ASCII punctuation into mojibake in the shipped log panel.
-            print(f"[Cap-{self.camera_id}] Preflight: {mask_source(src)} is unreachable "
-                  f"(TCP connect failed) - skipping the blocking decoder open.", flush=True)
+            now_ts = time.time()
+            if now_ts - getattr(self, "_last_preflight_log_ts", 0.0) >= 30.0:
+                self._last_preflight_log_ts = now_ts
+                # ASCII only: this goes to a Windows console whose code page mangles
+                # non-ASCII punctuation into mojibake in the shipped log panel.
+                print(f"[Cap-{self.camera_id}] Preflight: {mask_source(src)} is unreachable "
+                      f"(TCP connect failed) - skipping the blocking decoder open.", flush=True)
             return False
 
         # auth_failed is reported for visibility but NOT used to skip the open.
@@ -1914,8 +1917,8 @@ class PipelineCoordinator:
         w, h = 960, 540
         frame = np.zeros((h, w, 3), dtype=np.uint8)
 
-        if self.zone_profile == "micro_motion":
-            # Low-light CCTV warehouse IR environment
+        if is_virtual and self.zone_profile == "micro_motion":
+            # Low-light CCTV warehouse IR environment for virtual micro-motion demo
             frame[:, :] = (25, 28, 25)
             cv2.rectangle(frame, (100, 100), (300, 400), (35, 40, 35), -1)
             cv2.rectangle(frame, (650, 80), (880, 480), (30, 35, 30), -1)
@@ -1937,24 +1940,20 @@ class PipelineCoordinator:
             cv2.putText(frame, f"CAM_04 NIGHT_IR  {time_str}", (20, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (200, 200, 200), 1)
             return frame
 
-        # Deep slate background for fallback
-        frame[:, :] = (32, 34, 38)
+        # Clean dark slate canvas for live stream reconnects / standby HUD
+        frame[:, :] = (20, 22, 26)
         for y in range(0, h, 60):
-            cv2.line(frame, (0, y), (w, y), (42, 45, 52), 1)
+            cv2.line(frame, (0, y), (w, y), (30, 33, 40), 1)
         for x in range(0, w, 60):
-            cv2.line(frame, (x, 0), (x, h), (42, 45, 52), 1)
-
-        t = time.time()
-        pos_x = int(100 + ((t * 150) % 720))
-        cv2.rectangle(frame, (pos_x, 250), (pos_x + 100, 320), (0, 140, 255), -1)
+            cv2.line(frame, (x, 0), (x, h), (30, 33, 40), 1)
 
         time_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
         cam_name = getattr(self, "camera_id", "CamAI")[:12]
         cv2.putText(frame, f"CamAI Node | {cam_name}", (20, 35), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 255, 200), 2)
         cv2.putText(frame, f"TIMESTAMP: {time_str}", (20, 65), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (200, 200, 200), 1)
         cv2.putText(frame, f"STATUS: {reason}", (20, 90), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 200, 255), 1)
-        cv2.circle(frame, (w - 30, 35), 8, (0, 255, 0), -1)
-        cv2.putText(frame, "ONLINE", (w - 100, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 255, 0), 1)
+        cv2.circle(frame, (w - 30, 35), 8, (0, 165, 255), -1)
+        cv2.putText(frame, "RECONNECTING", (w - 140, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 165, 255), 1)
         return frame
 
     def _capture_loop(self):
@@ -2021,9 +2020,10 @@ class PipelineCoordinator:
                             self.cap.release()
                             self.cap = None
                         
-                        # Non-blocking reconnect throttling: attempt physical capture open every 2 seconds
+                        # Non-blocking reconnect throttling: attempt physical capture open every 5s for network streams
                         now_ts = time.time()
-                        if not hasattr(self, "_last_reconnect_attempt") or (now_ts - getattr(self, "_last_reconnect_attempt", 0) > 2.0):
+                        reconnect_delay = 5.0 if self.source_type == "rtsp" or "://" in str(self.source) else 2.0
+                        if not hasattr(self, "_last_reconnect_attempt") or (now_ts - getattr(self, "_last_reconnect_attempt", 0) > reconnect_delay):
                             self._last_reconnect_attempt = now_ts
                             if self._preflight_network_source():
                                 src = self._capture_source(refresh=self._is_page_url)
@@ -2065,14 +2065,22 @@ class PipelineCoordinator:
                                 if self._cap_hw_accel and self._cap_consecutive_failures >= 1:
                                     self._cap_hw_accel = False
                                 self._update_health_on_failure()
-                            frame = self._generate_synthetic_demo_frame("Stream Recovery")
-                            if self._health_status != "connecting":
-                                self._health_status = "connecting"
-                                self.publish_source_status()
-                            self._last_resolution = "960x540"
+                            # Hold the last good frame for brief drops (<3s) to
+                            # prevent the live tile from flickering to a demo
+                            # frame on every single missed grab. Only show the
+                            # synthetic standby screen once recovery is underway.
+                            if hasattr(self, "_last_good_frame") and self._last_good_frame is not None and time.time() - last_good_frame_ts < 3.0:
+                                frame = self._last_good_frame
+                            else:
+                                frame = self._generate_synthetic_demo_frame("Stream Recovery")
+                                if self._health_status != "connecting":
+                                    self._health_status = "connecting"
+                                    self.publish_source_status()
+                                self._last_resolution = "960x540"
                             time.sleep(0.033)
                         else:
                             last_good_frame_ts = time.time()
+                            self._last_good_frame = frame
                             self._cap_consecutive_failures = 0
                             if self._health_status != "online":
                                 self._health_status = "online"
@@ -2085,12 +2093,20 @@ class PipelineCoordinator:
                     self._push_event.clear()
                     frame = self.incoming_frame
                     self.incoming_frame = None
-                    if frame is None:
-                        frame = self._generate_synthetic_demo_frame("Virtual Live Stream")
-                        self._health_status = "online"
-                    else:
+                    if frame is not None:
+                        # Real push arrived — hold it for reuse between pushes
+                        # so the stream never flickers back to a demo frame.
+                        self._last_virtual_frame = frame
                         last_good_frame_ts = time.time()
-                        self._health_status = "online"
+                    elif hasattr(self, "_last_virtual_frame") and self._last_virtual_frame is not None:
+                        # Between pushes: reuse the last real frame instead of
+                        # injecting a demo frame that causes visible flickering
+                        # on the Admin Studio live tile.
+                        frame = self._last_virtual_frame
+                    else:
+                        # No frame has ever been pushed — show standby demo.
+                        frame = self._generate_synthetic_demo_frame("Virtual Live Stream")
+                    self._health_status = "online"
                     self._last_resolution = f"{frame.shape[1]}x{frame.shape[0]}"
 
                 t_cap = time.time()
@@ -2169,13 +2185,28 @@ class PipelineCoordinator:
                             cv2.fillPoly(frame, [pts_px], (0, 0, 0))
 
                 # ── Zero-DCE Night-Vision AI Enhancement (Per-Camera Controlled) ───────
+                # Enhancement runs here — single pass, early — so the identical
+                # enhanced frame flows synchronously to: (a) _decoded_slot → AI
+                # inference, (b) MJPEG live-screen encoder, and (c) the recorder.
+                # Keeping the local `frame` variable and data["frame"] in sync is
+                # mandatory: the MJPEG encode block below reads the local variable,
+                # not data["frame"], so they must always point to the same array.
                 try:
                     from app.ai.enhancer import zero_dce
-                    nv_cfg = self.profile_features.get("night_vision_zero_dce", {})
-                    if not nv_cfg and "night_vision" in self.profile_features:
-                        nv_cfg = self.profile_features.get("night_vision", {})
-                    is_enabled = nv_cfg.get("enabled", True) if isinstance(nv_cfg, dict) else True
-                    params = nv_cfg.get("params", {}) if isinstance(nv_cfg.get("params"), dict) else {}
+                    nv_cfg = self.profile_features.get("night_vision_zero_dce")
+                    if nv_cfg is None and "night_vision" in self.profile_features:
+                        nv_cfg = self.profile_features.get("night_vision")
+
+                    if isinstance(nv_cfg, dict):
+                        is_enabled = bool(nv_cfg.get("enabled", True))
+                        params = nv_cfg.get("params", {}) if isinstance(nv_cfg.get("params"), dict) else {}
+                    elif isinstance(nv_cfg, bool):
+                        is_enabled = nv_cfg
+                        params = {}
+                    else:
+                        is_enabled = True
+                        params = {}
+
                     mode = str(params.get("mode", getattr(self, "zero_dce_mode", "auto"))).lower()
                     raw_thresh = params.get("threshold", getattr(self, "zero_dce_threshold", 140.0))
                     try:
@@ -2183,15 +2214,36 @@ class PipelineCoordinator:
                     except (ValueError, TypeError):
                         thresh = 140.0
 
-                    if is_enabled and mode != "off":
-                        force_on = (mode == "on") or (self.zone_profile in ("micro_motion", "night_vision"))
-                        frame, _ = zero_dce.enhance(frame, override_threshold=thresh, force_enable=force_on)
-                        data["frame"] = frame
+                    force_on = (mode == "on") or (self.zone_profile in ("micro_motion", "night_vision"))
+                    if is_enabled and (force_on or mode != "off"):
+                        # Enhance and keep local + data in sync so every downstream
+                        # consumer (MJPEG encoder, recorder, AI slot) sees the same
+                        # restored, high-contrast frame.
+                        frame, dce_stats = zero_dce.enhance(
+                            frame,
+                            override_threshold=thresh,
+                            force_enable=force_on,
+                        )
+                        data["frame"] = frame          # AI slot reads data["frame"]
+                        data["zero_dce_stats"] = dce_stats
+                    else:
+                        # Enhancement disabled — record luminance for HUD telemetry
+                        # only; do not touch the frame.
+                        mean_lum = round(zero_dce.calculate_luminance(frame), 1)
+                        data["zero_dce_stats"] = {
+                            "zero_dce_applied": False,
+                            "mean_luminance": mean_lum,
+                            "method": "off",
+                            "latency_ms": 0.0,
+                        }
                 except Exception as e:
                     print(f"[Zero-DCE Err] {e}", flush=True)
-
-
-
+                    data["zero_dce_stats"] = {
+                        "zero_dce_applied": False,
+                        "mean_luminance": 128.0,
+                        "method": "error",
+                        "latency_ms": 0.0,
+                    }
 
 
                 # ── Hand the frame to the AI stage FIRST ─────────────────────────
@@ -2331,12 +2383,8 @@ class PipelineCoordinator:
                 inf_frame = frame
                 rh, rw    = orig_h, orig_w
 
-            # ── Zero-DCE Low-Light / Night-Vision AI Enhancement ──────────────────────
-            try:
-                from app.ai.enhancer import zero_dce
-                inf_frame, dce_stats = zero_dce.enhance(inf_frame)
-            except Exception:
-                pass
+            # Zero-DCE low-light enhancement is already performed in Module 2 (_decode_loop)
+            # according to per-camera profile features before entering the AI slot.
 
             # Detect motion inside the effective ROI crop to avoid motion outside ROI
             # forcing unnecessary inference passes and lowering FPS.
@@ -2761,18 +2809,17 @@ class PipelineCoordinator:
             t_anpr = (time.perf_counter() - t_anpr0) * 1000
 
             # ── Micro Motion pass: Runs independent of ByteTrack ────────────
-            _is_micro = self.zone_profile == "micro_motion" or (
-                isinstance(self.profile_features, dict) and
-                self.profile_features.get("micro_motion_hud", {}).get("enabled", False)
-            )
+            _is_micro = self.zone_profile == "micro_motion" or self._feature_enabled(self.profile_features, "micro_motion_hud")
             if _is_micro:
                 try:
                     if not hasattr(self, "_micro_motion_detector") or self._micro_motion_detector is None:
                         from app.ai.screen_motion_detector import ScreenMicroMotionDetector
                         self._micro_motion_detector = ScreenMicroMotionDetector(
-                            min_area=10, max_area=25000, threshold_value=12
+                            min_area=8, max_area=25000, threshold_value=8
                         )
-                    mm_dets = self._micro_motion_detector.detect(frame)
+                    target_frame = inf_frame if inf_frame is not None else frame
+                    mm_dets = self._micro_motion_detector.detect(target_frame)
+                    rx1, ry1 = (roi[0], roi[1]) if roi else (0, 0)
                     for idx, md in enumerate(mm_dets):
                         b = md["bbox"]
                         detections.append({
@@ -2780,12 +2827,12 @@ class PipelineCoordinator:
                             "confidence": round(float(md["confidence"]), 2),
                             "track_id": 901 + idx,
                             "bbox": {
-                                "x1": b[0],
-                                "y1": b[1],
-                                "x2": b[0] + b[2],
-                                "y2": b[1] + b[3],
+                                "x1": b[0] + rx1,
+                                "y1": b[1] + ry1,
+                                "x2": b[0] + b[2] + rx1,
+                                "y2": b[1] + b[3] + ry1,
                             },
-                            "label": md.get("tag", "MICRO MOTION"),
+                            "label": md.get("tag", "SUBTLE MOTION"),
                         })
                         masks.append([])
                 except Exception as e:
@@ -2812,7 +2859,7 @@ class PipelineCoordinator:
                 _feat_ids = {id(d) for d in _feat_keep}
                 _keep = [
                     i for i, d in enumerate(detections)
-                    if id(d) in _feat_ids and (not _allowed or d.get("class") in _allowed)
+                    if id(d) in _feat_ids and (not _allowed or d.get("class") in _allowed or d.get("class") == "micro_motion")
                 ]
                 if len(_keep) != len(detections):
                     if len(masks) == len(detections):
@@ -2921,6 +2968,8 @@ class PipelineCoordinator:
                     "plate_text_confidence": det.get("plate_text_confidence"),
                     "plate_reads": det.get("plate_reads"),
                     "plate_failure": det.get("plate_failure"),
+                    "label": det.get("label"),
+                    "custom_match": det.get("custom_match", False),
                     "bbox": {
                         "x1": round(float(bbox["x1"]) / orig_w, 4),
                         "y1": round(float(bbox["y1"]) / orig_h, 4),
@@ -3141,6 +3190,12 @@ class PipelineCoordinator:
                     "people_out":   getattr(self.analytics, "counter_out_person", 0),
                 },
                 "heatmap":  data["heatmap"],
+                "night_vision": data.get("zero_dce_stats", {
+                    "zero_dce_applied": False,
+                    "mean_luminance": 128.0,
+                    "method": "none",
+                    "latency_ms": 0.0,
+                }),
                 "latency":  round(total_latency),
                 "fps":      round(tel_fps, 1),       # pipeline FPS
                 "target_fps": round(getattr(self, "target_fps", 15.0), 1),

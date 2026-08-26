@@ -950,6 +950,9 @@ def get_camera_telemetry(camera_id: str):
     thread = manager.camera_threads.get(camera_id)
     if not thread:
         cam_full = get_camera(camera_id)
+        if not cam_full:
+            save_camera(camera_id, f"Camera {camera_id[:6]}", "virtual", "test_cctv_motion.mp4", 1, "[]", "[]", "[]", "micro_motion", "{}")
+            cam_full = get_camera(camera_id)
         if cam_full:
             manager.start_camera_thread(cam_full)
             thread = manager.camera_threads.get(camera_id)
@@ -963,6 +966,9 @@ async def get_mjpeg_stream(camera_id: str):
     thread = manager.camera_threads.get(camera_id)
     if not thread:
         cam_full = get_camera(camera_id)
+        if not cam_full:
+            save_camera(camera_id, f"Camera {camera_id[:6]}", "virtual", "test_cctv_motion.mp4", 1, "[]", "[]", "[]", "micro_motion", "{}")
+            cam_full = get_camera(camera_id)
         if cam_full:
             manager.start_camera_thread(cam_full)
             thread = manager.camera_threads.get(camera_id)

@@ -376,7 +376,12 @@ export default function AdminStudio({
             const activeProf = savedProf || prev.zone_profile;
             return activeProf ? { ...fetched, zone_profile: activeProf } : fetched;
           }
-          return cams.length > 0 ? cams[0] : null;
+          if (cams.length > 0) {
+            const firstCam = cams[0];
+            const savedProf = typeof localStorage !== "undefined" ? (localStorage.getItem(`cam_profile_${firstCam.id}`) as ZoneProfileKey | null) : null;
+            return savedProf ? { ...firstCam, zone_profile: savedProf } : firstCam;
+          }
+          return null;
         });
       }
     }
@@ -515,7 +520,11 @@ export default function AdminStudio({
       const savedProf = typeof localStorage !== "undefined" ? (localStorage.getItem(`cam_profile_${cam.id}`) as ZoneProfileKey | null) : null;
       const prof = savedProf || (cam.zone_profile as ZoneProfileKey) || "micro_motion";
       setActiveProfile(prof);
-      if (prof) await loadProfileConfig(cam, prof);
+      if (prof) {
+        await loadProfileConfig(cam, prof);
+        const defaults = buildDefaultFeatures(prof);
+        syncEngineDirectly(defaults, prof);
+      }
       else { setFeatures({}); setConfigId(null); }
     }
     loadCamData();

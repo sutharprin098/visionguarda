@@ -96,7 +96,10 @@ class ZeroDCEEnhancer:
             "method": "none",
         }
 
-        if frame is None or frame.size == 0 or not self.enabled:
+        if frame is None or frame.size == 0:
+            return frame, stats
+
+        if not self.enabled and not force_enable:
             return frame, stats
 
         t0 = time.time()
