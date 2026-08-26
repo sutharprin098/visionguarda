@@ -3053,11 +3053,10 @@ class PipelineCoordinator:
             # ── Synchronized MJPEG Stream Output (Post-Tracking) ─────────────
             # Encode frame ONLY after tracking & detections are resolved, ensuring
             # zero latency/phase mismatch between MJPEG image and WS bounding boxes.
-            if self._mjpeg_viewers > 0:
-                now_enc = time.monotonic()
-                if now_enc >= self._next_mjpeg_due:
-                    if MJPEG_MAX_FPS > 0:
-                        self._next_mjpeg_due = now_enc + (1.0 / MJPEG_MAX_FPS)
+            now_enc = time.monotonic()
+            if now_enc >= self._next_mjpeg_due:
+                if MJPEG_MAX_FPS > 0:
+                    self._next_mjpeg_due = now_enc + (1.0 / MJPEG_MAX_FPS)
                     
                     # Render active detection overlays directly onto camera stream frame
                     stream_frame = frame.copy()
