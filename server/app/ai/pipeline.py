@@ -3067,9 +3067,38 @@ class PipelineCoordinator:
                 if now_enc >= self._next_mjpeg_due:
                     if MJPEG_MAX_FPS > 0:
                         self._next_mjpeg_due = now_enc + (1.0 / MJPEG_MAX_FPS)
+                    
+                    # Render active detection overlays directly onto camera stream frame
+                    stream_frame = frame.copy()
+                    if detections:
+                        for d in detections:
+                            b = d.get("bbox")
+                            if not b:
+                                continue
+                            x1, y1 = int(b["x1"]), int(b["y1"])
+                            x2, y2 = int(b["x2"]), int(b["y2"])
+                            cls_name = d.get("class", "object")
+                            lbl = d.get("label") or f"{cls_name.upper()}"
+                            conf = int(d.get("confidence", 0.8) * 100)
+                            color = (0, 255, 255) if cls_name == "micro_motion" else (0, 255, 0)
+                            
+                            cv2.rectangle(stream_frame, (x1, y1), (x2, y2), color, 2)
+                            bw, bh = x2 - x1, y2 - y1
+                            line_len = min(bw // 4, bh // 4, 12)
+                            if line_len > 2:
+                                cv2.line(stream_frame, (x1, y1), (x1 + line_len, y1), color, 3)
+                                cv2.line(stream_frame, (x1, y1), (x1, y1 + line_len), color, 3)
+                                cv2.line(stream_frame, (x2, y1), (x2 - line_len, y1), color, 3)
+                                cv2.line(stream_frame, (x2, y1), (x2, y1 + line_len), color, 3)
+                            
+                            txt = f"{lbl} | {conf}%"
+                            (tw, th), _ = cv2.getTextSize(txt, cv2.FONT_HERSHEY_SIMPLEX, 0.45, 1)
+                            cv2.rectangle(stream_frame, (x1, max(0, y1 - th - 6)), (x1 + tw + 6, max(th + 6, y1)), (0, 0, 0), -1)
+                            cv2.putText(stream_frame, txt, (x1 + 3, max(th + 2, y1 - 4)), cv2.FONT_HERSHEY_SIMPLEX, 0.45, color, 1)
+
                     max_w = self.display_max_width
-                    h, w = frame.shape[:2]
-                    mjpeg_f = cv2.resize(frame, (max_w, int(h * (max_w / w))), interpolation=cv2.INTER_LINEAR) if w > max_w else frame
+                    h, w = stream_frame.shape[:2]
+                    mjpeg_f = cv2.resize(stream_frame, (max_w, int(h * (max_w / w))), interpolation=cv2.INTER_LINEAR) if w > max_w else stream_frame
                     ok, jpg = cv2.imencode('.jpg', mjpeg_f, [cv2.IMWRITE_JPEG_QUALITY, self.jpeg_quality])
                     if ok:
                         with self.jpeg_lock:
