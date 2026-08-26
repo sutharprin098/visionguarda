@@ -2276,29 +2276,17 @@ class PipelineCoordinator:
                 # left in place — a newly attached viewer paints the last known
                 # frame immediately and is overwritten by a live one within a
                 # frame period, which beats a blank tile.
-                if self._mjpeg_viewers > 0:
-                    now_enc = time.monotonic()
-                    if now_enc >= self._next_mjpeg_due:
-                        if MJPEG_MAX_FPS > 0:
-                            # Re-base off now rather than accumulating, so a
-                            # stalled or reconnecting camera does not owe a
-                            # burst of encodes the moment it recovers.
-                            self._next_mjpeg_due = now_enc + (1.0 / MJPEG_MAX_FPS)
-                        # Resize to display_max_width before encoding to reduce JPEG cost.
-                        max_w = self.display_max_width
-                        h, w = frame.shape[:2]
-                        if w > max_w:
-                            scale   = max_w / w
-                            mjpeg_f = cv2.resize(frame, (max_w, int(h * scale)), interpolation=cv2.INTER_LINEAR)
-                        else:
-                            mjpeg_f = frame
-                        ok, jpg = cv2.imencode('.jpg', mjpeg_f, [cv2.IMWRITE_JPEG_QUALITY, self.jpeg_quality])
-                        if ok:
-                            jpeg_bytes = jpg.tobytes()
-                            with self.jpeg_lock:
-                                self.current_jpeg_bytes = jpeg_bytes
-                            # Wake the MJPEG HTTP generator (event-driven, not polled)
-                            self.jpeg_ready_event.set()
+                # ── MJPEG stream: Synchronized Post-Tracking Encode ─────────────
+                # Initial cold frame encoding only (until tracking loop produces synchronized frames)
+                if self._mjpeg_viewers > 0 and self.current_jpeg_bytes is None:
+                    max_w = self.display_max_width
+                    h, w = frame.shape[:2]
+                    mjpeg_f = cv2.resize(frame, (max_w, int(h * (max_w / w))), interpolation=cv2.INTER_LINEAR) if w > max_w else frame
+                    ok, jpg = cv2.imencode('.jpg', mjpeg_f, [cv2.IMWRITE_JPEG_QUALITY, self.jpeg_quality])
+                    if ok:
+                        with self.jpeg_lock:
+                            self.current_jpeg_bytes = jpg.tobytes()
+                        self.jpeg_ready_event.set()
 
                 # ── Recording (non-blocking async queue) ─────────────────────────
                 self.recorder.push_frame(frame)
@@ -3061,6 +3049,23 @@ class PipelineCoordinator:
 
             trk_lat = (time.time() - t0) * 1000
             self._trk_ts.append(time.time())
+
+            # ── Synchronized MJPEG Stream Output (Post-Tracking) ─────────────
+            # Encode frame ONLY after tracking & detections are resolved, ensuring
+            # zero latency/phase mismatch between MJPEG image and WS bounding boxes.
+            if self._mjpeg_viewers > 0:
+                now_enc = time.monotonic()
+                if now_enc >= self._next_mjpeg_due:
+                    if MJPEG_MAX_FPS > 0:
+                        self._next_mjpeg_due = now_enc + (1.0 / MJPEG_MAX_FPS)
+                    max_w = self.display_max_width
+                    h, w = frame.shape[:2]
+                    mjpeg_f = cv2.resize(frame, (max_w, int(h * (max_w / w))), interpolation=cv2.INTER_LINEAR) if w > max_w else frame
+                    ok, jpg = cv2.imencode('.jpg', mjpeg_f, [cv2.IMWRITE_JPEG_QUALITY, self.jpeg_quality])
+                    if ok:
+                        with self.jpeg_lock:
+                            self.current_jpeg_bytes = jpg.tobytes()
+                        self.jpeg_ready_event.set()
 
             self._tracking_slot.put({
                 **data,
