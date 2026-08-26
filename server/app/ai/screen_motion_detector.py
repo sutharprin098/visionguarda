@@ -41,9 +41,13 @@ class ScreenMicroMotionDetector:
 
         h, w = frame.shape[:2]
         
-        # 1. Convert to grayscale and apply Gaussian blur to reduce high-frequency noise
+        # 1. Resize to fixed canonical (640, 360) for stable temporal differencing across all input sizes
+        proc_w, proc_h = 640, 360
+        scale_x, scale_y = w / float(proc_w), h / float(proc_h)
+        
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        blurred = cv2.GaussianBlur(gray, self.blur_kernel, 0)
+        proc_gray = cv2.resize(gray, (proc_w, proc_h), interpolation=cv2.INTER_LINEAR)
+        blurred = cv2.GaussianBlur(proc_gray, self.blur_kernel, 0)
         
         self.frame_buffer.append(blurred)
         if len(self.frame_buffer) > self.history_frames:
@@ -65,8 +69,8 @@ class ScreenMicroMotionDetector:
         _, thresh = cv2.threshold(frame_delta, self.threshold_value, 255, cv2.THRESH_BINARY)
         
         # Exclude bottom 10% and top 5% timestamp/header noise regions
-        thresh[:int(h * 0.05), :] = 0
-        thresh[int(h * 0.88):, :] = 0
+        thresh[:int(proc_h * 0.05), :] = 0
+        thresh[int(proc_h * 0.88):, :] = 0
 
         # 4. Morphological closing & dilation to merge rat/mouse body segments
         close_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (7, 7))
@@ -92,12 +96,18 @@ class ScreenMicroMotionDetector:
                 motion_score = intensity * (area ** 0.5)
                 confidence = min(0.99, max(0.45, intensity / 40.0))
 
-                tag = "RODENT / MOUSE" if area < 1500 else "SUBTLE MOTION TARGET"
+                tag = "RODENT / MOUSE" if area < 2500 else "SUBTLE MOTION TARGET"
                 color = (0, 255, 255) if area < 1500 else (0, 165, 255)
 
+                # Scale coordinates back to original frame dimensions
+                orig_x = int(x * scale_x)
+                orig_y = int(y * scale_y)
+                orig_bw = int(bw * scale_x)
+                orig_bh = int(bh * scale_y)
+
                 candidates.append({
-                    "box": [int(x), int(y), int(bw), int(bh)],
-                    "area": int(area),
+                    "box": [orig_x, orig_y, orig_bw, orig_bh],
+                    "area": int(area * scale_x * scale_y),
                     "confidence": round(confidence, 2),
                     "score": motion_score,
                     "tag": tag,
@@ -115,6 +125,7 @@ class ScreenMicroMotionDetector:
         
         # Subtle heatmap overlay for context
         motion_heatmap = cv2.applyColorMap(cv2.convertScaleAbs(frame_delta, alpha=3.0), cv2.COLORMAP_JET)
+        motion_heatmap = cv2.resize(motion_heatmap, (w, h), interpolation=cv2.INTER_LINEAR)
         annotated_frame = cv2.addWeighted(annotated_frame, 0.90, motion_heatmap, 0.10, 0)
 
         for i, det in enumerate(selected_targets):

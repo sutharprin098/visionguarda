@@ -2812,9 +2812,9 @@ class PipelineCoordinator:
                     if not hasattr(self, "_micro_motion_detector") or self._micro_motion_detector is None:
                         from app.ai.screen_motion_detector import ScreenMicroMotionDetector
                         self._micro_motion_detector = ScreenMicroMotionDetector(
-                            min_area=4, max_area=35000, threshold_value=5, blur_kernel=(5, 5), history_frames=5
+                            min_area=25, max_area=35000, threshold_value=6, blur_kernel=(5, 5), history_frames=5, max_targets=1
                         )
-                    target_frame = inf_frame if inf_frame is not None else frame
+                    target_frame = frame
                     mm_dets = self._micro_motion_detector.detect(target_frame)
                     rx1, ry1 = (roi[0], roi[1]) if roi else (0, 0)
                     for idx, md in enumerate(mm_dets):
