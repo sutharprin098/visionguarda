@@ -2797,12 +2797,15 @@ class PipelineCoordinator:
             t_anpr = (time.perf_counter() - t_anpr0) * 1000
 
             # ── Micro Motion pass: Runs independent of ByteTrack ────────────
+            gray_lum = float(np.mean(cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY))) if frame is not None and frame.size > 0 else 255.0
+            _is_dark_frame = gray_lum < 80.0
             _is_micro = (
                 self.zone_profile == "micro_motion"
                 or self._feature_enabled(self.profile_features, "micro_motion_hud")
                 or self._feature_enabled(self.profile_features, "micro_motion")
                 or self._feature_enabled(self.profile_features, "night_vision")
                 or self._feature_enabled(self.profile_features, "subtle_motion")
+                or _is_dark_frame
             )
             if _is_micro:
                 try:

@@ -90,10 +90,10 @@ class ScreenMicroMotionDetector:
                     tag = "Micro Motion (Rodent/Insect)"
                     color = (0, 255, 255) # Cyan
                 elif area < 1500:
-                    tag = "Subtle Motion (Bird/Bag)"
+                    tag = "Subtle Motion (Bird/Animal)"
                     color = (0, 165, 255) # Orange
                 else:
-                    tag = "Object/Human Motion"
+                    tag = "Night Motion (Object/Intruder)"
                     color = (0, 255, 0) # Bright Green
 
                 det = {
