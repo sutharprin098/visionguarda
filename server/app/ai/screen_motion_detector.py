@@ -10,11 +10,11 @@ class ScreenMicroMotionDetector:
     including rodents, insects, birds, vegetation shifts, and distant human motion.
     """
     def __init__(self, 
-                 min_area: int = 8, 
-                 max_area: int = 25000, 
-                 threshold_value: int = 8, 
-                 blur_kernel: Tuple[int, int] = (15, 15),
-                 history_frames: int = 3):
+                 min_area: int = 4, 
+                 max_area: int = 35000, 
+                 threshold_value: int = 5, 
+                 blur_kernel: Tuple[int, int] = (5, 5),
+                 history_frames: int = 5):
         self.min_area = min_area
         self.max_area = max_area
         self.threshold_value = threshold_value
