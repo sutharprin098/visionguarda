@@ -309,7 +309,7 @@ export default function Workspace({
   }, [orgConfidence]);
 
   // Automatically sync the org's central ai.inference_mode (cloud vs local) managed by Admin via Web Portal
-  const orgInferenceMode = bundle?.settings.find((s) => s.scope === "org" && s.key === "ai.inference_mode")?.value || "cloud";
+  const orgInferenceMode = bundle?.settings.find((s) => s.scope === "org" && s.key === "ai.inference_mode")?.value || "local";
   useEffect(() => {
     if (orgInferenceMode && typeof orgInferenceMode === "string") {
       void syncAiInferenceModeToLocalEngine(orgInferenceMode);

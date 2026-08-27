@@ -2403,8 +2403,13 @@ class PipelineCoordinator:
             if getattr(config, "INFERENCE_MODE", "cloud") == "cloud":
                 # Strict Cloud Mode: Local neural network inference is 100% PAUSED (0% Local GPU/CPU load).
                 # Detections and telemetry are offloaded to the AWS Cloud GPU node.
-                data["detections"] = []
+                data["detections"] = data.get("detections", [])
+                data["masks_polygons"] = data.get("masks_polygons", [])
                 data["inf_lat"] = 0.0
+                data["t_pre"] = 0.0
+                data["t_inf"] = 0.0
+                data["t_post"] = 0.0
+                data["trk_lat"] = 0.0
                 data["imgsz"] = self.current_imgsz
                 data["motion"] = False
                 self._tracking_slot.put(data)
@@ -3253,16 +3258,17 @@ class PipelineCoordinator:
             tel_fps = _fps(self._tel_ts)
 
             tel_lat       = (time.time() - t0) * 1000
-            total_latency = (time.time() - data["cap_time"]) * 1000
+            cap_time      = data.get("cap_time", time.time())
+            total_latency = (time.time() - cap_time) * 1000
 
             # Identify pipeline bottleneck (slowest stage)
             latencies = {
-                "capture":       data["cap_lat"],
-                "decode":        data["dec_lat"],
-                "ai_preproc":    data["t_pre"],
-                "ai_inference":  data["t_inf"],
-                "ai_postproc":   data["t_post"],
-                "tracking":      data["trk_lat"],
+                "capture":       data.get("cap_lat", 0.0),
+                "decode":        data.get("dec_lat", 0.0),
+                "ai_preproc":    data.get("t_pre", 0.0),
+                "ai_inference":  data.get("t_inf", 0.0),
+                "ai_postproc":   data.get("t_post", 0.0),
+                "tracking":      data.get("trk_lat", 0.0),
                 "telemetry":     tel_lat,
             }
             bottleneck = max(latencies, key=latencies.get)

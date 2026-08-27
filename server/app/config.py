@@ -55,8 +55,8 @@ except ValueError:
     ZERO_DCE_THRESHOLD = 80.0
 
 # Dual-Engine / Hybrid Cloud Mode Governor Settings (Strict Binary: "cloud" | "local")
-_raw_mode = os.getenv("CAMAI_INFERENCE_MODE", "cloud").strip().lower()
-INFERENCE_MODE = "local" if _raw_mode == "local" else "cloud"
+_raw_mode = os.getenv("CAMAI_INFERENCE_MODE", "local").strip().lower()
+INFERENCE_MODE = "cloud" if _raw_mode == "cloud" else "local"
 CLOUD_ENDPOINT_URL = os.getenv("CAMAI_CLOUD_ENDPOINT_URL", "http://13.203.71.14:8000").strip()
 CLOUD_API_KEY = os.getenv("CAMAI_CLOUD_API_KEY", "").strip()
 
