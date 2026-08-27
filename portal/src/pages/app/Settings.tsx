@@ -306,6 +306,7 @@ function AiTab({ canConfigure }: { canConfigure: boolean }) {
   };
 
   const [activeProfile, setActiveProfile] = useState<"traffic" | "security" | "factory" | "drone" | "micro_motion" | "custom">("traffic");
+  const [inferenceMode, setInferenceMode] = useState<"cloud" | "local">("cloud");
 
   // Traffic form state
   const [trafficDetections, setTrafficDetections] = useState({
@@ -390,6 +391,9 @@ function AiTab({ canConfigure }: { canConfigure: boolean }) {
     if (current && current.length > 0) {
       const prof = getSetting("ai.profile", "traffic") as "traffic" | "security" | "factory" | "drone" | "custom";
       setActiveProfile(prof);
+
+      const infMode = getSetting("ai.inference_mode", "cloud");
+      setInferenceMode(infMode === "local" ? "local" : "cloud");
 
       const tc = getSetting("ai.traffic_config", null);
       if (tc) {
@@ -518,6 +522,7 @@ function AiTab({ canConfigure }: { canConfigure: boolean }) {
     };
 
     const rows = [
+      { org_id: org.id, scope: "org", key: "ai.inference_mode", value: inferenceMode as any },
       { org_id: org.id, scope: "org", key: "ai.profile", value: activeProfile as any },
       { org_id: org.id, scope: "org", key: "ai.model", value: resolvedModel as any },
       { org_id: org.id, scope: "org", key: "ai.confidence", value: resolvedConfidence as any },
@@ -533,6 +538,11 @@ function AiTab({ canConfigure }: { canConfigure: boolean }) {
 
     // Hot-swap local AI engine backend dynamically if engine is running
     try {
+      await fetch("http://localhost:8000/api/cloud-mode", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mode: inferenceMode }),
+      });
       await fetch("http://localhost:8000/api/model/select", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -576,6 +586,75 @@ function AiTab({ canConfigure }: { canConfigure: boolean }) {
 
   return (
     <div className="space-y-6">
+      {/* Central Admin Inference Engine Governor */}
+      <div className="rounded-lg border border-accent/30 bg-surface-1/80 p-5 space-y-4 shadow-sm">
+        <div className="flex items-center justify-between">
+          <div>
+            <h3 className="text-sm font-bold text-ink-1 flex items-center gap-2">
+              <span className="text-base">☁️</span> Global AI Inference Engine Mode
+            </h3>
+            <p className="text-xs text-ink-3 mt-1">
+              Select where AI neural network inference processing executes. Centralized Admin control. Connected desktop software automatically syncs in real-time.
+            </p>
+          </div>
+          <Badge tone={canConfigure ? "accent" : "neutral"}>
+            {canConfigure ? "Admin Controlled" : "Read-Only"}
+          </Badge>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <button
+            type="button"
+            disabled={!canConfigure}
+            onClick={() => setInferenceMode("cloud")}
+            className={`text-left p-4 rounded-lg border transition-all relative ${
+              inferenceMode === "cloud"
+                ? "border-blue-500 bg-blue-500/10 text-ink-1 ring-1 ring-blue-500 shadow-md"
+                : "border-line bg-surface-2 text-ink-2 hover:border-blue-400 hover:bg-surface-1"
+            }`}
+          >
+            <div className="flex items-center justify-between">
+              <div className="font-semibold text-sm text-blue-400 flex items-center gap-2">
+                ☁️ Cloud Engine (AWS GPU)
+              </div>
+              {inferenceMode === "cloud" && (
+                <span className="text-[10px] font-bold uppercase tracking-wider bg-blue-500 text-white px-2 py-0.5 rounded-full">
+                  ACTIVE
+                </span>
+              )}
+            </div>
+            <p className="text-[11px] text-ink-3 mt-2 leading-relaxed">
+              Inference runs 100% on AWS EC2 Cloud GPU (<code className="text-blue-300">13.203.71.14</code>). Local desktop GPU/CPU load drops to <strong className="text-accent">0% (Paused)</strong>. High performance, zero local heat.
+            </p>
+          </button>
+
+          <button
+            type="button"
+            disabled={!canConfigure}
+            onClick={() => setInferenceMode("local")}
+            className={`text-left p-4 rounded-lg border transition-all relative ${
+              inferenceMode === "local"
+                ? "border-accent bg-accent/10 text-ink-1 ring-1 ring-accent shadow-md"
+                : "border-line bg-surface-2 text-ink-2 hover:border-accent hover:bg-surface-1"
+            }`}
+          >
+            <div className="flex items-center justify-between">
+              <div className="font-semibold text-sm text-accent flex items-center gap-2">
+                🖥️ Local Hardware Engine
+              </div>
+              {inferenceMode === "local" && (
+                <span className="text-[10px] font-bold uppercase tracking-wider bg-accent text-zinc-950 px-2 py-0.5 rounded-full">
+                  ACTIVE
+                </span>
+              )}
+            </div>
+            <p className="text-[11px] text-ink-3 mt-2 leading-relaxed">
+              Inference runs 100% on-premises on local GPU/CPU hardware (OpenVINO / ONNX runtime). Cloud connectivity is disabled.
+            </p>
+          </button>
+        </div>
+      </div>
+
       <div className="border-b border-line pb-4">
         <h3 className="text-base font-semibold text-ink-1">AI Profile</h3>
         <p className="text-xs text-ink-3 mt-0.5">Select a business profile. The system automatically configures detection models, classes, and runtimes without exposing filenames or libraries.</p>

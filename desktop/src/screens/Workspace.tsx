@@ -3,7 +3,7 @@ import { Video, Bell, Settings2, LogOut, Wifi, WifiOff, Sliders, Activity, Alert
 import FloorPlanView from "../components/FloorPlanView";
 import clsx from "clsx";
 import { startRealtimeSync, DeactivatedError, SyncBundle } from "../lib/sync";
-import { syncAiModelToLocalEngine, syncAiConfidenceToLocalEngine, mjpegStreamUrl, resetLocalEngineState } from "../lib/localEngine";
+import { syncAiModelToLocalEngine, syncAiConfidenceToLocalEngine, syncAiInferenceModeToLocalEngine, mjpegStreamUrl, resetLocalEngineState } from "../lib/localEngine";
 import { MediaShareSession, ShareStatus } from "../lib/mediaShare";
 import { TelemetrySession, TelemetryDetection, CameraTelemetry, TelemetryStatus, detectionsRenderEqual, telemetryHub } from "../lib/telemetry";
 import type { ZoneProfileKey } from "../lib/zoneProfiles";
@@ -308,6 +308,16 @@ export default function Workspace({
     return () => clearInterval(id);
   }, [orgConfidence]);
 
+  // Automatically sync the org's central ai.inference_mode (cloud vs local) managed by Admin via Web Portal
+  const orgInferenceMode = bundle?.settings.find((s) => s.scope === "org" && s.key === "ai.inference_mode")?.value || "cloud";
+  useEffect(() => {
+    if (orgInferenceMode && typeof orgInferenceMode === "string") {
+      void syncAiInferenceModeToLocalEngine(orgInferenceMode);
+      const id = setInterval(() => void syncAiInferenceModeToLocalEngine(orgInferenceMode), 5_000);
+      return () => clearInterval(id);
+    }
+  }, [orgInferenceMode]);
+
   // Check if user has permission or is super admin
   const hasPermission = (perm: string): boolean => {
     if (!bundle) return false;
@@ -419,13 +429,22 @@ export default function Workspace({
           )}
         </div>
         <div className="px-3 pb-3 pt-1 border-b border-line">
-          <CloudModeSwitcher
-            orgId={bundle.organization?.id ?? null}
-            canEdit={hasPermission("ai.configure")}
-            currentMode={
-              bundle?.settings.find((s) => s.scope === "org" && s.key === "ai.inference_mode")?.value || "cloud"
-            }
-          />
+          <div className="flex items-center justify-between gap-2 bg-surface-2/80 px-3 py-2 rounded-lg border border-line/80 text-xs">
+            {orgInferenceMode === "local" ? (
+              <div className="flex items-center gap-2 text-accent font-semibold">
+                <Cpu size={14} className="animate-pulse" />
+                <span>Local Hardware</span>
+              </div>
+            ) : (
+              <div className="flex items-center gap-2 text-blue-400 font-semibold">
+                <Cloud size={14} className="animate-pulse" />
+                <span>AWS Cloud GPU</span>
+              </div>
+            )}
+            <span className="text-[10px] text-zinc-500 bg-surface-1 px-1.5 py-0.5 rounded border border-line" title="AI Inference Engine Mode is managed centrally by Organization Admins via Web Portal">
+              Admin Managed
+            </span>
+          </div>
         </div>
         <nav className="flex-1 space-y-0.5 px-2 py-2">
           {navItems.map((n) => (

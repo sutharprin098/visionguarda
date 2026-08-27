@@ -742,6 +742,24 @@ export async function syncAiModelToLocalEngine(dbModelName: string | undefined):
   }
 }
 
+let appliedInferenceMode: string | null = null;
+
+export async function syncAiInferenceModeToLocalEngine(mode: string | undefined): Promise<void> {
+  if (!mode || !(await isEngineOnline())) return;
+  const targetMode = mode === "local" ? "local" : "cloud";
+  if (targetMode === appliedInferenceMode) return;
+  try {
+    const res = await fetch(`${ENGINE_BASE}/api/cloud-mode`, {
+      method: "POST",
+      headers: await controlHeaders(),
+      body: JSON.stringify({ mode: targetMode }),
+    });
+    if (res.ok) appliedInferenceMode = targetMode;
+  } catch (e) {
+    console.error("[LocalEngine] Failed to sync inference mode:", e);
+  }
+}
+
 // Mirrors pipeline.MIN/MAX_CONFIDENCE. Duplicated deliberately: the engine
 // clamps too (it must — it is reachable without going through this module), and
 // this copy exists only so the drift check below can predict what the engine
