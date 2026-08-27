@@ -2318,38 +2318,7 @@ class PipelineCoordinator:
                         mjpeg_fps_cap = MJPEG_MAX_FPS if MJPEG_MAX_FPS > 0 else 30.0
                         self._next_mjpeg_due = now_enc + (1.0 / mjpeg_fps_cap)
 
-                        dets_to_draw = []
-                        with self._overlay_lock:
-                            if self._latest_overlay_dets and (time.time() - self._latest_overlay_ts < 1.0):
-                                dets_to_draw = list(self._latest_overlay_dets)
-
-                        stream_frame = frame.copy() if dets_to_draw else frame
-                        if dets_to_draw:
-                            for d in dets_to_draw:
-                                b = d.get("bbox")
-                                if not b:
-                                    continue
-                                x1, y1 = int(b["x1"]), int(b["y1"])
-                                x2, y2 = int(b["x2"]), int(b["y2"])
-                                cls_name = d.get("class", "object")
-                                lbl = d.get("label") or f"{cls_name.upper()}"
-                                conf = int(d.get("confidence", 0.8) * 100)
-                                color = (0, 255, 255) if cls_name == "micro_motion" else (0, 255, 0)
-
-                                cv2.rectangle(stream_frame, (x1, y1), (x2, y2), color, 2)
-                                bw, bh = x2 - x1, y2 - y1
-                                line_len = min(bw // 4, bh // 4, 12)
-                                if line_len > 2:
-                                    cv2.line(stream_frame, (x1, y1), (x1 + line_len, y1), color, 3)
-                                    cv2.line(stream_frame, (x1, y1), (x1, y1 + line_len), color, 3)
-                                    cv2.line(stream_frame, (x2, y1), (x2 - line_len, y1), color, 3)
-                                    cv2.line(stream_frame, (x2, y1), (x2, y1 + line_len), color, 3)
-                                
-                                txt = f"{lbl} | {conf}%"
-                                (tw, th), _ = cv2.getTextSize(txt, cv2.FONT_HERSHEY_SIMPLEX, 0.45, 1)
-                                cv2.rectangle(stream_frame, (x1, max(0, y1 - th - 6)), (x1 + tw + 6, max(th + 6, y1)), (0, 0, 0), -1)
-                                cv2.putText(stream_frame, txt, (x1 + 3, max(th + 2, y1 - 4)), cv2.FONT_HERSHEY_SIMPLEX, 0.45, color, 1)
-
+                        stream_frame = frame
                         target_w = min(640, self.display_max_width)
                         h, w = stream_frame.shape[:2]
                         if w != target_w:
@@ -2899,19 +2868,38 @@ class PipelineCoordinator:
                     rx1, ry1 = 0, 0
                     for idx, md in enumerate(mm_dets):
                         b = md["bbox"]
-                        detections.append({
-                            "class": "micro_motion",
-                            "confidence": round(float(md["confidence"]), 2),
-                            "track_id": 901 + idx,
-                            "bbox": {
-                                "x1": b[0] + rx1,
-                                "y1": b[1] + ry1,
-                                "x2": b[0] + b[2] + rx1,
-                                "y2": b[1] + b[3] + ry1,
-                            },
-                            "label": md.get("tag", "SUBTLE MOTION"),
-                        })
-                        masks.append([])
+                        mm_x1, mm_y1 = b[0] + rx1, b[1] + ry1
+                        mm_x2, mm_y2 = b[0] + b[2] + rx1, b[1] + b[3] + ry1
+
+                        # Overlap suppression: don't create duplicate micro_motion box over an already-tracked primary object (car/person)
+                        is_overlapping = False
+                        for existing_det in detections:
+                            eb = existing_det.get("bbox", {})
+                            if not isinstance(eb, dict):
+                                continue
+                            ex1, ey1, ex2, ey2 = eb.get("x1", 0), eb.get("y1", 0), eb.get("x2", 0), eb.get("y2", 0)
+                            inter_w = max(0, min(mm_x2, ex2) - max(mm_x1, ex1))
+                            inter_h = max(0, min(mm_y2, ey2) - max(mm_y1, ey1))
+                            inter_area = inter_w * inter_h
+                            mm_area = max(1, (mm_x2 - mm_x1) * (mm_y2 - mm_y1))
+                            if inter_area / mm_area > 0.25:
+                                is_overlapping = True
+                                break
+
+                        if not is_overlapping:
+                            detections.append({
+                                "class": "micro_motion",
+                                "confidence": round(float(md["confidence"]), 2),
+                                "track_id": 901 + idx,
+                                "bbox": {
+                                    "x1": mm_x1,
+                                    "y1": mm_y1,
+                                    "x2": mm_x2,
+                                    "y2": mm_y2,
+                                },
+                                "label": md.get("tag", "SUBTLE MOTION"),
+                            })
+                            masks.append([])
                 except Exception as e:
                     print(f"[MicroMotion Err] {e}", flush=True)
 
