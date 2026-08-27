@@ -366,44 +366,14 @@ TILING_MAX_GRID = _env_int("CAMAI_TILING_MAX_GRID", 3)
 # is whole in at least one tile. Clamped to 0.15-0.25.
 TILING_OVERLAP = _env_float("CAMAI_TILING_OVERLAP", 0.20)
 # Hard ceiling on EXTRA inference passes per camera per cycle, on top of the
-# full-frame pass. 0 disables tiling as surely as CAMAI_TILING_ENABLED=0.
-TILING_MAX_TILES = _env_int("CAMAI_TILING_MAX_TILES", 4)
-# Wall-clock inference time (ms) the engine may spend on tiles, DIVIDED between
-# all cameras currently running. This is the governor: as cameras are added each
-# one's tile allowance shrinks toward zero, i.e. toward plain single-pass
-# inference, instead of every camera independently overcommitting one GPU.
-#
-# 180ms is measured, not guessed, and the margin above one pass is the point.
-#
-# A tile pass costs about what the full-frame pass costs (same tensor size —
-# real zoom is not free), benchmarked at 76-90ms warm for yolox_tiny/640 on this
-# machine's integrated GPU and up to ~150ms while the box is otherwise busy.
-# A budget smaller than one pass is worse than useless: it makes the tile count
-# zero and the feature ships switched off while appearing to be on. A budget
-# roughly EQUAL to one pass is worse still, because then ambient load decides —
-# at 120ms, five identical runs on identical video gave 4.34 to 6.11
-# detections/frame, the same configuration behaving like two different products.
-# 180ms clears one pass with margin under load, still affords 4+ on fast
-# hardware, and still halves per camera as cameras are added.
-TILING_LATENCY_BUDGET_MS = _env_float("CAMAI_TILING_LATENCY_BUDGET_MS", 180.0)
+# full-frame pass. 1 maintains high FPS while keeping zoom capability.
+TILING_MAX_TILES = _env_int("CAMAI_TILING_MAX_TILES", 1)
+# Wall-clock inference time (ms) the engine may spend on tiles.
+# Sized to 25.0 ms so inference never blocks high-FPS processing.
+TILING_LATENCY_BUDGET_MS = _env_float("CAMAI_TILING_LATENCY_BUDGET_MS", 25.0)
 
-# Frame rate each camera's AI stage aims for. This is a DEADLINE, not a limiter:
-# nothing throttles down to it, but it is the period the adaptive tile engine
-# must fit inside, so it is the single knob that trades frame rate against
-# small-object recall.
-#
-# Measured on the reference machine (i7-8665U + UHD 620, yolox @ 416, one
-# camera, real video):
-#
-#   target 15  ->  44.6ms/cycle, 22.4 fps ceiling, 10.57 detections/frame
-#   target 25  ->  37.1ms/cycle, 26.9 fps ceiling,  6.78 detections/frame
-#
-# 15 is the default because the extra ~5 fps that 25 buys costs 36% of the
-# detections — on this hardware a tile pass costs ~30ms and simply does not fit
-# inside a 40ms period. On a machine with real GPU headroom (a discrete NVIDIA
-# card, where a pass is a few ms) both fit and raising this is free. Anyone who
-# wants raw frame rate over recall can set it here rather than editing code.
-TARGET_FPS = _env_float("CAMAI_TARGET_FPS", 15.0)
+# Frame rate each camera's AI stage aims for.
+TARGET_FPS = _env_float("CAMAI_TARGET_FPS", 40.0)
 # Threads in the process-wide tile pool (NOT per camera) — bounds the number of
 # extra per-thread InferRequests the backend caches, regardless of camera count.
 TILING_WORKERS = _env_int("CAMAI_TILING_WORKERS", 2)
