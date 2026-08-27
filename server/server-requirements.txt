@@ -1,51 +1,14 @@
-fastapi==0.111.1
-uvicorn[standard]==0.23.2
-opencv-python-headless==4.8.1.78
-# Inference backends. app/ai/backend.py auto-selects the fastest available:
-# TensorRT/CUDA (onnxruntime-gpu, install manually on NVIDIA hosts) >
-# OpenVINO (Intel CPU/iGPU) > ONNX Runtime CPU. The engine runs fully on
-# these two; no AGPL packages are required at runtime (see LICENSING.md).
-openvino==2026.2.1
-# onnxruntime-openvino was tried for the helmet/ANPR secondary detectors
-# (app/ai/helmet.py, app/ai/plate.py) so they could also use this box's Intel
-# iGPU instead of silently falling back to CPU — its bundled
-# onnxruntime_providers_openvino.dll requires a specific OpenVINO runtime ABI
-# and failed to load against the openvino==2026.2.1 above (Error 127: "the
-# specified procedure could not be found" — version mismatch between the two
-# packages, confirmed 2026-08-02). onnxruntime-directml has no such coupling
-# (DirectML talks to the GPU via DirectX 12, independent of the openvino
-# package) and verified working: DmlExecutionProvider loads and runs real
-# inference on this hardware. Same "onnxruntime" import namespace as plain
-# onnxruntime — a drop-in replacement, not an additional package.
-onnxruntime>=1.20.0
-# Use a slightly older numpy that's widely available
-numpy>=1.26.4
-# Security patch level, API-compatible with the pins they replace:
-#   pillow 10.2.0        -> CVE-2024-28219, buffer overflow in _imagingcms
-#                           (fixed in 10.3.0)
-#   python-multipart 0.0.7 -> CVE-2024-53981, CPU/log exhaustion parsing a
-#                           malformed multipart boundary — reachable from
-#                           /api/cameras/upload (fixed in 0.0.18)
-# Rebuild the frozen engine (server/build_engine.ps1) to pick these up; the
-# shipped camai-engine.exe keeps whatever was frozen into it.
-pillow==10.4.0
-python-multipart==0.0.18
-# Hard dependency of app/ai/pipeline.py's ByteTracker (Hungarian assignment
-# for multi-object data association) — not optional/try-except like the
-# inference backends below.
-scipy==1.13.1
-# Hard dependency of app/recorder.py's H.264 encode path — cv2.VideoWriter's
-# own H.264 support needs the OpenH264 DLL, which isn't reliably present and
-# silently falls back to a browser-unplayable codec (mp4v) instead of
-# raising. imageio-ffmpeg bundles a portable ffmpeg binary with libx264.
-imageio-ffmpeg==0.6.0
-# Resolves page URLs (YouTube/Twitch live) into the direct manifest behind
-# them — see app/ai/stream_resolver.py. cv2.VideoCapture cannot open a watch
-# page at all: it returns isOpened()==False with no error, which upstream
-# looks exactly like a dead camera. Unlicense/public-domain, so it carries no
-# obligation into the shipped engine (see LICENSING.md).
-yt-dlp==2026.7.4
-psutil==5.9.8
-# Required for custom product embedding extraction (Lazy-loaded MobileNetV3)
-torch>=2.2.0
-torchvision>=0.17.0
+fastapi>=0.100.0
+uvicorn[standard]>=0.20.0
+opencv-python-headless>=4.8.0
+openvino>=2024.0.0
+onnxruntime>=1.16.0
+numpy>=1.26.0
+pillow>=10.0.0
+python-multipart>=0.0.9
+scipy>=1.11.0
+imageio-ffmpeg>=0.4.0
+yt-dlp>=2024.1.0
+psutil>=5.9.0
+torch>=2.0.0
+torchvision>=0.15.0
