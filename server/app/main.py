@@ -538,8 +538,10 @@ def get_system_status():
 
 
     running_states = [c for c in camera_states.values() if c["running"]]
-    avg_fps = sum(c["fps"] for c in running_states) / len(running_states) if running_states else 0.0
-    avg_latency = sum(c["latency"] for c in running_states) / len(running_states) if running_states else 0.0
+    online_states = [c for c in running_states if c.get("health_status") == "online"]
+    target_states = online_states if online_states else running_states
+    avg_fps = sum(c["fps"] for c in target_states) / len(target_states) if target_states else 0.0
+    avg_latency = sum(c["latency"] for c in target_states) / len(target_states) if target_states else 0.0
 
     if _proc is not None:
         try:
@@ -569,7 +571,7 @@ def get_system_status():
             "device": device,
             "avg_fps": round(avg_fps, 1),
             "avg_latency_ms": round(avg_latency, 1),
-            "active_cameras": len(running_states),
+            "active_cameras": len(online_states),
         },
     }
 
@@ -874,35 +876,30 @@ def remove_camera(camera_id: str):
 def update_camera_analytics(camera_id: str, payload: CameraAnalyticsPayload):
     cam = get_camera(camera_id)
     if not cam:
-        # Auto-create camera in local database for newly added Supabase cameras
-        save_camera(
-            camera_id,
-            f"Camera {camera_id[:6]}",
-            "virtual",
-            "test_cctv_motion.mp4",
-            1,
-            payload.zones,
-            payload.lines,
-            payload.rules or "[]",
-            payload.zone_profile,
-            payload.profile_features or "{}"
-        )
-    else:
-        # Update existing SQLite camera record
-        save_camera(
-            cam["id"],
-            cam["name"],
-            cam["type"],
-            cam["source"],
-            cam["is_active"],
-            payload.zones,
-            payload.lines,
-            payload.rules or "[]",
-            payload.zone_profile,
-            payload.profile_features or "{}"
-        )
-    
-    # Ensure camera thread is running
+        # Camera does not exist in the local DB. The desktop app registers cameras
+        # via POST /api/cameras (with a decrypted connection string) before pushing
+        # config — a config push for an unknown id means the registration raced or
+        # was dropped. Return 404 so the desktop retries the full registration path
+        # rather than letting us silently create a virtual-demo placeholder that
+        # would show "Virtual Live Stream" and fake AI detections indefinitely.
+        raise HTTPException(status_code=404, detail="Camera not registered. Register via POST /api/cameras first.")
+
+    # Update existing SQLite camera record
+    save_camera(
+        cam["id"],
+        cam["name"],
+        cam["type"],
+        cam["source"],
+        cam["is_active"],
+        payload.zones,
+        payload.lines,
+        payload.rules or "[]",
+        payload.zone_profile,
+        payload.profile_features or "{}"
+    )
+
+    # Ensure camera thread is running (it was already registered; the engine may
+    # have restarted and lost its in-memory thread while the DB row survived).
     if camera_id not in manager.camera_threads:
         cam_full = get_camera(camera_id)
         if cam_full:
@@ -910,11 +907,11 @@ def update_camera_analytics(camera_id: str, payload: CameraAnalyticsPayload):
 
     # Update live thread on-the-fly
     manager.update_camera_analytics_config(
-        camera_id, 
-        payload.zones, 
-        payload.lines, 
-        payload.rules or "[]", 
-        payload.zone_profile, 
+        camera_id,
+        payload.zones,
+        payload.lines,
+        payload.rules or "[]",
+        payload.zone_profile,
         payload.profile_features or "{}"
     )
     return {"success": True, "message": "Analytics config updated"}
@@ -949,14 +946,12 @@ def set_camera_recording(camera_id: str, payload: CameraRecordingPayload):
 def get_camera_telemetry(camera_id: str):
     thread = manager.camera_threads.get(camera_id)
     if not thread:
-        cam_full = get_camera(camera_id)
-        if not cam_full:
-            save_camera(camera_id, f"Camera {camera_id[:6]}", "virtual", "test_cctv_motion.mp4", 1, "[]", "[]", "[]", "micro_motion", "{}")
-            cam_full = get_camera(camera_id)
-        if cam_full:
-            manager.start_camera_thread(cam_full)
-            thread = manager.camera_threads.get(camera_id)
-    if not thread:
+        # Do NOT auto-create a virtual camera here — returning a running thread
+        # for an unknown camera_id would silently spin up a demo pipeline that
+        # shows "Virtual Live Stream" and fake AI detections. If the camera is
+        # registered in the DB but has no running thread the engine may have
+        # just restarted; in that case the desktop's next syncCamerasToLocalEngine
+        # tick will re-register it via POST /api/cameras.
         raise HTTPException(status_code=404, detail="Camera thread not running")
     return thread.latest_telemetry
 
@@ -965,14 +960,11 @@ def get_camera_telemetry(camera_id: str):
 async def get_mjpeg_stream(camera_id: str):
     thread = manager.camera_threads.get(camera_id)
     if not thread:
-        cam_full = get_camera(camera_id)
-        if not cam_full:
-            save_camera(camera_id, f"Camera {camera_id[:6]}", "virtual", "test_cctv_motion.mp4", 1, "[]", "[]", "[]", "micro_motion", "{}")
-            cam_full = get_camera(camera_id)
-        if cam_full:
-            manager.start_camera_thread(cam_full)
-            thread = manager.camera_threads.get(camera_id)
-    if not thread:
+        # Do NOT auto-create a virtual camera here — doing so would silently spin
+        # up a demo pipeline that streams test_cctv_motion.mp4 and shows
+        # "Virtual Live Stream" / fake AI detections for any unknown camera_id.
+        # A registered camera whose thread has disappeared (engine restart) will
+        # be re-registered by the desktop's next sync tick.
         raise HTTPException(status_code=404, detail="Camera thread not running or inactive")
 
     # A camera with no video must NOT be served an endless empty stream.

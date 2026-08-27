@@ -70,7 +70,7 @@ def health():
         "engine_error": manager.startup_error,
         "uptime_secs": round(time.time() - _START),
         "model_loaded": manager.yolo_model is not None,
-        "active_cameras": sum(1 for t in manager.camera_threads.values() if t.running),
+        "active_cameras": sum(1 for t in manager.camera_threads.values() if t.running and getattr(t, "_health_status", "") == "online"),
     }
 
 
@@ -157,6 +157,6 @@ def performance():
         "cpu_percent": cpu,
         "memory_mb": mem,
         "gpu_percent": get_gpu_usage(),
-        "active_cameras": len(running),
+        "active_cameras": len(online_cams),
         "device": _device(),
     }

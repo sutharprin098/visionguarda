@@ -34,16 +34,11 @@ export const DEFAULT_OFFLINE_BUNDLE: SyncBundle = {
     "analytics.view",
     "rules.manage",
   ],
-  cameras: [
-    {
-      id: "cam-virtual-1",
-      name: "Virtual Traffic Demo Feed",
-      stream_url: "virtual://traffic_demo",
-      status: "online",
-      ai_mode: "traffic_analytics",
-      fps: 30,
-    },
-  ],
+  // No placeholder cameras. The engine only registers cameras explicitly pushed
+  // via POST /api/cameras from the cloud-synced bundle. A phantom demo camera
+  // here caused "Virtual Live Stream" and fake AI detections to appear in the
+  // Admin Studio whenever the cloud sync was unavailable.
+  cameras: [],
   settings: [],
   notifications: [],
   ai_model_assignments: [],
