@@ -742,21 +742,25 @@ export async function syncAiModelToLocalEngine(dbModelName: string | undefined):
   }
 }
 
-let appliedInferenceMode: string | null = null;
+export async function syncAiInferenceModeToLocalEngine(dbMode: string | undefined): Promise<void> {
+  if (!dbMode) return;
+  const wantedMode = dbMode === "local" ? "local" : "cloud";
 
-export async function syncAiInferenceModeToLocalEngine(mode: string | undefined): Promise<void> {
-  if (!mode || !(await isEngineOnline())) return;
-  const targetMode = mode === "local" ? "local" : "cloud";
-  if (targetMode === appliedInferenceMode) return;
   try {
-    const res = await fetch(`${ENGINE_BASE}/api/cloud-mode`, {
+    const cur = await fetch(`${ENGINE_BASE}/api/cloud-mode`, {
+      signal: AbortSignal.timeout(4000),
+    });
+    if (cur.ok) {
+      const body = await cur.json();
+      if (body?.mode === wantedMode) return;
+    }
+    await fetch(`${ENGINE_BASE}/api/cloud-mode`, {
       method: "POST",
       headers: await controlHeaders(),
-      body: JSON.stringify({ mode: targetMode }),
+      body: JSON.stringify({ mode: wantedMode }),
     });
-    if (res.ok) appliedInferenceMode = targetMode;
-  } catch (e) {
-    console.error("[LocalEngine] Failed to sync inference mode:", e);
+  } catch {
+    // engine went away mid-sync — next tick retries
   }
 }
 
