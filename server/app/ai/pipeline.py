@@ -1993,9 +1993,8 @@ class PipelineCoordinator:
                 declared = float(self.cap.get(cv2.CAP_PROP_FPS))
             except Exception:
                 declared = 0.0
-            self._file_frame_interval = (
-                1.0 / declared if 1.0 <= declared <= 120.0 else 1.0 / 25.0
-            )
+            target_pacing_fps = max(35.0, declared) if 1.0 <= declared <= 120.0 else 35.0
+            self._file_frame_interval = 1.0 / target_pacing_fps
 
         next_frame_due = time.time()
 
