@@ -1,6 +1,6 @@
--- ============================================================================
--- Migration 0049: Cloud & Local Hybrid Inference Mode Governance
--- ============================================================================
+-- 0. Drop old triggers to prevent old function execution on update
+DROP TRIGGER IF EXISTS trg_log_inference_mode_change ON public.settings;
+DROP FUNCTION IF EXISTS public.log_inference_mode_change() CASCADE;
 
 -- 1. Ensure settings table contains appropriate constraints & default keys
 -- Keys introduced:
@@ -39,17 +39,20 @@ BEGIN
 END $$;
 
 -- 3. Audit trail logging for AI inference mode changes
+DROP TRIGGER IF EXISTS trg_log_inference_mode_change ON public.settings;
+DROP FUNCTION IF EXISTS public.log_inference_mode_change() CASCADE;
+
 CREATE OR REPLACE FUNCTION public.log_inference_mode_change()
 RETURNS TRIGGER AS $$
 BEGIN
   IF NEW.scope = 'org' AND NEW.key = 'ai.inference_mode' AND (OLD.value IS DISTINCT FROM NEW.value) THEN
     INSERT INTO public.audit_logs (
       org_id,
-      user_id,
+      actor_id,
       action,
-      entity_type,
-      entity_id,
-      details,
+      target_type,
+      target_id,
+      detail,
       created_at
     )
     VALUES (
