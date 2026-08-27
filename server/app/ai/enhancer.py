@@ -117,45 +117,18 @@ class ZeroDCEEnhancer:
             stats["latency_ms"] = round((time.time() - t0) * 1000.0, 2)
             return frame, stats
 
-        with self.lock:
-            # 1. Neural Zero-DCE inference if ONNX model is loaded
-            if self.is_loaded and self.onnx_session:
-                try:
-                    h, w = frame.shape[:2]
-                    small = cv2.resize(frame, (256, 256))
-                    blob = small.astype(np.float32) / 255.0
-                    blob = np.transpose(blob, (2, 0, 1))[None, ...]
-
-                    input_name = self.onnx_session.get_inputs()[0].name
-                    out = self.onnx_session.run(None, {input_name: blob})[0]
-
-                    if out.shape[1] == 24:
-                        a_maps = out[0]
-                        orig_norm = frame.astype(np.float32) / 255.0
-                        enhanced = orig_norm
-                        for i in range(8):
-                            a_i = cv2.resize(np.transpose(a_maps[i*3:(i+1)*3], (1, 2, 0)), (w, h))
-                            enhanced = enhanced + a_i * enhanced * (1.0 - enhanced)
-                        enhanced_bgr = np.clip(enhanced * 255.0, 0, 255).astype(np.uint8)
-                        stats["zero_dce_applied"] = True
-                        stats["method"] = "onnx_model"
-                        stats["latency_ms"] = round((time.time() - t0) * 1000.0, 2)
-                        return enhanced_bgr, stats
-                except Exception as e:
-                    print(f"[Zero-DCE] ONNX inference notice ({e}); using fast solver.", flush=True)
-
-            # 2. Sub-millisecond Color-Preserving Luminance Zero-DCE Curve Solver
-            ycrcb = cv2.cvtColor(frame, cv2.COLOR_BGR2YCrCb)
-            y_channel = ycrcb[:, :, 0]
-            
-            lut_y = self._enhance_curves_lut(mean_lum, thresh, iterations=4, target_lum=135.0)
-            ycrcb[:, :, 0] = cv2.LUT(y_channel, lut_y)
-            enhanced_bgr = cv2.cvtColor(ycrcb, cv2.COLOR_YCrCb2BGR)
-            
-            stats["zero_dce_applied"] = True
-            stats["method"] = "lut_curve_solver"
-            stats["latency_ms"] = round((time.time() - t0) * 1000.0, 2)
-            return enhanced_bgr, stats
+        # Sub-millisecond Color-Preserving Luminance Zero-DCE Curve Solver
+        ycrcb = cv2.cvtColor(frame, cv2.COLOR_BGR2YCrCb)
+        y_channel = ycrcb[:, :, 0]
+        
+        lut_y = self._enhance_curves_lut(mean_lum, thresh, iterations=4, target_lum=135.0)
+        ycrcb[:, :, 0] = cv2.LUT(y_channel, lut_y)
+        enhanced_bgr = cv2.cvtColor(ycrcb, cv2.COLOR_YCrCb2BGR)
+        
+        stats["zero_dce_applied"] = True
+        stats["method"] = "lut_curve_solver"
+        stats["latency_ms"] = round((time.time() - t0) * 1000.0, 2)
+        return enhanced_bgr, stats
 
 
 

@@ -2432,7 +2432,7 @@ class PipelineCoordinator:
             # in tracking_loop to extrapolate track positions forward seamlessly while
             # maintaining full pipeline frame rate.
             self._ai_frame_count = getattr(self, "_ai_frame_count", 0) + 1
-            keyframe_interval = max(1, int(os.getenv("CAMAI_AI_KEYFRAME_INTERVAL", "3")))
+            keyframe_interval = max(1, int(os.getenv("CAMAI_AI_KEYFRAME_INTERVAL", "1")))
 
             low_light = bool(motion_stats.get("low_light", False))
             force_interval = 0.50 if (low_light or self.zone_profile in ("micro_motion", "night_vision")) else self._FORCE_INFER_INTERVAL
