@@ -17,7 +17,7 @@ openvino==2026.2.1
 # package) and verified working: DmlExecutionProvider loads and runs real
 # inference on this hardware. Same "onnxruntime" import namespace as plain
 # onnxruntime — a drop-in replacement, not an additional package.
-onnxruntime==1.17.3
+onnxruntime>=1.20.0
 # Use a slightly older numpy that's widely available
 numpy==1.26.4
 # Security patch level, API-compatible with the pins they replace:
@@ -47,5 +47,5 @@ imageio-ffmpeg==0.6.0
 yt-dlp==2026.7.4
 psutil==5.9.8
 # Required for custom product embedding extraction (Lazy-loaded MobileNetV3)
-torch==2.13.0
-torchvision==0.28.0
+torch>=2.2.0
+torchvision>=0.17.0
