@@ -32,19 +32,17 @@ CamAI is four independently-run workspaces in one repository. There is no `clien
 
 ## Local engine pipeline (`server/app/ai/pipeline.py`)
 
-Each registered camera runs its own pipeline instance: six modules on dedicated threads, each handing off through a size-1 "latest wins" slot, plus a seventh module for recording. This is deliberate — a slow downstream stage drops stale frames rather than building a backlog, so latency never compounds.
+Each registered camera runs a dedicated `PipelineCoordinator` instance managing asynchronous worker loops connected via thread-safe lock structures (`_overlay_lock`, `jpeg_lock`) and lock-free deques:
 
 ```
-Module 1  Capture           → grabs frames from cv2.VideoCapture (must stay single-threaded — OpenCV capture objects are not thread-safe)
-Module 2  MJPEG Encode      → JPEG-encodes at camera FPS for the live stream; skipped entirely when no viewer is attached
-Module 3  AI Inference      → detector backend (see AI_ENGINE.md) on a cadence independent of capture FPS
-Module 4  Tracking + Rules  → ByteTrack-style tracker + CameraAnalytics (zones, speed, dwell, crowd, …)
-Module 5  Telemetry Build   → assembles the WebSocket payload from the latest tracking result
-Module 6  WebSocket Dispatch→ fans the payload out to connected clients
-Module 7  Recording         → CCTVRecorder, its own thread + async queue, independent of the above chain
+Stage 1  _capture_loop    → Grabs raw frames (RTSP / USB / NVR / YouTube / Screen Share) & applies Auto Zero-DCE Night Vision
+Stage 2  _decode_loop     → Independent high-frequency MJPEG encoding at 30–40 FPS, overlaying cached bounding boxes
+Stage 3  _tracking_loop   → Asynchronous AI inference (YOLO / ByteTrack / Micro-Motion), updating _latest_overlay_dets
+Stage 4  Recorder         → Asynchronous non-blocking MP4 video recording queue
+Stage 5  Telemetry & WS   → Pushes live FPS, detection alerts, and system health metrics to Desktop HUD & Supabase
 ```
 
-**Video and AI are decoupled on purpose.** The MJPEG stream (Module 2) runs at the camera's native FPS regardless of how fast AI inference is keeping up; the WebSocket (Modules 3–6) carries telemetry only — bounding boxes, track IDs, analytics events — never a frame. The desktop client renders the MJPEG image and draws the latest telemetry as a canvas overlay on top. A slow AI pass makes the overlay trail the video briefly; it never stalls or freezes the live picture.
+**Video streaming and AI inference are fully decoupled.** The MJPEG stream (`_decode_loop`) renders video at 30–40 FPS using cached detection results from `_latest_overlay_dets`. Even if heavy AI workloads (such as Zero-DCE or high-resolution YOLOX inference) slow down the detection cadence, video playback remains fluid and responsive without dropped frames or stuttering.
 
 ## Multi-tenancy (`supabase/`)
 

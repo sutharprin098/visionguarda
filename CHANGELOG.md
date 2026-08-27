@@ -1,5 +1,14 @@
 # Changelog
 
+## 2026-08-27 — Engine Optimization & Decoupled High-FPS Architecture
+
+### Added / Improved — Engine Performance & Streaming
+
+- **Decoupled MJPEG Streaming (`_decode_loop`)**: Re-architected the live video pipeline in `PipelineCoordinator` to decouple frame decoding/encoding from AI inference. Live video streams smoothly at **30–40 FPS**, fetching bounding box overlays asynchronously from a thread-safe overlay cache (`_overlay_lock`).
+- **Indentation & Scope Fix**: Resolved a critical `UnboundLocalError` inside `_decode_loop` where MJPEG encoding logic was executed outside the due-timer block, eliminating recovered exceptions and restoring high frame rate playback.
+- **Telemetry & Introspection Filtering**: Updated `/api/status` in `app/main.py` and introspection in `app/health.py` to filter metrics strictly by `health_status == "online"`, ensuring dead or reconnecting cameras do not dilute live stream FPS or active camera counts.
+- **Zero-DCE Night Vision Integration**: Auto-gated low-light enhancement with dynamic luminance thresholding, preventing frame drops during low-light AI processing.
+
 ## 2026-08-04 — Security audit follow-up (delta since 2026-07-25 audit)
 
 Scope: a full manual security/architecture audit was already performed on

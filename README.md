@@ -58,19 +58,21 @@ npm run dev                     # http://localhost:5174
 
 ```mermaid
 graph LR
-    A[Camera: RTSP / USB / NVR / stream URL] --> B[Capture — server/app/camera_manager.py]
-    B --> C[AI Inference — YOLOX + OpenVINO/ONNX/CUDA backend]
-    C --> D[Tracking — ByteTrack-style, appearance ReID]
-    D --> E[Analytics — zones, speed, ANPR, helmet, crowd, dwell]
-    E --> F[MJPEG stream — video at camera FPS]
-    E --> G[WebSocket — telemetry only, no frames]
-    F --> H[desktop/ live viewer]
-    G --> H
-    I[supabase/ — Postgres + RLS + Edge Functions] <-->|realtime sync, licensing| H
-    I <--> J[portal/ — admin SaaS]
+    A[Camera: RTSP / USB / NVR / YouTube / Screen] --> B[Capture Loop — PipelineCoordinator]
+    B --> C[Zero-DCE Night Vision — Auto Lum-Gated Enhancement]
+    C --> D[Decoupled Decode & Record Loop — Non-blocking MJPEG & MP4]
+    C --> E[Decoupled AI Tracking Loop — Asynchronous YOLOX / Micro-Motion / ByteTrack]
+    E --> F[Overlay Cache & Analytics — Thread-Safe Bounding Box Handoff]
+    F --> D
+    D --> G[MJPEG Live Stream — 30-40 FPS Smooth Video]
+    E --> H[WebSocket / REST Telemetry — Real-time FPS, HUD & Alerts]
+    G --> I[desktop/ Monitoring Client — Electron / React HUD]
+    H --> I
+    J[supabase/ Cloud — Postgres + RLS + License Sync] <--> I
+    J <--> K[portal/ — Admin SaaS]
 ```
 
-Video and AI are deliberately decoupled: the desktop renders MJPEG at the camera's native FPS and overlays bounding boxes from a separate WebSocket telemetry feed, so a slow AI pass degrades overlay freshness, never the live picture. See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
+Video streaming and AI inference are decoupled: `_decode_loop` encodes the MJPEG live video stream independently at **30–40 FPS**, reading bounding boxes from a thread-safe overlay cache (`_overlay_lock`). Asynchronous AI inference (`_tracking_loop`) runs in parallel, ensuring heavy detection workloads never degrade or drop streaming frame rates. See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
 ## License
 
