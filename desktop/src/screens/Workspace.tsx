@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef, useCallback, memo } from "react";
-import { Video, Bell, Settings2, LogOut, Wifi, WifiOff, Sliders, Activity, AlertTriangle, RotateCw, Maximize2, Minimize2, Lock, Send, Check, Loader2, MessageCircle, ChevronDown, ChevronRight, Copy, Map } from "lucide-react";
+import { Video, Bell, Settings2, LogOut, Wifi, WifiOff, Sliders, Activity, AlertTriangle, RotateCw, Maximize2, Minimize2, Lock, Send, Check, Loader2, MessageCircle, ChevronDown, ChevronRight, Copy, Map, Cloud, Cpu, Globe } from "lucide-react";
 import FloorPlanView from "../components/FloorPlanView";
 import clsx from "clsx";
 import { startRealtimeSync, DeactivatedError, SyncBundle } from "../lib/sync";
@@ -417,6 +417,15 @@ export default function Workspace({
               )}
             </button>
           )}
+        </div>
+        <div className="px-3 pb-3 pt-1 border-b border-line">
+          <CloudModeSwitcher
+            orgId={bundle.organization?.id ?? null}
+            canEdit={hasPermission("ai.configure")}
+            currentMode={
+              bundle?.settings.find((s) => s.scope === "org" && s.key === "ai.inference_mode")?.value || "cloud"
+            }
+          />
         </div>
         <nav className="flex-1 space-y-0.5 px-2 py-2">
           {navItems.map((n) => (
@@ -1853,6 +1862,85 @@ function AlertsTab({ orgId, hasPermission, active }: { orgId: string | null; has
       {/* The Alerts page. This is the only place an alert is ever rendered —
           realtime, filterable, exportable — see AlertsPage.tsx. */}
       <AlertsPage active={active} />
+    </div>
+  );
+}
+
+function CloudModeSwitcher({
+  orgId,
+  canEdit,
+  currentMode = "cloud",
+}: {
+  orgId: string | null;
+  canEdit: boolean;
+  currentMode?: string;
+}) {
+  const [mode, setMode] = useState<"local" | "cloud">(
+    currentMode === "local" ? "local" : "cloud"
+  );
+  const [updating, setUpdating] = useState(false);
+
+  useEffect(() => {
+    if (currentMode) {
+      setMode(currentMode === "local" ? "local" : "cloud");
+    }
+  }, [currentMode]);
+
+  async function handleModeChange(newMode: "local" | "cloud") {
+    setMode(newMode);
+    setUpdating(true);
+    try {
+      // 1. Sync to local FastAPI engine
+      await fetch("http://127.0.0.1:8000/api/cloud-mode", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mode: newMode }),
+      });
+
+      // 2. Sync to Supabase org settings
+      if (orgId && canEdit) {
+        const sb = await getSupabase();
+        await sb.from("settings").upsert(
+          { org_id: orgId, scope: "org", key: "ai.inference_mode", value: newMode },
+          { onConflict: "org_id,scope,key" }
+        );
+      }
+    } catch (e) {
+      console.error("[CloudModeSwitcher] Sync error:", e);
+    } finally {
+      setUpdating(false);
+    }
+  }
+
+  return (
+    <div className="flex items-center justify-between gap-1 bg-surface-2/80 p-1 rounded-lg border border-line/80 text-xs">
+      <button
+        onClick={() => void handleModeChange("local")}
+        disabled={updating}
+        title="Local Mode: Process 100% locally on Local Hardware (Cloud Off)"
+        className={clsx(
+          "flex flex-1 items-center justify-center gap-1.5 px-3 py-1.5 rounded-md text-[11px] font-semibold transition",
+          mode === "local"
+            ? "bg-accent/20 text-accent border border-accent/40 shadow-sm"
+            : "text-zinc-400 hover:text-zinc-200 hover:bg-surface-1"
+        )}
+      >
+        <Cpu size={12} /> Local (Hardware)
+      </button>
+
+      <button
+        onClick={() => void handleModeChange("cloud")}
+        disabled={updating}
+        title="Cloud Mode: Process 100% on AWS EC2 Cloud GPU (Local GPU 0% Paused)"
+        className={clsx(
+          "flex flex-1 items-center justify-center gap-1.5 px-3 py-1.5 rounded-md text-[11px] font-semibold transition",
+          mode === "cloud"
+            ? "bg-blue-500/20 text-blue-400 border border-blue-500/40 shadow-sm"
+            : "text-zinc-400 hover:text-zinc-200 hover:bg-surface-1"
+        )}
+      >
+        <Cloud size={12} /> Cloud (AWS GPU)
+      </button>
     </div>
   );
 }

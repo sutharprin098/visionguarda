@@ -551,20 +551,17 @@ class EngineBackend:
             except Exception as e:
                 print(f"[AI Backend] OpenVINO cache disabled (set_property failed: {e})", flush=True)
 
-        config = {"PERFORMANCE_HINT": "LATENCY"}
+        config = {
+            "PERFORMANCE_HINT": "LATENCY",
+        }
+        try:
+            import openvino.properties as props
+            config[props.enable_profiling()] = True
+        except Exception:
+            config["PERF_COUNT"] = "YES"
         if target_device == "CPU":
-            # Legacy string-keyed CPU tuning properties ("AFFINITY",
-            # "CPU_THREADS_NUM") were removed from the CPU plugin in newer
-            # OpenVINO releases (both raise NotFound on 2026.2.1) — every
-            # CPU startup wasted a full model compile attempt on these
-            # before falling back below. The CPU plugin auto-tunes thread
-            # count reasonably under PERFORMANCE_HINT=LATENCY on its own.
             pass
         else:
-            # FP16 inference on GPU: halves activation/weight bandwidth and is
-            # the throughput win the goal's "FP16 inference" requirement is
-            # after. Left off on CPU — most CPUs have no native fp16 compute
-            # path, so this would cost accuracy for zero speedup there.
             config["INFERENCE_PRECISION_HINT"] = "f16"
 
         try:
@@ -705,6 +702,85 @@ class EngineBackend:
 
         t_infer = (time.time() - t0) * 1000
         return (output0, output1), t_infer
+
+    def run_inference_ns(self, img_tensor, enable_layer_profiling=False):
+        """High-precision nanosecond inference runner supporting OpenVINO async completion callback & layer profiling."""
+        t_submit_ns = time.perf_counter_ns()
+        t_complete_ns = t_submit_ns
+        layer_profiling = []
+
+        try:
+            if self.backend_type == "openvino":
+                req = self._get_ov_infer_request()
+                ov_tensor = ov.Tensor(img_tensor)
+                req.set_input_tensor(ov_tensor)
+
+                completed_event = threading.Event()
+                def _on_complete(*args, **kwargs):
+                    nonlocal t_complete_ns
+                    t_complete_ns = time.perf_counter_ns()
+                    completed_event.set()
+
+                try:
+                    req.set_callback(_on_complete, None)
+                except Exception:
+                    try:
+                        req.set_callback(_on_complete)
+                    except Exception:
+                        pass
+                t_submit_ns = time.perf_counter_ns()
+                req.start_async()
+                req.wait()
+                if t_complete_ns == t_submit_ns:
+                    t_complete_ns = time.perf_counter_ns()
+
+                output0 = req.get_tensor(self.ov_output0).data
+                output1 = req.get_tensor(self.ov_output1).data if self.has_seg_output and self.ov_output1 is not None else None
+
+                if enable_layer_profiling:
+                    try:
+                        p_info = req.get_profiling_info()
+                        for p in p_info:
+                            if hasattr(p.real_time, 'total_seconds'):
+                                real_us = int(p.real_time.total_seconds() * 1e6)
+                            elif hasattr(p.real_time, 'count'):
+                                real_us = p.real_time.count()
+                            else:
+                                real_us = int(p.real_time)
+
+                            if hasattr(p.cpu_time, 'total_seconds'):
+                                cpu_us = int(p.cpu_time.total_seconds() * 1e6)
+                            elif hasattr(p.cpu_time, 'count'):
+                                cpu_us = p.cpu_time.count()
+                            else:
+                                cpu_us = int(p.cpu_time)
+                            layer_profiling.append({
+                                "node_name": str(getattr(p, 'node_name', getattr(p, 'layer_name', 'unknown'))),
+                                "exec_type": str(getattr(p, 'exec_type', '')),
+                                "real_time_us": real_us,
+                                "cpu_time_us": cpu_us,
+                                "status": str(getattr(p, 'status', 'EXECUTED')),
+                            })
+                    except Exception as pe:
+                        print(f"[AI Backend] Warning: Profiling info extraction failed: {pe}", flush=True)
+
+            elif self.backend_type == "onnx":
+                t_submit_ns = time.perf_counter_ns()
+                res = self.ort_session.run(None, {self._ort_input_name: img_tensor})
+                t_complete_ns = time.perf_counter_ns()
+                output0 = res[0]
+                output1 = res[1] if self.has_seg_output else None
+            else:
+                raise RuntimeError("Backend not initialized.")
+        except Exception as e:
+            self._infer_error_count += 1
+            if self._infer_error_count <= 5:
+                print(f"[AI Backend] [FAIL] INFERENCE ERROR #{self._infer_error_count} "
+                      f"({self.backend_type}/{self.backend_device}): {e}", flush=True)
+            raise
+
+        dur_ns = t_complete_ns - t_submit_ns
+        return (output0, output1), dur_ns, t_submit_ns, t_complete_ns, layer_profiling
 
     def benchmark(self, frame, target_size=320, runs=5):
         tensor, t_preprocess = self.preprocess(frame, target_size)

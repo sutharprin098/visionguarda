@@ -2400,6 +2400,17 @@ class PipelineCoordinator:
             backend.release_thread_request()
 
     def _ai_loop_iteration(self, data):
+            if getattr(config, "INFERENCE_MODE", "cloud") == "cloud":
+                # Strict Cloud Mode: Local neural network inference is 100% PAUSED (0% Local GPU/CPU load).
+                # Detections and telemetry are offloaded to the AWS Cloud GPU node.
+                data["detections"] = []
+                data["inf_lat"] = 0.0
+                data["imgsz"] = self.current_imgsz
+                data["motion"] = False
+                self._tracking_slot.put(data)
+                time.sleep(0.01)
+                return
+
             backend = self.backend
             if backend is None:
                 time.sleep(0.1)

@@ -180,8 +180,10 @@ class CameraManager:
         every camera 2-3x inference latency for the duration, to produce a
         number nothing reads — see CAMAI_MODEL_BENCHMARK in config.py.
         """
-        from app.config import MODEL_BENCHMARK_MODE
+        from app.config import MODEL_BENCHMARK_MODE, INFERENCE_MODE
 
+        if INFERENCE_MODE == "cloud":
+            return False, "disabled when INFERENCE_MODE=cloud (local hardware 0% load)"
         if MODEL_BENCHMARK_MODE == "off":
             return False, "disabled by CAMAI_MODEL_BENCHMARK=off"
         if MODEL_BENCHMARK_MODE == "on":

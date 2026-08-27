@@ -305,7 +305,7 @@ function AiTab({ canConfigure }: { canConfigure: boolean }) {
     return found ? found.value : fallback;
   };
 
-  const [activeProfile, setActiveProfile] = useState<"traffic" | "security" | "factory" | "drone" | "custom">("traffic");
+  const [activeProfile, setActiveProfile] = useState<"traffic" | "security" | "factory" | "drone" | "micro_motion" | "custom">("traffic");
 
   // Traffic form state
   const [trafficDetections, setTrafficDetections] = useState({

@@ -575,6 +575,39 @@ def get_system_status():
         },
     }
 
+class CloudModePayload(BaseModel):
+    mode: str  # "local" | "cloud"
+    cloud_url: Optional[str] = None
+    cloud_key: Optional[str] = None
+
+@app.get("/api/cloud-mode")
+def get_cloud_mode():
+    return {
+        "status": "ok",
+        "mode": config.INFERENCE_MODE,
+        "cloud_url": config.CLOUD_ENDPOINT_URL,
+        "active_backend": "cloud" if config.INFERENCE_MODE == "cloud" else "local",
+        "local_model_paused": config.INFERENCE_MODE == "cloud",
+        "cloud_status": "configured" if config.CLOUD_ENDPOINT_URL else "unconfigured",
+    }
+
+@app.post("/api/cloud-mode")
+def set_cloud_mode(payload: CloudModePayload):
+    m = payload.mode.strip().lower()
+    config.INFERENCE_MODE = "local" if m == "local" else "cloud"
+    if payload.cloud_url is not None:
+        config.CLOUD_ENDPOINT_URL = payload.cloud_url.strip()
+    if payload.cloud_key is not None:
+        config.CLOUD_API_KEY = payload.cloud_key.strip()
+    
+    print(f"[CloudMode] Inference mode set to '{config.INFERENCE_MODE}' (Cloud URL: '{config.CLOUD_ENDPOINT_URL}')", flush=True)
+    return {
+        "status": "ok",
+        "mode": config.INFERENCE_MODE,
+        "cloud_url": config.CLOUD_ENDPOINT_URL,
+        "local_model_paused": config.INFERENCE_MODE == "cloud",
+    }
+
 @app.post("/api/model/select", dependencies=control)
 def select_model(payload: ModelSelectPayload):
     target_path = None
