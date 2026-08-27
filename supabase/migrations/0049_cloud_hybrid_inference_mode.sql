@@ -8,15 +8,16 @@
 --   - 'ai.cloud_endpoint_url'  (e.g., 'https://api.camai.cloud/v1/infer' or AWS IP)
 --   - 'ai.cloud_api_key'       (Encrypted / Cloud token)
 
--- Seed default 'ai.inference_mode' = 'local' for all existing organizations
+-- Seed default 'ai.inference_mode' = 'cloud' for all existing organizations
 INSERT INTO public.settings (org_id, scope, key, value, updated_at)
-SELECT id, 'org', 'ai.inference_mode', '"local"'::jsonb, NOW()
+SELECT id, 'org', 'ai.inference_mode', '"cloud"'::jsonb, NOW()
 FROM public.organizations
-ON CONFLICT (org_id, scope, key) DO NOTHING;
+ON CONFLICT (org_id, scope, key) 
+DO UPDATE SET value = EXCLUDED.value, updated_at = NOW();
 
 -- Seed default 'ai.cloud_endpoint_url' = '' for all existing organizations
 INSERT INTO public.settings (org_id, scope, key, value, updated_at)
-SELECT id, 'org', 'ai.cloud_endpoint_url', '""'::jsonb, NOW()
+SELECT id, 'org', 'ai.cloud_endpoint_url', '"http://13.203.71.14:8000"'::jsonb, NOW()
 FROM public.organizations
 ON CONFLICT (org_id, scope, key) DO NOTHING;
 
