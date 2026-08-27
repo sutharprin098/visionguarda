@@ -8,7 +8,7 @@ name: CI
 # tag-push side, and docs/DEPLOYMENT.md for how installers actually get
 # built and published (locally, on a machine with the engine + models).
 
-on:
+'on':
   push:
     branches: [main]
   pull_request:

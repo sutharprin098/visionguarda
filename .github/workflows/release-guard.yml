@@ -12,7 +12,7 @@ name: Release guard
 # has a Windows installer attached. A red X here is the earliest possible
 # signal that a release shipped a tag but not a download.
 
-on:
+'on':
   push:
     tags:
       - "v*.*.*"
