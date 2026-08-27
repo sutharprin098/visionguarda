@@ -30,7 +30,7 @@ export interface ShareCallbacks {
 // fails the same way forever. This was very likely the actual root cause of
 // screen/webcam shares getting stuck "reconnecting" indefinitely.
 const WS_URL = "ws://127.0.0.1:8000/ws";
-const FRAME_INTERVAL_MS = 100;
+const FRAME_INTERVAL_MS = 33;
 const HEARTBEAT_INTERVAL_MS = 5000;
 const HEARTBEAT_TIMEOUT_MS = 12000;
 // How long the socket may stay open with NO frame actually sent before the
@@ -40,26 +40,8 @@ const HEARTBEAT_TIMEOUT_MS = 12000;
 const SEND_STALL_TIMEOUT_MS = 25000;
 // Ceiling on un-drained WebSocket bytes before frames start being skipped.
 //
-// This was 512KB, justified as "8-12 frames of slack: enough to ride out a
-// brief engine hiccup". That reasoning is right for a file upload and wrong
-// for live video, and it is the single largest source of delay in the virtual
-// camera path: a queued frame is not resilience, it is a frame that will be
-// DISPLAYED LATE. At the 10fps push rate, 8-12 queued frames is roughly a full
-// SECOND of latency that the design settles into under any sustained load —
-// the operator sees a second-old screen with boxes drawn on it and reports,
-// correctly, that it is nowhere near real time.
-//
-// For live video the rule is the opposite one: never hold a frame you could
-// replace with a newer one. This is a loopback socket (127.0.0.1), so
-// bufferedAmount returns to zero almost immediately whenever the engine is
-// keeping up; a non-trivial reading means it is NOT keeping up, and the right
-// response is to drop this frame and offer a fresher one 100ms later.
-//
-// Sized to roughly one frame, so at most one is ever in flight. Worst-case
-// added latency goes from ~1s to ~100-150ms, and a genuine engine stall now
-// drops frames (which is invisible) instead of accumulating stale ones (which
-// is the complaint).
-const MAX_WS_BUFFERED_BYTES = 64 * 1024;
+// Sized to roughly two frames (128KB), ensuring fast throughput at 30 FPS.
+const MAX_WS_BUFFERED_BYTES = 128 * 1024;
 const STREAM_REACQUIRE_DELAY_MS = 1500;
 const RECONNECT_BACKOFF_MS = [500, 1000, 2000, 4000, 8000, 15000, 30000];
 
@@ -161,7 +143,7 @@ export class MediaShareSession {
     if (this.stopped) return;
     this.setStatus("acquiring");
     try {
-      const constraints: MediaStreamConstraints = { video: { width: 960, height: 540, frameRate: 10 } };
+      const constraints: MediaStreamConstraints = { video: { width: 960, height: 540, frameRate: 30 } };
       let stream: MediaStream;
       if (this.kind === "screen") {
         if (!this.sourceId) {
