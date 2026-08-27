@@ -19,7 +19,7 @@ openvino==2026.2.1
 # onnxruntime — a drop-in replacement, not an additional package.
 onnxruntime>=1.20.0
 # Use a slightly older numpy that's widely available
-numpy==1.26.4
+numpy>=1.26.4
 # Security patch level, API-compatible with the pins they replace:
 #   pillow 10.2.0        -> CVE-2024-28219, buffer overflow in _imagingcms
 #                           (fixed in 10.3.0)
