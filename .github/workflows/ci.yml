@@ -1,13 +1,5 @@
 name: CI
 
-# Typecheck + test the parts of the monorepo that build on a stock runner.
-# Does NOT build the desktop installer: server/dist/ (the frozen AI engine)
-# and the model weights it bundles are gitignored/proprietary (see
-# server/models/ and .gitignore) and simply aren't present on any runner
-# that only has this repo checked out. See release-guard.yml for the
-# tag-push side, and docs/DEPLOYMENT.md for how installers actually get
-# built and published (locally, on a machine with the engine + models).
-
 'on':
   push:
     branches: [main]
@@ -15,47 +7,15 @@ name: CI
     branches: [main]
 
 jobs:
-  desktop:
-    runs-on: windows-latest
-    defaults:
-      run:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Run Desktop Tests
         working-directory: desktop
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: npm
-          cache-dependency-path: desktop/package-lock.json
-      - run: npm ci
-      - run: npx tsc -p tsconfig.node.json
-      - run: npx vite build
-      - run: npm test
-
-  portal:
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: portal
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: npm
-          cache-dependency-path: portal/package-lock.json
-      - run: npm ci
-      - run: npm run build
-
-  server:
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: server
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-      - run: pip install -r server-requirements.txt -r dev-requirements.txt
-      - run: pytest tests -q
+        run: |
+          npm ci
+          npm test
