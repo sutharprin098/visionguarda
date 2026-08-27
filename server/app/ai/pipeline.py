@@ -2323,7 +2323,7 @@ class PipelineCoordinator:
                         h, w = stream_frame.shape[:2]
                         if w != target_w:
                             target_h = max(180, int(h * (target_w / w)))
-                            mjpeg_f = cv2.resize(stream_frame, (target_w, target_h), interpolation=cv2.INTER_AREA)
+                            mjpeg_f = cv2.resize(stream_frame, (target_w, target_h), interpolation=cv2.INTER_LINEAR)
                         else:
                             mjpeg_f = stream_frame
                         q = max(60, min(90, self.jpeg_quality))
