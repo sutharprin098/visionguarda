@@ -50,10 +50,15 @@ class ZeroDCEEnhancer:
 
     @staticmethod
     def calculate_luminance(frame: np.ndarray) -> float:
-        """Computes mean frame luminance (0-255)."""
+        """Computes mean frame luminance (0-255) in sub-millisecond time."""
         if frame is None or frame.size == 0:
             return 128.0
-        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        h, w = frame.shape[:2]
+        if h > 180 or w > 320:
+            small = cv2.resize(frame, (160, 90), interpolation=cv2.INTER_NEAREST)
+            gray = cv2.cvtColor(small, cv2.COLOR_BGR2GRAY)
+        else:
+            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         return float(np.mean(gray))
 
     def _enhance_curves_lut(self, mean_lum: float, thresh: float, iterations: int = 4, target_lum: float = 135.0) -> np.ndarray:

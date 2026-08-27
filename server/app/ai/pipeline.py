@@ -1352,6 +1352,10 @@ class PipelineCoordinator:
         self._tile_stats: dict = {}
         self._push_tile_priority()
 
+        self._overlay_lock = threading.Lock()
+        self._latest_overlay_dets = []
+        self._latest_overlay_ts = 0.0
+
         # ── REST status snapshot (latest telemetry for /api/status) ─────────
         #
         # `status` starts at "connecting", NOT "no_human". This dict is what
@@ -1387,7 +1391,18 @@ class PipelineCoordinator:
 
         # ── Motion detection state ───────────────────────────────────────────
         self._prev_motion = None
+        self._prev_motion_full = None
+        self._motion_noise_ema = None
         self._motion_thr  = 0.004
+        self._motion_stats = {
+            "motion": True,
+            "changed_ratio": 0.0,
+            "threshold": 12,
+            "noise_sigma": 0.0,
+            "mean_luminance": 128.0,
+            "low_light": False,
+            "latency_ms": 0.0,
+        }
         # Wall-clock time of the last frame actually sent through inference.
         # should_infer normally gates on frame-diff motion, but a slow-moving
         # or newly-appeared-but-still object can sit below that threshold
@@ -2045,6 +2060,7 @@ class PipelineCoordinator:
                             self._health_status = "connecting"
                             self._last_resolution = "960x540"
                             self.publish_source_status()
+                            self._is_standby_frame = True
                             time.sleep(0.033)  # Maintain smooth 30fps playback during standby/recovery
                     else:
                         ret, frame = self.cap.read()
@@ -2073,6 +2089,7 @@ class PipelineCoordinator:
                                 frame = self._last_good_frame
                             else:
                                 frame = self._generate_synthetic_demo_frame("Stream Recovery")
+                                self._is_standby_frame = True
                                 if self._health_status != "connecting":
                                     self._health_status = "connecting"
                                     self.publish_source_status()
@@ -2082,6 +2099,7 @@ class PipelineCoordinator:
                             last_good_frame_ts = time.time()
                             self._last_good_frame = frame
                             self._cap_consecutive_failures = 0
+                            self._is_standby_frame = False
                             if self._health_status != "online":
                                 self._health_status = "online"
                                 self.publish_source_status()
@@ -2089,7 +2107,8 @@ class PipelineCoordinator:
                                 self._last_resolution = f"{frame.shape[1]}x{frame.shape[0]}"
 
                 else:
-                    self._push_event.wait(0.033)
+                    if self.incoming_frame is None:
+                        self._push_event.wait(0.033)
                     self._push_event.clear()
                     frame = self.incoming_frame
                     self.incoming_frame = None
@@ -2106,6 +2125,7 @@ class PipelineCoordinator:
                     else:
                         # No frame has ever been pushed — show standby demo.
                         frame = self._generate_synthetic_demo_frame("Virtual Live Stream")
+                        self._is_standby_frame = True
                     self._health_status = "online"
                     self._last_resolution = f"{frame.shape[1]}x{frame.shape[0]}"
 
@@ -2115,10 +2135,17 @@ class PipelineCoordinator:
 
                 # Put frame into slot — overwrites if Module 2 is still busy (latest wins)
                 self._grabbed_slot.put({
-                    "cap_time": t_cap,
-                    "cap_lat":  cap_lat,
-                    "frame":    frame,
+                    "cap_time":   t_cap,
+                    "cap_lat":    cap_lat,
+                    "frame":      frame,
+                    # Standby frames (demo video / reconnecting screen) must NOT
+                    # reach the AI stage: running YOLO on test_cctv_motion.mp4
+                    # produces genuine car/bus detections that appear as
+                    # "CAR-DEMO" / "BUS-DEMO" bounding boxes in the UI even
+                    # when no real camera is connected.
+                    "is_standby": getattr(self, "_is_standby_frame", False),
                 })
+                self._is_standby_frame = False   # reset for the next iteration
                 self._heartbeat["cap"] = time.time()
 
                 # Hold a FILE source to its own frame rate (see the pacing note
@@ -2208,11 +2235,11 @@ class PipelineCoordinator:
                         params = {}
 
                     mode = str(params.get("mode", getattr(self, "zero_dce_mode", "auto"))).lower()
-                    raw_thresh = params.get("threshold", getattr(self, "zero_dce_threshold", 140.0))
+                    raw_thresh = params.get("threshold", getattr(self, "zero_dce_threshold", 80.0))
                     try:
                         thresh = float(raw_thresh)
                     except (ValueError, TypeError):
-                        thresh = 140.0
+                        thresh = 80.0
 
                     force_on = (mode == "on") or (self.zone_profile in ("micro_motion", "night_vision"))
                     if is_enabled and (force_on or mode != "off"):
@@ -2256,6 +2283,14 @@ class PipelineCoordinator:
                 # frame, a raised quality setting) from throttling inference.
                 # The masking stays above it: masked pixels must never reach the
                 # detector either.
+                #
+                # Standby/demo frames are deliberately NOT forwarded to the AI
+                # stage. Running YOLO on test_cctv_motion.mp4 (the synthetic
+                # standby clip) produces genuine car/bus detections that the
+                # canvas overlay renders as "CAR-DEMO" / "BUS-DEMO" bounding
+                # boxes even when no real camera is connected. Standby frames
+                # still reach the MJPEG encoder below so the UI shows the
+                # "Connecting..." screen; they are simply never inferred on.
                 dec_lat = (time.time() - t0) * 1000
                 self._dec_ts.append(time.time())
                 self._decoded_slot.put({
@@ -2278,15 +2313,52 @@ class PipelineCoordinator:
                 # frame period, which beats a blank tile.
                 # ── MJPEG stream: Synchronized Post-Tracking Encode ─────────────
                 # Initial cold frame encoding only (until tracking loop produces synchronized frames)
-                if self._mjpeg_viewers > 0 and self.current_jpeg_bytes is None:
-                    max_w = self.display_max_width
-                    h, w = frame.shape[:2]
-                    mjpeg_f = cv2.resize(frame, (max_w, int(h * (max_w / w))), interpolation=cv2.INTER_LINEAR) if w > max_w else frame
-                    ok, jpg = cv2.imencode('.jpg', mjpeg_f, [cv2.IMWRITE_JPEG_QUALITY, self.jpeg_quality])
-                    if ok:
-                        with self.jpeg_lock:
-                            self.current_jpeg_bytes = jpg.tobytes()
-                        self.jpeg_ready_event.set()
+                if self._mjpeg_viewers > 0:
+                    now_enc = time.monotonic()
+                    if now_enc >= self._next_mjpeg_due:
+                        mjpeg_fps_cap = MJPEG_MAX_FPS if MJPEG_MAX_FPS > 0 else 30.0
+                        self._next_mjpeg_due = now_enc + (1.0 / mjpeg_fps_cap)
+
+                        dets_to_draw = []
+                        with self._overlay_lock:
+                            if self._latest_overlay_dets and (time.time() - self._latest_overlay_ts < 1.0):
+                                dets_to_draw = list(self._latest_overlay_dets)
+
+                        stream_frame = frame.copy() if dets_to_draw else frame
+                        if dets_to_draw:
+                            for d in dets_to_draw:
+                                b = d.get("bbox")
+                                if not b:
+                                    continue
+                                x1, y1 = int(b["x1"]), int(b["y1"])
+                                x2, y2 = int(b["x2"]), int(b["y2"])
+                                cls_name = d.get("class", "object")
+                                lbl = d.get("label") or f"{cls_name.upper()}"
+                                conf = int(d.get("confidence", 0.8) * 100)
+                                color = (0, 255, 255) if cls_name == "micro_motion" else (0, 255, 0)
+
+                                cv2.rectangle(stream_frame, (x1, y1), (x2, y2), color, 2)
+                                bw, bh = x2 - x1, y2 - y1
+                                line_len = min(bw // 4, bh // 4, 12)
+                                if line_len > 2:
+                                    cv2.line(stream_frame, (x1, y1), (x1 + line_len, y1), color, 3)
+                                    cv2.line(stream_frame, (x1, y1), (x1, y1 + line_len), color, 3)
+                                    cv2.line(stream_frame, (x2, y1), (x2 - line_len, y1), color, 3)
+                                    cv2.line(stream_frame, (x2, y1), (x2, y1 + line_len), color, 3)
+                                
+                                txt = f"{lbl} | {conf}%"
+                                (tw, th), _ = cv2.getTextSize(txt, cv2.FONT_HERSHEY_SIMPLEX, 0.45, 1)
+                                cv2.rectangle(stream_frame, (x1, max(0, y1 - th - 6)), (x1 + tw + 6, max(th + 6, y1)), (0, 0, 0), -1)
+                                cv2.putText(stream_frame, txt, (x1 + 3, max(th + 2, y1 - 4)), cv2.FONT_HERSHEY_SIMPLEX, 0.45, color, 1)
+
+                        max_w = self.display_max_width
+                        h, w = stream_frame.shape[:2]
+                        mjpeg_f = cv2.resize(stream_frame, (max_w, int(h * (max_w / w))), interpolation=cv2.INTER_LINEAR) if w > max_w else stream_frame
+                        ok, jpg = cv2.imencode('.jpg', mjpeg_f, [cv2.IMWRITE_JPEG_QUALITY, self.jpeg_quality])
+                        if ok:
+                            with self.jpeg_lock:
+                                self.current_jpeg_bytes = jpg.tobytes()
+                            self.jpeg_ready_event.set()
 
                 # ── Recording (non-blocking async queue) ─────────────────────────
                 self.recorder.push_frame(frame)
@@ -2376,7 +2448,9 @@ class PipelineCoordinator:
 
             # Detect motion inside the effective ROI crop to avoid motion outside ROI
             # forcing unnecessary inference passes and lowering FPS.
-            motion  = self._detect_motion(inf_frame)
+            motion_stats = self._analyze_motion(inf_frame)
+            motion = bool(motion_stats.get("motion", False))
+            self._motion_stats = motion_stats
 
 
             # Keyframe Subsampling (Phase 1 Optimization):
@@ -2387,9 +2461,13 @@ class PipelineCoordinator:
             self._ai_frame_count = getattr(self, "_ai_frame_count", 0) + 1
             keyframe_interval = max(1, int(os.getenv("CAMAI_AI_KEYFRAME_INTERVAL", "3")))
 
-            force_infer = (time.time() - self._last_infer_ts) > self._FORCE_INFER_INTERVAL
+            low_light = bool(motion_stats.get("low_light", False))
+            force_interval = 0.50 if (low_light or self.zone_profile in ("micro_motion", "night_vision")) else self._FORCE_INFER_INTERVAL
+            force_infer = (time.time() - self._last_infer_ts) > force_interval
 
-            if force_infer or (self._ai_frame_count % keyframe_interval == 1):
+            if data.get("is_standby", False):
+                should_infer = False
+            elif motion or force_infer or (self._ai_frame_count % keyframe_interval == 1):
                 should_infer = True
             else:
                 should_infer = False
@@ -2408,6 +2486,12 @@ class PipelineCoordinator:
                 n_tracks    = len(self.tracker.tracks)
                 crowded     = n_tracks > CROWDED_TRACK_COUNT
                 conf_thresh = round(base_conf * CROWDED_CONF_RATIO, 3) if crowded else base_conf
+                if low_light or self.zone_profile in ("micro_motion", "night_vision"):
+                    # Low light reduces detector confidence before it reduces
+                    # geometry. Lower the floor modestly, but never below the
+                    # global safety bound, so day detection keeps its operator
+                    # setting and night footage keeps marginal real objects.
+                    conf_thresh = max(MIN_CONFIDENCE, round(conf_thresh * 0.78, 3))
                 iou_thresh  = 0.65 if crowded else 0.45
 
                 # Invisible AI Zoom Engine (app.ai.tiling). Runs the same single
@@ -2582,6 +2666,7 @@ class PipelineCoordinator:
                 "detections":    detections,
                 "masks_polygons": masks_polygons,
                 "motion":         should_infer,
+                "micro_motion_stats": motion_stats,
                 "orig_h":         orig_h,
                 "orig_w":         orig_w,
                 "conf_thresh":    conf_thresh,
@@ -2796,8 +2881,8 @@ class PipelineCoordinator:
                     worker.last_error = None
             t_anpr = (time.perf_counter() - t_anpr0) * 1000
 
-            # ── Micro Motion pass: Runs independent of ByteTrack (Always Active) ──
-            _is_micro = True
+            # ── Micro Motion pass: Runs when micro_motion profile or feature is enabled ──
+            _is_micro = (self.zone_profile in ("micro_motion", "rodent")) or self._feature_enabled(self.profile_features, "micro_motion")
             if _is_micro:
                 try:
                     if not hasattr(self, "_micro_motion_detector") or self._micro_motion_detector is None:
@@ -2807,7 +2892,7 @@ class PipelineCoordinator:
                         )
                     target_frame = frame
                     mm_dets = self._micro_motion_detector.detect(target_frame)
-                    rx1, ry1 = (roi[0], roi[1]) if roi else (0, 0)
+                    rx1, ry1 = 0, 0
                     for idx, md in enumerate(mm_dets):
                         b = md["bbox"]
                         detections.append({
@@ -3053,14 +3138,18 @@ class PipelineCoordinator:
             # ── Synchronized MJPEG Stream Output (Post-Tracking) ─────────────
             # Encode frame ONLY after tracking & detections are resolved, ensuring
             # zero latency/phase mismatch between MJPEG image and WS bounding boxes.
-            now_enc = time.monotonic()
-            if now_enc >= self._next_mjpeg_due:
+            # Save latest tracked detections for Module 2 smooth high-FPS MJPEG stream
+            with self._overlay_lock:
+                self._latest_overlay_dets = list(client_dets) if client_dets else []
+                self._latest_overlay_ts = time.time()
+
+            # MJPEG stream encoding is handled asynchronously in Module 2 (_decode_loop) at full 20+ FPS
                 if MJPEG_MAX_FPS > 0:
-                    self._next_mjpeg_due = now_enc + (1.0 / MJPEG_MAX_FPS)
+                    pass
                     
                     # Render active detection overlays directly onto camera stream frame
-                    stream_frame = frame.copy()
-                    if detections:
+                    pass
+                    if False:
                         for d in detections:
                             b = d.get("bbox")
                             if not b:
@@ -3087,10 +3176,10 @@ class PipelineCoordinator:
                             cv2.putText(stream_frame, txt, (x1 + 3, max(th + 2, y1 - 4)), cv2.FONT_HERSHEY_SIMPLEX, 0.45, color, 1)
 
                     max_w = self.display_max_width
-                    h, w = stream_frame.shape[:2]
-                    mjpeg_f = cv2.resize(stream_frame, (max_w, int(h * (max_w / w))), interpolation=cv2.INTER_LINEAR) if w > max_w else stream_frame
-                    ok, jpg = cv2.imencode('.jpg', mjpeg_f, [cv2.IMWRITE_JPEG_QUALITY, self.jpeg_quality])
-                    if ok:
+                    h, w = frame.shape[:2]
+                    mjpeg_f = None
+                    ok, jpg = False, None
+                    if False:
                         with self.jpeg_lock:
                             self.current_jpeg_bytes = jpg.tobytes()
                         self.jpeg_ready_event.set()
@@ -3229,8 +3318,9 @@ class PipelineCoordinator:
                     "method": "none",
                     "latency_ms": 0.0,
                 }),
+                "micro_motion": data.get("micro_motion_stats", dict(self._motion_stats)),
                 "latency":  round(total_latency),
-                "fps":      round(tel_fps, 1),       # pipeline FPS
+                "fps":      round(dec_fps if dec_fps > 0 else cap_fps, 1),       # video decode/stream FPS
                 "target_fps": round(getattr(self, "target_fps", 15.0), 1),
 
 
@@ -3476,16 +3566,123 @@ class PipelineCoordinator:
                 pass
         return cv2.VideoCapture(src)
 
+    def _analyze_motion(self, frame):
+        """Cheap, noise-aware motion gate for inference scheduling.
+
+        The old gate downscaled every frame to 160x120 and used a fixed
+        20-level threshold. That made a true 1-2 px displacement disappear in
+        the resize, while dark sensor/compression noise could still dominate a
+        frame. This keeps a larger working image, compares both frame-to-frame
+        and short temporal history, and derives the threshold from the current
+        noise floor.
+        """
+        t0 = time.perf_counter()
+        stats = {
+            "motion": True,
+            "changed_ratio": 0.0,
+            "threshold": 12,
+            "noise_sigma": 0.0,
+            "mean_luminance": 128.0,
+            "low_light": False,
+            "latency_ms": 0.0,
+        }
+        if frame is None or frame.size == 0:
+            return stats
+
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        h, w = gray.shape[:2]
+        work_w = min(640, max(320, w))
+        work_h = max(180, int(round(h * (work_w / float(max(1, w))))))
+        small = cv2.resize(gray, (work_w, work_h), interpolation=cv2.INTER_LINEAR) if (w, h) != (work_w, work_h) else gray
+        mean_lum = float(np.mean(small))
+        low_light = mean_lum < 85.0
+        # Mild denoise: enough to suppress salt-and-pepper sensor shimmer, not
+        # enough to erase tiny edges.
+        proc = cv2.GaussianBlur(small, (3, 3), 0)
+
+        if self._prev_motion_full is None:
+            self._prev_motion_full = proc
+            self._prev_motion = proc
+            stats.update({
+                "mean_luminance": round(mean_lum, 1),
+                "low_light": low_light,
+                "latency_ms": round((time.perf_counter() - t0) * 1000.0, 2),
+            })
+            return stats
+
+        if self._prev_motion_full.shape != proc.shape:
+            self._prev_motion_full = proc
+            self._prev_motion = proc
+            stats.update({
+                "mean_luminance": round(mean_lum, 1),
+                "low_light": low_light,
+                "latency_ms": round((time.perf_counter() - t0) * 1000.0, 2),
+            })
+            return stats
+
+        diff_prev = cv2.absdiff(proc, self._prev_motion_full)
+        diff_hist = cv2.absdiff(proc, self._prev_motion if self._prev_motion is not None else self._prev_motion_full)
+        diff = cv2.max(diff_prev, diff_hist)
+        self._prev_motion_full = proc
+        self._prev_motion = (
+            cv2.addWeighted(self._prev_motion, 0.80, proc, 0.20, 0)
+            if self._prev_motion is not None and self._prev_motion.shape == proc.shape else proc
+        )
+
+        med = float(np.median(diff))
+        mad = float(np.median(np.abs(diff.astype(np.float32) - med)))
+        sigma = 1.4826 * mad
+        self._motion_noise_ema = sigma if self._motion_noise_ema is None else (0.9 * self._motion_noise_ema + 0.1 * sigma)
+        sigma_ref = max(float(self._motion_noise_ema or 0.0), sigma)
+        floor = 2.0 if low_light else 4.0
+        k = 3.9 if low_light else 3.0
+        thr = int(np.clip(max(floor, med + k * sigma_ref), floor, 18.0 if low_light else 24.0))
+        _, mask = cv2.threshold(diff, thr, 255, cv2.THRESH_BINARY)
+
+        # Remove isolated single-pixel noise, then validate very small blobs by
+        # connected component shape instead of throwing them away by area alone.
+        mask = cv2.medianBlur(mask, 3)
+        num, labels, cc_stats, _ = cv2.connectedComponentsWithStats(mask, 8)
+        valid_area = 0
+        valid_blobs = 0
+        min_area = 3 if low_light else 5
+        max_area = int(mask.size * (0.35 if low_light else 0.50))
+        for i in range(1, num):
+            area = int(cc_stats[i, cv2.CC_STAT_AREA])
+            if area < min_area or area > max_area:
+                continue
+            bw = int(cc_stats[i, cv2.CC_STAT_WIDTH])
+            bh = int(cc_stats[i, cv2.CC_STAT_HEIGHT])
+            aspect = max(bw / max(1, bh), bh / max(1, bw))
+            if aspect > 12.0 and area < 20:
+                continue
+            valid_area += area
+            valid_blobs += 1
+
+        changed_ratio = valid_area / float(max(1, mask.size))
+        ratio_gate = 0.000035 if low_light else 0.00006
+        blob_gate = 1 if low_light else 2
+        motion = (valid_blobs >= blob_gate and changed_ratio >= ratio_gate)
+        # A broad coherent change can be a fast object; scene-wide exposure
+        # jumps are handled by the adaptive threshold and are rare after
+        # Zero-DCE's luminance-preserving LUT.
+        if not motion and changed_ratio >= max(ratio_gate * 6.0, self._motion_thr * 0.2):
+            motion = True
+
+        stats.update({
+            "motion": bool(motion),
+            "changed_ratio": round(changed_ratio, 6),
+            "threshold": int(thr),
+            "noise_sigma": round(sigma_ref, 2),
+            "mean_luminance": round(mean_lum, 1),
+            "low_light": low_light,
+            "valid_blobs": int(valid_blobs),
+            "latency_ms": round((time.perf_counter() - t0) * 1000.0, 2),
+        })
+        return stats
+
     def _detect_motion(self, frame):
-        gray  = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        small = cv2.resize(gray, (160, 120), interpolation=cv2.INTER_NEAREST)
-        if self._prev_motion is None:
-            self._prev_motion = small
-            return True
-        diff = cv2.absdiff(small, self._prev_motion)
-        self._prev_motion = small
-        _, thresh = cv2.threshold(diff, 20, 255, cv2.THRESH_BINARY)
-        return np.count_nonzero(thresh) / thresh.size > self._motion_thr
+        return bool(self._analyze_motion(frame).get("motion", False))
 
     def _get_roi(self, orig_h: int, orig_w: int):
         # Prefer explicit detection-ROI zones (roi=true) or any drawn polygon zones
