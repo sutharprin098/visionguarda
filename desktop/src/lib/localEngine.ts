@@ -469,7 +469,7 @@ export function buildHealthReport(cameraIds: string[], status: EngineStatus): Ca
     // Not in the engine's active thread map (registration still pending,
     // or the engine dropped it) — the desktop hasn't lost the camera, it's
     // just not running yet, which reads to the operator as "connecting".
-    const health_status = cam?.health_status ?? "online";
+    const health_status = cam?.health_status ?? "connecting";
     return {
       camera_id: id,
       status: health_status,
