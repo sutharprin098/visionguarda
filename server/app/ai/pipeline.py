@@ -2222,6 +2222,8 @@ class PipelineCoordinator:
                     nv_cfg = self.profile_features.get("night_vision_zero_dce")
                     if nv_cfg is None and "night_vision" in self.profile_features:
                         nv_cfg = self.profile_features.get("night_vision")
+                    if nv_cfg is None and "zero_dce" in self.profile_features:
+                        nv_cfg = self.profile_features.get("zero_dce")
 
                     if isinstance(nv_cfg, dict):
                         is_enabled = bool(nv_cfg.get("enabled", True))
@@ -2234,13 +2236,13 @@ class PipelineCoordinator:
                         params = {}
 
                     mode = str(params.get("mode", getattr(self, "zero_dce_mode", "auto"))).lower()
-                    raw_thresh = params.get("threshold", getattr(self, "zero_dce_threshold", 80.0))
+                    raw_thresh = params.get("threshold", getattr(self, "zero_dce_threshold", 140.0))
                     try:
                         thresh = float(raw_thresh)
                     except (ValueError, TypeError):
-                        thresh = 80.0
+                        thresh = 140.0
 
-                    force_on = (mode == "on") or (self.zone_profile in ("micro_motion", "night_vision"))
+                    force_on = (mode in ("on", "always_on", "forced", "always", "manual", "true", "1")) or (self.zone_profile in ("micro_motion", "night_vision"))
                     if is_enabled and (force_on or mode != "off"):
                         # Enhance and keep local + data in sync so every downstream
                         # consumer (MJPEG encoder, recorder, AI slot) sees the same

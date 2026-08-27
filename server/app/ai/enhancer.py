@@ -61,7 +61,7 @@ class ZeroDCEEnhancer:
             gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         return float(np.mean(gray))
 
-    def _enhance_curves_lut(self, mean_lum: float, thresh: float, iterations: int = 4, target_lum: float = 135.0) -> np.ndarray:
+    def _enhance_curves_lut(self, mean_lum: float, thresh: float, iterations: int = 6, target_lum: float = 145.0, force_enable: bool = False) -> np.ndarray:
         """
         Ultra-fast C-speed Lookup Table (LUT) solver for Zero-DCE curve equation:
         LE_n(x) = LE_{n-1}(x) + A * LE_{n-1}(x) * (1 - LE_{n-1}(x))
@@ -70,12 +70,14 @@ class ZeroDCEEnhancer:
         lut_in = np.linspace(0.0, 1.0, 256, dtype=np.float32)
         mean_norm = mean_lum / 255.0
         
-        # Calculate brightness deficit relative to target (target_lum = 135.0)
-        target = max(110.0, target_lum)
-        deficit = max(0.0, (target - mean_lum) / target)
+        target = max(135.0, max(thresh, target_lum))
+        if force_enable:
+            deficit = max(0.20, (target - mean_lum) / target) if target > 0 else 0.25
+        else:
+            deficit = max(0.0, (target - mean_lum) / target)
         
-        # Zero-DCE curve alpha parameter (0.10 - 0.25 max) to avoid blowing out city lights/highlights
-        alpha = min(0.25, 0.16 * (1.0 + 1.2 * deficit) * (1.0 - mean_norm))
+        # Zero-DCE curve alpha parameter (0.15 - 0.40 max) for clear visible enhancement boost
+        alpha = min(0.40, max(0.12, 0.22 * (1.0 + 1.5 * deficit) * (1.0 - mean_norm * 0.6)))
         
         enhanced_lut = lut_in.copy()
         for _ in range(iterations):
@@ -121,7 +123,7 @@ class ZeroDCEEnhancer:
         ycrcb = cv2.cvtColor(frame, cv2.COLOR_BGR2YCrCb)
         y_channel = ycrcb[:, :, 0]
         
-        lut_y = self._enhance_curves_lut(mean_lum, thresh, iterations=4, target_lum=135.0)
+        lut_y = self._enhance_curves_lut(mean_lum, thresh, iterations=6, target_lum=145.0, force_enable=force_enable)
         ycrcb[:, :, 0] = cv2.LUT(y_channel, lut_y)
         enhanced_bgr = cv2.cvtColor(ycrcb, cv2.COLOR_YCrCb2BGR)
         
