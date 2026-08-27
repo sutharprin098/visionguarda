@@ -810,25 +810,36 @@ class EngineBackend:
                 f"{target_imgsz} implies {grid.shape[0]}."
             )
 
-        xy = (out[:, :2] + grid) * stride
-        wh = np.exp(out[:, 2:4]) * stride
-        boxes = np.concatenate([xy - wh / 2, xy + wh / 2], axis=1)
+        # Ultra-fast candidate pruning: filter low-objectness background anchors
+        # BEFORE computing spatial grid decode, exponentiation, and array concatenations.
+        obj_scores = out[:, 4]
+        cand_mask = obj_scores > (conf_threshold * 0.4)
+        if not np.any(cand_mask):
+            return [], [], (time.time() - t0) * 1000
 
-        # YOLOX splits confidence into an objectness column and per-class
-        # columns; the usable score is their product.
+        out_c = out[cand_mask]
+        grid_c = grid[cand_mask]
+        stride_c = stride[cand_mask]
+
         class_ids_of_interest = CLASS_IDS_OF_INTEREST
-        scores_interest = out[:, 5:][:, class_ids_of_interest] * out[:, 4:5]
+        scores_interest = out_c[:, 5:][:, class_ids_of_interest] * out_c[:, 4:5]
         max_score_idx = np.argmax(scores_interest, axis=1)
         max_scores = np.max(scores_interest, axis=1)
         max_class_ids = np.array(class_ids_of_interest)[max_score_idx]
 
         keep_idx = max_scores > conf_threshold
-        boxes = boxes[keep_idx]
+        if not np.any(keep_idx):
+            return [], [], (time.time() - t0) * 1000
+
+        out_k = out_c[keep_idx]
+        grid_k = grid_c[keep_idx]
+        stride_k = stride_c[keep_idx]
+
+        xy = (out_k[:, :2] + grid_k) * stride_k
+        wh = np.exp(np.minimum(out_k[:, 2:4], 10.0)) * stride_k
+        boxes = np.concatenate([xy - wh / 2, xy + wh / 2], axis=1)
         scores = max_scores[keep_idx]
         class_ids = max_class_ids[keep_idx]
-
-        if len(boxes) == 0:
-            return [], [], (time.time() - t0) * 1000
 
         nms_keep = nms(boxes, scores, iou_threshold)
         if len(nms_keep) == 0:

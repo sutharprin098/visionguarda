@@ -2350,10 +2350,15 @@ class PipelineCoordinator:
                                 cv2.rectangle(stream_frame, (x1, max(0, y1 - th - 6)), (x1 + tw + 6, max(th + 6, y1)), (0, 0, 0), -1)
                                 cv2.putText(stream_frame, txt, (x1 + 3, max(th + 2, y1 - 4)), cv2.FONT_HERSHEY_SIMPLEX, 0.45, color, 1)
 
-                        max_w = self.display_max_width
+                        target_w = min(640, self.display_max_width)
                         h, w = stream_frame.shape[:2]
-                        mjpeg_f = cv2.resize(stream_frame, (max_w, int(h * (max_w / w))), interpolation=cv2.INTER_LINEAR) if w > max_w else stream_frame
-                        ok, jpg = cv2.imencode('.jpg', mjpeg_f, [cv2.IMWRITE_JPEG_QUALITY, self.jpeg_quality])
+                        if w != target_w:
+                            target_h = max(180, int(h * (target_w / w)))
+                            mjpeg_f = cv2.resize(stream_frame, (target_w, target_h), interpolation=cv2.INTER_NEAREST)
+                        else:
+                            mjpeg_f = stream_frame
+                        q = max(45, min(75, self.jpeg_quality))
+                        ok, jpg = cv2.imencode('.jpg', mjpeg_f, [cv2.IMWRITE_JPEG_QUALITY, q])
                         if ok:
                             with self.jpeg_lock:
                                 self.current_jpeg_bytes = jpg.tobytes()
