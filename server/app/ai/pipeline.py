@@ -1267,8 +1267,8 @@ class PipelineCoordinator:
         # Display-only encode knobs, mutable at runtime via update_display_config().
         # Plain int/float attributes are fine to read/write without a lock here —
         # this only affects how Module 2 encodes the MJPEG preview, never the AI path.
-        self.display_max_width = 640
-        self.jpeg_quality = 65
+        self.display_max_width = 1280
+        self.jpeg_quality = 85
 
         # ── Per-stage FPS sliding windows ───────────────────────────────────
         # maxlen bounds memory even if the stage that normally trims a given
@@ -2319,14 +2319,14 @@ class PipelineCoordinator:
                         self._next_mjpeg_due = now_enc + (1.0 / mjpeg_fps_cap)
 
                         stream_frame = frame
-                        target_w = min(640, self.display_max_width)
+                        target_w = min(1280, self.display_max_width)
                         h, w = stream_frame.shape[:2]
                         if w != target_w:
                             target_h = max(180, int(h * (target_w / w)))
-                            mjpeg_f = cv2.resize(stream_frame, (target_w, target_h), interpolation=cv2.INTER_NEAREST)
+                            mjpeg_f = cv2.resize(stream_frame, (target_w, target_h), interpolation=cv2.INTER_AREA)
                         else:
                             mjpeg_f = stream_frame
-                        q = max(45, min(75, self.jpeg_quality))
+                        q = max(60, min(90, self.jpeg_quality))
                         ok, jpg = cv2.imencode('.jpg', mjpeg_f, [cv2.IMWRITE_JPEG_QUALITY, q])
                         if ok:
                             with self.jpeg_lock:

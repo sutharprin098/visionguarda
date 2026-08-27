@@ -191,8 +191,8 @@ export class MediaShareSession {
 
       if (!this.canvas) {
         this.canvas = document.createElement("canvas");
-        this.canvas.width = 960;
-        this.canvas.height = 540;
+        this.canvas.width = 1280;
+        this.canvas.height = 720;
         this.ctx = this.canvas.getContext("2d");
       }
 
@@ -382,7 +382,7 @@ export class MediaShareSession {
       if (video && video.readyState >= video.HAVE_CURRENT_DATA && this.ctx && this.canvas) {
         try {
           this.ctx.drawImage(video, 0, 0, this.canvas.width, this.canvas.height);
-          const frame = this.canvas.toDataURL("image/jpeg", 0.6);
+          const frame = this.canvas.toDataURL("image/jpeg", 0.85);
           this.ws.send(JSON.stringify({ type: "screen_frame", camera_id: this.cameraId, frame }));
           // Only a frame that actually reached the socket counts as progress.
           this.lastSendOkTs = Date.now();
