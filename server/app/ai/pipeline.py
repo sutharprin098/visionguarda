@@ -224,6 +224,65 @@ def _draw_snapshot_boxes(frame, detections):
     return annotated
 
 
+def _draw_normalized_overlay_boxes(frame, client_dets):
+    """Draw bounding boxes from client_dets (normalized 0..1 coords) directly onto stream frame."""
+    if not client_dets or frame is None:
+        return frame
+    h, w = frame.shape[:2]
+    for det in client_dets:
+        b = det.get("bbox")
+        if not b:
+            continue
+        try:
+            x1 = max(0, min(w - 1, int(float(b.get("x1", 0)) * w)))
+            y1 = max(0, min(h - 1, int(float(b.get("y1", 0)) * h)))
+            x2 = max(0, min(w - 1, int(float(b.get("x2", 0)) * w)))
+            y2 = max(0, min(h - 1, int(float(b.get("y2", 0)) * h)))
+        except (ValueError, TypeError, KeyError):
+            continue
+
+        if x2 - x1 < 2 or y2 - y1 < 2:
+            continue
+
+        cls = det.get("class", "object")
+        color = _class_color(cls)
+        cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
+
+        # Draw corner tick accents
+        bw, bh = x2 - x1, y2 - y1
+        cs = min(14, max(3, bw // 4), max(3, bh // 4))
+        if cs > 2:
+            cv2.line(frame, (x1, y1 + cs), (x1, y1), color, 3)
+            cv2.line(frame, (x1, y1), (x1 + cs, y1), color, 3)
+            cv2.line(frame, (x2 - cs, y1), (x2, y1), color, 3)
+            cv2.line(frame, (x2, y1), (x2, y1 + cs), color, 3)
+            cv2.line(frame, (x1, y1 + bh - cs), (x1, y1 + bh), color, 3)
+            cv2.line(frame, (x1, y1 + bh), (x1 + cs, y1 + bh), color, 3)
+            cv2.line(frame, (x2 - cs, y1 + bh), (x2, y1 + bh), color, 3)
+            cv2.line(frame, (x2, y1 + bh), (x2, y1 + bh - cs), color, 3)
+
+        parts = [cls.upper()]
+        tid = det.get("track_id")
+        if tid is not None:
+            parts.append(f"#{tid:02d}" if isinstance(tid, int) else f"#{tid}")
+        conf = det.get("confidence")
+        if conf is not None:
+            parts.append(f"{int(float(conf) * 100)}%")
+        speed = det.get("speed")
+        if speed is not None:
+            parts.append(f"{int(float(speed))}km/h")
+        if det.get("plate_text"):
+            parts.append(str(det["plate_text"]))
+        label = " ".join(parts)
+        (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.45, 1)
+        ly = y1 - th - 6 if y1 - th - 6 >= 0 else y1 + 2
+        cv2.rectangle(frame, (x1, ly), (x1 + tw + 6, ly + th + 6), (0, 0, 0), -1)
+        cv2.putText(frame, label, (x1 + 3, ly + th + 2),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.45, color, 1, cv2.LINE_AA)
+    return frame
+
+
+
 # ---------------------------------------------------------------------------
 # Kalman Filter + ByteTrack (unchanged)
 # ---------------------------------------------------------------------------
@@ -1263,6 +1322,11 @@ class PipelineCoordinator:
         self._mjpeg_viewer_lock  = threading.Lock()
         # Monotonic deadline for the next preview encode (MJPEG_MAX_FPS cap).
         self._next_mjpeg_due     = 0.0
+
+        # Synchronized MJPEG burn-in overlay state
+        self._overlay_lock        = threading.Lock()
+        self._latest_overlay_dets = []
+        self._latest_overlay_ts   = 0.0
 
         # Display-only encode knobs, mutable at runtime via update_display_config().
         # Plain int/float attributes are fine to read/write without a lock here —
@@ -2320,7 +2384,15 @@ class PipelineCoordinator:
                         mjpeg_fps_cap = MJPEG_MAX_FPS if MJPEG_MAX_FPS > 0 else 30.0
                         self._next_mjpeg_due = now_enc + (1.0 / mjpeg_fps_cap)
 
-                        stream_frame = frame
+                        stream_frame = frame.copy()
+
+                        with self._overlay_lock:
+                            latest_dets = list(getattr(self, "_latest_overlay_dets", []))
+                            latest_ts   = getattr(self, "_latest_overlay_ts", 0.0)
+
+                        if latest_dets and (time.time() - latest_ts < 2.5):
+                            _draw_normalized_overlay_boxes(stream_frame, latest_dets)
+
                         target_w = min(1280, self.display_max_width)
                         h, w = stream_frame.shape[:2]
                         if w != target_w:
@@ -3289,47 +3361,6 @@ class PipelineCoordinator:
             with self._overlay_lock:
                 self._latest_overlay_dets = list(client_dets) if client_dets else []
                 self._latest_overlay_ts = time.time()
-
-            # MJPEG stream encoding is handled asynchronously in Module 2 (_decode_loop) at full 20+ FPS
-                if MJPEG_MAX_FPS > 0:
-                    pass
-                    
-                    # Render active detection overlays directly onto camera stream frame
-                    pass
-                    if False:
-                        for d in detections:
-                            b = d.get("bbox")
-                            if not b:
-                                continue
-                            x1, y1 = int(b["x1"]), int(b["y1"])
-                            x2, y2 = int(b["x2"]), int(b["y2"])
-                            cls_name = d.get("class", "object")
-                            lbl = d.get("label") or f"{cls_name.upper()}"
-                            conf = int(d.get("confidence", 0.8) * 100)
-                            color = (0, 255, 255) if cls_name == "micro_motion" else (0, 255, 0)
-                            
-                            cv2.rectangle(stream_frame, (x1, y1), (x2, y2), color, 2)
-                            bw, bh = x2 - x1, y2 - y1
-                            line_len = min(bw // 4, bh // 4, 12)
-                            if line_len > 2:
-                                cv2.line(stream_frame, (x1, y1), (x1 + line_len, y1), color, 3)
-                                cv2.line(stream_frame, (x1, y1), (x1, y1 + line_len), color, 3)
-                                cv2.line(stream_frame, (x2, y1), (x2 - line_len, y1), color, 3)
-                                cv2.line(stream_frame, (x2, y1), (x2, y1 + line_len), color, 3)
-                            
-                            txt = f"{lbl} | {conf}%"
-                            (tw, th), _ = cv2.getTextSize(txt, cv2.FONT_HERSHEY_SIMPLEX, 0.45, 1)
-                            cv2.rectangle(stream_frame, (x1, max(0, y1 - th - 6)), (x1 + tw + 6, max(th + 6, y1)), (0, 0, 0), -1)
-                            cv2.putText(stream_frame, txt, (x1 + 3, max(th + 2, y1 - 4)), cv2.FONT_HERSHEY_SIMPLEX, 0.45, color, 1)
-
-                    max_w = self.display_max_width
-                    h, w = frame.shape[:2]
-                    mjpeg_f = None
-                    ok, jpg = False, None
-                    if False:
-                        with self.jpeg_lock:
-                            self.current_jpeg_bytes = jpg.tobytes()
-                        self.jpeg_ready_event.set()
 
             self._tracking_slot.put({
                 **data,
