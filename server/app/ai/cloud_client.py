@@ -55,25 +55,34 @@ def detect(
     frame: np.ndarray,
     endpoint_url: str,
     api_key: str = "",
-    jpeg_quality: int = 75,
-    timeout_s: float = 3.0,
+    jpeg_quality: int = 60,
+    timeout_s: float = 2.0,
     camera_id: str = "default",
+    target_size: int = 320,
 ) -> List[Dict[str, Any]]:
     """Send `frame` to the cloud endpoint and return a list of detections."""
     t0 = time.perf_counter()
 
-    # ── 1. Encode frame to JPEG bytes ─────────────────────────────────────────
-    ok, buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, jpeg_quality])
+    frame_h, frame_w = frame.shape[:2]
+
+    # ── 1. Downscale frame to target_size for ultra-fast payload transmission ──
+    if max(frame_h, frame_w) > target_size:
+        scale = target_size / float(max(frame_h, frame_w))
+        new_w, new_h = max(1, int(frame_w * scale)), max(1, int(frame_h * scale))
+        encode_frame = cv2.resize(frame, (new_w, new_h), interpolation=cv2.INTER_AREA)
+    else:
+        encode_frame = frame
+
+    # ── 2. Encode frame to JPEG bytes ─────────────────────────────────────────
+    ok, buf = cv2.imencode(".jpg", encode_frame, [cv2.IMWRITE_JPEG_QUALITY, jpeg_quality])
     if not ok:
         raise CloudOfflineError("Frame JPEG encoding failed")
     jpeg_bytes: bytes = buf.tobytes()
 
-    frame_h, frame_w = frame.shape[:2]
-
-    # ── 2. Build HTTP request ──────────────────────────────────────────────────
+    # ── 3. Build HTTP request ──────────────────────────────────────────────────
     import base64
     b64 = base64.b64encode(jpeg_bytes).decode("ascii")
-    body = json.dumps({"image_b64": b64}).encode("utf-8")
+    body = json.dumps({"image_b64": b64, "target_size": target_size}).encode("utf-8")
 
     url = endpoint_url.rstrip("/") + "/api/detect"
 
