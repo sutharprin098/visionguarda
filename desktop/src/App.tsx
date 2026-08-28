@@ -205,11 +205,13 @@ export default function App() {
 
     const orgInferenceMode =
       bundle.settings?.find((s) => s.scope === "org" && s.key === "ai.inference_mode")?.value || "local";
+    const orgCloudUrl =
+      bundle.settings?.find((s) => s.scope === "org" && s.key === "ai.cloud_endpoint_url")?.value || "http://13.203.71.14:8000";
 
     void loadLocalEngine().then(async ({ syncAiInferenceModeToLocalEngine }) => {
       if (cancelled) return;
       try {
-        await syncAiInferenceModeToLocalEngine(orgInferenceMode);
+        await syncAiInferenceModeToLocalEngine(orgInferenceMode, orgCloudUrl);
       } catch (err) {
         console.error("[App] Initial AI inference mode sync failed:", err);
       } finally {

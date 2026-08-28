@@ -310,13 +310,14 @@ export default function Workspace({
 
   // Automatically sync the org's central ai.inference_mode (cloud vs local) managed by Admin via Web Portal
   const orgInferenceMode = bundle?.settings.find((s) => s.scope === "org" && s.key === "ai.inference_mode")?.value || "local";
+  const orgCloudUrl = bundle?.settings.find((s) => s.scope === "org" && s.key === "ai.cloud_endpoint_url")?.value || "http://13.203.71.14:8000";
   useEffect(() => {
     if (orgInferenceMode && typeof orgInferenceMode === "string") {
-      void syncAiInferenceModeToLocalEngine(orgInferenceMode);
-      const id = setInterval(() => void syncAiInferenceModeToLocalEngine(orgInferenceMode), 5_000);
+      void syncAiInferenceModeToLocalEngine(orgInferenceMode, orgCloudUrl);
+      const id = setInterval(() => void syncAiInferenceModeToLocalEngine(orgInferenceMode, orgCloudUrl), 5_000);
       return () => clearInterval(id);
     }
-  }, [orgInferenceMode]);
+  }, [orgInferenceMode, orgCloudUrl]);
 
   // Check if user has permission or is super admin
   const hasPermission = (perm: string): boolean => {

@@ -749,9 +749,10 @@ export async function syncAiModelToLocalEngine(dbModelName: string | undefined):
   }
 }
 
-export async function syncAiInferenceModeToLocalEngine(dbMode: string | undefined): Promise<boolean> {
+export async function syncAiInferenceModeToLocalEngine(dbMode: string | undefined, cloudUrl?: string): Promise<boolean> {
   if (!dbMode) return true;
   const wantedMode = dbMode === "local" ? "local" : "cloud";
+  const urlToUse = cloudUrl || "http://13.203.71.14:8000";
 
   for (let attempt = 0; attempt < 5; attempt++) {
     try {
@@ -760,18 +761,23 @@ export async function syncAiInferenceModeToLocalEngine(dbMode: string | undefine
       });
       if (cur.ok) {
         const body = await cur.json();
-        if (body?.mode === wantedMode && body?.runtime_state !== "SWITCHING" && body?.runtime_state !== "OFFLINE") {
+        if (
+          body?.mode === wantedMode &&
+          body?.cloud_url === urlToUse &&
+          body?.runtime_state !== "SWITCHING" &&
+          body?.runtime_state !== "OFFLINE"
+        ) {
           return true;
         }
       }
       const res = await fetch(`${ENGINE_BASE}/api/cloud-mode`, {
         method: "POST",
         headers: await controlHeaders(),
-        body: JSON.stringify({ mode: wantedMode }),
+        body: JSON.stringify({ mode: wantedMode, cloud_url: urlToUse }),
         signal: AbortSignal.timeout(8000),
       });
       if (res.ok) {
-        console.log(`[localEngine] AI Inference Mode successfully synced to local engine: ${wantedMode}`);
+        console.log(`[localEngine] AI Inference Mode successfully synced to local engine: ${wantedMode} (URL: ${urlToUse})`);
         return true;
       }
     } catch {
