@@ -70,7 +70,24 @@ class CameraManager:
             print(f"[CameraManager] Hardware-profile setup skipped: {e}", flush=True)
 
     def load_initial_model(self):
-        """Load initial model backend synchronously so server starts up instantly."""
+        """Load initial model backend synchronously so server starts up instantly.
+
+        CLOUD MODE GUARD: If INFERENCE_MODE=='cloud' this method is a no-op —
+        the local YOLO model must never be loaded or keep memory/GPU while the
+        system is governed by the cloud endpoint. status is set to 'ready' so
+        the engine health API reports correctly without a local model.
+        """
+        from app import config
+
+        # ── Cloud mode: local model must NOT be loaded ───────────────────────
+        if getattr(config, "INFERENCE_MODE", "local").strip().lower() == "cloud":
+            print("[CameraManager] CLOUD mode active — local model load skipped (0% local GPU).",
+                  flush=True)
+            self.yolo_backend = None
+            self.startup_status = "ready"   # cloud is the active backend
+            self.startup_error = None
+            return
+
         if self.yolo_backend is None:
             self.startup_status = "loading"
             self.startup_error = None
@@ -107,16 +124,23 @@ class CameraManager:
                 raise
 
     def start_cameras(self):
-        # 1. Load default model backend synchronously
-        self.load_initial_model()
-        
+        from app import config
+        is_cloud = getattr(config, "INFERENCE_MODE", "local").strip().lower() == "cloud"
+
+        # 1. Load local model ONLY when not in cloud mode
+        #    (load_initial_model has its own cloud guard, but skip it entirely
+        #     here to avoid the double-check and keep the log clean)
+        if not is_cloud:
+            self.load_initial_model()
+
         # 2. Start camera pipeline coordinators
         cameras = get_all_cameras()
         for cam in cameras:
             if cam["is_active"]:
                 self.start_camera_thread(cam)
-                
+
         # 3. Launch background benchmarking to test other models
+        #    (benchmark already skips itself in cloud mode via _benchmark_is_safe_here)
         self.benchmark_thread = threading.Thread(target=self.run_background_benchmark)
         self.benchmark_thread.daemon = True
         self.benchmark_thread.start()
@@ -297,7 +321,14 @@ class CameraManager:
 
     def hot_swap_model(self, model_name: str) -> bool:
         """Manually trigger model swapping from client/API control."""
+        from app import config
         print(f"[CameraManager] Swapping active model backend to: {model_name}", flush=True)
+        if getattr(config, "INFERENCE_MODE", "cloud") == "cloud":
+            print(f"[CameraManager] Cloud Mode active: Model swap to '{model_name}' ignored for local engine.", flush=True)
+            self.selected_model_name = model_name
+            self.yolo_backend = None
+            return True
+
         try:
             if model_name == self.selected_model_name and self.yolo_backend is not None:
                 return True

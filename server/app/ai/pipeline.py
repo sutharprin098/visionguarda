@@ -2400,23 +2400,145 @@ class PipelineCoordinator:
             backend.release_thread_request()
 
     def _ai_loop_iteration(self, data):
-            if getattr(config, "INFERENCE_MODE", "cloud") == "cloud":
-                # Strict Cloud Mode: Local neural network inference is 100% PAUSED (0% Local GPU/CPU load).
-                # Detections and telemetry are offloaded to the AWS Cloud GPU node.
-                data["detections"] = data.get("detections", [])
-                data["masks_polygons"] = data.get("masks_polygons", [])
-                data["inf_lat"] = 0.0
-                data["t_pre"] = 0.0
-                data["t_inf"] = 0.0
-                data["t_post"] = 0.0
-                data["trk_lat"] = 0.0
-                data["imgsz"] = self.current_imgsz
-                data["motion"] = False
-                self._tracking_slot.put(data)
-                time.sleep(0.01)
-                return
+        """Mode-routing dispatcher — reads config.INFERENCE_MODE each iteration.
 
+        CLOUD mode: encode frame → cloud HTTP → parse → _ai_slot
+        LOCAL mode: YOLO local inference → _ai_slot  (unchanged path)
+
+        The pipeline NEVER decides its own mode. config.INFERENCE_MODE is the
+        single source of truth, set exclusively by RuntimeGovernor.
+        """
+        from app import config
+        mode = getattr(config, "INFERENCE_MODE", "local").strip().lower()
+        if mode == "cloud":
+            self._ai_loop_iteration_cloud(data)
+        else:
+            self._ai_loop_iteration_local(data)
+
+    # ------------------------------------------------------------------
+    # Module 3-CLOUD: Send frame to cloud endpoint, inject detections
+    # ------------------------------------------------------------------
+
+    def _ai_loop_iteration_cloud(self, data):
+        """Cloud inference path. Encodes the decoded frame as JPEG, POSTs it
+        to the configured cloud endpoint, and feeds the parsed detections
+        directly into _ai_slot so the tracking/telemetry pipeline is unchanged.
+
+        On any network error (CloudOfflineError) the frame is forwarded with
+        empty detections and motion=False so the tracker coasts — the UI will
+        show live video but zero detections until the cloud comes back.
+        No local inference is started as a fallback.
+        """
+        from app import config
+        from app.ai.cloud_client import detect as cloud_detect, CloudOfflineError
+
+        frame    = data["frame"]
+        orig_h, orig_w = frame.shape[:2]
+        t0_cloud = time.perf_counter()
+
+        cloud_url = getattr(config, "CLOUD_ENDPOINT_URL", "").strip()
+        cloud_key = getattr(config, "CLOUD_API_KEY", "").strip()
+
+        if not cloud_url:
+            # No endpoint configured — mark offline, forward empty frame
+            if not getattr(self, "_cloud_offline_logged", False):
+                print(f"[AI-{self.camera_id}] CLOUD mode active but CLOUD_ENDPOINT_URL is not set.",
+                      flush=True)
+                self._cloud_offline_logged = True
+            self._cloud_offline = True
+            self._ai_slot.put({
+                **data,
+                "detections":     [],
+                "masks_polygons": [],
+                "motion":         False,
+                "micro_motion_stats": self._motion_stats,
+                "orig_h":         orig_h,
+                "orig_w":         orig_w,
+                "conf_thresh":    0.3,
+                "t_pre": 0.0, "t_inf": 0.0, "t_post": 0.0, "ai_lat": 0.0,
+            })
+            return
+
+        try:
+            detections = cloud_detect(
+                frame,
+                endpoint_url=cloud_url,
+                api_key=cloud_key,
+                jpeg_quality=75,
+                timeout_s=3.0,
+                camera_id=self.camera_id,
+            )
+            t_inf = (time.perf_counter() - t0_cloud) * 1000
+
+            # ── Successful cloud inference ────────────────────────────────
+            if getattr(self, "_cloud_offline", False):
+                print(f"[AI-{self.camera_id}] Cloud endpoint recovered — detections resuming.",
+                      flush=True)
+            self._cloud_offline = False
+            self._cloud_offline_logged = False
+            self._last_infer_ts = time.time()
+
+            # Throttled heartbeat log
+            _now = time.time()
+            if _now - getattr(self, "_last_det_log_ts", 0.0) >= 5.0:
+                self._last_det_log_ts = _now
+                print(f"[AI-{self.camera_id}] [CLOUD] Inference OK: dets={len(detections)} "
+                      f"latency={t_inf:.0f}ms endpoint={cloud_url}", flush=True)
+
+            self._ai_ts.append(time.time())
+            self._ai_slot.put({
+                **data,
+                "detections":     detections,
+                "masks_polygons": [],
+                "motion":         True,  # always run tracker on cloud results
+                "micro_motion_stats": self._motion_stats,
+                "orig_h":         orig_h,
+                "orig_w":         orig_w,
+                "conf_thresh":    0.3,
+                "t_pre": 0.0, "t_inf": round(t_inf, 1), "t_post": 0.0,
+                "ai_lat": round(t_inf, 1),
+            })
+
+        except CloudOfflineError as exc:
+            # ── Cloud unreachable — NO local fallback ────────────────────
+            now_ts = time.time()
+            if not getattr(self, "_cloud_offline", False) or \
+               now_ts - getattr(self, "_cloud_last_err_log", 0.0) >= 30.0:
+                print(f"[AI-{self.camera_id}] CLOUD OFFLINE: {exc}", flush=True)
+                self._cloud_last_err_log = now_ts
+            self._cloud_offline = True
+
+            # Forward frame with empty detections — tracking coasts via Kalman
+            self._ai_slot.put({
+                **data,
+                "detections":     [],
+                "masks_polygons": [],
+                "motion":         False,
+                "micro_motion_stats": self._motion_stats,
+                "orig_h":         orig_h,
+                "orig_w":         orig_w,
+                "conf_thresh":    0.3,
+                "t_pre": 0.0, "t_inf": 0.0, "t_post": 0.0, "ai_lat": 0.0,
+            })
+
+        except Exception as exc:
+            # Unexpected error (parsing, encoding) — log and continue
+            self._stage_errors["ai"] += 1
+            print(f"[AI-{self.camera_id}] Cloud inference unexpected error: {exc}", flush=True)
+
+    # ------------------------------------------------------------------
+    # Module 3-LOCAL: Original YOLO local inference path (unchanged)
+    # ------------------------------------------------------------------
+
+    def _ai_loop_iteration_local(self, data):
             backend = self.backend
+            if backend is None:
+                try:
+                    from app.camera_manager import manager
+                    backend = manager.yolo_backend
+                except Exception:
+                    backend = None
+
             if backend is None:
                 time.sleep(0.1)
                 return
@@ -2717,6 +2839,9 @@ class PipelineCoordinator:
                 self.tracker, tracks_raw, detections, masks
             )
 
+            formatted_tracks = [f"{t['track_id']}:{t['class']}:{t['confidence']}:({int(t['bbox']['x1'])},{int(t['bbox']['y1'])},{int(t['bbox']['x2'])},{int(t['bbox']['y2'])})" for t in tracks_raw]
+            print(f"[CLOUD_DIAG] [TRACKED_OBJECTS] Camera={self.camera_id} Count={len(tracks_raw)} Tracks={formatted_tracks}", flush=True)
+
             # ── Face pass: a SECOND model, and the only module here whose
             # toggle actually saves inference time when off ────────────────
             # yolox emits every COCO class in one forward pass, so switching
@@ -2949,6 +3074,9 @@ class PipelineCoordinator:
                         masks = [masks[i] for i in _keep]
                     detections = [detections[i] for i in _keep]
 
+            formatted_filtered = [f"{d.get('class')}:{d.get('confidence')}:({int(d.get('bbox',{}).get('x1',0))},{int(d.get('bbox',{}).get('y1',0))},{int(d.get('bbox',{}).get('x2',0))},{int(d.get('bbox',{}).get('y2',0))})" for d in detections]
+            print(f"[CLOUD_DIAG] [FILTERED_DETECTIONS] Camera={self.camera_id} Profile={self.zone_profile} Count={len(detections)} Dets={formatted_filtered}", flush=True)
+
             # ── Rule engine + analytics: MUST receive absolute pixel coords ──
             # bbox is already the tracker's smoothed position; analytics.update()
             # only adds det["speed"] and drives zone/line/dwell logic from it.
@@ -3060,6 +3188,15 @@ class PipelineCoordinator:
                         "y2": round(float(bbox["y2"]) / orig_h, 4),
                     }
                 })
+
+            data["client_dets"] = client_dets
+            data["people_count"] = people_count
+            data["vehicles_count"] = vehicles_count
+            data["items_count"] = items_count
+            data["other_count"] = other_count
+
+            formatted_rendered = [f"{d.get('class')}:{d.get('confidence')}:{d.get('track_id')}:({d['bbox']['x1']},{d['bbox']['y1']},{d['bbox']['x2']},{d['bbox']['y2']})" for d in client_dets]
+            print(f"[CLOUD_DIAG] [RENDERED_OBJECTS] Camera={self.camera_id} Count={len(client_dets)} Emitted={formatted_rendered}", flush=True)
 
             # Persist history (rate-limited to 1 record per 10 s)
             now = time.time()
@@ -3307,13 +3444,13 @@ class PipelineCoordinator:
 
             self.latest_telemetry = {
                 "success":   True,
-                "people":    data["people_count"],
-                "vehicles":  data["vehicles_count"],
+                "people":    data.get("people_count", 0),
+                "vehicles":  data.get("vehicles_count", 0),
                 "items":     data.get("items_count", 0),
                 "other_objects": data.get("other_count", 0),
-                "detections": data["client_dets"],
-                "masks":     data["masks_polygons"],
-                "tracks":    data["tracks"],
+                "detections": data.get("client_dets", []),
+                "masks":     data.get("masks_polygons", []),
+                "tracks":    data.get("tracks", []),
                 "counters": {
                     "in":           self.analytics.counter_in,
                     "out":          self.analytics.counter_out,
@@ -3322,7 +3459,7 @@ class PipelineCoordinator:
                     "people_in":    getattr(self.analytics, "counter_in_person", 0),
                     "people_out":   getattr(self.analytics, "counter_out_person", 0),
                 },
-                "heatmap":  data["heatmap"],
+                "heatmap":  data.get("heatmap"),
                 "night_vision": data.get("zero_dce_stats", {
                     "zero_dce_applied": False,
                     "mean_luminance": 128.0,
@@ -3342,53 +3479,46 @@ class PipelineCoordinator:
                 "tracking_fps":  round(trk_fps, 1),
 
                 # Per-stage latency & timing breakdown
-                "capture_latency":    round(data["cap_lat"],  1),
-                "decode_latency":     round(data["dec_lat"],  1),
-                "preprocess_latency": round(data["t_pre"],    1),
-                "inference_latency":  round(data["t_inf"],    1),
+                "capture_latency":    round(data.get("cap_lat", 0.0),  1),
+                "decode_latency":     round(data.get("dec_lat", 0.0),  1),
+                "preprocess_latency": round(data.get("t_pre", 0.0),    1),
+                "inference_latency":  round(data.get("t_inf", 0.0),    1),
                 "face_latency":       round(data.get("t_face", 0.0), 1),
-                # Also a SUBMIT cost now (frame copy + overlaying published
-                # boxes); `helmet` below reports the worker's own pass timing,
-                # so a helmet net that has gone slow or died stays visible
-                # instead of being hidden by the fact that it no longer blocks.
                 "helmet_latency":     round(data.get("t_helmet", 0.0), 1),
                 "helmet":             (self._helmet_stats()
                                        if getattr(self, "_helmet_worker", None) else None),
-                # With the async worker this is the SUBMIT cost, i.e. the frame
-                # copy — not the cost of detection+OCR, which no longer happens
-                # on this thread. `anpr` below reports the worker's own timing.
                 "anpr_latency":       round(data.get("t_anpr", 0.0), 1),
                 "anpr":               (self._anpr_worker.stats()
                                        if getattr(self, "_anpr_worker", None) else None),
-                "postprocess_latency":round(data["t_post"],   1),
-                "tracking_latency":   round(data["trk_lat"],  1),
+                "postprocess_latency":round(data.get("t_post", 0.0),   1),
+                "tracking_latency":   round(data.get("trk_lat", 0.0),  1),
                 "rendering_latency":  round(tel_lat,           1),
                 "total_latency":      round(total_latency,     1),
 
                 # Summary timings for monitoring
-                "processing_time":    round(data["t_pre"] + data["t_inf"] + data["t_post"] + data["trk_lat"], 1),
-                "decode_time":        round(data["dec_lat"], 1),
+                "processing_time":    round(data.get("t_pre", 0.0) + data.get("t_inf", 0.0) + data.get("t_post", 0.0) + data.get("trk_lat", 0.0), 1),
+                "decode_time":        round(data.get("dec_lat", 0.0), 1),
                 "encode_time":        round(tel_lat, 1),
                 "queue_length":       1 if self._decoded_slot.has_item() else 0,
                 "active_cameras":     active_cams,
 
                 "bottleneck": f"{bottleneck} ({latencies[bottleneck]:.1f}ms)",
-                "status":     "human_found" if data["people_count"] > 0 else "no_human",
+                "status":     "human_found" if data.get("people_count", 0) > 0 else "no_human",
                 "cpu":        round(cpu, 1),
                 "memory":     round(mem, 1),
                 "gpu":        gpu,
                 "gpu_memory": round(gpu_mem, 1),
                 "gpu_temp":   round(gpu_temp, 1) if gpu_temp is not None else None,
-                "backend":    self.backend.backend_type,
-                "device":     self.backend.backend_device,
+                "backend":    self.backend.backend_type if self.backend else "cloud",
+                "device":     self.backend.backend_device if self.backend else "aws_cloud",
                 "imgsz":      self.current_imgsz,
                 # Diagnostics for the Invisible AI Zoom Engine. Admin/telemetry
                 # only — the operator's live view is unchanged by any of it.
                 "zoom_engine": dict(self._tile_stats),
                 "recording":  self.recorder.is_recording(),
-                "zone_stats": data["zone_stats"],
-                "line_stats": data["line_stats"],
-                "crowd_stats": data["crowd_stats"],
+                "zone_stats": data.get("zone_stats", {}),
+                "line_stats": data.get("line_stats", {}),
+                "crowd_stats": data.get("crowd_stats", {}),
                 "parking_stats": data.get("parking_stats", {"total": 0, "occupied": 0, "free": 0, "occupancy_percent": 0.0, "slots": []}),
                 "alert_counts": data.get("alert_counts", {}),
                 "stage_errors": dict(self._stage_errors),
@@ -3412,7 +3542,7 @@ class PipelineCoordinator:
                 # Named for the operator overlay rather than "debug_*", which
                 # reads as something safe to strip from a release build.
                 "tracker_count": len(self.tracker.tracks),
-                "detection_count": len(data["client_dets"]),
+                "detection_count": len(data.get("client_dets", [])),
                 "debug_tracks": len(self.tracker.tracks),
                 "debug_track_history": len(self.analytics.track_history),
                 "debug_zone_active": sum(len(v) for v in self.analytics.zone_active_tracks.values()),

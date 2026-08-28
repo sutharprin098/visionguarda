@@ -17,6 +17,7 @@ from pydantic import BaseModel
 from typing import List, Dict, Optional
 import cv2
 
+from app import config
 from app.config import HOST, PORT, RECORDINGS_DIR, UPLOADS_DIR, MODELS_DIR, API_TOKEN, CORS_ORIGINS
 from app.storage import (
     init_db, get_all_cameras, get_camera, save_camera, delete_camera,
@@ -29,6 +30,7 @@ from app.ai.stream_resolver import blocked_source_reason
 from app.ai.tiling import get_tiling_settings, set_tiling_settings
 from app.ai.tile_governor import governor
 from app.gpu_monitor import get_gpu_usage
+from app.runtime_governor import runtime_governor, RuntimeState
 
 app = FastAPI(title="CamAI CCTV Analytics Platform")
 
@@ -200,10 +202,14 @@ async def on_startup():
 
     async def _start_cameras_bg():
         try:
-            await asyncio.to_thread(manager.start_cameras)
-            print("[FastAPI] Camera threads + AI backend ready.", flush=True)
+            print("[FastAPI] 2-second initialization buffer: Verifying operating mode (local vs cloud)...", flush=True)
+            await asyncio.sleep(2.0)
+            await runtime_governor.initialize(manager)
+            print(f"[FastAPI] Runtime Governor ready. Mode: '{config.INFERENCE_MODE}', State: '{runtime_governor.state}'", flush=True)
         except Exception as e:
-            print(f"[FastAPI] Background camera/model startup failed: {e}", flush=True)
+            print(f"[FastAPI] Background runtime initialization failed: {e}", flush=True)
+            runtime_governor.state = RuntimeState.FAILED
+            runtime_governor.last_error = str(e)
 
     asyncio.create_task(_start_cameras_bg())
 
@@ -543,6 +549,8 @@ def get_system_status():
     avg_fps = sum(c["fps"] for c in target_states) / len(target_states) if target_states else 0.0
     avg_latency = sum(c["latency"] for c in target_states) / len(target_states) if target_states else 0.0
 
+    is_cloud = (config.INFERENCE_MODE == "cloud" or runtime_governor.state == RuntimeState.CLOUD_ACTIVE)
+
     if _proc is not None:
         try:
             cpu_percent = _proc.cpu_percent(interval=None)
@@ -551,6 +559,26 @@ def get_system_status():
             cpu_percent, memory_mb = 0.0, 0.0
     else:
         cpu_percent, memory_mb = 0.0, 0.0
+
+    if is_cloud:
+        gpu_usage = 0
+        device = "AWS Cloud GPU Node"
+        avg_fps_res = 0.0
+        avg_latency_res = 0.0
+        engine_status = "disabled"
+        engine_message = "Disabled — Cloud Mode Active"
+        local_engine_state = "disabled"
+        cloud_engine_state = "error" if runtime_governor.last_error else "active"
+    else:
+        gpu_usage = get_gpu_usage()
+        backend = getattr(manager, "yolo_backend", None)
+        device = getattr(backend, "backend_device", "cpu").upper() if backend else "CPU"
+        avg_fps_res = round(avg_fps, 1)
+        avg_latency_res = round(avg_latency, 1)
+        engine_status = manager.startup_status
+        engine_message = manager.startup_error or ("Model Ready" if manager.yolo_model is not None else "Model Not Loaded")
+        local_engine_state = "active" if manager.startup_status == "ready" and manager.yolo_model is not None else manager.startup_status
+        cloud_engine_state = "disabled"
 
     return {
         "server": "online",
@@ -562,15 +590,20 @@ def get_system_status():
         "benchmark": manager.benchmark_results,
         "recommendation": recommendation,
         "engine": {
-            "status": manager.startup_status,
-            "error": manager.startup_error,
+            "status": engine_status,
+            "message": engine_message,
+            "processing_mode": "cloud" if is_cloud else "local",
+            "runtime_state": runtime_governor.state,
+            "local_engine_state": local_engine_state,
+            "cloud_engine_state": cloud_engine_state,
+            "error": runtime_governor.last_error or (None if is_cloud else manager.startup_error),
             "elapsed_secs": round(time.time() - manager.startup_started_at, 1),
             "cpu_percent": round(cpu_percent, 1),
             "memory_mb": round(memory_mb, 1),
-            "gpu_percent": get_gpu_usage(),
+            "gpu_percent": gpu_usage,
             "device": device,
-            "avg_fps": round(avg_fps, 1),
-            "avg_latency_ms": round(avg_latency, 1),
+            "avg_fps": avg_fps_res,
+            "avg_latency_ms": avg_latency_res,
             "active_cameras": len(online_states),
         },
     }
@@ -581,32 +614,38 @@ class CloudModePayload(BaseModel):
     cloud_key: Optional[str] = None
 
 @app.get("/api/cloud-mode")
+@app.get("/api/runtime/status")
 def get_cloud_mode():
-    return {
-        "status": "ok",
-        "mode": config.INFERENCE_MODE,
-        "cloud_url": config.CLOUD_ENDPOINT_URL,
-        "active_backend": "cloud" if config.INFERENCE_MODE == "cloud" else "local",
-        "local_model_paused": config.INFERENCE_MODE == "cloud",
-        "cloud_status": "configured" if config.CLOUD_ENDPOINT_URL else "unconfigured",
-    }
+    res = runtime_governor.get_status()
+    res["active_backend"] = "cloud" if config.INFERENCE_MODE == "cloud" else "local"
+
+    # Aggregate per-camera cloud_offline flags so the portal can show
+    # "CLOUD OFFLINE" without needing a separate polling endpoint.
+    if config.INFERENCE_MODE == "cloud":
+        threads = list(manager.camera_threads.values())
+        if threads:
+            offline_count = sum(1 for t in threads if getattr(t, "_cloud_offline", False))
+            res["cloud_cameras_offline"] = offline_count
+            res["cloud_cameras_total"] = len(threads)
+            if offline_count > 0 and not res.get("error"):
+                endpoint = getattr(config, "CLOUD_ENDPOINT_URL", "")
+                res["error"] = f"CLOUD OFFLINE: {offline_count}/{len(threads)} cameras cannot reach {endpoint}"
+        else:
+            res["cloud_cameras_offline"] = 0
+            res["cloud_cameras_total"] = 0
+
+    return res
 
 @app.post("/api/cloud-mode")
-def set_cloud_mode(payload: CloudModePayload):
-    m = payload.mode.strip().lower()
-    config.INFERENCE_MODE = "local" if m == "local" else "cloud"
-    if payload.cloud_url is not None:
-        config.CLOUD_ENDPOINT_URL = payload.cloud_url.strip()
-    if payload.cloud_key is not None:
-        config.CLOUD_API_KEY = payload.cloud_key.strip()
-    
-    print(f"[CloudMode] Inference mode set to '{config.INFERENCE_MODE}' (Cloud URL: '{config.CLOUD_ENDPOINT_URL}')", flush=True)
-    return {
-        "status": "ok",
-        "mode": config.INFERENCE_MODE,
-        "cloud_url": config.CLOUD_ENDPOINT_URL,
-        "local_model_paused": config.INFERENCE_MODE == "cloud",
-    }
+@app.post("/api/runtime/mode")
+async def set_cloud_mode(payload: CloudModePayload):
+    res = await runtime_governor.set_mode(
+        manager=manager,
+        target_mode=payload.mode,
+        cloud_url=payload.cloud_url,
+        cloud_key=payload.cloud_key
+    )
+    return res
 
 @app.post("/api/model/select", dependencies=control)
 def select_model(payload: ModelSelectPayload):

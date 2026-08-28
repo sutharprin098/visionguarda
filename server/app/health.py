@@ -60,16 +60,32 @@ def _proc_metrics() -> tuple[float, float]:
 
 @router.get("/health")
 def health():
-    """Liveness + readiness. `ready` flips true once the AI backend has
-    finished its (potentially minutes-long) first-run model compilation."""
-    ready = manager.startup_status == "ready" and manager.yolo_model is not None
+    """Liveness + readiness. `ready` is true whenever the service is operational.
+    In cloud mode, local model status does NOT affect readiness or camera health.
+    """
+    from app import config
+    from app.runtime_governor import runtime_governor, RuntimeState
+
+    is_cloud = getattr(config, "INFERENCE_MODE", "local").strip().lower() == "cloud"
+    local_loaded = manager.yolo_model is not None
+    
+    local_state = "disabled" if is_cloud else ("active" if manager.startup_status == "ready" and local_loaded else manager.startup_status)
+    cloud_state = "active" if is_cloud and runtime_governor.state == RuntimeState.CLOUD_ACTIVE else ("disabled" if not is_cloud else "error")
+
+    ready = True if is_cloud else (manager.startup_status == "ready" and local_loaded)
+
     return {
         "status": "ok",
         "ready": ready,
-        "engine_status": manager.startup_status,
-        "engine_error": manager.startup_error,
+        "mode": "cloud" if is_cloud else "local",
+        "processing_mode": "cloud" if is_cloud else "local",
+        "runtime_state": runtime_governor.state,
+        "engine_status": "disabled" if is_cloud else manager.startup_status,
+        "engine_error": runtime_governor.last_error if is_cloud else (runtime_governor.last_error or manager.startup_error),
+        "local_engine_state": local_state,
+        "cloud_engine_state": cloud_state,
         "uptime_secs": round(time.time() - _START),
-        "model_loaded": manager.yolo_model is not None,
+        "model_loaded": local_loaded,
         "active_cameras": sum(1 for t in manager.camera_threads.values() if t.running and getattr(t, "_health_status", "") == "online"),
     }
 
@@ -145,18 +161,32 @@ def system():
 @router.get("/performance")
 def performance():
     """Aggregate live performance for the dashboard gauges."""
+    from app import config
+    is_cloud = getattr(config, "INFERENCE_MODE", "local").strip().lower() == "cloud"
     running = [t for t in manager.camera_threads.values() if t.running]
     online_cams = [t for t in running if getattr(t, "_health_status", "") == "online"]
     target_cams = online_cams if online_cams else running
-    avg_fps = round(sum(t.latest_telemetry.get("fps", 0) for t in target_cams) / len(target_cams), 1) if target_cams else 0.0
-    avg_latency = round(sum(t.latest_telemetry.get("latency", 0) for t in target_cams) / len(target_cams), 1) if target_cams else 0.0
-    cpu, mem = _proc_metrics()
+
+    if is_cloud:
+        avg_fps = 0.0
+        avg_latency = 0.0
+        cpu, mem = 0.0, 0.0
+        gpu = 0
+        device = "AWS Cloud GPU Node"
+    else:
+        avg_fps = round(sum(t.latest_telemetry.get("fps", 0) for t in target_cams) / len(target_cams), 1) if target_cams else 0.0
+        avg_latency = round(sum(t.latest_telemetry.get("latency", 0) for t in target_cams) / len(target_cams), 1) if target_cams else 0.0
+        cpu, mem = _proc_metrics()
+        gpu = get_gpu_usage()
+        device = _device()
+
     return {
         "avg_fps": avg_fps,
         "avg_latency_ms": avg_latency,
         "cpu_percent": cpu,
         "memory_mb": mem,
-        "gpu_percent": get_gpu_usage(),
+        "gpu_percent": gpu,
         "active_cameras": len(online_cams),
-        "device": _device(),
+        "device": device,
+        "processing_mode": "cloud" if is_cloud else "local",
     }

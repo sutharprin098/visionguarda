@@ -60,6 +60,39 @@ INFERENCE_MODE = "cloud" if _raw_mode == "cloud" else "local"
 CLOUD_ENDPOINT_URL = os.getenv("CAMAI_CLOUD_ENDPOINT_URL", "http://13.203.71.14:8000").strip()
 CLOUD_API_KEY = os.getenv("CAMAI_CLOUD_API_KEY", "").strip()
 
+ENGINE_SETTINGS_FILE = HISTORY_DIR / "engine_settings.json"
+
+def load_persisted_engine_settings():
+    global INFERENCE_MODE, CLOUD_ENDPOINT_URL, CLOUD_API_KEY
+    if ENGINE_SETTINGS_FILE.exists():
+        try:
+            import json
+            data = json.loads(ENGINE_SETTINGS_FILE.read_text())
+            if "inference_mode" in data and not os.getenv("CAMAI_INFERENCE_MODE"):
+                m = str(data["inference_mode"]).strip().lower()
+                INFERENCE_MODE = "cloud" if m == "cloud" else "local"
+            if "cloud_url" in data and not os.getenv("CAMAI_CLOUD_ENDPOINT_URL"):
+                CLOUD_ENDPOINT_URL = str(data["cloud_url"]).strip()
+            if "cloud_key" in data and not os.getenv("CAMAI_CLOUD_API_KEY"):
+                CLOUD_API_KEY = str(data["cloud_key"]).strip()
+        except Exception as e:
+            print(f"[config] Notice loading engine_settings.json: {e}", flush=True)
+
+load_persisted_engine_settings()
+
+def save_engine_settings():
+    try:
+        import json
+        data = {
+            "inference_mode": INFERENCE_MODE,
+            "cloud_url": CLOUD_ENDPOINT_URL,
+            "cloud_key": CLOUD_API_KEY
+        }
+        ENGINE_SETTINGS_FILE.write_text(json.dumps(data, indent=2))
+    except Exception as e:
+        print(f"[config] Failed to save engine_settings.json: {e}", flush=True)
+
+
 
 
 
