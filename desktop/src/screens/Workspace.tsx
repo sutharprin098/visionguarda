@@ -699,6 +699,8 @@ interface EngineHealthInfo {
   online: boolean;
   status: string;
   ready: boolean;
+  mode?: string;
+  processing_mode?: string;
   engine_status: string;
   engine_error: string | null;
   model_loaded: boolean;
@@ -855,7 +857,8 @@ function CamerasView({
     return <Panel title="Cameras">No cameras assigned to you. Ask your administrator.</Panel>;
   }
 
-  const isEngineOffline = healthInfo !== null && (!healthInfo.online || !healthInfo.ready);
+  const isCloudMode = healthInfo?.mode === "cloud" || (healthInfo as any)?.processing_mode === "cloud";
+  const isEngineOffline = healthInfo !== null && !isCloudMode && (!healthInfo.online || !healthInfo.ready);
 
   const gridLayoutClass =
     cameras.length === 1
@@ -876,6 +879,11 @@ function CamerasView({
           <span className="text-sm font-semibold text-zinc-100">
             {cameras.length === 1 ? `Live Camera: ${cameras[0].name}` : `Active Cameras (${cameras.length})`}
           </span>
+          {isCloudMode && (
+            <span className="ml-2 rounded-full bg-blue-500/20 px-2.5 py-0.5 text-[10px] font-bold text-blue-400 border border-blue-500/30">
+              ☁️ Cloud Processing Active
+            </span>
+          )}
         </div>
         <div className="flex items-center gap-2">
           <button
@@ -901,7 +909,7 @@ function CamerasView({
             key={c.id}
             camera={c}
             site={siteLabel(c, orgName)}
-            engineOnline={healthInfo ? (healthInfo.online && healthInfo.ready) : null}
+            engineOnline={healthInfo ? (healthInfo.online && (healthInfo.ready || isCloudMode)) : null}
             onFullscreen={onFullscreen}
             paused={paused}
           />

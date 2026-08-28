@@ -101,6 +101,7 @@ export default function App() {
   // pattern: switching TO Workspace and bumping this in the same click has to
   // work even if Workspace was already the visible screen.
   const [openAlertsSignal, setOpenAlertsSignal] = useState<{ nonce: number } | null>(null);
+  const [modeSynced, setModeSynced] = useState<boolean>(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -196,9 +197,35 @@ export default function App() {
     return () => { cancelled = true; stop?.(); };
   }, [phase]);
 
-  // Keep the local AI engine's running cameras in step with what's assigned.
+  // Synchronize central org ai.inference_mode (cloud vs local) from portal settings
+  // BEFORE allowing local cameras to start or dismissing the loading splash.
   useEffect(() => {
     if (phase !== "ready" || !bundle) return;
+    let cancelled = false;
+
+    const orgInferenceMode =
+      bundle.settings?.find((s) => s.scope === "org" && s.key === "ai.inference_mode")?.value || "local";
+
+    void loadLocalEngine().then(async ({ syncAiInferenceModeToLocalEngine }) => {
+      if (cancelled) return;
+      try {
+        await syncAiInferenceModeToLocalEngine(orgInferenceMode);
+      } catch (err) {
+        console.error("[App] Initial AI inference mode sync failed:", err);
+      } finally {
+        if (!cancelled) {
+          setModeSynced(true);
+        }
+      }
+    });
+
+    return () => { cancelled = true; };
+  }, [phase, bundle]);
+
+  // Keep the local AI engine's running cameras in step with what's assigned.
+  // Gated on modeSynced so cameras only initialize AFTER inference mode is set on engine.
+  useEffect(() => {
+    if (phase !== "ready" || !bundle || !modeSynced) return;
     let id: ReturnType<typeof setInterval> | undefined;
     let cancelled = false;
 
@@ -214,7 +241,7 @@ export default function App() {
     });
 
     return () => { cancelled = true; if (id) clearInterval(id); };
-  }, [phase, bundle?.cameras, bundle?.rule_engine_rules, bundle?.zone_profile_configs]);
+  }, [phase, modeSynced, bundle?.cameras, bundle?.rule_engine_rules, bundle?.zone_profile_configs]);
 
   // Push each assigned camera's live connection state (online/offline/
   // connecting/auth_failed/network_error) to Supabase so the portal's Health
@@ -259,11 +286,13 @@ export default function App() {
     );
   }
 
-  if (!bundle) {
+  if (!bundle || !modeSynced) {
+    const activeMode =
+      bundle?.settings?.find((s) => s.scope === "org" && s.key === "ai.inference_mode")?.value || "local";
     return (
       <SplashLoading
-        title="Synchronizing Workspace…"
-        subtitle="Connecting to org realtime channel, loading camera rules & zone profiles."
+        title="Synchronizing Workspace & AI Mode…"
+        subtitle={`Reading website configuration & setting engine to ${String(activeMode).toUpperCase()} mode before launch.`}
       />
     );
   }

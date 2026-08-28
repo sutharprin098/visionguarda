@@ -1,9 +1,11 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
+import { useQuery } from "@tanstack/react-query";
 import { LogOut, Menu, Moon, Search, Sun, X, Shield, Activity, ChevronRight } from "lucide-react";
 import clsx from "clsx";
 import { useAuth } from "../contexts/AuthContext";
 import { useTheme } from "../contexts/ThemeContext";
+import { supabase } from "../lib/supabase";
 import { NAV } from "./nav";
 import NotificationsBell from "./NotificationsBell";
 import CommandPalette from "./CommandPalette";
@@ -13,6 +15,33 @@ export default function AppShell() {
   const { theme, toggle } = useTheme();
   const nav = useNavigate();
   const [navOpen, setNavOpen] = useState(false);
+  const [logoUrl, setLogoUrl] = useState<string | null>(null);
+
+  const { data: orgSettings } = useQuery({
+    queryKey: ["org-settings"],
+    queryFn: async () => {
+      const { data } = await supabase.from("organization_settings").select("*").maybeSingle();
+      return data;
+    },
+    enabled: !!org,
+  });
+
+  const branding = orgSettings?.branding;
+  const brandName = branding?.name_override?.trim() || "CamAI";
+
+  useEffect(() => {
+    async function loadLogo() {
+      if (branding?.logo_path) {
+        const { data } = await supabase.storage
+          .from("branding")
+          .createSignedUrl(branding.logo_path, 3600);
+        if (data?.signedUrl) setLogoUrl(data.signedUrl);
+      } else {
+        setLogoUrl(null);
+      }
+    }
+    loadLogo();
+  }, [branding?.logo_path]);
 
   const getInitials = (name?: string) => {
     if (!name) return "AI";
@@ -44,18 +73,18 @@ export default function AppShell() {
       >
         {/* Brand & Organization Header */}
         <div className="flex items-center gap-3 px-5 py-4 border-b border-line/60">
-          <div className="relative flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-sky-500 to-indigo-600 shadow-md">
-            <img src="/favicon.svg" alt="CamAI" className="h-6 w-6 brightness-200" />
+          <div className="relative flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-sky-500 to-indigo-600 shadow-md overflow-hidden">
+            {logoUrl ? (
+              <img src={logoUrl} alt={brandName} className="h-7 w-7 object-contain" />
+            ) : (
+              <img src="/favicon.svg" alt="CamAI" className="h-6 w-6 brightness-200" />
+            )}
             <span className="absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full bg-emerald-500 border-2 border-surface-1" />
           </div>
           <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-1.5">
-              <span className="text-sm font-extrabold tracking-tight text-ink-1">CamAI</span>
-              {/* text-sky-600 on this 10%-opacity tint measured ~3.6:1 in light
-                  mode — below the 4.5:1 AA floor. -700 clears it (~5.3:1)
-                  without touching the dark-mode -400 pairing, which already
-                  has plenty of contrast against the dark tint. */}
-              <span className="rounded bg-sky-500/10 px-1.5 py-0.5 font-mono text-[9px] font-bold text-sky-700 dark:text-sky-400">CORE</span>
+            <div className="flex items-center gap-1.5 min-w-0">
+              <span className="text-sm font-extrabold tracking-tight text-ink-1 truncate">{brandName}</span>
+              <span className="rounded bg-sky-500/10 px-1.5 py-0.5 font-mono text-[9px] font-bold text-sky-700 dark:text-sky-400 shrink-0">CORE</span>
             </div>
             <div className="truncate text-xs font-medium text-ink-3">{org?.name ?? "Enterprise Node"}</div>
           </div>
@@ -77,7 +106,7 @@ export default function AppShell() {
               <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
               Edge Core Online
             </span>
-            <span className="font-mono text-[10px]">v1.0.0</span>
+            <span className="font-mono text-[10px]">v1.0.4</span>
           </div>
         </div>
 

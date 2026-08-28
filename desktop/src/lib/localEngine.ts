@@ -109,9 +109,16 @@ export interface EngineAppStatus {
   modelLoaded: boolean;
   cameraThreadsActive: number;
   selectedModel: string;
+  mode?: string;
+  processing_mode?: string;
   cameras: Record<string, EngineCameraState>;
   engine: {
-    status: "loading" | "ready" | "failed";
+    status: "loading" | "ready" | "failed" | "disabled";
+    message?: string;
+    processing_mode?: "local" | "cloud";
+    runtime_state?: string;
+    local_engine_state?: string;
+    cloud_engine_state?: string;
     error: string | null;
     elapsed_secs: number;
     cpu_percent: number;
@@ -742,26 +749,39 @@ export async function syncAiModelToLocalEngine(dbModelName: string | undefined):
   }
 }
 
-export async function syncAiInferenceModeToLocalEngine(dbMode: string | undefined): Promise<void> {
-  if (!dbMode) return;
+export async function syncAiInferenceModeToLocalEngine(dbMode: string | undefined): Promise<boolean> {
+  if (!dbMode) return true;
   const wantedMode = dbMode === "local" ? "local" : "cloud";
 
-  try {
-    const cur = await fetch(`${ENGINE_BASE}/api/cloud-mode`, {
-      signal: AbortSignal.timeout(4000),
-    });
-    if (cur.ok) {
-      const body = await cur.json();
-      if (body?.mode === wantedMode) return;
+  for (let attempt = 0; attempt < 5; attempt++) {
+    try {
+      const cur = await fetch(`${ENGINE_BASE}/api/cloud-mode`, {
+        signal: AbortSignal.timeout(3000),
+      });
+      if (cur.ok) {
+        const body = await cur.json();
+        if (body?.mode === wantedMode && body?.runtime_state !== "SWITCHING" && body?.runtime_state !== "OFFLINE") {
+          return true;
+        }
+      }
+      const res = await fetch(`${ENGINE_BASE}/api/cloud-mode`, {
+        method: "POST",
+        headers: await controlHeaders(),
+        body: JSON.stringify({ mode: wantedMode }),
+        signal: AbortSignal.timeout(8000),
+      });
+      if (res.ok) {
+        console.log(`[localEngine] AI Inference Mode successfully synced to local engine: ${wantedMode}`);
+        return true;
+      }
+    } catch {
+      // Engine might be starting up, wait briefly and retry
+      if (attempt < 4) {
+        await new Promise((r) => setTimeout(r, 600));
+      }
     }
-    await fetch(`${ENGINE_BASE}/api/cloud-mode`, {
-      method: "POST",
-      headers: await controlHeaders(),
-      body: JSON.stringify({ mode: wantedMode }),
-    });
-  } catch {
-    // engine went away mid-sync — next tick retries
   }
+  return false;
 }
 
 // Mirrors pipeline.MIN/MAX_CONFIDENCE. Duplicated deliberately: the engine

@@ -153,8 +153,8 @@ function AboutTab() {
         </div>
       </div>
       <div className="card space-y-2 p-4 text-sm text-ink-2">
-        <div className="flex justify-between"><span className="text-ink-3">Portal version</span><span>1.0.0</span></div>
-        <div className="flex justify-between"><span className="text-ink-3">Desktop client</span><span>1.0.0</span></div>
+        <div className="flex justify-between"><span className="text-ink-3">Portal version</span><span>1.0.4</span></div>
+        <div className="flex justify-between"><span className="text-ink-3">Desktop client</span><span>1.0.4</span></div>
       </div>
     </div>
   );
@@ -287,12 +287,12 @@ function BrandingTab({ settings, onSave }: { settings: OrgSettings; onSave: (p: 
   );
 }
 
+
+
 // --------------------------------------------------------------- AI Profiles Configuration
 function AiTab({ canConfigure }: { canConfigure: boolean }) {
   const { org } = useAuth();
   const qc = useQueryClient();
-  const [busy, setBusy] = useState(false);
-  const [saved, setSaved] = useState(false);
 
   const { data: current } = useQuery({
     queryKey: ["ai-settings"],
@@ -305,284 +305,99 @@ function AiTab({ canConfigure }: { canConfigure: boolean }) {
     return found ? found.value : fallback;
   };
 
-  const [activeProfile, setActiveProfile] = useState<"traffic" | "security" | "factory" | "drone" | "micro_motion" | "custom">("traffic");
   const [inferenceMode, setInferenceMode] = useState<"cloud" | "local">("cloud");
+  const [runtimeState, setRuntimeState] = useState<string>("CLOUD ACTIVE");
+  const [runtimeError, setRuntimeError] = useState<string | null>(null);
+  const [runtimeCloudOffline, setRuntimeCloudOffline] = useState<boolean>(false);
+  const [isSwitchingMode, setIsSwitchingMode] = useState<boolean>(false);
 
-  // Traffic form state
-  const [trafficDetections, setTrafficDetections] = useState({
-    vehicle_detection: true,
-    vehicle_counting: true,
-    lane_detection: true,
-    wrong_way: true,
-    speed_monitoring: true,
-    queue_monitoring: true,
-    parking_monitoring: true,
-    anpr: true,
-    traffic_light_violation: true,
-  });
-  const [trafficObjects, setTrafficObjects] = useState({
-    car: true,
-    truck: true,
-    bus: true,
-    motorcycle: true,
-    bicycle: true,
-    auto_rickshaw: true,
-  });
-  const [trafficDetSensitivity, setTrafficDetSensitivity] = useState<"low" | "medium" | "high">("high");
-  const [trafficAlertSensitivity, setTrafficAlertSensitivity] = useState<"low" | "medium" | "high">("medium");
-
-  // Security form state
-  const [securityDetections, setSecurityDetections] = useState({
-    person: true,
-    intrusion: true,
-    restricted_area: true,
-    loitering: true,
-    crowd: true,
-    fire: true,
-    smoke: true,
-    fall_detection: true,
-  });
-  const [securityObjects, setSecurityObjects] = useState({
-    person: true,
-    backpack: true,
-    bag: true,
-  });
-  const [securitySensitivity, setSecuritySensitivity] = useState<"low" | "medium" | "high">("high");
-
-  // Factory form state
-  const [factoryDetections, setFactoryDetections] = useState({
-    ppe: true,
-    helmet: true,
-    gloves: true,
-    vest: true,
-    shoes: true,
-    forklift: true,
-    worker: true,
-    fire: true,
-    smoke: true,
-  });
-  const [factorySensitivity, setFactorySensitivity] = useState<"low" | "medium" | "high">("high");
-
-  // Drone form state
-  const [droneDetections, setDroneDetections] = useState({
-    small_vehicle_tracking: true,
-    aerial_pedestrian: true,
-    high_altitude_tiling: true,
-    traffic_flow: true,
-  });
-  const [droneObjects, setDroneObjects] = useState({
-    car: true,
-    pedestrian: true,
-    van: true,
-    truck: true,
-    bus: true,
-    motorcycle: true,
-    bicycle: true,
-  });
-  const [droneSensitivity, setDroneSensitivity] = useState<"low" | "medium" | "high">("high");
-
-  // Custom form state
-  const [customDetections, setCustomDetections] = useState<string[]>(["person", "vehicle"]);
-  const [customObjects, setCustomObjects] = useState<string[]>(["car", "person", "bag"]);
-  const [customSensitivity, setCustomSensitivity] = useState<"low" | "medium" | "high">("medium");
-
-  // Load from db
   useEffect(() => {
     if (current && current.length > 0) {
-      const prof = getSetting("ai.profile", "traffic") as "traffic" | "security" | "factory" | "drone" | "custom";
-      setActiveProfile(prof);
-
       const infMode = getSetting("ai.inference_mode", "cloud");
       setInferenceMode(infMode === "local" ? "local" : "cloud");
-
-      const tc = getSetting("ai.traffic_config", null);
-      if (tc) {
-        setTrafficDetections({ ...trafficDetections, ...tc.detections });
-        setTrafficObjects({ ...trafficObjects, ...tc.objects });
-        if (tc.detectionSensitivity) setTrafficDetSensitivity(tc.detectionSensitivity);
-        if (tc.alertSensitivity) setTrafficAlertSensitivity(tc.alertSensitivity);
-      }
-
-      const sc = getSetting("ai.security_config", null);
-      if (sc) {
-        setSecurityDetections({ ...securityDetections, ...sc.detections });
-        setSecurityObjects({ ...securityObjects, ...sc.objects });
-        if (sc.sensitivity) setSecuritySensitivity(sc.sensitivity);
-      }
-
-      const fc = getSetting("ai.factory_config", null);
-      if (fc) {
-        setFactoryDetections({ ...factoryDetections, ...fc.detections });
-        if (fc.sensitivity) setFactorySensitivity(fc.sensitivity);
-      }
-
-      const dc = getSetting("ai.drone_config", null);
-      if (dc) {
-        setDroneDetections({ ...droneDetections, ...dc.detections });
-        setDroneObjects({ ...droneObjects, ...dc.objects });
-        if (dc.sensitivity) setDroneSensitivity(dc.sensitivity);
-      }
-
-      const cc = getSetting("ai.custom_config", null);
-      if (cc) {
-        if (cc.detections) setCustomDetections(cc.detections);
-        if (cc.objects) setCustomObjects(cc.objects);
-        if (cc.sensitivity) setCustomSensitivity(cc.sensitivity);
-      }
     }
   }, [current]);
 
-  async function save() {
-    if (!org) return;
-    setBusy(true);
+  useEffect(() => {
+    let active = true;
+    async function pollRuntime() {
+      try {
+        const res = await fetch("http://localhost:8000/api/runtime/status");
+        if (res.ok && active) {
+          const data = await res.json();
+          if (data.runtime_state) setRuntimeState(data.runtime_state);
+          if (data.mode) setInferenceMode(data.mode);
+          const isCloudOffline = !!data.cloud_cameras_offline && data.cloud_cameras_offline > 0;
+          setRuntimeCloudOffline(isCloudOffline);
+          if (data.error) setRuntimeError(data.error);
+          else setRuntimeError(null);
+          return;
+        }
+      } catch {
+        // Local engine HTTP server not directly reachable (e.g. HTTPS remote admin portal)
+      }
 
-    let resolvedModel = "CamAI Engine M"; // Default high quality detection
-    let activeSensitivity: "low" | "medium" | "high" = "high";
-
-    if (activeProfile === "traffic") {
-      activeSensitivity = trafficDetSensitivity;
-    } else if (activeProfile === "security") {
-      activeSensitivity = securitySensitivity;
-    } else if (activeProfile === "factory") {
-      activeSensitivity = factorySensitivity;
-    } else if (activeProfile === "drone") {
-      activeSensitivity = droneSensitivity;
-      resolvedModel = "yolov8_visdrone.onnx";
-    } else if (activeProfile === "custom") {
-      activeSensitivity = customSensitivity;
+      if (active) {
+        const currentMode = getSetting("ai.inference_mode", "cloud");
+        setRuntimeState(currentMode === "local" ? "LOCAL ACTIVE" : "CLOUD ACTIVE");
+        setRuntimeCloudOffline(false);
+        setRuntimeError(null);
+      }
     }
+    pollRuntime();
+    const iv = setInterval(pollRuntime, 3000);
+    return () => { active = false; clearInterval(iv); };
+  }, [current]);
 
-    if (activeProfile !== "drone") {
-      if (activeSensitivity === "low") {
-        resolvedModel = "CamAI Engine Tiny";
-      } else if (activeSensitivity === "medium") {
-        resolvedModel = "CamAI Engine S";
+  async function handleModeSwitch(targetMode: "cloud" | "local") {
+    if (!canConfigure || isSwitchingMode) return;
+    setIsSwitchingMode(true);
+    setRuntimeState("SWITCHING");
+    setRuntimeError(null);
+
+    setInferenceMode(targetMode);
+
+    let supabaseSuccess = false;
+    if (org) {
+      const { error } = await supabase.from("settings").upsert(
+        [{ org_id: org.id, scope: "org", key: "ai.inference_mode", value: targetMode as any }],
+        { onConflict: "org_id,scope,key" }
+      );
+      if (!error) {
+        supabaseSuccess = true;
       } else {
-        resolvedModel = "CamAI Engine M";
+        setRuntimeError(error.message);
       }
-    }
-
-    // Special factory logic: if factory PPE is checked, use PPE Detection model
-    if (activeProfile === "factory" && factoryDetections.ppe) {
-      resolvedModel = "PPE Detection";
-    }
-
-    // Mapped classes
-    let resolvedClasses: string[] = [];
-    if (activeProfile === "traffic") {
-      resolvedClasses = Object.entries(trafficObjects)
-        .filter(([_, enabled]) => enabled)
-        .map(([obj]) => obj);
-    } else if (activeProfile === "security") {
-      resolvedClasses = Object.entries(securityObjects)
-        .filter(([_, enabled]) => enabled)
-        .map(([obj]) => obj === "bag" ? "handbag" : obj);
-    } else if (activeProfile === "factory") {
-      resolvedClasses = ["person", "helmet", "vest", "gloves", "shoes"];
-    } else if (activeProfile === "drone") {
-      resolvedClasses = Object.entries(droneObjects)
-        .filter(([_, enabled]) => enabled)
-        .map(([obj]) => obj);
     } else {
-      resolvedClasses = customObjects;
+      supabaseSuccess = true;
     }
 
-    const resolvedConfidence = activeProfile === "drone"
-      ? (activeSensitivity === "low" ? 0.15 : activeSensitivity === "medium" ? 0.20 : 0.30)
-      : (activeSensitivity === "low" ? 0.25 : activeSensitivity === "medium" ? 0.40 : 0.55);
-
-    const trafficConfigObj = {
-      detections: trafficDetections,
-      objects: trafficObjects,
-      detectionSensitivity: trafficDetSensitivity,
-      alertSensitivity: trafficAlertSensitivity,
-    };
-
-    const securityConfigObj = {
-      detections: securityDetections,
-      objects: securityObjects,
-      sensitivity: securitySensitivity,
-    };
-
-    const factoryConfigObj = {
-      detections: factoryDetections,
-      sensitivity: factorySensitivity,
-    };
-
-    const droneConfigObj = {
-      detections: droneDetections,
-      objects: droneObjects,
-      sensitivity: droneSensitivity,
-    };
-
-    const customConfigObj = {
-      detections: customDetections,
-      objects: customObjects,
-      sensitivity: customSensitivity,
-    };
-
-    const rows = [
-      { org_id: org.id, scope: "org", key: "ai.inference_mode", value: inferenceMode as any },
-      { org_id: org.id, scope: "org", key: "ai.profile", value: activeProfile as any },
-      { org_id: org.id, scope: "org", key: "ai.model", value: resolvedModel as any },
-      { org_id: org.id, scope: "org", key: "ai.confidence", value: resolvedConfidence as any },
-      { org_id: org.id, scope: "org", key: "ai.classes", value: resolvedClasses as any },
-      { org_id: org.id, scope: "org", key: "ai.traffic_config", value: trafficConfigObj as any },
-      { org_id: org.id, scope: "org", key: "ai.security_config", value: securityConfigObj as any },
-      { org_id: org.id, scope: "org", key: "ai.factory_config", value: factoryConfigObj as any },
-      { org_id: org.id, scope: "org", key: "ai.drone_config", value: droneConfigObj as any },
-      { org_id: org.id, scope: "org", key: "ai.custom_config", value: customConfigObj as any },
-    ];
-
-    await supabase.from("settings").upsert(rows, { onConflict: "org_id,scope,key" });
-
-    // Hot-swap local AI engine backend dynamically if engine is running
     try {
-      await fetch("http://localhost:8000/api/cloud-mode", {
+      const res = await fetch("http://localhost:8000/api/cloud-mode", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ mode: inferenceMode }),
+        body: JSON.stringify({ mode: targetMode }),
       });
-      await fetch("http://localhost:8000/api/model/select", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ model_name: resolvedModel }),
-      });
-      await fetch("http://localhost:8000/api/detection/confidence", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ confidence: resolvedConfidence }),
-      });
-    } catch {
-      // Local engine not running in browser dev mode — saved to cloud settings DB for desktop sync
-    }
-
-    audit("ai.profile.update", "settings", "org", {
-      module: "settings",
-      new: {
-        profile: activeProfile,
-        model: resolvedModel,
-        classes: resolvedClasses,
-        confidence: resolvedConfidence,
+      if (res.ok) {
+        const data = await res.json();
+        if (data.runtime_state) setRuntimeState(data.runtime_state);
+        if (data.mode) setInferenceMode(data.mode);
+        if (data.error) setRuntimeError(data.error);
+      } else if (supabaseSuccess) {
+        setRuntimeState(targetMode === "cloud" ? "CLOUD ACTIVE" : "LOCAL ACTIVE");
+        setRuntimeError(null);
       }
-    });
-
-    qc.invalidateQueries({ queryKey: ["ai-settings"] });
-    setBusy(false);
-    setSaved(true);
-    setTimeout(() => setSaved(false), 1800);
+    } catch {
+      // Local HTTP endpoint skipped on remote HTTPS portal — Supabase updated successfully
+      if (supabaseSuccess) {
+        setRuntimeState(targetMode === "cloud" ? "CLOUD ACTIVE" : "LOCAL ACTIVE");
+        setRuntimeError(null);
+      }
+    } finally {
+      setIsSwitchingMode(false);
+      qc.invalidateQueries({ queryKey: ["ai-settings"] });
+    }
   }
-
-  const PROFILES = [
-    { id: "traffic", label: "Traffic", desc: "For highway, roads, speed checking, and vehicle flow management." },
-    { id: "security", label: "Security", desc: "For perimeter security, intrusion detection, loitering, and fire alerts." },
-    { id: "factory", label: "Factory", desc: "For employee safety monitoring, PPE compliance, and forklift tracking." },
-    { id: "drone", label: "Drone / Aerial", desc: "For UAV high-altitude overhead surveillance, small vehicle & person tracking (VisDrone AI)." },
-    { id: "micro_motion", label: "Micro Motion / Screen HUD", desc: "For CCTV alarm review, subtle movement highlighting (rodents, insects, birds, night motion)." },
-    { id: "custom", label: "Custom", desc: "Define your own business-specific tracking rules and event processing." },
-  ] as const;
-
-  const SENSITIVITIES = ["low", "medium", "high"] as const;
 
   return (
     <div className="space-y-6">
@@ -591,22 +406,58 @@ function AiTab({ canConfigure }: { canConfigure: boolean }) {
         <div className="flex items-center justify-between">
           <div>
             <h3 className="text-sm font-bold text-ink-1 flex items-center gap-2">
-              <span className="text-base">☁️</span> Global AI Inference Engine Mode
+              <span className="text-base">☁️</span> Mutually Exclusive Runtime Engine Mode
             </h3>
             <p className="text-xs text-ink-3 mt-1">
-              Select where AI neural network inference processing executes. Centralized Admin control. Connected desktop software automatically syncs in real-time.
+              Backend single source of truth. Selecting a mode gracefully stops the old runtime before starting the new one. Exactly one mode is active at any time.
             </p>
           </div>
-          <Badge tone={canConfigure ? "accent" : "neutral"}>
-            {canConfigure ? "Admin Controlled" : "Read-Only"}
-          </Badge>
+          <div className="flex items-center gap-2">
+            {runtimeState === "CLOUD ACTIVE" && !runtimeCloudOffline && (
+              <span className="text-xs font-bold px-2.5 py-1 rounded bg-blue-500/20 text-blue-400 border border-blue-500/30">
+                ☁️ CLOUD ACTIVE
+              </span>
+            )}
+            {runtimeState === "CLOUD ACTIVE" && runtimeCloudOffline && (
+              <span className="text-xs font-bold px-2.5 py-1 rounded bg-orange-500/20 text-orange-400 border border-orange-500/30 animate-pulse">
+                ⚠️ CLOUD OFFLINE
+              </span>
+            )}
+            {runtimeState === "LOCAL ACTIVE" && (
+              <span className="text-xs font-bold px-2.5 py-1 rounded bg-accent/20 text-accent border border-accent/30">
+                🖥️ LOCAL ACTIVE
+              </span>
+            )}
+            {runtimeState === "SWITCHING" && (
+              <span className="text-xs font-bold px-2.5 py-1 rounded bg-amber-500/20 text-amber-400 border border-amber-500/30 animate-pulse">
+                ⏳ SWITCHING…
+              </span>
+            )}
+            {(runtimeState === "FAILED") && !runtimeCloudOffline && (
+              <span className="text-xs font-bold px-2.5 py-1 rounded bg-red-500/20 text-red-400 border border-red-500/30">
+                ⚠️ FAILED / OFFLINE
+              </span>
+            )}
+          </div>
         </div>
+
+        {runtimeError && (
+          <div className="rounded-md border border-red-500/40 bg-red-500/10 p-3 text-xs text-red-300 flex items-start gap-2">
+            <span>⚠️</span>
+            <div>
+              {runtimeCloudOffline
+                ? <><strong>Cloud Node Unreachable:</strong> {runtimeError} — Cameras are streaming but AI detections are paused until the cloud endpoint comes back online.</>
+                : <><strong>Runtime Mode Execution Failure:</strong> {runtimeError}</>
+              }
+            </div>
+          </div>
+        )}
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <button
             type="button"
-            disabled={!canConfigure}
-            onClick={() => setInferenceMode("cloud")}
+            disabled={!canConfigure || isSwitchingMode || runtimeState === "SWITCHING"}
+            onClick={() => handleModeSwitch("cloud")}
             className={`text-left p-4 rounded-lg border transition-all relative ${
               inferenceMode === "cloud"
                 ? "border-blue-500 bg-blue-500/10 text-ink-1 ring-1 ring-blue-500 shadow-md"
@@ -617,21 +468,21 @@ function AiTab({ canConfigure }: { canConfigure: boolean }) {
               <div className="font-semibold text-sm text-blue-400 flex items-center gap-2">
                 ☁️ Cloud Engine (AWS GPU)
               </div>
-              {inferenceMode === "cloud" && (
+              {runtimeState === "CLOUD ACTIVE" && (
                 <span className="text-[10px] font-bold uppercase tracking-wider bg-blue-500 text-white px-2 py-0.5 rounded-full">
                   ACTIVE
                 </span>
               )}
             </div>
             <p className="text-[11px] text-ink-3 mt-2 leading-relaxed">
-              Inference runs 100% on AWS EC2 Cloud GPU (<code className="text-blue-300">13.203.71.14</code>). Local desktop GPU/CPU load drops to <strong className="text-accent">0% (Paused)</strong>. High performance, zero local heat.
+              Inference runs 100% on AWS EC2 Cloud GPU. Local desktop camera processing and GPU/CPU load are <strong className="text-accent">100% STOPPED (0% Load)</strong>.
             </p>
           </button>
 
           <button
             type="button"
-            disabled={!canConfigure}
-            onClick={() => setInferenceMode("local")}
+            disabled={!canConfigure || isSwitchingMode || runtimeState === "SWITCHING"}
+            onClick={() => handleModeSwitch("local")}
             className={`text-left p-4 rounded-lg border transition-all relative ${
               inferenceMode === "local"
                 ? "border-accent bg-accent/10 text-ink-1 ring-1 ring-accent shadow-md"
@@ -642,474 +493,18 @@ function AiTab({ canConfigure }: { canConfigure: boolean }) {
               <div className="font-semibold text-sm text-accent flex items-center gap-2">
                 🖥️ Local Hardware Engine
               </div>
-              {inferenceMode === "local" && (
+              {runtimeState === "LOCAL ACTIVE" && (
                 <span className="text-[10px] font-bold uppercase tracking-wider bg-accent text-zinc-950 px-2 py-0.5 rounded-full">
                   ACTIVE
                 </span>
               )}
             </div>
             <p className="text-[11px] text-ink-3 mt-2 leading-relaxed">
-              Inference runs 100% on-premises on local GPU/CPU hardware (OpenVINO / ONNX runtime). Cloud connectivity is disabled.
+              Inference runs 100% on-premises on local GPU/CPU hardware. Cloud processing for CamAI is completely disabled.
             </p>
           </button>
         </div>
       </div>
-
-      <div className="border-b border-line pb-4">
-        <h3 className="text-base font-semibold text-ink-1">AI Profile</h3>
-        <p className="text-xs text-ink-3 mt-0.5">Select a business profile. The system automatically configures detection models, classes, and runtimes without exposing filenames or libraries.</p>
-      </div>
-
-      {/* Profile Selector */}
-      <div className="grid gap-3 sm:grid-cols-2">
-        {PROFILES.map((p) => {
-          const selected = activeProfile === p.id;
-          return (
-            <button
-              key={p.id}
-              disabled={!canConfigure}
-              onClick={() => setActiveProfile(p.id)}
-              className={`text-left p-4 rounded-lg border transition ${
-                selected
-                  ? "border-accent bg-accent/5 ring-1 ring-accent text-ink-1"
-                  : "border-line bg-surface-1 text-ink-2 hover:border-accent hover:text-ink-1"
-              }`}
-            >
-              <div className="font-semibold text-sm capitalize">{p.label}</div>
-              <div className="text-[11px] mt-1 text-ink-3 leading-normal">{p.desc}</div>
-            </button>
-          );
-        })}
-      </div>
-
-      {/* Traffic Profile Settings */}
-      {activeProfile === "traffic" && (
-        <div className="space-y-4 rounded-lg border border-line bg-surface-1/50 p-4">
-          <h4 className="text-xs font-semibold text-ink-1 uppercase tracking-wider">Traffic Configuration</h4>
-          
-          <div className="space-y-2">
-            <label className="text-xs font-medium text-ink-2">Detection Types</label>
-            <div className="grid grid-cols-2 gap-2">
-              {Object.keys(trafficDetections).map((k) => (
-                <label key={k} className="flex items-center gap-2 text-xs text-ink-1 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    disabled={!canConfigure}
-                    checked={(trafficDetections as any)[k]}
-                    onChange={(e) => setTrafficDetections({ ...trafficDetections, [k]: e.target.checked })}
-                    className="rounded border-line bg-surface-2 text-accent focus:ring-accent accent-accent"
-                  />
-                  <span className="capitalize">{k.replace(/_/g, " ")}</span>
-                </label>
-              ))}
-            </div>
-          </div>
-
-          <div className="space-y-2">
-            <label className="text-xs font-medium text-ink-2">Tracked Objects</label>
-            <div className="grid grid-cols-3 gap-2">
-              {Object.keys(trafficObjects).map((k) => (
-                <label key={k} className="flex items-center gap-2 text-xs text-ink-1 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    disabled={!canConfigure}
-                    checked={(trafficObjects as any)[k]}
-                    onChange={(e) => setTrafficObjects({ ...trafficObjects, [k]: e.target.checked })}
-                    className="rounded border-line bg-surface-2 text-accent focus:ring-accent accent-accent"
-                  />
-                  <span className="capitalize">{k.replace(/_/g, " ")}</span>
-                </label>
-              ))}
-            </div>
-          </div>
-
-          <div className="grid grid-cols-2 gap-4 pt-2">
-            <div className="space-y-1.5">
-              <label className="text-xs font-medium text-ink-2">Detection Sensitivity</label>
-              <div className="flex gap-1 bg-surface-2 p-0.5 rounded-md border border-line">
-                {SENSITIVITIES.map((s) => (
-                  <button
-                    key={s}
-                    type="button"
-                    disabled={!canConfigure}
-                    onClick={() => setTrafficDetSensitivity(s)}
-                    className={`flex-1 py-1 text-center text-[10px] font-semibold uppercase rounded transition ${
-                      trafficDetSensitivity === s ? "bg-accent text-white" : "text-ink-3 hover:text-ink-1"
-                    }`}
-                  >
-                    {s}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <div className="space-y-1.5">
-              <label className="text-xs font-medium text-ink-2">Alert Sensitivity</label>
-              <div className="flex gap-1 bg-surface-2 p-0.5 rounded-md border border-line">
-                {SENSITIVITIES.map((s) => (
-                  <button
-                    key={s}
-                    type="button"
-                    disabled={!canConfigure}
-                    onClick={() => setTrafficAlertSensitivity(s)}
-                    className={`flex-1 py-1 text-center text-[10px] font-semibold uppercase rounded transition ${
-                      trafficAlertSensitivity === s ? "bg-accent text-white" : "text-ink-3 hover:text-ink-1"
-                    }`}
-                  >
-                    {s}
-                  </button>
-                ))}
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Security Profile Settings */}
-      {activeProfile === "security" && (
-        <div className="space-y-4 rounded-lg border border-line bg-surface-1/50 p-4">
-          <h4 className="text-xs font-semibold text-ink-1 uppercase tracking-wider">Security Configuration</h4>
-          
-          <div className="space-y-2">
-            <label className="text-xs font-medium text-ink-2">Detection Types</label>
-            <div className="grid grid-cols-2 gap-2">
-              {Object.keys(securityDetections).map((k) => (
-                <label key={k} className="flex items-center gap-2 text-xs text-ink-1 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    disabled={!canConfigure}
-                    checked={(securityDetections as any)[k]}
-                    onChange={(e) => setSecurityDetections({ ...securityDetections, [k]: e.target.checked })}
-                    className="rounded border-line bg-surface-2 text-accent focus:ring-accent accent-accent"
-                  />
-                  <span className="capitalize">{k.replace(/_/g, " ")}</span>
-                </label>
-              ))}
-            </div>
-          </div>
-
-          <div className="space-y-2">
-            <label className="text-xs font-medium text-ink-2">Tracked Objects</label>
-            <div className="grid grid-cols-3 gap-2">
-              {Object.keys(securityObjects).map((k) => (
-                <label key={k} className="flex items-center gap-2 text-xs text-ink-1 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    disabled={!canConfigure}
-                    checked={(securityObjects as any)[k]}
-                    onChange={(e) => setSecurityObjects({ ...securityObjects, [k]: e.target.checked })}
-                    className="rounded border-line bg-surface-2 text-accent focus:ring-accent accent-accent"
-                  />
-                  <span className="capitalize">{k.replace(/_/g, " ")}</span>
-                </label>
-              ))}
-            </div>
-          </div>
-
-          <div className="space-y-1.5 pt-2">
-            <label className="text-xs font-medium text-ink-2">Profile Sensitivity</label>
-            <div className="flex gap-1 bg-surface-2 p-0.5 rounded-md border border-line max-w-xs">
-              {SENSITIVITIES.map((s) => (
-                <button
-                  key={s}
-                  type="button"
-                  disabled={!canConfigure}
-                  onClick={() => setSecuritySensitivity(s)}
-                  className={`flex-1 py-1 text-center text-[10px] font-semibold uppercase rounded transition ${
-                    securitySensitivity === s ? "bg-accent text-white" : "text-ink-3 hover:text-ink-1"
-                  }`}
-                >
-                  {s}
-                </button>
-              ))}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Factory Profile Settings */}
-      {activeProfile === "factory" && (
-        <div className="space-y-4 rounded-lg border border-line bg-surface-1/50 p-4">
-          <h4 className="text-xs font-semibold text-ink-1 uppercase tracking-wider">Factory Configuration</h4>
-          
-          <div className="space-y-2">
-            <label className="text-xs font-medium text-ink-2">Safety & Tracking Rules</label>
-            <div className="grid grid-cols-2 gap-2">
-              {Object.keys(factoryDetections).map((k) => (
-                <label key={k} className="flex items-center gap-2 text-xs text-ink-1 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    disabled={!canConfigure}
-                    checked={(factoryDetections as any)[k]}
-                    onChange={(e) => setFactoryDetections({ ...factoryDetections, [k]: e.target.checked })}
-                    className="rounded border-line bg-surface-2 text-accent focus:ring-accent accent-accent"
-                  />
-                  <span className="capitalize">{k.replace(/_/g, " ")}</span>
-                </label>
-              ))}
-            </div>
-          </div>
-
-          <div className="space-y-1.5 pt-2">
-            <label className="text-xs font-medium text-ink-2">Profile Sensitivity</label>
-            <div className="flex gap-1 bg-surface-2 p-0.5 rounded-md border border-line max-w-xs">
-              {SENSITIVITIES.map((s) => (
-                <button
-                  key={s}
-                  type="button"
-                  disabled={!canConfigure}
-                  onClick={() => setFactorySensitivity(s)}
-                  className={`flex-1 py-1 text-center text-[10px] font-semibold uppercase rounded transition ${
-                    factorySensitivity === s ? "bg-accent text-white" : "text-ink-3 hover:text-ink-1"
-                  }`}
-                >
-                  {s}
-                </button>
-              ))}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Drone Profile Settings */}
-      {activeProfile === "drone" && (
-        <div className="space-y-4 rounded-lg border border-line bg-surface-1/50 p-4">
-          <h4 className="text-xs font-semibold text-ink-1 uppercase tracking-wider">Drone Aerial Configuration (VisDrone Engine)</h4>
-          
-          <div className="space-y-2">
-            <label className="text-xs font-medium text-ink-2">Aerial Detection Modes</label>
-            <div className="grid grid-cols-2 gap-2">
-              {Object.keys(droneDetections).map((k) => (
-                <label key={k} className="flex items-center gap-2 text-xs text-ink-1 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    disabled={!canConfigure}
-                    checked={(droneDetections as any)[k]}
-                    onChange={(e) => setDroneDetections({ ...droneDetections, [k]: e.target.checked })}
-                    className="rounded border-line bg-surface-2 text-accent focus:ring-accent accent-accent"
-                  />
-                  <span className="capitalize">{k.replace(/_/g, " ")}</span>
-                </label>
-              ))}
-            </div>
-          </div>
-
-          <div className="space-y-2">
-            <label className="text-xs font-medium text-ink-2">Tracked Overhead Classes</label>
-            <div className="grid grid-cols-3 gap-2">
-              {Object.keys(droneObjects).map((k) => (
-                <label key={k} className="flex items-center gap-2 text-xs text-ink-1 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    disabled={!canConfigure}
-                    checked={(droneObjects as any)[k]}
-                    onChange={(e) => setDroneObjects({ ...droneObjects, [k]: e.target.checked })}
-                    className="rounded border-line bg-surface-2 text-accent focus:ring-accent accent-accent"
-                  />
-                  <span className="capitalize">{k.replace(/_/g, " ")}</span>
-                </label>
-              ))}
-            </div>
-          </div>
-
-          <div className="space-y-1.5 pt-2">
-            <label className="text-xs font-medium text-ink-2">Drone Small-Object Sensitivity</label>
-            <div className="flex gap-1 bg-surface-2 p-0.5 rounded-md border border-line max-w-xs">
-              {SENSITIVITIES.map((s) => (
-                <button
-                  key={s}
-                  type="button"
-                  disabled={!canConfigure}
-                  onClick={() => setDroneSensitivity(s)}
-                  className={`flex-1 py-1 text-center text-[10px] font-semibold uppercase rounded transition ${
-                    droneSensitivity === s ? "bg-accent text-white" : "text-ink-3 hover:text-ink-1"
-                  }`}
-                >
-                  {s}
-                </button>
-              ))}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Custom Profile Settings */}
-      {activeProfile === "custom" && (
-        <div className="space-y-4 rounded-lg border border-line bg-surface-1/50 p-4">
-          <h4 className="text-xs font-semibold text-ink-1 uppercase tracking-wider">Custom Configuration</h4>
-          
-          <div className="space-y-2">
-            <label className="text-xs font-medium text-ink-2">Detection Types</label>
-            <div className="flex flex-wrap gap-1.5">
-              {["general", "intrusion", "safety", "fire", "smoke", "pose"].map((c) => {
-                const on = customDetections.includes(c);
-                return (
-                  <button
-                    key={c}
-                    type="button"
-                    disabled={!canConfigure}
-                    onClick={() =>
-                      setCustomDetections(
-                        on ? customDetections.filter((x) => x !== c) : [...customDetections, c]
-                      )
-                    }
-                    className={`rounded-full border px-2.5 py-1 text-xs transition ${
-                      on
-                        ? "border-accent bg-accent/15 text-accent"
-                        : "border-line text-ink-2 hover:text-ink-1"
-                    }`}
-                  >
-                    {c}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          <div className="space-y-2">
-            <label className="text-xs font-medium text-ink-2">Detection Classes</label>
-            <div className="flex flex-wrap gap-1.5">
-              {["person", "car", "truck", "bus", "motorcycle", "bicycle", "backpack", "handbag", "suitcase", "helmet", "vest"].map((c) => {
-                const on = customObjects.includes(c);
-                return (
-                  <button
-                    key={c}
-                    type="button"
-                    disabled={!canConfigure}
-                    onClick={() =>
-                      setCustomObjects(
-                        on ? customObjects.filter((x) => x !== c) : [...customObjects, c]
-                      )
-                    }
-                    className={`rounded-full border px-2.5 py-1 text-xs transition ${
-                      on
-                        ? "border-accent bg-accent/15 text-accent"
-                        : "border-line text-ink-2 hover:text-ink-1"
-                    }`}
-                  >
-                    {c}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          <div className="space-y-1.5 pt-2">
-            <label className="text-xs font-medium text-ink-2">Sensitivity</label>
-            <div className="flex gap-1 bg-surface-2 p-0.5 rounded-md border border-line max-w-xs">
-              {SENSITIVITIES.map((s) => (
-                <button
-                  key={s}
-                  type="button"
-                  disabled={!canConfigure}
-                  onClick={() => setCustomSensitivity(s)}
-                  className={`flex-1 py-1 text-center text-[10px] font-semibold uppercase rounded transition ${
-                    customSensitivity === s ? "bg-accent text-white" : "text-ink-3 hover:text-ink-1"
-                  }`}
-                >
-                  {s}
-                </button>
-              ))}
-            </div>
-          </div>
-
-
-        </div>
-      )}
-
-      {/* Zero-DCE Night Vision Enhancement Panel */}
-      <div className="space-y-4 rounded-lg border border-line bg-surface-1/50 p-4">
-        <div className="flex items-center justify-between">
-          <div>
-            <h4 className="text-xs font-semibold text-ink-1 uppercase tracking-wider">Zero-DCE Night-Vision AI Enhancement</h4>
-            <p className="text-[11px] text-ink-3 mt-0.5">Zero-Reference Deep Curve Estimation dynamically boosts low-light exposure on night CCTV/Drone feeds for accurate detection.</p>
-          </div>
-          <label className="relative inline-flex items-center cursor-pointer">
-            <input
-              type="checkbox"
-              disabled={!canConfigure}
-              defaultChecked={true}
-              onChange={async (e) => {
-                try {
-                  await fetch("http://localhost:8000/api/enhancement/zero_dce", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ enabled: e.target.checked }),
-                  });
-                } catch {}
-              }}
-              className="sr-only peer"
-            />
-            <div className="w-9 h-5 bg-surface-2 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-accent"></div>
-          </label>
-        </div>
-
-        <div className="grid grid-cols-2 gap-4 pt-1 border-t border-line/60">
-          <div>
-            <label className="text-xs font-medium text-ink-2">Trigger Mode</label>
-            <div className="flex gap-2 mt-1">
-              <button
-                type="button"
-                onClick={async () => {
-                  try {
-                    await fetch("http://localhost:8000/api/enhancement/zero_dce", {
-                      method: "POST",
-                      headers: { "Content-Type": "application/json" },
-                      body: JSON.stringify({ auto_mode: true }),
-                    });
-                  } catch {}
-                }}
-                className="px-3 py-1 text-xs rounded border border-accent bg-accent/15 text-accent font-medium"
-              >
-                Auto-Luminance Gated
-              </button>
-              <button
-                type="button"
-                onClick={async () => {
-                  try {
-                    await fetch("http://localhost:8000/api/enhancement/zero_dce", {
-                      method: "POST",
-                      headers: { "Content-Type": "application/json" },
-                      body: JSON.stringify({ auto_mode: false }),
-                    });
-                  } catch {}
-                }}
-                className="px-3 py-1 text-xs rounded border border-line bg-surface-2 text-ink-2 hover:text-ink-1"
-              >
-                Always On
-              </button>
-            </div>
-          </div>
-          <div>
-            <label className="text-xs font-medium text-ink-2">Dark Scene Luminance Threshold (10 - 100)</label>
-            <input
-              type="range"
-              min="10"
-              max="100"
-              defaultValue="65"
-              disabled={!canConfigure}
-              onChange={async (e) => {
-                try {
-                  await fetch("http://localhost:8000/api/enhancement/zero_dce", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ threshold: parseFloat(e.target.value) }),
-                  });
-                } catch {}
-              }}
-              className="w-full mt-2 accent-accent bg-surface-2 rounded-lg cursor-pointer"
-            />
-          </div>
-        </div>
-      </div>
-
-      {canConfigure && (
-        <div className="flex items-center gap-3 pt-2">
-          <SaveButton onClick={save} busy={busy} />
-          {saved && <span className="text-sm text-ok">Saved ✓ — desktops re-sync automatically</span>}
-        </div>
-      )}
-
     </div>
   );
 }
