@@ -230,6 +230,8 @@ def _draw_normalized_overlay_boxes(frame, client_dets):
         return frame
     h, w = frame.shape[:2]
     for det in client_dets:
+        if det.get("tracking_status") == "coasting" or float(det.get("confidence", 0.0)) < 0.20:
+            continue
         b = det.get("bbox")
         if not b:
             continue
@@ -543,7 +545,7 @@ class ByteTracker:
     # discriminative enough to safely re-identify across the whole frame.
     _REID_SPATIAL_GATE = 0.5
 
-    def __init__(self, max_lost_seconds=1.8, reid_ttl=60.0, n_init=1):
+    def __init__(self, max_lost_seconds=0.5, reid_ttl=15.0, n_init=2):
         # Seconds — NOT iterations — a track stays actively coasted before it
         # moves to the gallery. See Track.secs_since_update.
         self.max_lost_seconds = max_lost_seconds
@@ -935,7 +937,7 @@ class ByteTracker:
 # seconds, not iterations, for the same reason the tracker ages in seconds: at
 # 5 iterations this was 0.2s on a healthy loop and 4s on a stalled one, so a
 # ghost box outlived its object by whatever the pipeline load happened to be.
-COAST_RENDER_SECONDS = 1.5
+COAST_RENDER_SECONDS = 0.25
 
 
 def resolve_emitted_detections(tracker, tracks_raw, detections, masks,
@@ -1028,7 +1030,7 @@ def resolve_emitted_detections(tracker, tracks_raw, detections, masks,
                 "track_id": tid,
                 "dwell_time": trk["dwell_time"],
                 "bbox": dict(trk["bbox"]),
-                "tracking_status": "tracked",
+                "tracking_status": "coasting",
             })
             out_masks.append([])
 
@@ -2384,22 +2386,21 @@ class PipelineCoordinator:
                         mjpeg_fps_cap = MJPEG_MAX_FPS if MJPEG_MAX_FPS > 0 else 30.0
                         self._next_mjpeg_due = now_enc + (1.0 / mjpeg_fps_cap)
 
-                        stream_frame = frame.copy()
+                        target_w = min(1280, self.display_max_width)
+                        h, w = frame.shape[:2]
+                        if w != target_w:
+                            target_h = max(180, int(h * (target_w / w)))
+                            mjpeg_f = cv2.resize(frame, (target_w, target_h), interpolation=cv2.INTER_LINEAR)
+                        else:
+                            mjpeg_f = frame.copy()
 
                         with self._overlay_lock:
                             latest_dets = list(getattr(self, "_latest_overlay_dets", []))
                             latest_ts   = getattr(self, "_latest_overlay_ts", 0.0)
 
-                        if latest_dets and (time.time() - latest_ts < 2.5):
-                            _draw_normalized_overlay_boxes(stream_frame, latest_dets)
+                        if latest_dets and (time.time() - latest_ts < 0.5):
+                            _draw_normalized_overlay_boxes(mjpeg_f, latest_dets)
 
-                        target_w = min(1280, self.display_max_width)
-                        h, w = stream_frame.shape[:2]
-                        if w != target_w:
-                            target_h = max(180, int(h * (target_w / w)))
-                            mjpeg_f = cv2.resize(stream_frame, (target_w, target_h), interpolation=cv2.INTER_LINEAR)
-                        else:
-                            mjpeg_f = stream_frame
                         q = max(60, min(90, self.jpeg_quality))
                         ok, jpg = cv2.imencode('.jpg', mjpeg_f, [cv2.IMWRITE_JPEG_QUALITY, q])
                         if ok:
