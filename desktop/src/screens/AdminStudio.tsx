@@ -35,6 +35,7 @@ import { getSupabase } from "../lib/session";
 import { useAlertState } from "../components/alerts/AlertProvider";
 import { fnErrorMessage } from "../lib/fnError";
 import { isEngineOnline, mjpegStreamUrl, controlHeaders } from "../lib/localEngine";
+import TargetMatcherUI from "../components/TargetMatcherUI";
 
 import {
   History,
@@ -1591,6 +1592,11 @@ export default function AdminStudio({
               ))}
             </div>
           )}
+        </div>
+
+        {/* Custom Target Image Upload & Vector Matcher Engine */}
+        <div className="pt-2">
+          <TargetMatcherUI />
         </div>
       </div>
     );
