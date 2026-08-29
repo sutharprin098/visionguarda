@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Activity, Cpu, MemoryStick, Gauge, Play, Square, RotateCw, Terminal, AlertTriangle, FolderCog } from "lucide-react";
+import { Activity, Cpu, MemoryStick, Gauge, Play, Square, RotateCw, Terminal, AlertTriangle, FolderCog, Cloud } from "lucide-react";
 import clsx from "clsx";
 import { getEngineAppStatus, EngineAppStatus } from "../lib/localEngine";
 import type { EngineStatus } from "../lib/bridge";
@@ -21,7 +21,15 @@ const PROCESS_TONES: Record<EngineStatus["state"], string> = {
   stopped: "bg-surface-3 text-zinc-500",
 };
 
-export default function EngineHealthPanel() {
+interface EngineHealthPanelProps {
+  orgInferenceMode?: string;
+  cloudUrl?: string;
+}
+
+export default function EngineHealthPanel({
+  orgInferenceMode = "local",
+  cloudUrl = "http://13.203.71.14:8000",
+}: EngineHealthPanelProps) {
   const [proc, setProc] = useState<EngineStatus | null>(null);
   const [app, setApp] = useState<EngineAppStatus | null>(null);
   const [logs, setLogs] = useState<string[]>([]);
@@ -67,7 +75,7 @@ export default function EngineHealthPanel() {
 
   const eng = app?.engine;
   const modelState = eng?.status;
-  const isCloud = eng?.status === "disabled" || (eng as any)?.processing_mode === "cloud" || (eng as any)?.runtime_state === "CLOUD ACTIVE";
+  const isCloud = orgInferenceMode === "cloud" || eng?.status === "disabled" || (eng as any)?.processing_mode === "cloud" || (eng as any)?.runtime_state === "CLOUD ACTIVE";
 
   async function saveEnginePath() {
     setSaveError(null);
@@ -84,8 +92,8 @@ export default function EngineHealthPanel() {
             <Activity size={16} className="text-accent" />
             <h2 className="text-sm font-semibold text-zinc-100">Local AI Engine</h2>
             {isCloud ? (
-              <span className="rounded-full bg-blue-500/15 text-blue-400 px-2 py-0.5 text-[10px] font-semibold border border-blue-500/20">
-                Disabled — Cloud Mode Active
+              <span className="rounded-full bg-blue-500/15 text-blue-400 px-2 py-0.5 text-[10px] font-bold border border-blue-500/20">
+                ☁️ AWS Cloud GPU Mode Active
               </span>
             ) : (
               <>
@@ -104,8 +112,8 @@ export default function EngineHealthPanel() {
           </div>
           <div className="flex items-center gap-1.5">
             {isCloud ? (
-              <span className="text-[11px] text-zinc-500 bg-surface-2 px-2 py-1 rounded italic">
-                Local controls disabled in Cloud Mode
+              <span className="text-[11px] text-blue-400 font-medium bg-blue-500/10 border border-blue-500/20 px-2 py-1 rounded">
+                Cloud Managed (Local Engine Standby)
               </span>
             ) : (
               <>
@@ -143,11 +151,25 @@ export default function EngineHealthPanel() {
           </div>
         </div>
 
-        {!isCloud && (proc?.lastError || (modelState === "failed" && eng?.error)) && (
-          <div className="mt-3 flex items-start gap-2 rounded-md border border-danger/30 bg-danger/10 px-3 py-2 text-xs text-danger">
-            <AlertTriangle size={13} className="mt-0.5 shrink-0" />
-            <span>{proc?.lastError || eng?.error}</span>
+        {isCloud ? (
+          <div className="mt-3 flex items-start gap-2.5 rounded-md border border-blue-500/30 bg-blue-500/10 px-3.5 py-2.5 text-xs text-blue-200">
+            <Cloud size={16} className="mt-0.5 shrink-0 text-blue-400 animate-pulse" />
+            <div>
+              <div className="font-semibold text-blue-300">AWS Cloud GPU Inference Active</div>
+              <div className="mt-0.5 text-zinc-400">
+                AI detection and video analytics are offloaded to remote cloud server (
+                <code className="font-mono text-[11px] text-blue-300">{cloudUrl}</code>
+                ). Local engine process is kept on standby.
+              </div>
+            </div>
           </div>
+        ) : (
+          (proc?.lastError || (modelState === "failed" && eng?.error)) && (
+            <div className="mt-3 flex items-start gap-2 rounded-md border border-danger/30 bg-danger/10 px-3 py-2 text-xs text-danger">
+              <AlertTriangle size={13} className="mt-0.5 shrink-0" />
+              <span>{proc?.lastError || eng?.error}</span>
+            </div>
+          )
         )}
 
         {showSettings && (

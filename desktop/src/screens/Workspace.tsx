@@ -508,6 +508,7 @@ export default function Workspace({
             logs={logs}
             onFullscreen={setFullscreenCamId}
             paused={fullscreenCamId !== null}
+            orgInferenceMode={orgInferenceMode}
           />
         </div>
         {tab === "maps" && (
@@ -584,7 +585,7 @@ export default function Workspace({
           </div>
         )}
         {tab === "engine" && (
-          <EngineHealthPanel />
+          <EngineHealthPanel orgInferenceMode={orgInferenceMode} cloudUrl={orgCloudUrl} />
         )}
       </main>
     </div>
@@ -842,6 +843,7 @@ function CamerasView({
   logs,
   onFullscreen,
   paused,
+  orgInferenceMode = "local",
 }: {
   cameras: any[];
   /** Fallback for the alert card's site line — see siteLabel(). */
@@ -853,12 +855,13 @@ function CamerasView({
   onFullscreen: (id: string) => void;
   /** The fullscreen viewer is covering the grid — see CameraTile. */
   paused: boolean;
+  orgInferenceMode?: string;
 }) {
   if (!cameras.length) {
     return <Panel title="Cameras">No cameras assigned to you. Ask your administrator.</Panel>;
   }
 
-  const isCloudMode = healthInfo?.mode === "cloud" || (healthInfo as any)?.processing_mode === "cloud";
+  const isCloudMode = orgInferenceMode === "cloud" || healthInfo?.mode === "cloud" || (healthInfo as any)?.processing_mode === "cloud";
   const isEngineOffline = healthInfo !== null && !isCloudMode && (!healthInfo.online || !healthInfo.ready);
 
   const gridLayoutClass =

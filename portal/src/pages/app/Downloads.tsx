@@ -33,10 +33,10 @@ const DEFAULT_FALLBACK_RELEASES: GithubRelease[] = [
     published_at: "2026-08-28T18:50:00Z",
     asset_id: 108,
     asset_name: "CamAI-Desktop-Setup-1.0.7.exe",
-    size_bytes: 651028234,
+    size_bytes: 356697721,
     content_type: "application/octet-stream",
     download_url: `${REPO_URL}/releases/download/v1.0.7/CamAI-Desktop-Setup-1.0.7.exe`,
-    checksum_sha256: "316eaa0c25b1ea6065798ba05d4e79f00839217463d298220ccd28e00e4427fa",
+    checksum_sha256: "a21d36f9495c22812557c9afdb49826c70866d9a6c22a1dd47bc5a70330969c6",
     release_notes: `
 ### 🎯 Synchronized MJPEG Overlay & Zero Ghost Box AI Inference (v1.0.7)
 - **Synchronized MJPEG Server Burn-in Overlay**: Direct zero-phase-mismatch visual overlay burn-in on MJPEG video frames, locking bounding boxes, speeds, and class labels to camera pixels at full 30 FPS.
