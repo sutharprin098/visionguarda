@@ -1576,15 +1576,9 @@ class PipelineCoordinator:
             return True
 
         if result == "network_error":
-            self._health_status = "network_error"
-            now_ts = time.time()
-            if now_ts - getattr(self, "_last_preflight_log_ts", 0.0) >= 30.0:
-                self._last_preflight_log_ts = now_ts
-                # ASCII only: this goes to a Windows console whose code page mangles
-                # non-ASCII punctuation into mojibake in the shipped log panel.
-                print(f"[Cap-{self.camera_id}] Preflight: {mask_source(src)} is unreachable "
-                      f"(TCP connect failed) - skipping the blocking decoder open.", flush=True)
-            return False
+            # TCP probe check failed (e.g. RTSP UDP or custom streaming port),
+            # proceed to real VideoCapture open so the camera connects.
+            return True
 
         # auth_failed is reported for visibility but NOT used to skip the open.
         # probe_connection sends OPTIONS with no credentials, and cameras that
