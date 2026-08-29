@@ -2534,19 +2534,8 @@ class PipelineCoordinator:
             return
 
         _now_cloud = time.time()
-        if _now_cloud - getattr(self, "_last_cloud_req_ts", 0.0) < 0.10:
-            # Skip cloud request on this frame to keep live video stream running at 30 FPS smooth
-            self._ai_slot.put({
-                **data,
-                "detections":     [],
-                "masks_polygons": [],
-                "motion":         False,
-                "micro_motion_stats": self._motion_stats,
-                "orig_h":         orig_h,
-                "orig_w":         orig_w,
-                "conf_thresh":    0.3,
-                "t_pre": 0.0, "t_inf": 0.0, "t_post": 0.0, "ai_lat": 0.0,
-            })
+        if _now_cloud - getattr(self, "_last_cloud_req_ts", 0.0) < 0.05:
+            # Skip sending duplicate request while cloud frame is in flight
             return
         self._last_cloud_req_ts = _now_cloud
 
