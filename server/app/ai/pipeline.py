@@ -2538,24 +2538,9 @@ class PipelineCoordinator:
             return
 
         _now_cloud = time.time()
-        if _now_cloud - getattr(self, "_last_cloud_req_ts", 0.0) < 0.05:
-            # Skip sending duplicate request while cloud frame is in flight
+        if _now_cloud - getattr(self, "_last_cloud_req_ts", 0.0) < 0.04:
+            # High-throughput streaming rate limiter (up to 25 FPS)
             return
-
-        # ── Smart Motion-Gated Cloud Inference ────────────────────────────
-        # Run local CPU motion analysis (~0.3ms). If motion is detected OR
-        # motion occurred within the last 3.0s (Memory Hold Buffer), send
-        # frame to AWS Cloud. If scene is static (>3.0s), skip cloud request
-        # to reduce AWS cloud compute & bandwidth costs by up to 90%.
-        m_stats = self._analyze_motion(frame)
-        if m_stats.get("motion", False):
-            self._last_motion_trigger_ts = _now_cloud
-
-        in_motion_window = (_now_cloud - getattr(self, "_last_motion_trigger_ts", 0.0)) < 3.0
-        if not in_motion_window:
-            # Static empty scene -> skip cloud HTTP request (saves 90% AWS cost)
-            return
-
         self._last_cloud_req_ts = _now_cloud
 
         try:

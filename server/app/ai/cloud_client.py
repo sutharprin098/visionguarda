@@ -247,7 +247,7 @@ def _parse_response(
             cls = str(raw_cls)
 
         conf = float(det.get("confidence") or det.get("score") or 0.0)
-        if conf < 0.45:
+        if conf < 0.25:
             continue
 
         # Extract bounding box
