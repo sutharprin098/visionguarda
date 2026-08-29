@@ -147,7 +147,7 @@ def detect(
     except Exception as exc:
         raise CloudOfflineError(f"Cloud response is not valid JSON: {exc}") from exc
 
-    return _parse_response(payload, frame_w, frame_h)
+    return _parse_response(payload, frame_w, frame_h, enc_w=new_w, enc_h=new_h)
 
 
 def ping(endpoint_url: str, timeout_s: float = 2.0) -> bool:
@@ -166,15 +166,51 @@ def ping(endpoint_url: str, timeout_s: float = 2.0) -> bool:
 
 
 # ---------------------------------------------------------------------------
-# Response parser
+# Response parser with Coordinate Scaling & NMS Duplicate Filtering
 # ---------------------------------------------------------------------------
+
+def _nms(dets: List[Dict[str, Any]], iou_thresh: float = 0.45) -> List[Dict[str, Any]]:
+    if not dets:
+        return []
+    # Sort by confidence descending
+    dets = sorted(dets, key=lambda d: d["confidence"], reverse=True)
+    keep = []
+    for d in dets:
+        b = d["bbox"]
+        x1, y1, x2, y2 = b["x1"], b["y1"], b["x2"], b["y2"]
+        area = (x2 - x1) * (y2 - y1)
+        if area <= 0:
+            continue
+        duplicate = False
+        for k in keep:
+            kb = k["bbox"]
+            kx1, ky1, kx2, ky2 = kb["x1"], kb["y1"], kb["x2"], kb["y2"]
+            karea = (kx2 - kx1) * (ky2 - ky1)
+            
+            # Intersection
+            ix1, iy1 = max(x1, kx1), max(y1, ky1)
+            ix2, iy2 = min(x2, kx2), min(y2, ky2)
+            iw, ih = max(0.0, ix2 - ix1), max(0.0, iy2 - iy1)
+            iarea = iw * ih
+            if iarea > 0:
+                iou = iarea / float(area + karea - iarea)
+                # If IoU > threshold or box is 80%+ contained inside higher-confidence box of same class
+                if (d.get("class") == k.get("class")) and (iou > iou_thresh or (iarea / float(area)) > 0.80):
+                    duplicate = True
+                    break
+        if not duplicate:
+            keep.append(d)
+    return keep
+
 
 def _parse_response(
     payload: Any,
     frame_w: int,
     frame_h: int,
+    enc_w: int = 320,
+    enc_h: int = 320,
 ) -> List[Dict[str, Any]]:
-    """Convert cloud JSON payload to canonical detection list."""
+    """Convert cloud JSON payload to canonical detection list scaled to full frame."""
     if isinstance(payload, list):
         raw_dets = payload
     elif isinstance(payload, dict):
@@ -192,10 +228,8 @@ def _parse_response(
     if not isinstance(raw_dets, list):
         raw_dets = []
 
-    print(
-        f"[CLOUD_DIAG] [RAW_DETECTIONS] Count={len(raw_dets)} Dets={raw_dets}",
-        flush=True,
-    )
+    scale_x = frame_w / float(enc_w) if (enc_w > 0 and enc_w != frame_w) else 1.0
+    scale_y = frame_h / float(enc_h) if (enc_h > 0 and enc_h != frame_h) else 1.0
 
     out: List[Dict[str, Any]] = []
     for det in raw_dets:
@@ -213,6 +247,8 @@ def _parse_response(
             cls = str(raw_cls)
 
         conf = float(det.get("confidence") or det.get("score") or 0.0)
+        if conf < 0.20:
+            continue
 
         # Extract bounding box
         bbox_raw = det.get("bbox")
@@ -230,7 +266,6 @@ def _parse_response(
         elif isinstance(bbox_raw, (list, tuple)) and len(bbox_raw) == 4:
             v1, v2, v3, v4 = (float(v) for v in bbox_raw)
             if v3 < v1 or v4 < v2:
-                # Format: [x_min, y_min, width, height] or [x_center, y_center, width, height]
                 if v1 + v3 <= 1.05 and v2 + v4 <= 1.05:
                     x1, y1, x2, y2 = v1, v2, v1 + v3, v2 + v4
                 else:
@@ -238,7 +273,6 @@ def _parse_response(
             else:
                 x1, y1, x2, y2 = v1, v2, v3, v4
         else:
-            # Flat keys on det itself
             x1 = float(det.get("x1", det.get("xmin", 0)))
             y1 = float(det.get("y1", det.get("ymin", 0)))
             x2 = float(det.get("x2", det.get("xmax", 0)))
@@ -250,6 +284,12 @@ def _parse_response(
             x2 *= frame_w
             y1 *= frame_h
             y2 *= frame_h
+        else:
+            # Rescale pixel coords from downscaled encoded frame to original frame size
+            x1 *= scale_x
+            x2 *= scale_x
+            y1 *= scale_y
+            y2 *= scale_y
 
         # Clamp to frame bounds
         x1 = max(0.0, min(float(frame_w - 1), x1))
@@ -257,7 +297,7 @@ def _parse_response(
         x2 = max(0.0, min(float(frame_w - 1), x2))
         y2 = max(0.0, min(float(frame_h - 1), y2))
 
-        if x2 - x1 < 2 or y2 - y1 < 2:
+        if x2 - x1 < 4 or y2 - y1 < 4:
             continue  # degenerate box
 
         out.append({
@@ -266,10 +306,6 @@ def _parse_response(
             "bbox": {"x1": x1, "y1": y1, "x2": x2, "y2": y2},
         })
 
-    formatted_dets = [f"{d['class']}:{d['confidence']}:({int(d['bbox']['x1'])},{int(d['bbox']['y1'])},{int(d['bbox']['x2'])},{int(d['bbox']['y2'])})" for d in out]
-    print(
-        f"[CLOUD_DIAG] [PARSED_DETECTIONS] Count={len(out)} Dets={formatted_dets}",
-        flush=True,
-    )
-
+    # Apply NMS to remove duplicate stacked boxes
+    out = _nms(out, iou_thresh=0.45)
     return out
