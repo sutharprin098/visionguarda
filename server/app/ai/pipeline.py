@@ -2128,10 +2128,6 @@ class PipelineCoordinator:
                             self._is_standby_frame = True
                             time.sleep(0.033)  # Maintain smooth 30fps playback during standby/recovery
                     else:
-                        if not self._is_video_file:
-                            for _ in range(2):
-                                if not self.cap.grab():
-                                    break
                         ret, frame = self.cap.read()
                         if (not ret or frame is None) and self._is_video_file:
                             self.cap.set(cv2.CAP_PROP_POS_FRAMES, 0)

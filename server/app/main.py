@@ -1159,9 +1159,7 @@ async def get_mjpeg_stream(camera_id: str):
                     idle_since = last_frame_ts if last_frame_ts is not None else started
                     if time.time() - idle_since > NO_FRAME_GRACE_S:
                         return
-                    # Bounded so the grace check above still runs on a dead camera
-                    # that will never set the event again.
-                    await _wait_for_frame(0.5)
+                    await asyncio.sleep(0.015)
         finally:
             if detach:
                 detach()
