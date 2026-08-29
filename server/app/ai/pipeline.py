@@ -2532,13 +2532,30 @@ class PipelineCoordinator:
             })
             return
 
+        _now_cloud = time.time()
+        if _now_cloud - getattr(self, "_last_cloud_req_ts", 0.0) < 0.10:
+            # Skip cloud request on this frame to keep live video stream running at 30 FPS smooth
+            self._ai_slot.put({
+                **data,
+                "detections":     [],
+                "masks_polygons": [],
+                "motion":         False,
+                "micro_motion_stats": self._motion_stats,
+                "orig_h":         orig_h,
+                "orig_w":         orig_w,
+                "conf_thresh":    0.3,
+                "t_pre": 0.0, "t_inf": 0.0, "t_post": 0.0, "ai_lat": 0.0,
+            })
+            return
+        self._last_cloud_req_ts = _now_cloud
+
         try:
             detections = cloud_detect(
                 frame,
                 endpoint_url=cloud_url,
                 api_key=cloud_key,
-                jpeg_quality=75,
-                timeout_s=3.0,
+                jpeg_quality=50,
+                timeout_s=1.2,
                 camera_id=self.camera_id,
             )
             t_inf = (time.perf_counter() - t0_cloud) * 1000

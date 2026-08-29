@@ -172,6 +172,7 @@ export default function DetectionOverlay({ detections, mediaRef, fit = "cover" }
     const oy = (rect.height - dh) / 2;
 
     for (const det of detections) {
+      if (det.tracking_status === "coasting" || (det.confidence != null && det.confidence < 0.35)) continue;
       const x1 = ox + det.bbox.x1 * dw;
       const y1 = oy + det.bbox.y1 * dh;
       const w = (det.bbox.x2 - det.bbox.x1) * dw;
