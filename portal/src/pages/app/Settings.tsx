@@ -561,11 +561,19 @@ function AiTab({ canConfigure }: { canConfigure: boolean }) {
           </div>
 
           <div className="space-y-2 pt-2 border-t border-line/60">
-            <div className="text-[11px] font-semibold text-ink-2 uppercase tracking-wider">Active AI Modules & Features Suite</div>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-2.5 text-xs">
+            <div className="text-[11px] font-semibold text-ink-2 uppercase tracking-wider">Active AI Modules &amp; Features Suite</div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-2.5 text-xs">
               <div className="p-3 rounded bg-surface-2/60 border border-line/60">
                 <div className="font-semibold text-blue-400 flex items-center gap-1.5">
-                  🚦 Traffic Governance & ANPR
+                  🖼️ Image Target Matcher
+                </div>
+                <div className="text-[11px] text-ink-3 mt-1.5 leading-relaxed">
+                  Upload any photo or crop (Person, Face, Vehicle, Custom Target). Generates 512-d embeddings for continuous cross-camera matching.
+                </div>
+              </div>
+              <div className="p-3 rounded bg-surface-2/60 border border-line/60">
+                <div className="font-semibold text-blue-400 flex items-center gap-1.5">
+                  🚦 Traffic &amp; ANPR
                 </div>
                 <div className="text-[11px] text-ink-3 mt-1.5 leading-relaxed">
                   Real-time vehicle counting (Cars, Bikes, Trucks, Buses), speed estimation (km/h), helmet violation alerts, and ANPR plate recognition.
@@ -573,7 +581,7 @@ function AiTab({ canConfigure }: { canConfigure: boolean }) {
               </div>
               <div className="p-3 rounded bg-surface-2/60 border border-line/60">
                 <div className="font-semibold text-accent flex items-center gap-1.5">
-                  🛡️ Safety & Intrusion Alerts
+                  🛡️ Safety &amp; Intrusion Alerts
                 </div>
                 <div className="text-[11px] text-ink-3 mt-1.5 leading-relaxed">
                   Human intrusion detection, loitering tracking, overcrowding/crowd density alerts, fall detection heuristics, and zone hazard boundaries.
@@ -581,7 +589,7 @@ function AiTab({ canConfigure }: { canConfigure: boolean }) {
               </div>
               <div className="p-3 rounded bg-surface-2/60 border border-line/60">
                 <div className="font-semibold text-indigo-400 flex items-center gap-1.5">
-                  🌙 Micro-Motion & Zero-DCE Night Vision
+                  🌙 Micro-Motion &amp; Night DCE
                 </div>
                 <div className="text-[11px] text-ink-3 mt-1.5 leading-relaxed">
                   Subtle motion rodent/pest tracking for warehouses, automated Zero-DCE low-light frame enhancement, and temporal ghost-box eviction.

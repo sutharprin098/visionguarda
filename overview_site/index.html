@@ -598,21 +598,23 @@
       <div class="metric-card">
         <div class="card-label">Detection Classes</div>
         <div class="card-sub" style="margin-top:6px;">
-          • Person &amp; Face<br/>
+          • Person &amp; Face Recognition<br/>
           • Car, Bus, Truck, Motorcycle<br/>
           • Bicycle &amp; Helmet Compliance<br/>
           • License Plates (ANPR)<br/>
-          • Bags, Backpacks, Suitcases
+          • Bags, Backpacks, Suitcases<br/>
+          • <strong>Custom Target Image Upload</strong>
         </div>
       </div>
       <div class="metric-card">
         <div class="card-label">Tracking Algorithms</div>
         <div class="card-sub" style="margin-top:6px;">
-          • Multi-Target Tracking<br/>
-          • Re-Identification Gallery<br/>
+          • Multi-Target Vector Tracking<br/>
+          • Re-Identification (Re-ID) Gallery<br/>
           • Occlusion Trajectory Recovery<br/>
           • 8-Way Vector Heading<br/>
-          • Dwell &amp; Dwell Time Accumulator
+          • Dwell &amp; Dwell Time Accumulator<br/>
+          • <strong>One-Shot Vector Feature Matching</strong>
         </div>
       </div>
       <div class="metric-card">
@@ -622,7 +624,8 @@
           • ANPR OCR Engine<br/>
           • 4×4 Crowd Density Grid<br/>
           • Abandoned / Removed Object<br/>
-          • Motion Occupancy Heatmap
+          • Motion Occupancy Heatmap<br/>
+          • <strong>Image-Based Target Matcher</strong>
         </div>
       </div>
     </div>
@@ -637,6 +640,11 @@
         </tr>
       </thead>
       <tbody>
+        <tr>
+          <td class="highlight" style="color:#2563eb;">🖼️ Custom Image Upload Target Matcher</td>
+          <td>User uploads any reference photo or crop (Face, Person, Vehicle, or Custom Object). Generates 512-d vector embeddings for real-time cross-camera matching &amp; tracking.</td>
+          <td>Instant target match confidence score (%), live location tracking, visual bounding box alert trigger.</td>
+        </tr>
         <tr>
           <td class="highlight">Homography Speed Engine</td>
           <td>Calculates real-world speed (km/h) via 4-point ground-plane perspective matrix and Kalman smoothing.</td>
