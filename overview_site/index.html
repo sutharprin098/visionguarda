@@ -354,20 +354,20 @@
     </p>
     <div class="card-grid-2">
       <div class="metric-card">
-        <div class="card-label">Layer 1: AI Engine</div>
-        <div class="card-sub">Python 3.10+ / FastAPI service handling RTSP capture, YOLOX detection, ByteTrack-style tracking, ANPR, and telemetry streaming.</div>
+        <div class="card-label">Layer 1: Edge & Cloud AI Engines</div>
+        <div class="card-sub">Dual-mode YOLOX/OpenCV engine supporting on-premises local hardware (CPU/GPU) &amp; AWS EC2 Cloud GPU instance (13.203.71.14:8000) with 0% client desktop CPU/GPU load.</div>
       </div>
       <div class="metric-card">
-        <div class="card-label">Layer 2: Desktop Client</div>
-        <div class="card-sub">Electron + React workstation application providing live camera grids, interactive GIS mapping, DPAPI license vault, and incident tracking.</div>
+        <div class="card-label">Layer 2: Desktop Client Workstation</div>
+        <div class="card-sub">Electron + React workstation application providing live camera grids, interactive GIS floor plans, DPAPI license vault, and real-time engine mode synchronizers.</div>
       </div>
       <div class="metric-card">
-        <div class="card-label">Layer 3: Cloud Backend</div>
+        <div class="card-label">Layer 3: Cloud Backend & RLS</div>
         <div class="card-sub">Multi-tenant Supabase Postgres database with 44+ migration scripts, Row-Level Security, and 21 Deno/TypeScript Edge Functions.</div>
       </div>
       <div class="metric-card">
-        <div class="card-label">Layer 4: Web Admin Portal</div>
-        <div class="card-sub">Browser-based SaaS administration portal (React + Vite) for organization, camera, user role, and license management.</div>
+        <div class="card-label">Layer 4: SaaS Web Admin Portal</div>
+        <div class="card-sub">Browser-based SaaS administration portal (React + Vite) for single-click runtime mode switching, camera groups, user role RLS, and license vault management.</div>
       </div>
     </div>
 
@@ -491,24 +491,29 @@
       </thead>
       <tbody>
         <tr>
-          <td class="highlight">AI Inference Server</td>
+          <td class="highlight">AWS Cloud GPU Engine</td>
+          <td>AWS EC2 Cloud GPU (NVIDIA Accelerated), FastAPI, YOLOX, PyTorch</td>
+          <td>Offloaded 30+ FPS cloud inference with sub-second latency (&lt;45ms) and 0% client CPU/GPU resource utilization.</td>
+        </tr>
+        <tr>
+          <td class="highlight">Local Edge AI Server</td>
           <td>Python 3.10+, FastAPI, PyTorch, OpenCV, OpenVINO, ONNX Runtime</td>
-          <td>High-throughput stream capture, frame decoding, tensor inference, and WebSocket telemetry generation.</td>
+          <td>High-throughput stream capture, frame decoding, Zero-DCE night vision, and synchronized MJPEG burn-in streaming.</td>
         </tr>
         <tr>
           <td class="highlight">Algorithms &amp; Models</td>
-          <td>YOLOX, RT-DETR, LPD-YuNet, CRNN, ByteTrack-style Tracker</td>
-          <td>Multi-class detection, transformer-based classification, plate localization, OCR, and trajectory matching.</td>
+          <td>YOLOX, RT-DETR, YuNet ANPR, Micro-Motion Tracker, Zero-DCE</td>
+          <td>Multi-class detection, helmet compliance, license plate OCR, subtle rodent tracking, and low-light enhancement.</td>
         </tr>
         <tr>
           <td class="highlight">Desktop Workstation</td>
           <td>Electron, React 18, TypeScript, Vite, Tailwind CSS, Leaflet GIS</td>
-          <td>Cross-platform operator interface, hardware-accelerated video rendering, and offline configuration vault.</td>
+          <td>Cross-platform operator interface, DPAPI encrypted local vault, zero ghost-box eviction, and live telemetry sync.</td>
         </tr>
         <tr>
           <td class="highlight">Cloud &amp; Database</td>
           <td>Supabase, PostgreSQL 15, Row-Level Security, Deno Edge Functions</td>
-          <td>Multi-tenant data isolation, central administration, remote configuration push, and webhook integrations.</td>
+          <td>Multi-tenant data isolation, single-click runtime mode switching (Cloud vs Local), and automated Telegram alerts.</td>
         </tr>
       </tbody>
     </table>
@@ -714,9 +719,14 @@
           <td>Perimeter line-crossing, loitering detection, face detection, abandoned bag identification, crowd density evaluation.</td>
         </tr>
         <tr>
-          <td class="highlight" style="color:#b45309;">🏭 Factory Mode</td>
+          <td class="highlight" style="color:#b45309;">🏭 Factory &amp; Warehouse Mode</td>
           <td>Manufacturing facilities, warehouses, hazardous industrial zones</td>
           <td>Worker headcount, restricted zone intrusion, schedule-gated monitoring, privacy masking of non-work areas.</td>
+        </tr>
+        <tr>
+          <td class="highlight" style="color:#4f46e5;">🌙 Micro-Motion &amp; Night DCE Mode</td>
+          <td>Commercial warehouses, grain storage, low-light night perimeters</td>
+          <td>Subtle rodent/pest movement tracking, Zero-DCE automated low-light night enhancement, and temporal ghost-box eviction.</td>
         </tr>
         <tr>
           <td class="highlight" style="color:#6b21a8;">⚙️ Custom Mode</td>
@@ -1149,6 +1159,13 @@
       </thead>
       <tbody>
         <tr>
+          <td class="highlight" style="color:#1d4ed8;">☁️ AWS EC2 Cloud GPU Node (Remote)</td>
+          <td>1 – 16 Streams</td>
+          <td class="verified">30+ FPS / stream</td>
+          <td>&lt; 45.0 ms</td>
+          <td class="verified">0% Client GPU/CPU Load</td>
+        </tr>
+        <tr>
           <td class="highlight">OpenVINO GPU (Discrete GPU)</td>
           <td>1 Stream</td>
           <td class="verified">57 FPS</td>
@@ -1238,7 +1255,7 @@
       <img src="assets/downloads_screen.png" alt="CamAI Desktop Workstation Release Hub & Installer Download" />
       <div class="ui-screenshot-caption">
         <span class="ui-screenshot-tag">Figure 5</span>
-        <strong>Enterprise Command Suite — Desktop Release &amp; Offline Installer Hub:</strong> Workstation download manager providing direct Windows x64 setup executable (`CamAI-Desktop-Setup-1.0.1.exe`, 620.8 MB), bundled offline AI engine configuration, and cryptographic SHA-256 checksum verification (`bb344a5...335dad1`).
+        <strong>Enterprise Command Suite — Desktop Release &amp; Offline Installer Hub:</strong> Workstation download manager providing direct Windows x64 v1.0.7 setup executable (<code>CamAI-Desktop-Setup-1.0.7.exe</code>, 356.7 MB), GitHub automated production releases pipeline, bundled offline/cloud engine toggles, and cryptographic SHA-256 checksum verification (<code>4dadbe61f...276427d3</code>).
       </div>
     </div>
 
