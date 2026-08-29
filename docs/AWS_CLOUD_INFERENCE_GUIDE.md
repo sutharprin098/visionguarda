@@ -194,14 +194,56 @@ Validated end-to-end telemetry measurements recorded during live stress test:
 
 ---
 
-## 8. Resiliency & Failure Cool-Off Mechanism
-
-The system includes a client-side **Failure Cool-Off Governor** located in `server/app/ai/cloud_client.py`:
-
-- **Cool-Off Window (`ENDPOINT_COOL_OFF_S`)**: Set to **15.0 seconds**.
-- **Behavior**: If the primary AWS endpoint (`http://13.203.71.14:8000`) suffers network drops or becomes unreachable, it is flagged for cool-off.
-- **Failover Routing**: Subsequent frames immediately skip probing the dead endpoint and route to the local microservice (`http://127.0.0.1:8099`) or local OpenVINO pipeline.
 - **Result**: Zero video freezing or per-frame connection stalls, maintaining continuous 30+ FPS video streams.
 
 ---
-*Document generated for CamAI VisionGuarda Infrastructure Team.*
+
+## 9. 🚀 24/7 Always-ON Deployment & Maintenance Log
+
+### 📝 Operations Audit Record
+
+| Attribute | Details |
+|---|---|
+| **Timestamp (UTC)** | `2026-08-29 07:44:08 UTC` |
+| **Timestamp (IST)** | `2026-08-29 13:14:08 IST` |
+| **Target AWS Instance** | `CamAI-Cloud-Node` (`c6i.xlarge`) |
+| **Public IPv4 Address** | `13.203.71.14` |
+| **Private IPv4 Address** | `172.31.25.38` |
+| **Operating System** | Ubuntu 26.04 LTS (GNU/Linux 7.0.0-1006-aws x86_64) |
+| **Service Unit File** | `/etc/systemd/system/camai-cloud.service` |
+| **Auto-Restart Policy** | `Restart=always`, `RestartSec=3` |
+| **AI Inference Backend** | OpenVINO CPU Engine (`yolox_tiny`) |
+| **Git Synchronization** | Commit `b6ba8e9` (`origin/main`) |
+
+---
+
+### ❓ What Was Done (Kya Kiya)?
+1. **Repository Synchronization**: Connected to the AWS EC2 node and executed `git pull origin main` to pull the latest v1.0.7 pipeline updates, target matcher modules, and cloud node service fixes.
+2. **Systemd Daemon Creation**: Created and configured `/etc/systemd/system/camai-cloud.service` to run `/usr/bin/python3 /home/ubuntu/camAI/server/run_cloud_node.py --port 8000 --host 0.0.0.0`.
+3. **Automated Boot & Recovery**: Enabled the systemd unit (`sudo systemctl enable camai-cloud`) and started the service (`sudo systemctl start camai-cloud`).
+
+---
+
+### 💡 Why It Was Done (Kyo Kiya)?
+1. **Eliminate Unintentional Downtime**: Previously, running the server manually via terminal caused the process to stop whenever the terminal session disconnected or the EC2 instance rebooted.
+2. **24/7 Continuous Availability**: Setting `Restart=always` ensures that if the Python process crashes or runs out of memory, Linux `systemd` automatically restarts the microservice within **3 seconds**.
+3. **Seamless Client Workspace Streams**: Resolves zero-detection issues on the desktop client (`Workspace.tsx`) by maintaining an active HTTP endpoint for `AWS Cloud GPU` inference requests.
+
+---
+
+### 🔍 Live Verification & Health Benchmark
+
+- **Endpoint**: `GET http://13.203.71.14:8000/health`
+- **HTTP Status**: `200 OK`
+- **Response Payload**:
+  ```json
+  {
+    "status": "ok",
+    "service": "CamAI Cloud AI Node",
+    "backend_ready": true,
+    "timestamp": 1787989494.5573735
+  }
+  ```
+
+---
+*Document updated & verified for CamAI VisionGuarda Infrastructure Team.*

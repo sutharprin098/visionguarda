@@ -2751,7 +2751,13 @@ class PipelineCoordinator:
                         ])
                     masks_polygons = scaled
 
-                # ── Custom Visual Embedding Matcher ───────────────────────────
+                # ── Custom Visual Embedding Matcher & Target Image Matcher ─────
+                try:
+                    from app.ai.target_matcher import target_matcher
+                    detections = target_matcher.match_detections(frame, detections)
+                except Exception as e:
+                    print(f"[TargetMatcher Err] {e}", flush=True)
+
                 try:
                     from app.ai.custom_detector import match_crop, has_active_custom_models
                     if self.zone_profile == "custom" or has_active_custom_models():
