@@ -186,23 +186,7 @@ export default function DetectionOverlay({ detections, mediaRef, fit = "cover" }
       ctx.save();
       ctx.strokeStyle = color;
       ctx.lineWidth = 2;
-      ctx.shadowColor = color;
-      ctx.shadowBlur = 10;
       ctx.strokeRect(x1, y1, w, h);
-      ctx.shadowBlur = 0;
-
-      // Clean corner accents, clipped to the box so a small box doesn't turn
-      // into an X of overlapping ticks.
-      const cs = Math.min(14, w / 3, h / 3);
-      if (cs > 2) {
-        ctx.lineWidth = 3;
-        ctx.beginPath();
-        ctx.moveTo(x1, y1 + cs); ctx.lineTo(x1, y1); ctx.lineTo(x1 + cs, y1);
-        ctx.moveTo(x1 + w - cs, y1); ctx.lineTo(x1 + w, y1); ctx.lineTo(x1 + w, y1 + cs);
-        ctx.moveTo(x1, y1 + h - cs); ctx.lineTo(x1, y1 + h); ctx.lineTo(x1 + cs, y1 + h);
-        ctx.moveTo(x1 + w - cs, y1 + h); ctx.lineTo(x1 + w, y1 + h); ctx.lineTo(x1 + w, y1 + h - cs);
-        ctx.stroke();
-      }
       ctx.restore();
 
       // One label per box.

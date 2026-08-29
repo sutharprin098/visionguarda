@@ -89,7 +89,7 @@ async def detect(request: Request):
             img_tensor, _ = backend.preprocess(frame, target_size=tsize)
             outputs, _ = backend.run_inference(img_tensor)
             raw_dets, _, _ = backend.postprocess(
-                outputs, frame.shape[:2], conf_threshold=0.25, iou_threshold=0.45, target_imgsz=tsize
+                outputs, frame.shape[:2], conf_threshold=0.45, iou_threshold=0.45, target_imgsz=tsize
             )
             for d in raw_dets:
                 cls_name = str(d.get("class", "object"))
