@@ -217,14 +217,14 @@ Validated end-to-end telemetry measurements recorded during live stress test:
 
 ---
 
-### ❓ What Was Done (Kya Kiya)?
+### ❓ What Was Done
 1. **Repository Synchronization**: Connected to the AWS EC2 node and executed `git pull origin main` to pull the latest v1.0.7 pipeline updates, target matcher modules, and cloud node service fixes.
 2. **Systemd Daemon Creation**: Created and configured `/etc/systemd/system/camai-cloud.service` to run `/usr/bin/python3 /home/ubuntu/camAI/server/run_cloud_node.py --port 8000 --host 0.0.0.0`.
 3. **Automated Boot & Recovery**: Enabled the systemd unit (`sudo systemctl enable camai-cloud`) and started the service (`sudo systemctl start camai-cloud`).
 
 ---
 
-### 💡 Why It Was Done (Kyo Kiya)?
+### 💡 Why It Was Done
 1. **Eliminate Unintentional Downtime**: Previously, running the server manually via terminal caused the process to stop whenever the terminal session disconnected or the EC2 instance rebooted.
 2. **24/7 Continuous Availability**: Setting `Restart=always` ensures that if the Python process crashes or runs out of memory, Linux `systemd` automatically restarts the microservice within **3 seconds**.
 3. **Seamless Client Workspace Streams**: Resolves zero-detection issues on the desktop client (`Workspace.tsx`) by maintaining an active HTTP endpoint for `AWS Cloud GPU` inference requests.
