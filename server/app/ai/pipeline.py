@@ -2059,7 +2059,7 @@ class PipelineCoordinator:
                 declared = float(self.cap.get(cv2.CAP_PROP_FPS))
             except Exception:
                 declared = 0.0
-            target_pacing_fps = max(35.0, declared) if 1.0 <= declared <= 120.0 else 35.0
+            target_pacing_fps = declared if 1.0 <= declared <= 120.0 else 25.0
             self._file_frame_interval = 1.0 / target_pacing_fps
 
         next_frame_due = time.time()
@@ -2128,6 +2128,10 @@ class PipelineCoordinator:
                             self._is_standby_frame = True
                             time.sleep(0.033)  # Maintain smooth 30fps playback during standby/recovery
                     else:
+                        if not self._is_video_file:
+                            for _ in range(2):
+                                if not self.cap.grab():
+                                    break
                         ret, frame = self.cap.read()
                         if (not ret or frame is None) and self._is_video_file:
                             self.cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
