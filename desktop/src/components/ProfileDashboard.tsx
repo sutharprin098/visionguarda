@@ -172,16 +172,51 @@ function tilesFor(profile: ZoneProfileKey | null, t: CameraTelemetry): Tile[] {
   ];
 }
 
+function filterActiveTiles(tiles: Tile[]): Tile[] {
+  const active = tiles.filter((tile) => {
+    // FPS is always active
+    if (tile.label === "FPS") return true;
+
+    // Primary summary counts are always active for context
+    if (["People", "Vehicles", "Subtle Motion", "Workers"].includes(tile.label)) return true;
+
+    // Night vision tile -> show if active/enabled
+    if (tile.label === "Night Vision") {
+      return tile.value !== "Off";
+    }
+
+    // "Counted" tile -> show only if in/out counts are non-zero
+    if (tile.label === "Counted") {
+      return tile.value !== "0 in / 0 out" && !tile.value.startsWith("0 in / 0");
+    }
+
+    // Speed / Dwell / Zones -> show only if active value (not "—")
+    if (tile.label === "Avg Speed" || tile.label === "Peak Speed" || tile.label === "Dwell" || tile.label === "Zones") {
+      return tile.value !== "—";
+    }
+
+    // Numeric sub-metrics & violation counters -> show ONLY if non-zero active count exists
+    if (tile.value === "0") {
+      return false;
+    }
+
+    return true;
+  });
+
+  return active.length > 0 ? active : tiles.filter(t => t.label === "FPS" || ["People", "Vehicles"].includes(t.label));
+}
+
 export default function ProfileDashboard({ profile, t }: Props) {
-  const tiles = tilesFor(profile, t);
+  const rawTiles = tilesFor(profile, t);
+  const tiles = filterActiveTiles(rawTiles);
   return (
-    <div className="grid grid-cols-3 gap-px overflow-hidden rounded border border-line bg-line sm:grid-cols-6">
+    <div className="flex flex-wrap items-center gap-2 overflow-hidden rounded border border-line bg-surface-1 p-1.5">
       {tiles.map((tile) => (
-        <div key={tile.label} className="bg-surface-2 px-2 py-1.5" title={tile.hint}>
-          <div className="text-[9px] font-semibold uppercase tracking-wider text-zinc-500">{tile.label}</div>
-          <div className={`truncate text-xs font-semibold ${tile.value === "—" ? "text-zinc-600" : "text-zinc-200"}`}>
+        <div key={tile.label} className="flex items-center gap-1.5 rounded bg-surface-2 px-2.5 py-1" title={tile.hint}>
+          <span className="text-[10px] font-semibold uppercase tracking-wider text-zinc-400">{tile.label}:</span>
+          <span className={`text-xs font-bold ${tile.value === "—" ? "text-zinc-500" : "text-emerald-400"}`}>
             {tile.value}
-          </div>
+          </span>
         </div>
       ))}
     </div>
