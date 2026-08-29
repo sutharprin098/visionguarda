@@ -2527,6 +2527,11 @@ class PipelineCoordinator:
             })
             return
 
+        if getattr(self, "_is_standby_frame", False):
+            with self._overlay_lock:
+                self._latest_overlay_dets = []
+            return
+
         _now_cloud = time.time()
         if _now_cloud - getattr(self, "_last_cloud_req_ts", 0.0) < 0.04:
             # High-throughput streaming rate limiter (up to 25 FPS)
@@ -3716,8 +3721,6 @@ class PipelineCoordinator:
         accel_mode = cv2.VIDEO_ACCELERATION_ANY if hw_accel else cv2.VIDEO_ACCELERATION_NONE
         params = [
             cv2.CAP_PROP_HW_ACCELERATION, accel_mode,
-            cv2.CAP_PROP_OPEN_TIMEOUT_MSEC, 5000,
-            cv2.CAP_PROP_READ_TIMEOUT_MSEC, 5000,
         ]
 
         # Try only the backends that can actually serve this kind of source.
