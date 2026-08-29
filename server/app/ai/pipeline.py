@@ -3134,13 +3134,21 @@ class PipelineCoordinator:
             # engine, so those switches did nothing at all and vehicles kept
             # being boxed after being turned off.
             # masks is index-parallel with detections and must be narrowed with it.
+            # ── Target Matcher pass: Compare frame crops against enrolled custom target vectors ──
+            if detections:
+                try:
+                    from app.ai.target_matcher import target_matcher
+                    detections = target_matcher.match_detections(frame, detections)
+                except Exception as _tme:
+                    pass
+
             _allowed = PROFILE_CLASSES.get(self.zone_profile)
             if detections:
                 _feat_keep = filter_by_features(detections, self.profile_features)
                 _feat_ids = {id(d) for d in _feat_keep}
                 _keep = [
                     i for i, d in enumerate(detections)
-                    if id(d) in _feat_ids and (not _allowed or d.get("class") in _allowed or d.get("class") == "micro_motion")
+                    if id(d) in _feat_ids and (not _allowed or d.get("class") in _allowed or d.get("custom_match") or d.get("class") == "micro_motion")
                 ]
                 if len(_keep) != len(detections):
                     if len(masks) == len(detections):

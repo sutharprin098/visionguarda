@@ -696,6 +696,54 @@ def set_confidence(payload: ConfidencePayload):
     return {"success": True, "confidence": applied}
 
 
+# --- Custom Image Upload Target Matcher APIs ---
+from app.ai.target_matcher import target_matcher
+
+@app.post("/api/target/upload")
+async def upload_target_image(
+    file: UploadFile = File(...),
+    name: str = "Custom Target",
+    threshold: float = 0.70
+):
+    try:
+        contents = await file.read()
+        nparr = np.frombuffer(contents, np.uint8)
+        img_bgr = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+        if img_bgr is None:
+            raise HTTPException(status_code=400, detail="Invalid image file uploaded.")
+
+        target_dir = str(UPLOADS_DIR / "targets")
+        item = target_matcher.add_target(
+            name=name,
+            img_bgr=img_bgr,
+            save_dir=target_dir,
+            threshold=threshold
+        )
+        if item is None:
+            raise HTTPException(status_code=500, detail="Failed to process and enroll target embedding.")
+
+        return {
+            "success": True,
+            "target_id": item.target_id,
+            "name": item.name,
+            "threshold": item.threshold,
+            "created_at": item.created_at
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/target/list")
+def list_target_images():
+    return {"targets": target_matcher.list_targets()}
+
+@app.delete("/api/target/{target_id}")
+def delete_target_image(target_id: str):
+    success = target_matcher.remove_target(target_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="Target ID not found.")
+    return {"success": True, "target_id": target_id}
+
+
 class ZeroDCEPayload(BaseModel):
     enabled: Optional[bool] = None
     auto_mode: Optional[bool] = None
