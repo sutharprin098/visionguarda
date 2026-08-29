@@ -2197,14 +2197,8 @@ class PipelineCoordinator:
                     "cap_time":   t_cap,
                     "cap_lat":    cap_lat,
                     "frame":      frame,
-                    # Standby frames (demo video / reconnecting screen) must NOT
-                    # reach the AI stage: running YOLO on test_cctv_motion.mp4
-                    # produces genuine car/bus detections that appear as
-                    # "CAR-DEMO" / "BUS-DEMO" bounding boxes in the UI even
-                    # when no real camera is connected.
                     "is_standby": getattr(self, "_is_standby_frame", False),
                 })
-                self._is_standby_frame = False   # reset for the next iteration
                 self._heartbeat["cap"] = time.time()
 
                 # Hold a FILE source to its own frame rate (see the pacing note
