@@ -2398,8 +2398,9 @@ class PipelineCoordinator:
                             latest_dets = list(getattr(self, "_latest_overlay_dets", []))
                             latest_ts   = getattr(self, "_latest_overlay_ts", 0.0)
 
-                        if latest_dets and (time.time() - latest_ts < 0.5):
-                            _draw_normalized_overlay_boxes(mjpeg_f, latest_dets)
+                        # Disabling MJPEG frame burn-in: React DetectionOverlay handles single clean overlay rendering
+                        # if latest_dets and (time.time() - latest_ts < 0.5):
+                        #     _draw_normalized_overlay_boxes(mjpeg_f, latest_dets)
 
                         q = max(60, min(90, self.jpeg_quality))
                         ok, jpg = cv2.imencode('.jpg', mjpeg_f, [cv2.IMWRITE_JPEG_QUALITY, q])
