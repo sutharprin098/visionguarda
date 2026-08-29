@@ -159,6 +159,17 @@ function AboutTab() {
         <div className="flex justify-between"><span className="text-ink-3">Inference Backend</span><span>YOLOX + OpenCV + Zero-DCE Night Vision</span></div>
         <div className="flex justify-between"><span className="text-ink-3">Stream Sync</span><span>Zero-Lag MJPEG Burn-In & Ghost Eviction</span></div>
         <div className="flex justify-between"><span className="text-ink-3">Cloud Repository</span><span className="font-mono text-xs text-ink-1">sutharprin098/visionguarda</span></div>
+        <div className="pt-2 border-t border-line/60 flex items-center justify-between">
+          <span className="text-ink-3">Technology Briefing &amp; Architecture Site</span>
+          <a
+            href="https://camai-enterprise-overview.vercel.app"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-500/20 text-blue-400 border border-blue-500/30 text-xs font-semibold hover:bg-blue-500/30 transition-all"
+          >
+            <span>📄 View Overview Site ↗</span>
+          </a>
+        </div>
       </div>
     </div>
   );
