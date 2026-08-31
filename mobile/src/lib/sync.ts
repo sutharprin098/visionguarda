@@ -57,6 +57,26 @@ export class DeactivatedError extends Error {
   constructor() { super("device deactivated by admin"); }
 }
 
+export function normalizeBundle(data: any): SyncBundle {
+  if (!data || typeof data !== "object") return DEFAULT_OFFLINE_BUNDLE;
+  return {
+    ...DEFAULT_OFFLINE_BUNDLE,
+    ...data,
+    permissions: Array.isArray(data.permissions) ? data.permissions : DEFAULT_OFFLINE_BUNDLE.permissions,
+    cameras: Array.isArray(data.cameras) ? data.cameras : [],
+    settings: Array.isArray(data.settings) ? data.settings : [],
+    notifications: Array.isArray(data.notifications) ? data.notifications : [],
+    ai_model_assignments: Array.isArray(data.ai_model_assignments) ? data.ai_model_assignments : [],
+    analytics_drawings: Array.isArray(data.analytics_drawings) ? data.analytics_drawings : [],
+    rule_engine_rules: Array.isArray(data.rule_engine_rules) ? data.rule_engine_rules : [],
+    custom_ai_modes: Array.isArray(data.custom_ai_modes) ? data.custom_ai_modes : [],
+    ai_model_packages: Array.isArray(data.ai_model_packages) ? data.ai_model_packages : [],
+    zone_profile_configs: Array.isArray(data.zone_profile_configs) ? data.zone_profile_configs : [],
+    floor_plans: Array.isArray(data.floor_plans) ? data.floor_plans : [],
+    floor_plan_cameras: Array.isArray(data.floor_plan_cameras) ? data.floor_plan_cameras : [],
+  };
+}
+
 export async function fetchBundle(): Promise<SyncBundle> {
   const sb = await getSupabase();
   const stored = await window.camai.getStoredSession();
@@ -70,10 +90,11 @@ export async function fetchBundle(): Promise<SyncBundle> {
     throw new Error("sync failed");
   }
   if (!data) throw new Error("sync failed");
+  const normalized = normalizeBundle(data);
   // Snapshot for the next launch. Fire-and-forget: the UI already has the data
   // and must not wait on a disk write to render it.
-  void window.camai.bundleCache.set(data);
-  return data;
+  void window.camai.bundleCache.set(normalized);
+  return normalized;
 }
 
 /**
@@ -95,8 +116,8 @@ export async function loadCachedBundle(): Promise<SyncBundle | null> {
     const cached = await window.camai.bundleCache.get();
     // Shape check, not a version check: a bundle written by an older build is
     // still useful, but half a bundle would crash the workspace on mount.
-    if (cached && typeof cached === "object" && Array.isArray((cached as SyncBundle).cameras)) {
-      return cached as SyncBundle;
+    if (cached && typeof cached === "object") {
+      return normalizeBundle(cached);
     }
     return DEFAULT_OFFLINE_BUNDLE;
   } catch {

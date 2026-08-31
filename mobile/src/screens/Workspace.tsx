@@ -88,9 +88,9 @@ export default function Workspace({
   const { unacked: unackedAlerts, alerts } = useAlertState();
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
 
-  const prevAlertCountRef = useRef(alerts.length);
+  const prevAlertCountRef = useRef(alerts?.length ?? 0);
   useEffect(() => {
-    if (alerts.length > prevAlertCountRef.current) {
+    if (alerts && alerts.length > prevAlertCountRef.current) {
       const latest = alerts[0];
       if (latest) {
         import("../lib/notifications").then(({ sendDesktopSystemNotification }) => {
@@ -102,7 +102,7 @@ export default function Workspace({
         });
       }
     }
-    prevAlertCountRef.current = alerts.length;
+    prevAlertCountRef.current = alerts?.length ?? 0;
   }, [alerts]);
 
   const [syncError, setSyncError] = useState(false);
@@ -113,7 +113,7 @@ export default function Workspace({
   const [logs, setLogs] = useState<string[]>([]);
   const [consecutiveMisses, setConsecutiveMisses] = useState(0);
 
-  const activeProfile = bundle?.settings.find((s) => s.scope === "org" && s.key === "ai.profile")?.value || "Traffic";
+  const activeProfile = bundle?.settings?.find((s) => s.scope === "org" && s.key === "ai.profile")?.value || "Traffic";
 
   useEffect(() => {
     let cancelled = false;
@@ -147,7 +147,7 @@ export default function Workspace({
             engine_status: prev?.engine_status || "ready",
             engine_error: null,
             model_loaded: true,
-            active_cameras: prev?.active_cameras || bundle.cameras.length,
+            active_cameras: prev?.active_cameras || (bundle?.cameras?.length ?? 0),
           }));
           setConsecutiveMisses(0);
         }
@@ -336,12 +336,12 @@ export default function Workspace({
   }
 
   const aiSettings = Object.fromEntries(
-    bundle.settings.filter((s) => s.scope === "org").map((s) => [s.key, s.value]),
+    (bundle.settings ?? []).filter((s) => s.scope === "org").map((s) => [s.key, s.value]),
   );
 
   const navItems = ([
-    { id: "cameras", label: `Cameras (${bundle.cameras.length})`, icon: Video },
-    { id: "alerts", label: `Alerts (${bundle.notifications.length})`, icon: Bell },
+    { id: "cameras", label: `Cameras (${bundle.cameras?.length ?? 0})`, icon: Video },
+    { id: "alerts", label: `Alerts (${bundle.notifications?.length ?? 0})`, icon: Bell },
   ] as const).filter((item) => allowedTabs.includes(item.id));
 
   return (
@@ -991,7 +991,7 @@ function CamerasView({
   const isCloudMode = orgInferenceMode === "cloud" || healthInfo?.mode === "cloud" || (healthInfo as any)?.processing_mode === "cloud";
   const isEngineOffline = healthInfo !== null && !isCloudMode && (!healthInfo.online || !healthInfo.ready);
 
-  if (!cameras.length) {
+  if (!Array.isArray(cameras) || !cameras.length) {
     return (
       <div className="space-y-4 w-full">
         {isEngineOffline && (
@@ -1039,7 +1039,7 @@ function CamerasView({
         <div className="flex items-center gap-2">
           <Video size={16} className="text-accent" />
           <span className="text-sm font-semibold text-zinc-100">
-            {cameras.length === 1 ? `Live Camera: ${cameras[0].name}` : `Active Cameras (${cameras.length})`}
+            {cameras.length === 1 ? `Live Camera: ${cameras[0]?.name || "Camera"}` : `Active Cameras (${cameras.length})`}
           </span>
           {isCloudMode && (
             <span className="ml-2 rounded-full bg-blue-500/20 px-2.5 py-0.5 text-[10px] font-bold text-blue-400 border border-blue-500/30">

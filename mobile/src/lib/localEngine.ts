@@ -507,7 +507,7 @@ export function buildHealthReport(cameraIds: string[], status: EngineStatus): Ca
  * Safe to call on a timer — no-ops cheaply if the engine isn't reachable.
  */
 export async function reportCameraHealth(cameraIds: string[]): Promise<void> {
-  if (!cameraIds.length) return;
+  if (!Array.isArray(cameraIds) || !cameraIds.length) return;
   let status: EngineStatus;
   try {
     const res = await fetch(`${ENGINE_BASE}/api/status`, { signal: AbortSignal.timeout(3000) });
@@ -550,7 +550,8 @@ let telegramSentIds = new Set<string>();
 
 // Camera-id → camera name map, populated from the bundle on each sync call.
 let cameraNames = new Map<string, string>();
-export function updateCameraNames(cameras: { id: string; name: string }[]) {
+export function updateCameraNames(cameras?: { id: string; name: string }[]) {
+  if (!Array.isArray(cameras)) return;
   cameraNames = new Map(cameras.map((c) => [c.id, c.name]));
 }
 
