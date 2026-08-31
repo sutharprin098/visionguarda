@@ -87,6 +87,65 @@ export default function Workspace({
 
   const { unacked: unackedAlerts, alerts } = useAlertState();
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+  const [showExitToast, setShowExitToast] = useState(false);
+  const lastBackPressRef = useRef(0);
+
+  // Prevent app exit on Android Back Button press
+  useEffect(() => {
+    let backListener: any = null;
+
+    const setupBackButton = async () => {
+      try {
+        const { App: CapApp } = await import("@capacitor/app");
+        backListener = await CapApp.addListener("backButton", () => {
+          // 1. If Fullscreen Viewer is open, close it
+          if (fullscreenCamId) {
+            setFullscreenCamId(null);
+            return;
+          }
+
+          // 2. If Add Camera Modal is open, close it
+          if (isAddModalOpen) {
+            setIsAddModalOpen(false);
+            return;
+          }
+
+          // 3. If Settings Modal is open, close it
+          if (isSettingsOpen) {
+            setIsSettingsOpen(false);
+            return;
+          }
+
+          // 4. If in Alerts tab, switch back to Cameras tab
+          if (tab !== "cameras") {
+            setTab("cameras");
+            return;
+          }
+
+          // 5. On root Cameras view: Require double press to exit
+          const now = Date.now();
+          if (now - lastBackPressRef.current < 2000) {
+            CapApp.exitApp();
+          } else {
+            lastBackPressRef.current = now;
+            setShowExitToast(true);
+            setTimeout(() => setShowExitToast(false), 2000);
+          }
+        });
+      } catch (e) {
+        console.warn("Capacitor App backButton listener:", e);
+      }
+    };
+
+    void setupBackButton();
+
+    return () => {
+      if (backListener && typeof backListener.remove === "function") {
+        backListener.remove();
+      }
+    };
+  }, [fullscreenCamId, isAddModalOpen, isSettingsOpen, tab]);
 
   const prevAlertCountRef = useRef(alerts?.length ?? 0);
   useEffect(() => {
@@ -506,6 +565,8 @@ export default function Workspace({
             onFullscreen={setFullscreenCamId}
             paused={fullscreenCamId !== null}
             orgInferenceMode={orgInferenceMode}
+            isAddModalOpen={isAddModalOpen}
+            setIsAddModalOpen={setIsAddModalOpen}
           />
         </div>
         {tab === "alerts" && (
@@ -566,6 +627,14 @@ export default function Workspace({
         onClose={() => setIsSettingsOpen(false)}
         onSignOut={deactivate}
       />
+
+      {/* Double Tap Back Button Exit Toast Notification */}
+      {showExitToast && (
+        <div className="fixed bottom-16 left-1/2 -translate-x-1/2 z-[250] flex items-center gap-2.5 rounded-2xl border border-sky-300/40 bg-slate-900/95 px-5 py-3 text-xs font-extrabold text-sky-200 shadow-2xl backdrop-blur-xl animate-in fade-in slide-in-from-bottom-4">
+          <span className="h-2 w-2 rounded-full bg-cyan-400 animate-ping" />
+          <span>Press back again to exit CamAI</span>
+        </div>
+      )}
     </div>
   );
 }
@@ -969,6 +1038,8 @@ function CamerasView({
   onFullscreen,
   paused,
   orgInferenceMode,
+  isAddModalOpen,
+  setIsAddModalOpen,
 }: {
   cameras: any[];
   orgName: string | null;
@@ -981,9 +1052,9 @@ function CamerasView({
   /** The fullscreen viewer is covering the grid — see CameraTile. */
   paused: boolean;
   orgInferenceMode?: string;
+  isAddModalOpen: boolean;
+  setIsAddModalOpen: (open: boolean) => void;
 }) {
-  const [isAddModalOpen, setIsAddModalOpen] = useState(false);
-
   const handleCameraAdded = () => {
     window.location.reload();
   };
