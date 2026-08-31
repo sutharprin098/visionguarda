@@ -365,7 +365,7 @@ export default function Workspace({
       )}
 
       {/* MOBILE TOP BAR (visible only on small screens < md) */}
-      <header className="flex md:hidden items-center justify-between border-b border-line bg-surface-1/95 px-4 py-3 shrink-0 backdrop-blur-md">
+      <header className="flex md:hidden items-center justify-between border-b border-line bg-surface-1/95 px-4 pt-8 pb-3.5 shrink-0 backdrop-blur-md w-full max-w-full">
         <div className="flex items-center gap-2.5 min-w-0">
           <img src="./favicon.svg" alt="CamAI" className="h-7 w-7 rounded-md shrink-0" />
           <div className="min-w-0 flex-1">
@@ -493,7 +493,7 @@ export default function Workspace({
       </aside>
 
       {/* MAIN CONTENT AREA */}
-      <main className="flex-1 overflow-y-auto p-4 md:p-6 pb-24 md:pb-6">
+      <main className="flex-1 overflow-y-auto overflow-x-hidden p-3 sm:p-4 md:p-6 pb-28 md:pb-6 w-full max-w-full">
         <div style={{ display: tab === "cameras" ? "block" : "none" }}>
           <CamerasView
             cameras={bundle.cameras}
@@ -514,7 +514,7 @@ export default function Workspace({
       </main>
 
       {/* MOBILE BOTTOM NAVIGATION BAR (fixed at bottom for phones < md) */}
-      <div className="flex md:hidden fixed bottom-0 inset-x-0 z-40 bg-zinc-950/95 backdrop-blur-xl border-t border-zinc-800/90 py-1.5 px-2 justify-around items-center shadow-2xl">
+      <div className="flex md:hidden fixed bottom-0 inset-x-0 z-40 bg-zinc-950/95 backdrop-blur-xl border-t border-zinc-800/90 py-2 px-2 pb-[max(0.75rem,env(safe-area-inset-bottom))] justify-around items-center shadow-2xl">
         <button
           onClick={() => setTab("cameras")}
           className={clsx(
@@ -1035,39 +1035,39 @@ function CamerasView({
         <EngineDiagnosticPanel healthInfo={healthInfo} procStatus={procStatus} logs={logs} isPackaged={isPackaged} />
       )}
       
-      <div className="flex items-center justify-between rounded-lg border border-line bg-surface-1 px-4 py-2.5">
-        <div className="flex items-center gap-2">
-          <Video size={16} className="text-accent" />
-          <span className="text-sm font-semibold text-zinc-100">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 rounded-lg border border-line bg-surface-1 px-3.5 py-2.5 w-full max-w-full overflow-hidden">
+        <div className="flex items-center gap-2 flex-wrap">
+          <Video size={16} className="text-accent shrink-0" />
+          <span className="text-xs sm:text-sm font-semibold text-zinc-100 truncate">
             {cameras.length === 1 ? `Live Camera: ${cameras[0]?.name || "Camera"}` : `Active Cameras (${cameras.length})`}
           </span>
           {isCloudMode && (
-            <span className="ml-2 rounded-full bg-blue-500/20 px-2.5 py-0.5 text-[10px] font-bold text-blue-400 border border-blue-500/30">
-              ☁️ Cloud Processing Active
+            <span className="rounded-full bg-blue-500/20 px-2 py-0.5 text-[9px] sm:text-[10px] font-bold text-blue-400 border border-blue-500/30 shrink-0">
+              ☁️ Cloud Active
             </span>
           )}
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 shrink-0 flex-wrap sm:flex-nowrap">
           <button
             onClick={() => setIsAddModalOpen(true)}
-            className="inline-flex items-center gap-1.5 rounded bg-accent px-3 py-1.5 text-xs font-semibold text-white shadow hover:bg-accent/80 transition"
+            className="inline-flex items-center gap-1.5 rounded bg-accent px-2.5 py-1.5 text-xs font-semibold text-white shadow hover:bg-accent/80 transition"
             title="Add a new Wi-Fi or RTSP IP camera"
           >
-            <Plus size={14} /> Add Camera
+            <Plus size={14} /> <span>Add Camera</span>
           </button>
           <button
             onClick={() => window.location.reload()}
-            className="inline-flex items-center gap-1.5 rounded bg-surface-2 border border-line px-3 py-1.5 text-xs font-semibold text-zinc-200 shadow hover:bg-surface-3 transition"
+            className="inline-flex items-center gap-1.5 rounded bg-surface-2 border border-line px-2.5 py-1.5 text-xs font-semibold text-zinc-200 shadow hover:bg-surface-3 transition"
             title="Sync & Refresh workspace configuration from database"
           >
-            <RotateCw size={13} /> Refresh Workspace
+            <RotateCw size={13} /> <span className="hidden sm:inline">Refresh</span>
           </button>
           <button
             onClick={() => onFullscreen(cameras[0].id)}
-            className="inline-flex items-center gap-2 rounded bg-surface-2 border border-line px-3 py-1.5 text-xs font-semibold text-zinc-200 shadow hover:bg-surface-3 transition"
+            className="inline-flex items-center gap-1.5 rounded bg-surface-2 border border-line px-2.5 py-1.5 text-xs font-semibold text-zinc-200 shadow hover:bg-surface-3 transition"
             title="Open Full Screen Monitor View (F11 / Double-Click)"
           >
-            <Maximize2 size={14} /> Full Screen
+            <Maximize2 size={14} /> <span className="hidden sm:inline">Full Screen</span>
           </button>
         </div>
       </div>

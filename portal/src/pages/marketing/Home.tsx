@@ -17,15 +17,15 @@ export default function Home() {
   const scaleX = useSpring(scrollYProgress, { stiffness: 120, damping: 30, restDelta: 0.001 });
 
   return (
-    <div className="ap-page min-h-screen overflow-x-hidden selection:bg-[var(--ap-accent-soft)]">
-      {/* Top Scroll Progress Bar */}
+    <div className="min-h-screen bg-sky-50/50 text-slate-900 overflow-x-hidden selection:bg-sky-500/30">
+      {/* Glowing Light Top Scroll Progress Bar */}
       <motion.div
         style={{ scaleX }}
-        className="fixed top-0 left-0 right-0 h-[3px] bg-[var(--ap-accent)] z-[60] origin-left shadow-sm"
+        className="fixed top-0 left-0 right-0 h-[3px] bg-gradient-to-r from-sky-400 via-blue-500 to-indigo-600 z-[100] origin-left shadow-[0_0_15px_rgba(14,165,233,0.6)]"
       />
 
-      {/* Main Content Sections */}
-      <main className="relative">
+      {/* Main Content Sections with Ultra-Smooth Light Cloud Transitions */}
+      <main className="relative z-10 bg-sky-50/50">
         <HeroSection />
         <MobileAppShowcaseSection />
         <RealtimeAlertSection />

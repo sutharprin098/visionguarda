@@ -50,7 +50,6 @@ export default function LiveProductDemo() {
   const [gpuUsage, setGpuUsage] = useState(41.8);
   const [confidence, setConfidence] = useState(98.4);
   const [activeTrackers, setActiveTrackers] = useState(14);
-  const [historyChart, setHistoryChart] = useState<number[]>([42, 48, 52, 59, 58, 60, 59, 60, 59.8]);
 
   const activeStream = STREAMS[activeIdx];
 
@@ -67,24 +66,23 @@ export default function LiveProductDemo() {
       setGpuUsage(newGpu);
       setConfidence(newConf);
       setActiveTrackers(newTrackers);
-      setHistoryChart((prev) => [...prev.slice(1), newFps]);
     }, 1000);
     return () => clearInterval(interval);
   }, []);
 
   return (
-    <div className="ap-card relative overflow-hidden p-4 sm:p-6" style={{ boxShadow: "var(--ap-shadow-lg)" }}>
+    <div className="relative overflow-hidden rounded-3xl border border-sky-200/80 bg-white/80 p-4 sm:p-6 backdrop-blur-2xl shadow-2xl shadow-sky-900/10">
       {/* Header controls & Stream Selector */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-[var(--ap-border)] pb-4">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-sky-100 pb-4">
         <div className="flex items-center gap-3">
-          <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-[var(--ap-dark)] text-[var(--ap-on-dark)] shadow-sm">
+          <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-sky-100 text-sky-600 border border-sky-200 shadow-xs">
             <Radio size={18} className="animate-pulse" />
           </span>
           <div>
-            <h2 className="ap-pixel-bold text-[12px] sm:text-[13px] text-[var(--ap-ink)]">
+            <h2 className="font-mono font-extrabold text-[13px] sm:text-[14px] text-slate-900">
               {activeStream.label}
             </h2>
-            <p className="ap-pixel mt-0.5 text-[9px] text-[var(--ap-ink-2)]">
+            <p className="font-mono mt-0.5 text-[9.5px] text-sky-600 font-bold">
               {activeStream.sub}
             </p>
           </div>
@@ -96,10 +94,10 @@ export default function LiveProductDemo() {
             <button
               key={st.id}
               onClick={() => setActiveIdx(idx)}
-              className={`ap-pixel rounded-lg px-3 py-2 text-[9px] uppercase transition-all text-center ${
+              className={`font-mono rounded-xl px-3.5 py-2 text-[10px] uppercase font-bold transition-all text-center ${
                 activeIdx === idx
-                  ? "bg-[var(--ap-dark)] text-[var(--ap-on-dark)] font-bold shadow-sm"
-                  : "bg-[var(--ap-surface-2)] text-[var(--ap-ink-2)] hover:bg-[var(--ap-border)]"
+                  ? "bg-gradient-to-r from-sky-500 via-blue-600 to-indigo-600 text-white shadow-md shadow-sky-500/25 scale-105"
+                  : "bg-slate-100 text-slate-700 border border-slate-200 hover:bg-slate-200"
               }`}
             >
               {st.label}
@@ -109,36 +107,36 @@ export default function LiveProductDemo() {
       </div>
 
       {/* Connected Multi-Device Cluster Pills */}
-      <div className="mt-4 grid grid-cols-2 sm:grid-cols-4 gap-2 border-b border-[var(--ap-border)] pb-4">
-        <div className="flex items-center gap-2 rounded-lg border border-[var(--ap-border)] bg-[var(--ap-surface-2)] p-2">
-          <Monitor size={14} className="text-[var(--ap-accent)]" />
+      <div className="mt-4 grid grid-cols-2 sm:grid-cols-4 gap-2 border-b border-sky-100 pb-4">
+        <div className="flex items-center gap-2 rounded-xl border border-sky-100 bg-sky-50/60 p-2.5">
+          <Monitor size={16} className="text-sky-600" />
           <div>
-            <p className="ap-pixel text-[8.5px] font-bold text-[var(--ap-ink)]">DESKTOP</p>
-            <p className="ap-pixel text-[7.5px] text-emerald-600 dark:text-emerald-400">60 FPS CUDA</p>
+            <p className="font-mono text-[9.5px] font-bold text-slate-900">DESKTOP</p>
+            <p className="font-mono text-[8px] text-emerald-600 font-bold">60 FPS CUDA</p>
           </div>
         </div>
 
-        <div className="flex items-center gap-2 rounded-lg border border-[var(--ap-border)] bg-[var(--ap-surface-2)] p-2">
-          <Laptop size={14} className="text-[var(--ap-accent)]" />
+        <div className="flex items-center gap-2 rounded-xl border border-sky-100 bg-sky-50/60 p-2.5">
+          <Laptop size={16} className="text-sky-600" />
           <div>
-            <p className="ap-pixel text-[8.5px] font-bold text-[var(--ap-ink)]">LAPTOP</p>
-            <p className="ap-pixel text-[7.5px] text-emerald-600 dark:text-emerald-400">WEBRTC SYNC</p>
+            <p className="font-mono text-[9.5px] font-bold text-slate-900">LAPTOP</p>
+            <p className="font-mono text-[8px] text-emerald-600 font-bold">WEBRTC SYNC</p>
           </div>
         </div>
 
-        <div className="flex items-center gap-2 rounded-lg border border-[var(--ap-border)] bg-[var(--ap-surface-2)] p-2">
-          <Tablet size={14} className="text-[var(--ap-accent)]" />
+        <div className="flex items-center gap-2 rounded-xl border border-sky-100 bg-sky-50/60 p-2.5">
+          <Tablet size={16} className="text-sky-600" />
           <div>
-            <p className="ap-pixel text-[8.5px] font-bold text-[var(--ap-ink)]">TABLET</p>
-            <p className="ap-pixel text-[7.5px] text-emerald-600 dark:text-emerald-400">ZERO LAG</p>
+            <p className="font-mono text-[9.5px] font-bold text-slate-900">TABLET</p>
+            <p className="font-mono text-[8px] text-emerald-600 font-bold">ZERO LAG</p>
           </div>
         </div>
 
-        <div className="flex items-center gap-2 rounded-lg border border-[var(--ap-border)] bg-[var(--ap-surface-2)] p-2">
-          <Smartphone size={14} className="text-[var(--ap-accent)]" />
+        <div className="flex items-center gap-2 rounded-xl border border-sky-100 bg-sky-50/60 p-2.5">
+          <Smartphone size={16} className="text-sky-600" />
           <div>
-            <p className="ap-pixel text-[8.5px] font-bold text-[var(--ap-ink)]">MOBILE</p>
-            <p className="ap-pixel text-[7.5px] text-emerald-600 dark:text-emerald-400">TELEGRAM BOT</p>
+            <p className="font-mono text-[9.5px] font-bold text-slate-900">MOBILE</p>
+            <p className="font-mono text-[8px] text-emerald-600 font-bold">TELEGRAM BOT</p>
           </div>
         </div>
       </div>
@@ -156,36 +154,36 @@ export default function LiveProductDemo() {
 
       {/* Metrics Row */}
       <div className="mt-4 grid grid-cols-2 gap-2.5 sm:gap-3 md:grid-cols-4">
-        <div className="rounded-xl border border-[var(--ap-border)] bg-[var(--ap-surface-2)] p-3">
-          <div className="flex items-center gap-1.5 text-[var(--ap-accent)]">
-            <Gauge size={13} />
-            <span className="ap-pixel text-[8px] tracking-[0.08em] text-[var(--ap-ink-2)]">INFERENCE FPS</span>
+        <div className="rounded-xl border border-sky-100 bg-white p-3 shadow-xs">
+          <div className="flex items-center gap-1.5 text-sky-600">
+            <Gauge size={14} />
+            <span className="font-mono text-[9px] font-bold tracking-wider text-slate-500">INFERENCE FPS</span>
           </div>
-          <div className="ap-pixel-bold mt-1 text-[15px] text-[var(--ap-ink)]">{fps} HZ</div>
+          <div className="font-mono font-extrabold mt-1 text-[16px] text-slate-900">{fps} HZ</div>
         </div>
 
-        <div className="rounded-xl border border-[var(--ap-border)] bg-[var(--ap-surface-2)] p-3">
-          <div className="flex items-center gap-1.5 text-[var(--ap-accent)]">
-            <Cpu size={13} />
-            <span className="ap-pixel text-[8px] tracking-[0.08em] text-[var(--ap-ink-2)]">LATENCY</span>
+        <div className="rounded-xl border border-sky-100 bg-white p-3 shadow-xs">
+          <div className="flex items-center gap-1.5 text-sky-600">
+            <Cpu size={14} />
+            <span className="font-mono text-[9px] font-bold tracking-wider text-slate-500">LATENCY</span>
           </div>
-          <div className="ap-pixel-bold mt-1 text-[15px] text-[var(--ap-ink)]">{latency} MS</div>
+          <div className="font-mono font-extrabold mt-1 text-[16px] text-emerald-600">{latency} MS</div>
         </div>
 
-        <div className="rounded-xl border border-[var(--ap-border)] bg-[var(--ap-surface-2)] p-3">
-          <div className="flex items-center gap-1.5 text-[var(--ap-accent)]">
-            <Activity size={13} />
-            <span className="ap-pixel text-[8px] tracking-[0.08em] text-[var(--ap-ink-2)]">GPU UTIL</span>
+        <div className="rounded-xl border border-sky-100 bg-white p-3 shadow-xs">
+          <div className="flex items-center gap-1.5 text-sky-600">
+            <Activity size={14} />
+            <span className="font-mono text-[9px] font-bold tracking-wider text-slate-500">GPU UTIL</span>
           </div>
-          <div className="ap-pixel-bold mt-1 text-[15px] text-[var(--ap-ink)]">{gpuUsage}%</div>
+          <div className="font-mono font-extrabold mt-1 text-[16px] text-sky-600">{gpuUsage}%</div>
         </div>
 
-        <div className="rounded-xl border border-[var(--ap-border)] bg-[var(--ap-surface-2)] p-3">
-          <div className="flex items-center gap-1.5 text-[var(--ap-accent)]">
-            <Crosshair size={13} />
-            <span className="ap-pixel text-[8px] tracking-[0.08em] text-[var(--ap-ink-2)]">TRACKING IDs</span>
+        <div className="rounded-xl border border-sky-100 bg-white p-3 shadow-xs">
+          <div className="flex items-center gap-1.5 text-sky-600">
+            <Crosshair size={14} />
+            <span className="font-mono text-[9px] font-bold tracking-wider text-slate-500">TRACKING IDs</span>
           </div>
-          <div className="ap-pixel-bold mt-1 text-[15px] text-[var(--ap-ink)]">#{activeTrackers}</div>
+          <div className="font-mono font-extrabold mt-1 text-[16px] text-indigo-600">#{activeTrackers}</div>
         </div>
       </div>
     </div>

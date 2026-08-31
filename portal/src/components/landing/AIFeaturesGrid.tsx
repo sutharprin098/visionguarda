@@ -17,6 +17,7 @@ import {
   ScanLine,
   Eye,
   Zap,
+  Cloud
 } from "lucide-react";
 import { motion } from "framer-motion";
 
@@ -41,20 +42,27 @@ const FEATURES = [
 
 export default function AIFeaturesGrid() {
   return (
-    <section id="capabilities" className="relative py-16 sm:py-24 border-y border-[var(--ap-border)] bg-[var(--ap-surface-2)] overflow-hidden">
+    <section id="capabilities" className="relative py-16 sm:py-24 border-y border-sky-100 bg-gradient-to-b from-white via-sky-50/70 to-blue-50/50 text-slate-900 overflow-hidden">
+      
+      {/* Soft Floating Cloud Silhouette */}
+      <div className="absolute top-8 left-[3%] opacity-20 pointer-events-none animate-pulse">
+        <Cloud size={100} className="text-sky-300" />
+      </div>
+
       <div className="relative mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
         
         {/* Header */}
         <div className="text-center max-w-3xl mx-auto mb-12">
-          <p className="ap-eyebrow justify-center text-[10px] sm:text-[11px] mb-2">
-            16 Neural Detection Models
-          </p>
+          <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-sky-100 border border-sky-300 text-sky-800 text-xs font-bold uppercase tracking-wider mb-3 shadow-xs">
+            <Zap size={13} className="text-sky-600" />
+            <span>16 NEURAL DETECTION MODELS</span>
+          </div>
 
-          <h2 className="ap-pixel-bold text-xl sm:text-4xl text-[var(--ap-ink)]">
+          <h2 className="text-2xl sm:text-4xl font-extrabold tracking-tight text-slate-900">
             Enterprise Camera AI Capabilities
           </h2>
 
-          <p className="ap-pixel mt-4 text-[10px] sm:text-[12px] leading-[1.8] text-[var(--ap-ink-2)]">
+          <p className="mt-3 text-xs sm:text-sm leading-relaxed text-slate-600 font-medium">
             Pre-trained neural networks running concurrently on your local GPU with sub-12ms latency.
           </p>
         </div>
@@ -67,31 +75,31 @@ export default function AIFeaturesGrid() {
               initial={{ opacity: 0, y: 20 }}
               whileInView={{ opacity: 1, y: 0 }}
               viewport={{ once: true }}
-              transition={{ duration: 0.4, delay: (idx % 4) * 0.08 }}
-              className="ap-card p-5 flex flex-col justify-between hover:border-[var(--ap-accent-line)] transition-all"
+              transition={{ duration: 0.4, delay: (idx % 4) * 0.05 }}
+              className="rounded-2xl p-5 border border-sky-200/80 bg-white/90 backdrop-blur-xl flex flex-col justify-between hover:border-sky-400 hover:shadow-xl hover:shadow-sky-900/10 transition-all duration-300 group shadow-xs"
             >
               <div>
                 <div className="flex items-center justify-between mb-3">
-                  <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-[var(--ap-dark)] text-[var(--ap-on-dark)] shadow-sm">
-                    <item.icon size={16} />
+                  <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-sky-100 text-sky-600 border border-sky-200 group-hover:scale-110 transition-transform">
+                    <item.icon size={18} />
                   </span>
-                  <span className="ap-chip text-[8px]">
+                  <span className="font-mono text-[9px] px-2 py-0.5 rounded-full bg-sky-50 text-sky-700 border border-sky-200 font-bold">
                     {item.tag}
                   </span>
                 </div>
 
-                <h3 className="ap-pixel-bold text-[11px] text-[var(--ap-ink)]">
+                <h3 className="font-extrabold text-sm text-slate-900 group-hover:text-sky-600 transition-colors">
                   {item.title}
                 </h3>
 
-                <p className="ap-pixel mt-2 text-[9px] leading-relaxed text-[var(--ap-ink-2)]">
+                <p className="mt-2 text-xs leading-relaxed text-slate-600 font-medium">
                   {item.desc}
                 </p>
               </div>
 
-              <div className="mt-4 pt-3 border-t border-[var(--ap-border)] flex items-center justify-between ap-pixel text-[8px] text-[var(--ap-accent)]">
+              <div className="mt-4 pt-3 border-t border-sky-100 flex items-center justify-between font-mono text-[9px] text-sky-700 font-bold">
                 <span>CUDA 12.2</span>
-                <span>SUB-12MS →</span>
+                <span className="group-hover:translate-x-1 transition-transform text-sky-600">SUB-12MS →</span>
               </div>
             </motion.div>
           ))}

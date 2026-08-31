@@ -6,14 +6,14 @@ type Frame = { t: number; d: Det[] };
 type Data = { w: number; h: number; fps: number; duration: number; frames: Frame[] };
 
 const CLS_COLOR: Record<string, string> = {
-  person: "#3fb96b",
-  bus: "#e0a83e",
-  car: "#7FA6B8",
-  truck: "#e0a83e",
-  motorcycle: "#c98bdb",
-  bicycle: "#7FA6B8",
+  person: "#10b981",
+  bus: "#f59e0b",
+  car: "#0284c7",
+  truck: "#f59e0b",
+  motorcycle: "#8b5cf6",
+  bicycle: "#0284c7",
 };
-const colorFor = (c: string) => CLS_COLOR[c] || "#7FA6B8";
+const colorFor = (c: string) => CLS_COLOR[c] || "#0284c7";
 
 type Props = {
   src?: string;
@@ -29,50 +29,104 @@ export default function VideoDetections({
   caption = "CAMAI · REAL FOOTAGE",
 }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
   const [data, setData] = useState<Data | null>(null);
-  const [dets, setDets] = useState<Det[]>([]);
   const [ready, setReady] = useState(false);
 
+  // Fetch detection telemetry JSON
   useEffect(() => {
     if (!dataSrc) {
       setData(null);
-      setDets([]);
       return;
     }
+    let isMounted = true;
     fetch(dataSrc)
       .then((r) => r.json())
-      .then((d: Data) => setData(d))
+      .then((d: Data) => {
+        if (isMounted) setData(d);
+      })
       .catch(() => {
-        setData(null);
-        setDets([]);
+        if (isMounted) setData(null);
       });
+    return () => {
+      isMounted = false;
+    };
   }, [dataSrc]);
 
+  // Zero-React-Rerender 60 FPS HTML Canvas Drawing Loop
   useEffect(() => {
-    if (!data) {
-      setDets([]);
-      return;
-    }
-    let raf = 0;
-    const tick = () => {
-      const v = videoRef.current;
-      if (v && data.frames.length) {
-        const t = v.currentTime;
-        let lo = 0, hi = data.frames.length - 1, best = 0;
-        while (lo <= hi) {
-          const mid = (lo + hi) >> 1;
-          if (data.frames[mid].t <= t) { best = mid; lo = mid + 1; }
-          else hi = mid - 1;
+    const video = videoRef.current;
+    const canvas = canvasRef.current;
+    if (!video || !canvas) return;
+
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    let rafId = 0;
+
+    const draw = () => {
+      if (video.videoWidth && video.videoHeight) {
+        if (canvas.width !== video.videoWidth || canvas.height !== video.videoHeight) {
+          canvas.width = video.videoWidth;
+          canvas.height = video.videoHeight;
         }
-        setDets(data.frames[best].d);
+
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+        if (data && data.frames && data.frames.length > 0) {
+          const t = video.currentTime;
+          let lo = 0, hi = data.frames.length - 1, best = 0;
+          while (lo <= hi) {
+            const mid = (lo + hi) >> 1;
+            if (data.frames[mid].t <= t) {
+              best = mid;
+              lo = mid + 1;
+            } else {
+              hi = mid - 1;
+            }
+          }
+
+          const currentDets = data.frames[best]?.d || [];
+          const cw = canvas.width;
+          const ch = canvas.height;
+
+          currentDets.forEach((d) => {
+            const col = colorFor(d.cls);
+            const bx = d.x * cw;
+            const by = d.y * ch;
+            const bw = d.w * cw;
+            const bh = d.h * ch;
+
+            // Draw bounding box
+            ctx.strokeStyle = col;
+            ctx.lineWidth = 2.5;
+            ctx.strokeRect(bx, by, bw, bh);
+
+            // Label text box
+            const text = `${d.cls.toUpperCase()} ${d.c.toFixed(2)} #${d.id}${d.spd != null ? ` · ${d.spd} km/h` : ""}`;
+            ctx.font = "bold 11px monospace";
+            const textWidth = ctx.measureText(text).width;
+
+            ctx.fillStyle = col;
+            ctx.fillRect(bx, Math.max(0, by - 18), textWidth + 8, 18);
+
+            ctx.fillStyle = "#ffffff";
+            ctx.fillText(text, bx + 4, Math.max(12, by - 5));
+          });
+        }
       }
-      raf = requestAnimationFrame(tick);
+
+      rafId = requestAnimationFrame(draw);
     };
-    raf = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(raf);
+
+    rafId = requestAnimationFrame(draw);
+
+    return () => {
+      cancelAnimationFrame(rafId);
+    };
   }, [data]);
 
-  // Reliable Autoplay & Instant Frame Load logic
+  // Reliable Autoplay & Load Handler
   useEffect(() => {
     const v = videoRef.current;
     if (!v) return;
@@ -93,7 +147,7 @@ export default function VideoDetections({
         })
         .catch(() => {
           if (isMounted) {
-            retryTimer = setTimeout(safePlay, 200);
+            retryTimer = setTimeout(safePlay, 250);
           }
         });
     };
@@ -101,27 +155,26 @@ export default function VideoDetections({
     v.load();
     safePlay();
 
-    // Re-trigger play on user click or touch if autoplay blocked by browser policy
-    const handleGlobalInteraction = () => {
+    const handleInteraction = () => {
       if (v && v.paused) {
         v.play().then(() => setReady(true)).catch(() => {});
       }
     };
-    window.addEventListener("click", handleGlobalInteraction, { once: true });
-    window.addEventListener("touchstart", handleGlobalInteraction, { once: true });
+    window.addEventListener("click", handleInteraction, { once: true });
+    window.addEventListener("touchstart", handleInteraction, { once: true });
 
     return () => {
       isMounted = false;
       clearTimeout(retryTimer);
-      window.removeEventListener("click", handleGlobalInteraction);
-      window.removeEventListener("touchstart", handleGlobalInteraction);
+      window.removeEventListener("click", handleInteraction);
+      window.removeEventListener("touchstart", handleInteraction);
     };
   }, [src]);
 
   const aspect = data ? `${data.w} / ${data.h}` : "16 / 9";
 
   return (
-    <div className="relative w-full overflow-hidden rounded-2xl border border-[var(--ap-dark)] bg-[#0c1418]" style={{ aspectRatio: aspect }}>
+    <div className="relative w-full overflow-hidden rounded-2xl border border-sky-200 bg-slate-950" style={{ aspectRatio: aspect }}>
       {/* Video Element */}
       <video
         ref={videoRef}
@@ -133,59 +186,32 @@ export default function VideoDetections({
         preload="auto"
         onCanPlay={() => setReady(true)}
         onLoadedData={() => setReady(true)}
-        onLoadedMetadata={() => {
-          if (videoRef.current) {
-            videoRef.current.play().then(() => setReady(true)).catch(() => {});
-          }
-        }}
         className="absolute inset-0 h-full w-full object-cover transition-opacity duration-300"
         style={{ opacity: ready ? 1 : 0.4 }}
       />
 
-      {/* Loading Overlay if frame not ready */}
+      {/* Zero-Rerender Hardware Accelerated Canvas Overlay */}
+      <canvas
+        ref={canvasRef}
+        className="absolute inset-0 h-full w-full pointer-events-none z-10"
+      />
+
+      {/* Loading Overlay */}
       {!ready && (
-        <div className="absolute inset-0 flex flex-col items-center justify-center bg-[#08131a]/80 backdrop-blur-sm z-10 transition-opacity">
+        <div className="absolute inset-0 flex flex-col items-center justify-center bg-slate-950/80 backdrop-blur-xs z-20">
           <Loader2 className="h-6 w-6 animate-spin text-sky-400 mb-2" />
-          <span className="ap-pixel text-[9px] tracking-wider text-sky-300 uppercase">Connecting Camera Stream…</span>
+          <span className="font-mono text-[9px] tracking-wider text-sky-300 uppercase font-bold">Connecting Camera Stream…</span>
         </div>
       )}
 
-      {/* Detection Layer */}
-      <div className="absolute inset-0 pointer-events-none">
-        {dets.map((d) => {
-          const col = colorFor(d.cls);
-          return (
-            <div
-              key={d.id}
-              className="absolute transition-all duration-100 ease-linear"
-              style={{ left: `${d.x * 100}%`, top: `${d.y * 100}%`, width: `${d.w * 100}%`, height: `${d.h * 100}%` }}
-            >
-              <div className="relative h-full w-full rounded-[2px]" style={{ border: `1.5px solid ${col}`, boxShadow: `0 0 10px ${col}55` }}>
-                <span
-                  className="ap-pixel absolute -top-[13px] left-0 whitespace-nowrap rounded-[2px] px-1 py-[1px] text-[7px] leading-none font-bold"
-                  style={{ background: col, color: "#08131a" }}
-                >
-                  {d.cls.toUpperCase()} {d.c.toFixed(2)} #{d.id}{d.spd != null ? ` · ${d.spd} km/h` : ""}
-                </span>
-              </div>
-            </div>
-          );
-        })}
-      </div>
-
-      {/* Scanline + HUD */}
-      <div className="ap-scanline pointer-events-none" />
-      <div className="absolute left-3 top-3 flex items-center gap-2 rounded-lg border border-white/10 bg-black/45 px-2.5 py-1.5 backdrop-blur z-20">
+      {/* Scanline + HUD Overlay */}
+      <div className="absolute left-3 top-3 flex items-center gap-2 rounded-lg border border-white/20 bg-slate-900/80 px-2.5 py-1.5 backdrop-blur-xs z-20 shadow-md">
         <span className="h-2 w-2 animate-ping rounded-full bg-emerald-400" />
-        <span className="ap-pixel text-[8px] text-white sm:text-[9px]">{hudLabel}</span>
-        <span className="text-white/25">/</span>
-        {/* This HUD sits on bg-black/45 over video in BOTH themes, so it needs a
-            fixed light ink — its siblings are text-white. The themed
-            --ap-accent is deliberately dark on the light theme and dropped to
-            3.6:1 here. */}
-        <span className="ap-pixel text-[8px] text-[#9FC4D6] sm:text-[9px]">CAMAI ENGINE</span>
+        <span className="font-mono text-[8px] sm:text-[9px] text-white font-extrabold">{hudLabel}</span>
+        <span className="text-white/30">/</span>
+        <span className="font-mono text-[8px] sm:text-[9px] text-sky-300 font-bold">CAMAI ENGINE</span>
       </div>
-      <div className="absolute bottom-3 right-3 ap-pixel text-[7px] text-white/40 sm:text-[8px] z-20">{caption}</div>
+      <div className="absolute bottom-3 right-3 font-mono text-[7.5px] text-white/50 sm:text-[8.5px] z-20 font-semibold">{caption}</div>
     </div>
   );
 }

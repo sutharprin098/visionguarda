@@ -3,8 +3,11 @@
 @tailwind utilities;
 
 @layer base {
-  html {
-    @apply bg-surface-0 text-zinc-200 antialiased;
+  html, body {
+    @apply bg-surface-0 text-zinc-200 antialiased w-full max-w-full overflow-x-hidden;
+    margin: 0;
+    padding: 0;
+    touch-action: manipulation;
   }
 }
 
