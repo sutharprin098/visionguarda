@@ -2,6 +2,7 @@ import React from "react";
 import { motion, useScroll, useSpring } from "framer-motion";
 import { useSmoothScroll } from "../../lib/useSmoothScroll";
 import HeroSection from "../../components/landing/HeroSection";
+import MobileAppShowcaseSection from "../../components/landing/MobileAppShowcaseSection";
 import RealtimeAlertSection from "../../components/landing/RealtimeAlertSection";
 import CameraNetworkSection from "../../components/landing/CameraNetworkSection";
 import AIFeaturesGrid from "../../components/landing/AIFeaturesGrid";
@@ -26,6 +27,7 @@ export default function Home() {
       {/* Main Content Sections */}
       <main className="relative">
         <HeroSection />
+        <MobileAppShowcaseSection />
         <RealtimeAlertSection />
         <CameraNetworkSection />
         <AIFeaturesGrid />
