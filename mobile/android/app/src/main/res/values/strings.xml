@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">CamAI Mobile Security</string>
+    <string name="title_activity_main">CamAI Mobile Security</string>
+    <string name="package_name">com.camai.mobile</string>
+    <string name="custom_url_scheme">com.camai.mobile</string>
+</resources>

@@ -238,6 +238,7 @@ export default function CamerasPage() {
 
 const SOURCE_TYPES = [
   { value: "rtsp", label: "RTSP" },
+  { value: "phone_camera", label: "Mobile / Phone Camera" },
   { value: "onvif", label: "ONVIF" },
   { value: "usb", label: "USB Camera" },
   { value: "ip", label: "IP Camera" },
@@ -299,7 +300,7 @@ function AddCameraForm({ camera, onDone }: { camera?: CameraRow; onDone: () => v
   const isUsb = form.source_type === "usb";
   // Its address is one opaque string, so it shares nothing with the host/port
   // form below — and nothing is dialled from the cloud to verify it.
-  const isStreamUrl = form.source_type === "stream_url";
+  const isStreamUrl = form.source_type === "stream_url" || form.source_type === "phone_camera";
   // Mirrors _PAGE_HOSTS in server/app/ai/stream_resolver.py. Purely for the
   // explainer below — nothing here changes what is stored, and the engine
   // makes the real decision. Kept in sync by hand; a page host added there and
@@ -431,12 +432,22 @@ function AddCameraForm({ camera, onDone }: { camera?: CameraRow; onDone: () => v
       ) : isStreamUrl ? (
         <>
           <Field
-            label="Stream URL"
-            hint="A YouTube or Twitch live link, an HLS playlist (.m3u8), an MJPEG endpoint, or an RTSP URL that already includes its credentials. Paste it exactly as-is."
+            label={form.source_type === "phone_camera" ? "Mobile Phone Stream URL" : "Stream URL"}
+            hint={
+              form.source_type === "phone_camera"
+                ? "Enter the RTSP/HTTP/MJPEG URL from your mobile camera app (e.g. rtsp://192.168.1.50:8080/h264_pcm.sdp or IP Webcam URL)"
+                : "A YouTube or Twitch live link, an HLS playlist (.m3u8), an MJPEG endpoint, or an RTSP URL that already includes its credentials. Paste it exactly as-is."
+            }
           >
             <textarea
               className="input min-h-[72px] font-mono text-xs"
-              placeholder={isEdit ? "unchanged" : "https://www.youtube.com/watch?v=… or https://example.com/live/playlist.m3u8"}
+              placeholder={
+                isEdit
+                  ? "unchanged"
+                  : form.source_type === "phone_camera"
+                  ? "rtsp://192.168.1.XX:8080/h264_pcm.sdp or http://192.168.1.XX:8080/video"
+                  : "https://www.youtube.com/watch?v=… or https://example.com/live/playlist.m3u8"
+              }
               value={form.url}
               onChange={(e) => { setForm({ ...form, url: e.target.value }); setTestState({ state: "idle" }); }}
             />

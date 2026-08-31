@@ -1,5 +1,5 @@
 import { FormEvent, useState } from "react";
-import { KeyRound, ShieldCheck, Lock } from "lucide-react";
+import { KeyRound, ShieldCheck, Lock, Globe, ExternalLink } from "lucide-react";
 import { activateWithKey } from "../lib/session";
 
 export default function Activation({ onActivated }: { onActivated: () => void }) {
@@ -80,7 +80,22 @@ export default function Activation({ onActivated }: { onActivated: () => void })
             </button>
           </form>
 
-          <div className="mt-6 flex items-center justify-center gap-2 text-xs text-slate-500">
+          {/* Website Link Badge */}
+          <div className="mt-5 pt-4 border-t border-slate-100 flex flex-col items-center gap-2">
+            <span className="text-xs text-slate-500">Need a license key or manage subscription?</span>
+            <a
+              href="https://camai.princesite.in"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1.5 rounded-full border border-sky-200 bg-sky-50 px-3.5 py-1.5 text-xs font-semibold text-sky-700 hover:bg-sky-100 hover:text-sky-800 transition shadow-sm"
+            >
+              <Globe size={13} className="text-sky-600" />
+              <span>Visit Portal: camai.princesite.in</span>
+              <ExternalLink size={11} className="opacity-70" />
+            </a>
+          </div>
+
+          <div className="mt-4 flex items-center justify-center gap-2 text-xs text-slate-500">
             <Lock className="h-3.5 w-3.5 text-slate-400" />
             <span>Bound to DPAPI Hardware Fingerprint</span>
           </div>

@@ -1,0 +1,18 @@
+{
+  "appId": "ai.camai.admin-studio",
+  "productName": "CamAI Admin Studio",
+  "win": {
+    "target": "nsis",
+    "artifactName": "CamAI-Admin-Studio-Setup-${version}.exe",
+    "icon": "build/icon.ico"
+  },
+  "nsis": {
+    "oneClick": false,
+    "allowToChangeInstallationDirectory": true,
+    "installerIcon": "build/icon.ico",
+    "uninstallerIcon": "build/icon.ico",
+    "installerHeaderIcon": "build/icon.ico"
+  },
+  "files": ["dist/**", "dist-electron/**", "build/icon.ico"],
+  "publish": null
+}

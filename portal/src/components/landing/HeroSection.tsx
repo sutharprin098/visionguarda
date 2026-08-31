@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
-import { ArrowRight, Play, CheckCircle2 } from "lucide-react";
+import { ArrowRight, Play, CheckCircle2, Download, Smartphone } from "lucide-react";
 import { motion } from "framer-motion";
 import ParticleField from "./ParticleField";
 import LiveProductDemo from "./LiveProductDemo";
@@ -71,24 +71,40 @@ export default function HeroSection() {
             inference grid — sub-12 ms detection, zero cloud video egress, one activation key.
           </motion.p>
 
-          {/* CTA Buttons */}
+          {/* CTA Buttons - Desktop & Mobile Direct Downloads */}
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.7, delay: 0.3 }}
             className="mt-8 flex flex-col sm:flex-row items-center justify-center gap-3 sm:gap-4"
           >
-            <Link to="/signup" className="ap-btn ap-btn-primary w-full sm:w-auto px-7 py-3.5 justify-center">
-              Start Free Trial <ArrowRight size={14} />
-            </Link>
-
-            <button
-              onClick={scrollToDemo}
-              className="ap-btn ap-btn-ghost w-full sm:w-auto px-7 py-3.5 justify-center flex items-center gap-2"
+            <a
+              href="https://github.com/sutharprin098/visionguarda/releases/download/v1.0.8/CamAI-Desktop-Setup-1.0.8.exe"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="ap-btn ap-btn-primary w-full sm:w-auto px-6 py-3.5 justify-center flex items-center gap-2 bg-gradient-to-r from-sky-500 to-blue-600 hover:from-sky-400 hover:to-blue-500 font-bold"
             >
-              <Play size={13} className="fill-current" />
-              <span>Watch Live Demo</span>
-            </button>
+              <Download size={16} />
+              <span>Desktop Software (v1.0.8 .exe)</span>
+            </a>
+
+            <a
+              href="https://github.com/sutharprin098/visionguarda/releases/download/v1.0.8/CamAI-Mobile-v1.0.0.apk"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="ap-btn ap-btn-ghost w-full sm:w-auto px-6 py-3.5 justify-center flex items-center gap-2 border border-sky-500/40 text-sky-300 hover:bg-sky-500/10 font-bold"
+            >
+              <Smartphone size={16} />
+              <span>Mobile App (v1.0.0 .apk)</span>
+            </a>
+
+            <Link
+              to="/app/downloads"
+              className="ap-btn ap-btn-ghost w-full sm:w-auto px-5 py-3.5 justify-center flex items-center gap-1.5 text-slate-400 hover:text-white"
+            >
+              <span>All Downloads</span>
+              <ArrowRight size={14} />
+            </Link>
           </motion.div>
 
           {/* Hardware Trust Pills */}

@@ -2778,15 +2778,12 @@ class PipelineCoordinator:
                 except Exception as e:
                     print(f"[CustomDetector Err] {e}", flush=True)
 
-                # ── Strict polygon ROI gate: cameras with one or more drawn zones
+                # ── Strict polygon ROI gate: cameras with explicit ROI zones
                 # only detect/track/analyze objects whose centroid or feet position
-                # falls inside the union of those admin-defined polygons.
-                # Detections outside the admin polygon area are strictly dropped here.
-                explicit_roi = [z for z in self.zones if z.get("roi") and z.get("points")]
-                if explicit_roi:
-                    roi_zones = explicit_roi
-                else:
-                    roi_zones = [z for z in self.zones if z.get("points") and len(z.get("points", [])) >= 3 and z.get("zoneType") != "privacy_mask"]
+                # falls inside the union of those admin-defined ROI polygons.
+                # Detections outside the explicit ROI area are dropped here.
+                # Regular alert/intrusion zones do NOT crop full-frame detections.
+                roi_zones = [z for z in self.zones if (z.get("roi") or z.get("zoneType") == "roi") and z.get("points")]
 
                 if roi_zones and detections:
                     kept = []

@@ -247,7 +247,7 @@ def _parse_response(
             cls = str(raw_cls)
 
         conf = float(det.get("confidence") or det.get("score") or 0.0)
-        if conf < 0.38:
+        if conf < 0.25:
             continue
 
         # Extract bounding box
@@ -266,7 +266,7 @@ def _parse_response(
         elif isinstance(bbox_raw, (list, tuple)) and len(bbox_raw) == 4:
             v1, v2, v3, v4 = (float(v) for v in bbox_raw)
             if v3 < v1 or v4 < v2:
-                if v1 + v3 <= 1.05 and v2 + v4 <= 1.05:
+                if v1 + v3 <= 1.5 and v2 + v4 <= 1.5:
                     x1, y1, x2, y2 = v1, v2, v1 + v3, v2 + v4
                 else:
                     x1, y1, x2, y2 = v1 - v3 / 2.0, v2 - v4 / 2.0, v1 + v3 / 2.0, v2 + v4 / 2.0
@@ -278,8 +278,8 @@ def _parse_response(
             x2 = float(det.get("x2", det.get("xmax", 0)))
             y2 = float(det.get("y2", det.get("ymax", 0)))
 
-        # Auto-detect normalised vs pixel coords: if all coords <= 1.0 treat as normalised
-        if x1 <= 1.0 and y1 <= 1.0 and x2 <= 1.0 and y2 <= 1.0 and (x2 > x1 or y2 > y1):
+        # Auto-detect normalised vs pixel coords: if all coords <= 1.5 treat as normalised
+        if max(x1, y1, x2, y2) <= 1.5 and (x2 > x1 or y2 > y1):
             x1 *= frame_w
             x2 *= frame_w
             y1 *= frame_h

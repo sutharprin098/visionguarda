@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
-import { NavLink, Outlet, useNavigate } from "react-router-dom";
+import { NavLink, Outlet, useNavigate, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { LogOut, Menu, Moon, Search, Sun, X, Shield, Activity, ChevronRight } from "lucide-react";
+import { LogOut, Menu, Moon, Search, Sun, X, Shield, Activity, ChevronRight, Smartphone, ExternalLink, CheckCircle2 } from "lucide-react";
 import clsx from "clsx";
 import { useAuth } from "../contexts/AuthContext";
 import { useTheme } from "../contexts/ThemeContext";
@@ -11,11 +11,24 @@ import NotificationsBell from "./NotificationsBell";
 import CommandPalette from "./CommandPalette";
 
 export default function AppShell() {
-  const { profile, org, can, signOut } = useAuth();
+  const { session, profile, org, can, signOut } = useAuth();
   const { theme, toggle } = useTheme();
   const nav = useNavigate();
+  const [searchParams] = useSearchParams();
   const [navOpen, setNavOpen] = useState(false);
   const [logoUrl, setLogoUrl] = useState<string | null>(null);
+
+  // Redirect mobile auth flows away from desktop dashboard shell to dedicated callback handoff
+  useEffect(() => {
+    const isMobileAuthFlow = 
+      searchParams.get("mobile") === "1" || 
+      localStorage.getItem("camai_mobile_auth") === "1";
+
+    if (isMobileAuthFlow) {
+      const hash = window.location.hash || "";
+      nav(`/auth/callback?mobile=1${hash}`, { replace: true });
+    }
+  }, [searchParams, nav]);
 
   const { data: orgSettings } = useQuery({
     queryKey: ["org-settings"],
@@ -229,6 +242,8 @@ export default function AppShell() {
           </div>
         </main>
       </div>
+
+      <CommandPalette />
 
       <CommandPalette />
     </div>

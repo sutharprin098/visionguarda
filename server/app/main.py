@@ -636,6 +636,45 @@ def get_cloud_mode():
 
     return res
 
+
+@app.get("/api/cameras/{camera_id}/telemetry-debug")
+def get_camera_telemetry_debug(camera_id: str):
+    """Diagnostic endpoint exposing heartbeat timestamps, stage error counts,
+    and authoritative telemetry details for a specific camera pipeline."""
+    thread = manager.camera_threads.get(camera_id)
+    if not thread and manager.camera_threads:
+        thread = next((t for t in manager.camera_threads.values() if t.running), list(manager.camera_threads.values())[0])
+    if not thread:
+        return JSONResponse({"status": "error", "message": f"Camera '{camera_id}' not found or inactive"}, status_code=404)
+
+    latest_tel = getattr(thread, "latest_telemetry", {}) or {}
+    heartbeat = getattr(thread, "_heartbeat", {}) or {}
+    stage_errors = getattr(thread, "_stage_errors", {}) or {}
+    roi_zones = [z for z in getattr(thread, "zones", []) if (z.get("roi") or z.get("zoneType") == "roi") and z.get("points")]
+
+    return {
+        "status": "ok",
+        "camera_id": camera_id,
+        "running": thread.running,
+        "inference_mode": getattr(config, "INFERENCE_MODE", "local"),
+        "heartbeat": heartbeat,
+        "stage_errors": stage_errors,
+        "explicit_roi_zones_count": len(roi_zones),
+        "active_zones_total": len(getattr(thread, "zones", [])),
+        "telemetry": {
+            "success": latest_tel.get("success", False),
+            "people_count": latest_tel.get("people", 0),
+            "vehicles_count": latest_tel.get("vehicles", 0),
+            "items_count": latest_tel.get("items", 0),
+            "detections_count": len(latest_tel.get("detections", [])),
+            "detections": latest_tel.get("detections", []),
+            "fps": latest_tel.get("fps", 0),
+            "latency": latest_tel.get("latency", 0),
+        }
+    }
+
+
+
 @app.post("/api/cloud-mode")
 @app.post("/api/runtime/mode")
 async def set_cloud_mode(payload: CloudModePayload):
@@ -1077,14 +1116,14 @@ def get_camera_telemetry(camera_id: str):
 
 # MJPEG Stream
 @app.get("/api/cameras/{camera_id}/stream")
+@app.get("/stream/{camera_id}")
+@app.get("/engine-proxy/stream/{camera_id}")
 async def get_mjpeg_stream(camera_id: str):
     thread = manager.camera_threads.get(camera_id)
+    if not thread and manager.camera_threads:
+        # Fallback to first active running thread if exact ID match is missing
+        thread = next((t for t in manager.camera_threads.values() if t.running), list(manager.camera_threads.values())[0])
     if not thread:
-        # Do NOT auto-create a virtual camera here — doing so would silently spin
-        # up a demo pipeline that streams test_cctv_motion.mp4 and shows
-        # "Virtual Live Stream" / fake AI detections for any unknown camera_id.
-        # A registered camera whose thread has disappeared (engine restart) will
-        # be re-registered by the desktop's next sync tick.
         raise HTTPException(status_code=404, detail="Camera thread not running or inactive")
 
     # A camera with no video must NOT be served an endless empty stream.
@@ -1141,25 +1180,19 @@ async def get_mjpeg_stream(camera_id: str):
             attach()
         try:
             while thread.running:
+                await _wait_for_frame(0.04)
                 jpeg_bytes = getattr(thread, "current_jpeg_bytes", None)
                 if jpeg_bytes is not None and jpeg_bytes is not last_jpeg:
                     last_jpeg = jpeg_bytes
                     last_frame_ts = time.time()
-                    # Cleared before the yield, so a frame produced while this one
-                    # is still being written to the socket leaves the event set and
-                    # the next wait returns immediately instead of missing it.
                     if jpeg_event is not None:
                         jpeg_event.clear()
                     yield (b'--frame\r\n'
                            b'Content-Type: image/jpeg\r\n\r\n' + jpeg_bytes + b'\r\n')
                 else:
-                    # Grace is measured from the last frame actually sent, so a
-                    # healthy camera that merely pauses between frames is never cut
-                    # off — only one that has genuinely stopped (or never started).
                     idle_since = last_frame_ts if last_frame_ts is not None else started
                     if time.time() - idle_since > NO_FRAME_GRACE_S:
                         return
-                    await asyncio.sleep(0.015)
         finally:
             if detach:
                 detach()

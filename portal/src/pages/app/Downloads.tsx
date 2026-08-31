@@ -26,6 +26,24 @@ const REPO_BLOB_BASE = `${REPO_URL}/blob/main/`;
 // actually published.
 const DEFAULT_FALLBACK_RELEASES: GithubRelease[] = [
   {
+    tag_name: "v1.0.8",
+    name: "CamAI Desktop v1.0.8 (Windows Release)",
+    version: "v1.0.8",
+    prerelease: false,
+    published_at: "2026-08-31T21:40:00Z",
+    asset_id: 109,
+    asset_name: "CamAI-Desktop-Setup-1.0.8.exe",
+    size_bytes: 356706747,
+    content_type: "application/octet-stream",
+    download_url: `${REPO_URL}/releases/download/v1.0.8/CamAI-Desktop-Setup-1.0.8.exe`,
+    checksum_sha256: "a0d7cdb1d53c48b8b299df2fad93b8e86d5f605ffb0ce39b4ab2b5bc5ed1f755",
+    release_notes: `
+### 🚀 CamAI Desktop v1.0.8 & Mobile v1.0.0 Unified Release
+- **CamAI Desktop v1.0.8**: Bundled high-speed AI vision engine for Windows x64.
+- **Signed Android APK v1.0.0**: Production release key signed APK with 24/7 background AI notification alerts and 1-Click OTA updates.
+    `,
+  },
+  {
     tag_name: "v1.0.7",
     name: "CamAI Desktop v1.0.7 (Windows Release)",
     version: "v1.0.7",
@@ -585,6 +603,44 @@ export default function DownloadsPage() {
       />
 
       <div className="mx-auto max-w-[1100px] space-y-8 pb-4">
+
+        {/* -------------------------------------------------- CamAI Mobile App APK Hero */}
+        <section className="relative overflow-hidden rounded-3xl border border-sky-500/30 bg-gradient-to-br from-slate-950 via-slate-900 to-indigo-950/80 p-6 sm:p-8 text-white shadow-xl">
+          <div className="pointer-events-none absolute -right-16 -bottom-16 h-64 w-64 rounded-full bg-sky-500/20 blur-3xl" />
+          
+          <div className="flex flex-col gap-6 lg:flex-row lg:items-center lg:justify-between relative z-10">
+            <div className="space-y-3">
+              <div className="flex items-center gap-2">
+                <Badge tone="ok" pulse>Official Mobile Release</Badge>
+                <span className="px-2 py-0.5 rounded bg-sky-500/20 text-sky-300 font-mono text-[10px] font-bold">Android v1.0.0</span>
+              </div>
+              <h2 className="text-2xl font-black tracking-tight sm:text-3xl text-white">
+                CamAI Mobile Security Hub (.apk)
+              </h2>
+              <p className="text-xs sm:text-sm text-slate-300 max-w-2xl leading-relaxed">
+                Edge-First Intelligent CCTV & AI Vision Grid for Android smartphones. Single unified Google authentication, live RTSP stream playback, and real-time alert notifications.
+              </p>
+              <div className="flex flex-wrap items-center gap-4 text-xs text-slate-400 pt-1">
+                <span>📱 Android 7.0+</span>
+                <span>⚡ File Size: 4.8 MB</span>
+                <span>🔒 Single Google SSO Unified Identity</span>
+              </div>
+            </div>
+
+            <div className="flex shrink-0 flex-col items-stretch gap-2.5 sm:min-w-[260px]">
+              <a
+                href="https://github.com/sutharprin098/visionguarda/releases/download/v1.0.8/CamAI-Mobile-v1.0.0.apk"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center justify-center gap-2 py-4 px-6 rounded-2xl bg-gradient-to-r from-sky-500 to-indigo-600 hover:from-sky-400 hover:to-indigo-500 text-white font-extrabold text-sm shadow-lg active:scale-95 transition-all"
+              >
+                <Download size={18} />
+                <span>DOWNLOAD ANDROID APK (v1.0.0)</span>
+              </a>
+              <span className="text-center text-[10px] text-slate-400">Direct Public Link • Instant Installation</span>
+            </div>
+          </div>
+        </section>
 
         {/* -------------------------------------------------- hero: latest release */}
         <section className="relative overflow-hidden rounded-3xl border border-line bg-surface-1 shadow-sm">

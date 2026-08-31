@@ -62,11 +62,15 @@ server/.venv-build/
 server/build/
 kernel.errors.txt
 
-# Large demo videos & test captures — host via CDN/Vercel, not git.
-portal/public/demo.mp4
-portal/public/features-demo.mp4
-portal/public/videos/
+# Large binaries & release installers — upload via GitHub Release, not git source
+*.exe
+*.apk
+*.zip
 *.mp4
-*.mp4.part
-live_stream_*.jpg
 videos/
+overview_site/
+mobile/release/
+mobile/dist/
+mobile/dist-electron/
+
+

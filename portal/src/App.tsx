@@ -5,6 +5,7 @@ import AppShell from "./components/AppShell";
 import MarketingLayout from "./components/MarketingLayout";
 import Home from "./pages/marketing/Home";
 import SignIn from "./pages/SignIn";
+import AuthCallback from "./pages/AuthCallback";
 
 import PermissionGuard from "./components/PermissionGuard";
 
@@ -69,6 +70,8 @@ export default function App() {
           <Route path="/security" element={<SecurityPolicy />} />
         </Route>
         <Route path="/signin" element={<SignIn />} />
+        <Route path="/auth/v1/callback" element={<AuthCallback />} />
+        <Route path="/auth/callback" element={<AuthCallback />} />
         <Route path="/signup" element={<SignUp />} />
         <Route path="/forgot-password" element={<ForgotPassword />} />
         <Route path="/reset-password" element={<ResetPassword />} />
