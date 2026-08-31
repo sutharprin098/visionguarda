@@ -186,5 +186,9 @@ if (typeof window !== "undefined" && !window.camai) {
     },
 
     onPowerEvent: () => () => {},
+    getDownloadStatus: async () => ({ ok: true, status: "complete" }),
+    downloadModel: async () => ({ ok: true }),
+    onDownloadProgress: () => () => {},
   };
 }
+

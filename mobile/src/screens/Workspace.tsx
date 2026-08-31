@@ -236,18 +236,22 @@ export default function Workspace({
       }
 
       try {
-        const statusRes = await (window as any).camai.getDownloadStatus({ modelName: pkg.name });
-        if (statusRes.ok) {
-          if (statusRes.status === "complete") {
-            void syncAiModelToLocalEngine(orgModel);
-          } else if (statusRes.status !== "downloading") {
-            await (window as any).camai.downloadModel({
-              url: pkg.download_url,
-              modelName: pkg.name,
-              expectedChecksum: pkg.checksum,
-              signature: pkg.signature,
-            });
+        if (typeof (window as any).camai?.getDownloadStatus === "function") {
+          const statusRes = await (window as any).camai.getDownloadStatus({ modelName: pkg.name });
+          if (statusRes?.ok) {
+            if (statusRes.status === "complete") {
+              void syncAiModelToLocalEngine(orgModel);
+            } else if (statusRes.status !== "downloading" && typeof (window as any).camai?.downloadModel === "function") {
+              await (window as any).camai.downloadModel({
+                url: pkg.download_url,
+                modelName: pkg.name,
+                expectedChecksum: pkg.checksum,
+                signature: pkg.signature,
+              });
+            }
           }
+        } else {
+          void syncAiModelToLocalEngine(orgModel);
         }
       } catch (err) {
         console.error("[Background Sync] Failed to sync model:", err);
@@ -256,15 +260,18 @@ export default function Workspace({
 
     void checkAndDownload();
 
-    const unsub = (window as any).camai.onDownloadProgress(orgModel, (progress: any) => {
-      if (active && progress.status === "complete") {
-        void syncAiModelToLocalEngine(orgModel);
-      }
-    });
+    let unsub: (() => void) | undefined;
+    if (typeof (window as any).camai?.onDownloadProgress === "function") {
+      unsub = (window as any).camai.onDownloadProgress(orgModel, (progress: any) => {
+        if (active && progress.status === "complete") {
+          void syncAiModelToLocalEngine(orgModel);
+        }
+      });
+    }
 
     return () => {
       active = false;
-      unsub();
+      if (typeof unsub === "function") unsub();
     };
   }, [orgModel, bundle?.ai_model_packages]);
 

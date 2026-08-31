@@ -1,4 +1,4 @@
-import { useEffect, useState, lazy, Suspense } from "react";
+import { useEffect, useState, lazy, Suspense, Component, ReactNode } from "react";
 import { canConfigure } from "./lib/rbac";
 import type { SyncBundle } from "./lib/sync";
 import AlertProvider from "./components/alerts/AlertProvider";
@@ -15,15 +15,6 @@ const loadSession = () => import("./lib/session");
 const loadSync = () => import("./lib/sync");
 const loadLocalEngine = () => import("./lib/localEngine");
 
-// The three screens are ~140KB of source between them and NONE of them can
-// render until the session and bundle have arrived — yet statically imported
-// they had to be downloaded, parsed and evaluated before the splash could show
-// its first frame. Split out, the initial chunk is the splash and little else,
-// and the screens load over the network wait that was happening anyway.
-//
-// Splitting alone would just move the delay to the moment the data lands, so
-// prefetch() below pulls them in immediately after mount — off the critical
-// path, but well before anything needs them.
 const Activation = lazy(() => import("./screens/Activation"));
 const Workspace = lazy(() => import("./screens/Workspace"));
 const AdminStudio = lazy(() => import("./screens/AdminStudio")); // configuration drawings & rule studio
@@ -33,6 +24,36 @@ function prefetchScreens() {
   void import("./screens/AdminStudio");
   void import("./screens/Activation");
 }
+
+class ErrorBoundary extends Component<{ children: ReactNode }, { hasError: boolean; error: string }> {
+  state = { hasError: false, error: "" };
+  static getDerivedStateFromError(error: Error) {
+    return { hasError: true, error: error?.message || "Workspace execution interrupted" };
+  }
+  componentDidCatch(error: Error, errorInfo: any) {
+    console.error("[ErrorBoundary] Caught error:", error, errorInfo);
+  }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="flex h-screen w-screen flex-col items-center justify-center bg-slate-950 px-6 text-center text-white">
+          <div className="rounded-2xl border border-slate-800 bg-slate-900/90 p-6 shadow-2xl backdrop-blur-md max-w-sm w-full">
+            <h2 className="text-base font-bold text-sky-400">CamAI Mobile Node</h2>
+            <p className="mt-2 text-xs text-slate-300">{this.state.error}</p>
+            <button
+              onClick={() => window.location.reload()}
+              className="mt-5 w-full rounded-xl bg-sky-600 py-2.5 text-xs font-semibold text-white shadow hover:bg-sky-500 transition"
+            >
+              Reload Node Workspace
+            </button>
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 
 type Phase = "booting" | "needs-activation" | "ready";
 
@@ -312,66 +333,60 @@ export default function App() {
   }
 
   return (
-    <div className="h-screen w-screen relative overflow-hidden bg-[#0b0d10]">
-      <Suspense
-        fallback={
-          <SplashLoading
-            title="Synchronizing Workspace…"
-            subtitle="Connecting to org realtime channel, loading camera rules & zone profiles."
-          />
-        }
-      >
-      {/* Mounted once, above both screens: Workspace's camera tiles are what
-          actually call useAlertIngest() (that's where live telemetry is), so
-          this has to wrap Workspace for alerts to be generated at all. It
-          renders nothing itself — the Alerts tab inside Workspace is the only
-          place any alert is ever shown — so ingestion runs identically
-          whichever screen is visible. */}
-      <AlertProvider
-        onOpenLiveFeed={(camId) => {
-          setCurrentScreen("workspace");
-          setPendingLiveCam({ id: camId, nonce: Date.now() });
-        }}
-      >
-      {showWorkspace && (
-        <div
-          className="h-full w-full"
-          style={{ display: currentScreen === "workspace" ? "block" : "none" }}
+    <ErrorBoundary>
+      <div className="h-screen w-screen relative overflow-hidden bg-[#0b0d10]">
+        <Suspense
+          fallback={
+            <SplashLoading
+              title="Synchronizing Workspace…"
+              subtitle="Connecting to org realtime channel, loading camera rules & zone profiles."
+            />
+          }
         >
-          <Workspace
-            bundle={bundle}
-            onDeactivated={() => setPhase("needs-activation")}
-            // undefined tells Workspace to render the entry point locked rather
-            // than offering a door that RLS will slam.
-            onOpenAdminStudio={mayConfigure ? () => setCurrentScreen("admin-studio") : undefined}
-            openLiveCam={pendingLiveCam}
-            openAlertsSignal={openAlertsSignal}
-          />
-        </div>
-      )}
-      {showAdmin && (
-        <div
-          className="h-full w-full"
-          style={{ display: currentScreen === "admin-studio" || appType === "admin" ? "block" : "none" }}
+        <AlertProvider
+          onOpenLiveFeed={(camId) => {
+            setCurrentScreen("workspace");
+            setPendingLiveCam({ id: camId, nonce: Date.now() });
+          }}
         >
-          <AdminStudio
-            orgId={bundle?.organization?.id ?? null}
-            onDeactivated={() => {
-              if (appType === "admin") {
-                setPhase("needs-activation");
-              } else {
+        {showWorkspace && (
+          <div
+            className="h-full w-full"
+            style={{ display: currentScreen === "workspace" ? "block" : "none" }}
+          >
+            <Workspace
+              bundle={bundle}
+              onDeactivated={() => setPhase("needs-activation")}
+              onOpenAdminStudio={mayConfigure ? () => setCurrentScreen("admin-studio") : undefined}
+              openLiveCam={pendingLiveCam}
+              openAlertsSignal={openAlertsSignal}
+            />
+          </div>
+        )}
+        {showAdmin && (
+          <div
+            className="h-full w-full"
+            style={{ display: currentScreen === "admin-studio" || appType === "admin" ? "block" : "none" }}
+          >
+            <AdminStudio
+              orgId={bundle?.organization?.id ?? null}
+              onDeactivated={() => {
+                if (appType === "admin") {
+                  setPhase("needs-activation");
+                } else {
+                  setCurrentScreen("workspace");
+                }
+              }}
+              onOpenAlerts={() => {
                 setCurrentScreen("workspace");
-              }
-            }}
-            onOpenAlerts={() => {
-              setCurrentScreen("workspace");
-              setOpenAlertsSignal({ nonce: Date.now() });
-            }}
-          />
-        </div>
-      )}
-      </AlertProvider>
-      </Suspense>
-    </div>
+                setOpenAlertsSignal({ nonce: Date.now() });
+              }}
+            />
+          </div>
+        )}
+        </AlertProvider>
+        </Suspense>
+      </div>
+    </ErrorBoundary>
   );
 }
