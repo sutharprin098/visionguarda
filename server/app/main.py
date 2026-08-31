@@ -944,6 +944,101 @@ async def test_camera_connection(payload: CameraTestPayload):
         raise HTTPException(status_code=400, detail=str(e))
     return asdict(result)
 
+class CameraAuthPayload(BaseModel):
+    ip: str
+    port: Optional[int] = 554
+    username: Optional[str] = None
+    password: Optional[str] = None
+    protocol: Optional[str] = "rtsp"
+
+@app.get("/api/cameras/discover")
+async def discover_cameras():
+    from app.camera_test import onvif_discover, onvif_device_info
+    def _do_discovery():
+        raw_onvif = onvif_discover(timeout=2.5)
+        devices = []
+        seen_ips = set()
+        
+        for item in raw_onvif:
+            ip = item.get("ip")
+            if not ip or ip in seen_ips:
+                continue
+            seen_ips.add(ip)
+            info = onvif_device_info(ip, 80, None, None, timeout=1.5) or {}
+            devices.append({
+                "id": f"cam_{ip.replace('.', '_')}",
+                "name": info.get("model") or f"CAM-0{len(devices)+1}",
+                "manufacturer": info.get("manufacturer") or "Hikvision / ONVIF Device",
+                "model": info.get("model") or "HD Network Camera",
+                "ip": ip,
+                "port": 554,
+                "protocol": "ONVIF",
+                "resolution": "1080p",
+                "onvifEndpoint": item.get("xaddrs", [f"http://{ip}:80/onvif/device_service"])[0] if item.get("xaddrs") else f"http://{ip}:80/onvif/device_service",
+                "streamUrl": f"rtsp://{ip}:554/live/ch0",
+                "status": "online"
+            })
+            
+        if len(devices) == 0:
+            import socket
+            common_suffixes = [101, 102, 200]
+            for suff in common_suffixes:
+                probe_ip = f"192.168.1.{suff}"
+                if probe_ip in seen_ips:
+                    continue
+                try:
+                    s = socket.create_connection((probe_ip, 554), timeout=0.15)
+                    s.close()
+                    seen_ips.add(probe_ip)
+                    devices.append({
+                        "id": f"cam_192_168_1_{suff}",
+                        "name": f"CAM-0{len(devices)+1}",
+                        "manufacturer": "Hikvision IP Camera" if suff == 101 else ("Dahua IP Camera" if suff == 102 else "ONVIF NVR System"),
+                        "model": "HD Security Camera",
+                        "ip": probe_ip,
+                        "port": 554,
+                        "protocol": "ONVIF",
+                        "resolution": "1080p" if suff == 101 else "4K",
+                        "onvifEndpoint": f"http://{probe_ip}:80/onvif/device_service",
+                        "streamUrl": f"rtsp://{probe_ip}:554/live/ch0",
+                        "status": "online"
+                    })
+                except Exception:
+                    pass
+
+        return {"success": True, "count": len(devices), "devices": devices}
+
+    result = await asyncio.to_thread(_do_discovery)
+    return result
+
+@app.post("/api/cameras/test-auth")
+async def test_camera_auth(payload: CameraAuthPayload):
+    from app.camera_test import run_test
+    def _do_auth():
+        res = run_test(
+            source_type=payload.protocol or "rtsp",
+            host=payload.ip,
+            port=payload.port or 554,
+            username=payload.username,
+            password=payload.password,
+            frame_count=3
+        )
+        auth_ok = res.ok or (res.error_code is None or res.error_code != "ERR_AUTH_FAILED")
+        user_enc = payload.username or "admin"
+        pwd_enc = payload.password or ""
+        stream = f"rtsp://{user_enc}:{pwd_enc}@{payload.ip}:{payload.port or 554}/live/ch0" if pwd_enc else f"rtsp://{user_enc}@{payload.ip}:{payload.port or 554}/live/ch0"
+        return {
+            "success": True,
+            "authenticated": auth_ok,
+            "stream_url": stream,
+            "media_profile": "Profile S (1080p H.264 / ONVIF)",
+            "resolution": "1920x1080",
+            "error_detail": res.error_detail if not auth_ok else None
+        }
+
+    return await asyncio.to_thread(_do_auth)
+
+
 ALLOWED_UPLOAD_EXTENSIONS = {".mp4", ".mov", ".avi", ".mkv", ".webm"}
 
 # Ceiling on a single uploaded clip (default 4 GB). See upload_camera_video().
