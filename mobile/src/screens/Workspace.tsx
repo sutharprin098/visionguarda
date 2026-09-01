@@ -85,7 +85,7 @@ export default function Workspace({
     if (openAlertsSignal) setTab("alerts");
   }, [openAlertsSignal]);
 
-  const { unacked: unackedAlerts, alerts } = useAlertState();
+  const { unacked: unackedAlerts, events: alerts } = useAlertState();
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [showExitToast, setShowExitToast] = useState(false);
@@ -154,9 +154,9 @@ export default function Workspace({
       if (latest) {
         import("../lib/notifications").then(({ sendDesktopSystemNotification }) => {
           sendDesktopSystemNotification(
-            `🚨 ${latest.camera_name || "Camera"} Alert`,
-            `AI Detection: ${latest.rule_name || "Security Event"} detected at ${new Date().toLocaleTimeString()}`,
-            latest.rule_name || "intrusion"
+            `🚨 ${latest.cameraName || "Camera"} Alert`,
+            `AI Detection: ${latest.def?.title || "Security Event"} detected at ${new Date(latest.ts).toLocaleTimeString()}`,
+            latest.def?.title || "intrusion"
           );
         });
       }
@@ -343,7 +343,7 @@ export default function Workspace({
   }, [orgConfidence]);
 
   // Permanently Enforce AWS Cloud GPU AI Mode
-  const orgInferenceMode = "cloud";
+  const orgInferenceMode: "cloud" | "local" = "cloud";
   const orgCloudUrl = "http://13.203.71.14:8000";
   useEffect(() => {
     void syncAiInferenceModeToLocalEngine("cloud", orgCloudUrl);
@@ -489,7 +489,7 @@ export default function Workspace({
         </div>
         <div className="px-3 pb-3 pt-1 border-b border-line">
           <div className="flex items-center justify-between gap-2 bg-surface-2/80 px-3 py-2 rounded-lg border border-line/80 text-xs">
-            {orgInferenceMode === "local" ? (
+            {(orgInferenceMode as string) === "local" ? (
               <div className="flex items-center gap-2 text-accent font-semibold">
                 <Cpu size={14} className="animate-pulse" />
                 <span>Local Hardware</span>

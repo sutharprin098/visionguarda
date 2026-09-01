@@ -217,24 +217,44 @@ export default function MobileAppShowcaseSection() {
                           />
 
                           {/* Real YOLO AI Detection Bounding Boxes Overlay */}
-                          <div className="absolute top-8 left-6 w-24 h-24 border-2 border-emerald-400 bg-emerald-500/15 rounded flex flex-col justify-between p-1 animate-pulse z-10 shadow-lg shadow-emerald-500/20">
-                            <span className="bg-emerald-500 text-slate-950 font-bold text-[8px] px-1 py-0.5 rounded tracking-wider uppercase font-mono">
-                              PERSON 98.4%
-                            </span>
-                            <span className="text-[7px] text-emerald-300 font-mono font-bold bg-slate-950/70 px-1 rounded">ID #104 · INTRUSION</span>
-                          </div>
+                          {activeStream === "/videos/humans.mp4" ? (
+                            <>
+                              <div className="absolute top-6 left-12 w-20 h-28 border-2 border-emerald-400 bg-emerald-500/15 rounded flex flex-col justify-between p-1 animate-pulse z-10 shadow-lg shadow-emerald-500/20">
+                                <span className="bg-emerald-500 text-slate-950 font-bold text-[8px] px-1 py-0.5 rounded tracking-wider uppercase font-mono">
+                                  PERSON 98.4%
+                                </span>
+                                <span className="text-[7px] text-emerald-300 font-mono font-bold bg-slate-950/70 px-1 rounded">ID #104 · RE-ID</span>
+                              </div>
 
-                          <div className="absolute bottom-6 right-5 w-28 h-20 border-2 border-sky-400 bg-sky-500/15 rounded flex flex-col justify-between p-1 z-10 shadow-lg shadow-sky-500/20">
-                            <span className="bg-sky-500 text-slate-950 font-bold text-[8px] px-1 py-0.5 rounded tracking-wider uppercase font-mono">
-                              VEHICLE 96.1%
-                            </span>
-                            <span className="text-[7px] text-sky-200 font-mono font-bold bg-slate-950/70 px-1 rounded">48 km/h · ALPR</span>
-                          </div>
+                              <div className="absolute bottom-6 right-10 w-22 h-26 border-2 border-emerald-400 bg-emerald-500/15 rounded flex flex-col justify-between p-1 z-10 shadow-lg shadow-emerald-500/20">
+                                <span className="bg-emerald-500 text-slate-950 font-bold text-[8px] px-1 py-0.5 rounded tracking-wider uppercase font-mono">
+                                  PERSON 96.2%
+                                </span>
+                                <span className="text-[7px] text-emerald-300 font-mono font-bold bg-slate-950/70 px-1 rounded">ID #208 · TRACK</span>
+                              </div>
+                            </>
+                          ) : (
+                            <>
+                              <div className="absolute top-10 left-8 w-26 h-20 border-2 border-sky-400 bg-sky-500/15 rounded flex flex-col justify-between p-1 animate-pulse z-10 shadow-lg shadow-sky-500/20">
+                                <span className="bg-sky-500 text-slate-950 font-bold text-[8px] px-1 py-0.5 rounded tracking-wider uppercase font-mono">
+                                  VEHICLE 98.1%
+                                </span>
+                                <span className="text-[7px] text-sky-200 font-mono font-bold bg-slate-950/70 px-1 rounded">52 km/h · ALPR</span>
+                              </div>
+
+                              <div className="absolute bottom-8 right-6 w-28 h-20 border-2 border-amber-400 bg-amber-500/15 rounded flex flex-col justify-between p-1 z-10 shadow-lg shadow-amber-500/20">
+                                <span className="bg-amber-500 text-slate-950 font-bold text-[8px] px-1 py-0.5 rounded tracking-wider uppercase font-mono">
+                                  BUS 94.6%
+                                </span>
+                                <span className="text-[7px] text-amber-200 font-mono font-bold bg-slate-950/70 px-1 rounded">GATE-01 PASS</span>
+                              </div>
+                            </>
+                          )}
 
                           {/* Overlay HUD stats */}
                           <div className="absolute top-2 left-2 flex items-center gap-1.5 bg-slate-950/80 px-2 py-0.5 rounded text-[9px] font-mono text-slate-300 backdrop-blur-md z-10">
                             <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-ping" />
-                            <span>REC · NORTH-GATE-01</span>
+                            <span>{activeStream === "/videos/humans.mp4" ? "REC · HUMAN-REID-02" : "REC · NORTH-GATE-01"}</span>
                           </div>
 
                           <div className="absolute bottom-2 right-2 bg-slate-950/80 px-2 py-0.5 rounded text-[9px] font-mono text-emerald-400 backdrop-blur-md z-10">

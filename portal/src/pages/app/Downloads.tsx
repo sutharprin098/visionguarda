@@ -612,30 +612,30 @@ export default function DownloadsPage() {
             <div className="space-y-3">
               <div className="flex items-center gap-2">
                 <Badge tone="ok" pulse>Official Mobile Release</Badge>
-                <span className="px-2 py-0.5 rounded bg-sky-500/20 text-sky-300 font-mono text-[10px] font-bold">Android v1.0.0</span>
+                <span className="px-2 py-0.5 rounded bg-sky-500/20 text-sky-300 font-mono text-[10px] font-bold">Android v1.0.1</span>
               </div>
               <h2 className="text-2xl font-black tracking-tight sm:text-3xl text-white">
                 CamAI Mobile Security Hub (.apk)
               </h2>
               <p className="text-xs sm:text-sm text-slate-300 max-w-2xl leading-relaxed">
-                Edge-First Intelligent CCTV & AI Vision Grid for Android smartphones. Single unified Google authentication, live RTSP stream playback, and real-time alert notifications.
+                Edge-First Intelligent CCTV & AI Vision Grid for Android smartphones. Single unified Google authentication, live RTSP stream playback, real-time alert notifications, and fixed package installation compatibility.
               </p>
               <div className="flex flex-wrap items-center gap-4 text-xs text-slate-400 pt-1">
                 <span>📱 Android 7.0+</span>
-                <span>⚡ File Size: 4.8 MB</span>
+                <span>⚡ File Size: 3.5 MB</span>
                 <span>🔒 Single Google SSO Unified Identity</span>
               </div>
             </div>
 
             <div className="flex shrink-0 flex-col items-stretch gap-2.5 sm:min-w-[260px]">
               <a
-                href="https://github.com/sutharprin098/visionguarda/releases/download/v1.0.8/CamAI-Mobile-v1.0.0.apk"
+                href="https://github.com/sutharprin098/visionguarda/releases/download/v1.0.8/CamAI-Mobile-v1.0.1.apk"
                 target="_blank"
                 rel="noopener noreferrer"
                 className="flex items-center justify-center gap-2 py-4 px-6 rounded-2xl bg-gradient-to-r from-sky-500 to-indigo-600 hover:from-sky-400 hover:to-indigo-500 text-white font-extrabold text-sm shadow-lg active:scale-95 transition-all"
               >
                 <Download size={18} />
-                <span>DOWNLOAD ANDROID APK (v1.0.0)</span>
+                <span>DOWNLOAD ANDROID APK (v1.0.1)</span>
               </a>
               <span className="text-center text-[10px] text-slate-400">Direct Public Link • Instant Installation</span>
             </div>

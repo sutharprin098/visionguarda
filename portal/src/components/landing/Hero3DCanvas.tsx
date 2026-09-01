@@ -11,18 +11,26 @@ export default function Hero3DCanvas() {
     if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
 
     const container = containerRef.current;
-    const width = container.clientWidth || window.innerWidth;
-    const height = container.clientHeight || window.innerHeight;
+    const width = container.clientWidth || window.innerWidth || 300;
+    const height = container.clientHeight || window.innerHeight || 300;
 
-    // Scene, Camera, Renderer
-    const scene = new THREE.Scene();
-    const camera = new THREE.PerspectiveCamera(50, width / height, 0.1, 100);
-    camera.position.set(0, 1, 11);
+    let scene: THREE.Scene;
+    let camera: THREE.PerspectiveCamera;
+    let renderer: THREE.WebGLRenderer;
 
-    const renderer = new THREE.WebGLRenderer({ alpha: true, antialias: false, powerPreference: "high-performance" });
-    renderer.setSize(width, height);
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.25));
-    container.appendChild(renderer.domElement);
+    try {
+      scene = new THREE.Scene();
+      camera = new THREE.PerspectiveCamera(50, width / height, 0.1, 100);
+      camera.position.set(0, 1, 11);
+
+      renderer = new THREE.WebGLRenderer({ alpha: true, antialias: false, powerPreference: "high-performance" });
+      renderer.setSize(width, height);
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.25));
+      container.appendChild(renderer.domElement);
+    } catch (e) {
+      console.warn("WebGL initialization skipped:", e);
+      return;
+    }
 
     // Optimized Lighting
     const ambientLight = new THREE.AmbientLight(0xffffff, 1.8);

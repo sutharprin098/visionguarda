@@ -98,7 +98,7 @@ export default function HeroSection() {
             </a>
 
             <Link
-              to="/app/downloads"
+              to="/downloads"
               className="w-full sm:w-auto px-5 py-4 justify-center flex items-center gap-1.5 text-slate-600 hover:text-sky-600 text-xs font-bold transition"
             >
               <span>All Builds</span>
