@@ -1,6 +1,7 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "outputDirectory": "dist",
+  "buildCommand": "cd portal && npm install && npm run build",
+  "outputDirectory": "portal/dist",
   "rewrites": [
     {
       "source": "/(.*)",

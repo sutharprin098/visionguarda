@@ -4,6 +4,7 @@ import { useState } from "react";
 
 const NAV = [
   { to: "/features", label: "Features" },
+  { to: "/downloads", label: "Downloads" },
   { to: "/pricing", label: "Pricing" },
   { to: "/about", label: "About" },
   { to: "/contact", label: "Contact" },
