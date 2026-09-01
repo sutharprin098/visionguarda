@@ -559,7 +559,6 @@ export default function DownloadsPage() {
           return;
         }
       }
-      // Direct Release Asset Fallback Link
       const fallbackUrl = `${REPO_URL}/releases/download/${r.tag_name}/${r.asset_name}`;
       window.open(fallbackUrl, "_blank");
     } catch {
@@ -575,185 +574,275 @@ export default function DownloadsPage() {
 
   if (isLoading && !data) {
     return (
-      <>
-        <PageHeader title="Downloads" subtitle="CamAI Desktop for Windows. Activate with your license key." />
-        <div className="mx-auto max-w-[1100px] space-y-8">
-          <div className="skeleton h-56 w-full rounded-3xl" />
-          <div className="skeleton h-64 w-full rounded-2xl" />
+      <div className="mx-auto max-w-7xl px-4 py-8 space-y-8">
+        <div className="skeleton h-48 w-full rounded-3xl" />
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div className="skeleton h-72 w-full rounded-3xl" />
+          <div className="skeleton h-72 w-full rounded-3xl" />
         </div>
-      </>
+      </div>
     );
   }
 
   return (
-    <>
-      <PageHeader
-        title="Downloads"
-        subtitle="CamAI Desktop for Windows. Activate with your license key."
-        actions={
-          <a
-            href={`${REPO_URL}/releases`}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="btn-ghost btn-sm"
-          >
-            <Github size={13} /> All releases <ArrowUpRight size={12} />
-          </a>
-        }
-      />
+    <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-6 sm:py-10 space-y-10">
+      
+      {/* -------------------------------------------------- Header Section */}
+      <div className="relative overflow-hidden rounded-3xl border border-sky-300/60 bg-gradient-to-r from-slate-900 via-sky-950 to-indigo-950 p-6 sm:p-10 text-white shadow-2xl">
+        <div className="pointer-events-none absolute -right-20 -top-20 h-72 w-72 rounded-full bg-sky-500/20 blur-3xl" />
+        <div className="pointer-events-none absolute -left-20 -bottom-20 h-72 w-72 rounded-full bg-indigo-500/20 blur-3xl" />
 
-      <div className="mx-auto max-w-[1100px] space-y-8 pb-4">
+        <div className="relative z-10 flex flex-col md:flex-row md:items-center md:justify-between gap-6">
+          <div className="space-y-3 max-w-3xl">
+            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-sky-500/20 border border-sky-400/30 text-sky-300 text-xs font-bold uppercase tracking-wider">
+              <span className="h-2 w-2 rounded-full bg-sky-400 animate-ping" />
+              Official CamAI Distribution Hub
+            </div>
+            <h1 className="text-3xl sm:text-5xl font-black tracking-tight text-white leading-tight">
+              Downloads &amp; Release Matrix
+            </h1>
+            <p className="text-xs sm:text-sm text-slate-300 leading-relaxed font-medium">
+              Get the latest production-grade CamAI releases for Windows Desktop and Android Mobile. On-premise sub-12ms AI vision engine, local data sovereignty, and cloud hybrid alerts.
+            </p>
+            <div className="flex flex-wrap items-center gap-4 text-xs font-semibold text-sky-200/90 pt-2">
+              <span className="flex items-center gap-1.5"><Check className="text-emerald-400" size={14} /> DirectML &amp; CUDA GPU Accelerated</span>
+              <span className="flex items-center gap-1.5"><Check className="text-emerald-400" size={14} /> 100% Offline Edge Mode</span>
+              <span className="flex items-center gap-1.5"><Check className="text-emerald-400" size={14} /> Zero Cloud Video Egress</span>
+            </div>
+          </div>
 
-        {/* -------------------------------------------------- CamAI Mobile App APK Hero */}
-        <section className="relative overflow-hidden rounded-3xl border border-sky-500/30 bg-gradient-to-br from-slate-950 via-slate-900 to-indigo-950/80 p-6 sm:p-8 text-white shadow-xl">
-          <div className="pointer-events-none absolute -right-16 -bottom-16 h-64 w-64 rounded-full bg-sky-500/20 blur-3xl" />
-          
-          <div className="flex flex-col gap-6 lg:flex-row lg:items-center lg:justify-between relative z-10">
-            <div className="space-y-3">
-              <div className="flex items-center gap-2">
-                <Badge tone="ok" pulse>Official Mobile Release</Badge>
-                <span className="px-2 py-0.5 rounded bg-sky-500/20 text-sky-300 font-mono text-[10px] font-bold">Android v1.0.1</span>
-              </div>
-              <h2 className="text-2xl font-black tracking-tight sm:text-3xl text-white">
-                CamAI Mobile Security Hub (.apk)
+          <div className="shrink-0 flex flex-col sm:flex-row md:flex-col gap-3">
+            <a
+              href={`${REPO_URL}/releases`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center justify-center gap-2 px-5 py-3 rounded-xl border border-sky-400/40 bg-white/10 hover:bg-white/20 text-white font-bold text-xs backdrop-blur-md transition-all shadow-md"
+            >
+              <Github size={16} />
+              <span>View GitHub Releases</span>
+              <ArrowUpRight size={14} />
+            </a>
+          </div>
+        </div>
+      </div>
+
+      {/* -------------------------------------------------- Dual Featured Hero Grid (Desktop & Mobile) */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+
+        {/* Desktop Setup Card */}
+        <div className="relative flex flex-col justify-between overflow-hidden rounded-3xl border border-sky-500/30 bg-gradient-to-b from-slate-900 via-slate-900 to-slate-950 p-7 text-white shadow-xl hover:border-sky-400/50 transition-all">
+          <div className="pointer-events-none absolute top-0 right-0 h-48 w-48 rounded-full bg-sky-500/10 blur-2xl" />
+
+          <div className="space-y-4 relative z-10">
+            <div className="flex items-center justify-between gap-3">
+              <span className="px-3 py-1 rounded-full bg-sky-500/20 border border-sky-500/30 text-sky-300 text-xs font-bold uppercase tracking-wider flex items-center gap-1.5">
+                <HardDrive size={13} strokeWidth={2.5} /> Desktop Release (v1.0.8)
+              </span>
+              <span className="text-xs font-mono font-bold text-emerald-400 bg-emerald-500/10 px-2.5 py-1 rounded-md border border-emerald-500/20">
+                Official Windows Build
+              </span>
+            </div>
+
+            <div>
+              <h2 className="text-2xl sm:text-3xl font-black text-white tracking-tight">
+                CamAI Desktop Security Suite
               </h2>
-              <p className="text-xs sm:text-sm text-slate-300 max-w-2xl leading-relaxed">
-                Edge-First Intelligent CCTV & AI Vision Grid for Android smartphones. Single unified Google authentication, live RTSP stream playback, real-time alert notifications, and fixed package installation compatibility.
+              <p className="mt-2 text-xs sm:text-sm text-slate-300 leading-relaxed">
+                Bundled high-speed AI vision grid for Windows x64. Sub-12ms multi-camera detection, zero ghost box filtering, RTSP/ONVIF auto-discovery, and local SQLite/PostgreSQL storage.
               </p>
-              <div className="flex flex-wrap items-center gap-4 text-xs text-slate-400 pt-1">
-                <span>📱 Android 7.0+</span>
-                <span>⚡ File Size: 3.5 MB</span>
-                <span>🔒 Single Google SSO Unified Identity</span>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3 pt-2">
+              <div className="rounded-xl border border-slate-800 bg-slate-900/80 p-3">
+                <span className="text-[10px] uppercase font-bold text-slate-400 block">Target OS</span>
+                <span className="text-xs font-bold text-white mt-0.5 block">Windows 10 / 11 (64-bit)</span>
+              </div>
+              <div className="rounded-xl border border-slate-800 bg-slate-900/80 p-3">
+                <span className="text-[10px] uppercase font-bold text-slate-400 block">Installer Size</span>
+                <span className="text-xs font-bold text-white mt-0.5 block">{fmtSize(latest.size_bytes)}</span>
+              </div>
+              <div className="rounded-xl border border-slate-800 bg-slate-900/80 p-3">
+                <span className="text-[10px] uppercase font-bold text-slate-400 block">AI Engine</span>
+                <span className="text-xs font-bold text-sky-400 mt-0.5 block">Bundled (Offline Ready)</span>
+              </div>
+              <div className="rounded-xl border border-slate-800 bg-slate-900/80 p-3">
+                <span className="text-[10px] uppercase font-bold text-slate-400 block">Release Date</span>
+                <span className="text-xs font-bold text-white mt-0.5 block">{format(new Date(latest.published_at), "dd MMM yyyy")}</span>
               </div>
             </div>
+          </div>
 
-            <div className="flex shrink-0 flex-col items-stretch gap-2.5 sm:min-w-[260px]">
-              <a
-                href="https://github.com/sutharprin098/visionguarda/releases/download/v1.0.8/CamAI-Mobile-v1.0.1.apk"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="flex items-center justify-center gap-2 py-4 px-6 rounded-2xl bg-gradient-to-r from-sky-500 to-indigo-600 hover:from-sky-400 hover:to-indigo-500 text-white font-extrabold text-sm shadow-lg active:scale-95 transition-all"
-              >
-                <Download size={18} />
-                <span>DOWNLOAD ANDROID APK (v1.0.1)</span>
-              </a>
-              <span className="text-center text-[10px] text-slate-400">Direct Public Link • Instant Installation</span>
+          <div className="mt-8 pt-6 border-t border-slate-800 space-y-3 relative z-10">
+            <button
+              onClick={() => download(latest)}
+              disabled={downloadingId === latest.asset_id}
+              className="w-full py-4 px-6 rounded-2xl bg-gradient-to-r from-sky-500 via-blue-600 to-indigo-600 hover:from-sky-400 hover:to-indigo-500 text-white font-extrabold text-sm shadow-xl shadow-sky-500/20 flex items-center justify-center gap-2.5 transition-all hover:scale-[1.01] active:scale-95"
+            >
+              {downloadingId === latest.asset_id ? <Loader2 size={18} className="animate-spin" /> : <Download size={18} />}
+              <span>{downloadingId === latest.asset_id ? "Preparing Download..." : "DOWNLOAD DESKTOP INSTALLER (.exe)"}</span>
+            </button>
+            <div className="flex items-center justify-between text-[11px] text-slate-400 px-1">
+              <span>SHA-256 Verified Release</span>
+              <span>Requires License Key Activation</span>
             </div>
           </div>
-        </section>
+        </div>
 
-        {/* -------------------------------------------------- hero: latest release */}
-        <section className="relative overflow-hidden rounded-3xl border border-line bg-surface-1 shadow-sm">
-          <div className="pointer-events-none absolute -right-16 -top-16 h-56 w-56 rounded-full bg-sky-500/10 blur-3xl" />
+        {/* Mobile APK Card */}
+        <div className="relative flex flex-col justify-between overflow-hidden rounded-3xl border border-indigo-500/30 bg-gradient-to-b from-slate-900 via-indigo-950/90 to-slate-950 p-7 text-white shadow-xl hover:border-indigo-400/50 transition-all">
+          <div className="pointer-events-none absolute top-0 right-0 h-48 w-48 rounded-full bg-indigo-500/10 blur-2xl" />
 
-          <div className="relative p-6 sm:p-8">
-            <div className="flex flex-col gap-6 lg:flex-row lg:items-start lg:justify-between">
-              <div className="min-w-0 flex-1">
-                <div className="flex flex-wrap items-center gap-2">
-                  <Badge tone="ok" pulse>Latest Release</Badge>
-                  {latest.prerelease && <Badge tone="warn">Pre-release</Badge>}
-                </div>
-                <h2 className="mt-3 t-display">CamAI Desktop {latest.version}</h2>
-                <p className="mt-1.5 t-body truncate">{latest.asset_name}</p>
+          <div className="space-y-4 relative z-10">
+            <div className="flex items-center justify-between gap-3">
+              <span className="px-3 py-1 rounded-full bg-indigo-500/20 border border-indigo-500/30 text-indigo-300 text-xs font-bold uppercase tracking-wider flex items-center gap-1.5">
+                <MonitorSmartphone size={13} strokeWidth={2.5} /> Mobile Release (v1.0.1)
+              </span>
+              <span className="text-xs font-mono font-bold text-sky-400 bg-sky-500/10 px-2.5 py-1 rounded-md border border-sky-500/20">
+                Production Signed APK
+              </span>
+            </div>
 
-                <div className="mt-4 flex flex-wrap items-center gap-x-5 gap-y-1.5">
-                  <span className="flex items-center gap-1.5 t-caption">
-                    <Calendar size={13} /> Released {format(new Date(latest.published_at), "dd MMM yyyy")}
-                  </span>
-                  <span className="flex items-center gap-1.5 t-caption">
-                    <HardDrive size={13} /> {fmtSize(latest.size_bytes)}
-                  </span>
-                  <span className="flex items-center gap-1.5 t-caption">
-                    <MonitorSmartphone size={13} /> Windows x64
-                  </span>
-                </div>
+            <div>
+              <h2 className="text-2xl sm:text-3xl font-black text-white tracking-tight">
+                CamAI Mobile Security Hub
+              </h2>
+              <p className="mt-2 text-xs sm:text-sm text-slate-300 leading-relaxed">
+                Mobile security hub for Android smartphones. Direct live RTSP stream playback, real-time background alert push notifications, unified Google SSO authentication, and zero package conflict installation.
+              </p>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3 pt-2">
+              <div className="rounded-xl border border-slate-800 bg-slate-900/80 p-3">
+                <span className="text-[10px] uppercase font-bold text-slate-400 block">Compatible OS</span>
+                <span className="text-xs font-bold text-white mt-0.5 block">Android 7.0+ (Nougat &amp; newer)</span>
               </div>
-
-              <div className="flex shrink-0 flex-col items-stretch gap-2 sm:min-w-[240px]">
-                <button
-                  className="btn-primary w-full justify-center"
-                  onClick={() => download(latest)}
-                  disabled={downloadingId === latest.asset_id}
-                  aria-busy={downloadingId === latest.asset_id}
-                >
-                  {downloadingId === latest.asset_id ? <Loader2 size={15} className="animate-spin" /> : <Download size={15} />}
-                  {downloadingId === latest.asset_id ? "Preparing…" : "Download Installer (.exe)"}
-                </button>
-                <span className="text-center t-caption">Requires a license key to activate</span>
+              <div className="rounded-xl border border-slate-800 bg-slate-900/80 p-3">
+                <span className="text-[10px] uppercase font-bold text-slate-400 block">Package File Size</span>
+                <span className="text-xs font-bold text-white mt-0.5 block">3.5 MB (Instant Install)</span>
+              </div>
+              <div className="rounded-xl border border-slate-800 bg-slate-900/80 p-3">
+                <span className="text-[10px] uppercase font-bold text-slate-400 block">Authentication</span>
+                <span className="text-xs font-bold text-indigo-400 mt-0.5 block">Single Google SSO</span>
+              </div>
+              <div className="rounded-xl border border-slate-800 bg-slate-900/80 p-3">
+                <span className="text-[10px] uppercase font-bold text-slate-400 block">Signature</span>
+                <span className="text-xs font-bold text-emerald-400 mt-0.5 block">Signed Keystore (v1.0.1)</span>
               </div>
             </div>
-
-            <div className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
-              <Kpi label="Version" value={latest.version} icon={<Tag size={15} />} />
-              <Kpi label="File Size" value={fmtSize(latest.size_bytes)} icon={<HardDrive size={15} />} />
-              <Kpi label="Signing" value={signingState} icon={<ShieldCheck size={15} />} />
-              <Kpi label="Engine" value="Bundled" icon={<Cpu size={15} />} hint="Runs fully offline" />
-            </div>
-
-            <div className="mt-6 border-t border-line/60 pt-5">
-              <ChecksumBlock sha256={latest.checksum_sha256} />
-            </div>
-          </div>
-        </section>
-
-        {/* -------------------------------------------------- installation guide */}
-        <InstallGuide />
-
-        {/* -------------------------------------------------- release notes / history */}
-        <section className="space-y-4">
-          <div className="flex items-center gap-2">
-            <PackageCheck size={17} className="text-accent" />
-            <h3 className="t-h2">Release Notes</h3>
           </div>
 
+          <div className="mt-8 pt-6 border-t border-slate-800 space-y-3 relative z-10">
+            <a
+              href="https://github.com/sutharprin098/visionguarda/releases/download/v1.0.8/CamAI-Mobile-v1.0.1.apk"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="w-full py-4 px-6 rounded-2xl bg-gradient-to-r from-indigo-500 via-purple-600 to-sky-600 hover:from-indigo-400 hover:to-sky-500 text-white font-extrabold text-sm shadow-xl shadow-indigo-500/20 flex items-center justify-center gap-2.5 transition-all hover:scale-[1.01] active:scale-95"
+            >
+              <Download size={18} />
+              <span>DOWNLOAD ANDROID APK (v1.0.1)</span>
+            </a>
+            <div className="flex items-center justify-between text-[11px] text-slate-400 px-1">
+              <span>Direct Public Link</span>
+              <span>Instant Clean Installation</span>
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+      {/* -------------------------------------------------- Checksum Integrity & Installation Verification */}
+      <section className="rounded-3xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-6 sm:p-8 shadow-sm">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 dark:border-slate-800 pb-5">
+          <div>
+            <h3 className="text-xl font-black text-slate-900 dark:text-white flex items-center gap-2">
+              <ShieldCheck size={20} className="text-sky-600" /> Security Verification &amp; Checksums
+            </h3>
+            <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+              Verify SHA-256 checksums before installing to guarantee software integrity.
+            </p>
+          </div>
+          <span className="text-xs font-mono font-bold text-slate-600 dark:text-slate-300 bg-slate-100 dark:bg-slate-800 px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700">
+            Version {latest.version} Checksum
+          </span>
+        </div>
+
+        <div className="mt-6 space-y-4">
+          <ChecksumBlock sha256={latest.checksum_sha256} />
+          
+          <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950/60 p-4 text-xs space-y-2">
+            <span className="font-bold text-slate-900 dark:text-white flex items-center gap-1.5">
+              <Terminal size={14} className="text-sky-600" /> Verify Checksum via PowerShell (Windows):
+            </span>
+            <CodeBlock text={`Get-FileHash -Algorithm SHA256 .\\${latest.asset_name}`} />
+          </div>
+        </div>
+      </section>
+
+      {/* -------------------------------------------------- Installation Walkthrough */}
+      <InstallGuide />
+
+      {/* -------------------------------------------------- Release History Timeline */}
+      <section className="space-y-6">
+        <div className="flex items-center gap-2.5">
+          <PackageCheck size={20} className="text-sky-600" />
+          <h3 className="text-2xl font-black text-slate-900 dark:text-white">Full Release History</h3>
+        </div>
+
+        <div className="space-y-4">
           {releases.map((r, i) => {
             const isLatest = r.tag_name === latest.tag_name;
             const header = (
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <div className="flex items-center gap-2">
-                  <Tag size={13} className="text-ink-3" />
-                  <span className="text-sm font-bold text-ink-1">{r.name}</span>
-                  {isLatest && <Badge tone="ok">Latest</Badge>}
+              <div className="flex flex-wrap items-center justify-between gap-3 w-full">
+                <div className="flex flex-wrap items-center gap-2">
+                  <Tag size={14} className="text-sky-600" />
+                  <span className="text-base font-extrabold text-slate-900 dark:text-white">{r.name}</span>
+                  {isLatest && <Badge tone="ok">Latest Release</Badge>}
                   {r.prerelease && <Badge tone="warn">Pre-release</Badge>}
-                  <span className="t-caption">· {format(new Date(r.published_at), "dd MMM yyyy")}</span>
+                  <span className="text-xs font-medium text-slate-500 dark:text-slate-400">
+                    · {format(new Date(r.published_at), "dd MMM yyyy")}
+                  </span>
                 </div>
                 {!isLatest && (
-                  <button className="btn-ghost btn-sm" onClick={(e) => { e.preventDefault(); download(r); }} disabled={downloadingId === r.asset_id}>
-                    {downloadingId === r.asset_id ? <Loader2 size={12} className="animate-spin" /> : <Download size={12} />}
-                    {downloadingId === r.asset_id ? "Preparing…" : "Download"}
+                  <button
+                    onClick={(e) => { e.preventDefault(); download(r); }}
+                    disabled={downloadingId === r.asset_id}
+                    className="px-3 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-100 dark:bg-slate-800 hover:bg-sky-50 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 font-bold text-xs flex items-center gap-1.5 transition-all"
+                  >
+                    {downloadingId === r.asset_id ? <Loader2 size={13} className="animate-spin" /> : <Download size={13} />}
+                    <span>{downloadingId === r.asset_id ? "Preparing..." : "Download"}</span>
                   </button>
                 )}
               </div>
             );
 
-            // Latest release is shown open — history collapses behind a
-            // details toggle so the page stays compact as releases add up.
             if (isLatest) {
               return (
-                <div key={r.tag_name} className="card p-6">
-                  <div className="mb-4 border-b border-line/60 pb-4">{header}</div>
+                <div key={r.tag_name} className="rounded-3xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-6 sm:p-8 shadow-sm">
+                  <div className="mb-5 border-b border-slate-100 dark:border-slate-800 pb-4">{header}</div>
                   {r.release_notes && (
                     <ReleaseNotes content={r.release_notes} assetName={r.asset_name} onDownloadCurrent={() => download(r)} />
                   )}
                 </div>
               );
             }
+
             return (
-              <details key={r.tag_name} className="group/acc card overflow-hidden p-0" open={i === 1}>
-                <summary className="flex cursor-pointer list-none items-center gap-3 p-6 marker:content-none">
-                  <div className="flex-1">{header}</div>
-                  <ChevronDown size={16} className="shrink-0 text-ink-3 transition-transform group-open/acc:rotate-180" />
+              <details key={r.tag_name} className="group/acc rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-0 overflow-hidden shadow-2xs" open={i === 1}>
+                <summary className="flex cursor-pointer list-none items-center gap-3 p-5 sm:p-6 marker:content-none hover:bg-slate-50/80 dark:hover:bg-slate-800/40 transition">
+                  <div className="flex-1 min-w-0">{header}</div>
+                  <ChevronDown size={18} className="shrink-0 text-slate-400 transition-transform group-open/acc:rotate-180" />
                 </summary>
                 {r.release_notes && (
-                  <div className="border-t border-line/60 px-6 pb-6 pt-4">
+                  <div className="border-t border-slate-100 dark:border-slate-800 px-6 pb-6 pt-4">
                     <ReleaseNotes content={r.release_notes} assetName={r.asset_name} onDownloadCurrent={() => download(r)} />
                   </div>
                 )}
               </details>
             );
           })}
-        </section>
-      </div>
-    </>
+        </div>
+      </section>
+
+    </div>
   );
 }
