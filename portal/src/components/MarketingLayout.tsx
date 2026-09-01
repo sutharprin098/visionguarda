@@ -99,7 +99,7 @@ export default function MarketingLayout() {
               ))}
               <div className="mt-3 flex flex-col gap-2 border-t border-slate-200 pt-3">
                 <a
-                  href="https://github.com/sutharprin098/visionguarda/releases/download/v1.0.8/CamAI-Desktop-Setup-1.0.8.exe"
+                  href="/downloads/CamAI-Desktop-Setup-1.0.8.exe"
                   className="w-full py-2.5 rounded-xl border border-sky-300 bg-sky-50 text-sky-800 text-xs font-mono font-bold text-center flex items-center justify-center gap-2"
                 >
                   <Download size={14} className="text-sky-600" />
@@ -107,11 +107,11 @@ export default function MarketingLayout() {
                 </a>
 
                 <a
-                  href="https://github.com/sutharprin098/visionguarda/releases/download/v1.0.8/CamAI-Mobile-v1.0.0.apk"
+                  href="/downloads/CamAI-Mobile-v1.0.1.apk"
                   className="w-full py-2.5 rounded-xl border border-slate-300 bg-slate-100 text-slate-700 text-xs font-mono font-bold text-center flex items-center justify-center gap-2"
                 >
                   <Download size={14} className="text-slate-600" />
-                  Download Mobile App v1.0.0 (.apk)
+                  Download Mobile App v1.0.1 (.apk)
                 </a>
 
                 <Link to="/signin" onClick={() => setOpen(false)} className="w-full py-2.5 rounded-xl border border-slate-200 bg-slate-100 text-slate-700 text-xs font-bold text-center hover:bg-slate-200 mt-1">
@@ -167,13 +167,13 @@ export default function MarketingLayout() {
               <h3 className="text-xs uppercase font-mono tracking-wider font-extrabold text-slate-900 mb-3">Direct Downloads</h3>
               <ul className="space-y-2 text-xs font-medium text-slate-600 font-mono">
                 <li>
-                  <a href="https://github.com/sutharprin098/visionguarda/releases/download/v1.0.8/CamAI-Desktop-Setup-1.0.8.exe" className="text-sky-600 font-bold hover:underline flex items-center gap-1">
+                  <a href="/downloads/CamAI-Desktop-Setup-1.0.8.exe" className="text-sky-600 font-bold hover:underline flex items-center gap-1">
                     <Download size={11} /> Desktop v1.0.8 (.exe)
                   </a>
                 </li>
                 <li>
-                  <a href="https://github.com/sutharprin098/visionguarda/releases/download/v1.0.8/CamAI-Mobile-v1.0.0.apk" className="text-slate-700 font-bold hover:underline flex items-center gap-1">
-                    <Download size={11} /> Mobile App v1.0.0 (.apk)
+                  <a href="/downloads/CamAI-Mobile-v1.0.1.apk" className="text-slate-700 font-bold hover:underline flex items-center gap-1">
+                    <Download size={11} /> Mobile App v1.0.1 (.apk)
                   </a>
                 </li>
               </ul>

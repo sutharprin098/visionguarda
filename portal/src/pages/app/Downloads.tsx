@@ -35,7 +35,7 @@ const DEFAULT_FALLBACK_RELEASES: GithubRelease[] = [
     asset_name: "CamAI-Desktop-Setup-1.0.8.exe",
     size_bytes: 356706747,
     content_type: "application/octet-stream",
-    download_url: `${REPO_URL}/releases/download/v1.0.8/CamAI-Desktop-Setup-1.0.8.exe`,
+    download_url: `/downloads/CamAI-Desktop-Setup-1.0.8.exe`,
     checksum_sha256: "a0d7cdb1d53c48b8b299df2fad93b8e86d5f605ffb0ce39b4ab2b5bc5ed1f755",
     release_notes: `
 ### 🚀 CamAI Desktop v1.0.8 & Mobile v1.0.0 Unified Release
@@ -559,10 +559,10 @@ export default function DownloadsPage() {
           return;
         }
       }
-      const fallbackUrl = `${REPO_URL}/releases/download/${r.tag_name}/${r.asset_name}`;
+      const fallbackUrl = `/downloads/${r.asset_name}`;
       window.open(fallbackUrl, "_blank");
     } catch {
-      const fallbackUrl = `${REPO_URL}/releases/download/${r.tag_name}/${r.asset_name}`;
+      const fallbackUrl = `/downloads/${r.asset_name}`;
       window.open(fallbackUrl, "_blank");
     } finally {
       setDownloadingId(null);
@@ -733,7 +733,7 @@ export default function DownloadsPage() {
 
           <div className="mt-8 pt-6 border-t border-slate-800 space-y-3 relative z-10">
             <a
-              href="https://github.com/sutharprin098/visionguarda/releases/download/v1.0.8/CamAI-Mobile-v1.0.1.apk"
+              href="/downloads/CamAI-Mobile-v1.0.1.apk"
               target="_blank"
               rel="noopener noreferrer"
               className="w-full py-4 px-6 rounded-2xl bg-gradient-to-r from-indigo-500 via-purple-600 to-sky-600 hover:from-indigo-400 hover:to-sky-500 text-white font-extrabold text-sm shadow-xl shadow-indigo-500/20 flex items-center justify-center gap-2.5 transition-all hover:scale-[1.01] active:scale-95"

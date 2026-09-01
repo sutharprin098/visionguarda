@@ -57,7 +57,7 @@ export default function SettingsMenuModal({ isOpen, onClose, onSignOut }: Settin
       }
       // Trigger in-app reload & open APK download
       try {
-        window.open("https://github.com/sutharprin098/visionguarda/releases/download/v1.0.8/CamAI-Mobile-v1.0.0.apk", "_system");
+        window.open("https://camai.princesite.in/downloads/CamAI-Mobile-v1.0.1.apk", "_system");
       } catch (e) {
         console.warn("Direct download link trigger:", e);
       }
