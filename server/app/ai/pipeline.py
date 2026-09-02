@@ -2386,9 +2386,11 @@ class PipelineCoordinator:
                             latest_dets = list(getattr(self, "_latest_overlay_dets", []))
                             latest_ts   = getattr(self, "_latest_overlay_ts", 0.0)
 
-                        # Disabling MJPEG frame burn-in: React DetectionOverlay handles single clean overlay rendering
-                        # if latest_dets and (time.time() - latest_ts < 0.5):
-                        #     _draw_normalized_overlay_boxes(mjpeg_f, latest_dets)
+                        # Enable frame-synchronized MJPEG overlay burn-in: ensures bounding boxes and video pixels
+                        # are 100% frame-locked in the exact same JPEG frame, eliminating browser HTTP/WebSocket desync.
+                        burnin_overlay = os.getenv("CAMAI_BURNIN_OVERLAY", "1").strip() != "0"
+                        if burnin_overlay and latest_dets and (time.time() - latest_ts < 0.6):
+                            _draw_normalized_overlay_boxes(mjpeg_f, latest_dets)
 
                         q = max(60, min(90, self.jpeg_quality))
                         ok, jpg = cv2.imencode('.jpg', mjpeg_f, [cv2.IMWRITE_JPEG_QUALITY, q])
@@ -3477,9 +3479,9 @@ class PipelineCoordinator:
 
     def _telemetry_loop(self):
         while self.running:
-            data = self._tracking_slot.take()
+            data = self._tracking_slot.take_latest()
             if data is None:
-                continue  # _Slot.take() already sleeps internally
+                continue  # _Slot.take_latest() already sleeps internally
 
             try:
                 self._telemetry_loop_iteration(data)
@@ -3679,9 +3681,9 @@ class PipelineCoordinator:
 
     def _ws_dispatch_loop(self):
         while self.running:
-            telemetry = self._telemetry_out_slot.take()
+            telemetry = self._telemetry_out_slot.take_latest()
             if telemetry is None:
-                continue  # _Slot.take() already sleeps internally
+                continue  # _Slot.take_latest() already sleeps internally
             try:
                 if self.telemetry_callback:
                     self.telemetry_callback({self.camera_id: telemetry})
