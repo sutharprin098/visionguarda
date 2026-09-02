@@ -99,11 +99,11 @@ export default function MarketingLayout() {
               ))}
               <div className="mt-3 flex flex-col gap-2 border-t border-slate-200 pt-3">
                 <a
-                  href="/downloads/CamAI-Desktop-Setup-1.0.8.exe"
+                  href="/downloads/CamAI-Desktop-Setup-1.0.9.exe"
                   className="w-full py-2.5 rounded-xl border border-sky-300 bg-sky-50 text-sky-800 text-xs font-mono font-bold text-center flex items-center justify-center gap-2"
                 >
                   <Download size={14} className="text-sky-600" />
-                  Download Desktop Setup v1.0.8 (.exe)
+                  Download Desktop Setup v1.0.9 (.exe)
                 </a>
 
                 <a
@@ -167,8 +167,8 @@ export default function MarketingLayout() {
               <h3 className="text-xs uppercase font-mono tracking-wider font-extrabold text-slate-900 mb-3">Direct Downloads</h3>
               <ul className="space-y-2 text-xs font-medium text-slate-600 font-mono">
                 <li>
-                  <a href="/downloads/CamAI-Desktop-Setup-1.0.8.exe" className="text-sky-600 font-bold hover:underline flex items-center gap-1">
-                    <Download size={11} /> Desktop v1.0.8 (.exe)
+                  <a href="/downloads/CamAI-Desktop-Setup-1.0.9.exe" className="text-sky-600 font-bold hover:underline flex items-center gap-1">
+                    <Download size={11} /> Desktop v1.0.9 (.exe)
                   </a>
                 </li>
                 <li>

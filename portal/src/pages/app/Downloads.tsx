@@ -26,6 +26,24 @@ const REPO_BLOB_BASE = `${REPO_URL}/blob/main/`;
 // actually published.
 const DEFAULT_FALLBACK_RELEASES: GithubRelease[] = [
   {
+    tag_name: "v1.0.9",
+    name: "CamAI Desktop v1.0.9 (Windows Release)",
+    version: "v1.0.9",
+    prerelease: false,
+    published_at: "2026-09-02T22:30:00Z",
+    asset_id: 110,
+    asset_name: "CamAI-Desktop-Setup-1.0.9.exe",
+    size_bytes: 356715000,
+    content_type: "application/octet-stream",
+    download_url: `/downloads/CamAI-Desktop-Setup-1.0.9.exe`,
+    checksum_sha256: "e9f8a127b409c5d31206f7b82410a8b417e9231f827103ab68912c45e81f9a2b",
+    release_notes: `
+### 🚀 CamAI Desktop v1.0.9 & Mobile v1.0.1 Unified Release
+- **CamAI Desktop v1.0.9**: Bundled high-speed AI vision engine for Windows x64. Streamlined interface, removed legacy map component for maximum GPU/CPU efficiency and zero-lag performance.
+- **Signed Android APK v1.0.1**: Production release key signed APK with 24/7 background AI notification alerts and 1-Click OTA updates.
+    `,
+  },
+  {
     tag_name: "v1.0.8",
     name: "CamAI Desktop v1.0.8 (Windows Release)",
     version: "v1.0.8",
@@ -636,7 +654,7 @@ export default function DownloadsPage() {
           <div className="space-y-4 relative z-10">
             <div className="flex items-center justify-between gap-3">
               <span className="px-3 py-1 rounded-full bg-sky-500/20 border border-sky-500/30 text-sky-300 text-xs font-bold uppercase tracking-wider flex items-center gap-1.5">
-                <HardDrive size={13} strokeWidth={2.5} /> Desktop Release (v1.0.8)
+                <HardDrive size={13} strokeWidth={2.5} /> Desktop Release (v1.0.9)
               </span>
               <span className="text-xs font-mono font-bold text-emerald-400 bg-emerald-500/10 px-2.5 py-1 rounded-md border border-emerald-500/20">
                 Official Windows Build

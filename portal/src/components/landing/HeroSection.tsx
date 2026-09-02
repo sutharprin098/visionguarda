@@ -42,7 +42,7 @@ export default function HeroSection() {
               <Cloud size={13} className="text-sky-600" /> CLOUD &amp; HYBRID AI INFERENCE MATRIX
             </span>
             <span className="text-slate-300">•</span>
-            <span className="text-sky-600 font-extrabold">DESKTOP v1.0.8 &amp; MOBILE v1.0.1</span>
+            <span className="text-sky-600 font-extrabold">DESKTOP v1.0.9 &amp; MOBILE v1.0.1</span>
           </div>
         </motion.div>
 
@@ -78,13 +78,13 @@ export default function HeroSection() {
             className="mt-9 flex flex-col sm:flex-row items-center justify-center gap-3.5 sm:gap-4"
           >
             <a
-              href="/downloads/CamAI-Desktop-Setup-1.0.8.exe"
+              href="/downloads/CamAI-Desktop-Setup-1.0.9.exe"
               target="_blank"
               rel="noopener noreferrer"
               className="w-full sm:w-auto px-7 py-4 rounded-xl justify-center flex items-center gap-2.5 bg-gradient-to-r from-sky-500 via-blue-600 to-indigo-600 hover:from-sky-400 hover:to-indigo-500 text-white font-bold text-sm shadow-xl shadow-sky-500/25 transition-all hover:scale-[1.03]"
             >
               <Download size={18} />
-              <span>Desktop Setup (v1.0.8 .exe)</span>
+              <span>Desktop Setup (v1.0.9 .exe)</span>
             </a>
 
             <a

@@ -88,13 +88,13 @@ export default function MobileAppShowcaseSection() {
             </a>
 
             <a
-              href="/downloads/CamAI-Desktop-Setup-1.0.8.exe"
+              href="/downloads/CamAI-Desktop-Setup-1.0.9.exe"
               target="_blank"
               rel="noopener noreferrer"
               className="w-full sm:w-auto px-5 py-3 rounded-2xl bg-white hover:bg-sky-50 text-slate-800 border border-sky-200 font-bold text-xs shadow-sm flex items-center justify-center gap-2 transition-all hover:scale-105"
             >
               <Download size={15} className="text-sky-600" />
-              <span>Desktop Setup v1.0.8 (.exe)</span>
+              <span>Desktop Setup v1.0.9 (.exe)</span>
             </a>
           </motion.div>
         </div>

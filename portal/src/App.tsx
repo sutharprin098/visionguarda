@@ -41,7 +41,6 @@ const NotificationsPage = lazy(() => import("./pages/app/Notifications"));
 const SettingsPage = lazy(() => import("./pages/app/Settings"));
 const SupportPage = lazy(() => import("./pages/app/Support"));
 const ModelLibraryPage = lazy(() => import("./pages/app/ModelLibrary"));
-const MapsPage = lazy(() => import("./pages/app/Maps"));
 
 function Protected({ children }: { children: JSX.Element }) {
   const { session, loading } = useAuth();
@@ -86,7 +85,6 @@ export default function App() {
           <Route path="cameras" element={<PermissionGuard perm="cameras.manage" moduleName="Cameras Grid"><CamerasPage /></PermissionGuard>} />
           <Route path="camera-groups" element={<PermissionGuard perm="cameras.manage" moduleName="Camera Groups"><CameraGroupsPage /></PermissionGuard>} />
           <Route path="sites" element={<PermissionGuard perm="cameras.manage" moduleName="Site Locations"><SitesPage /></PermissionGuard>} />
-          <Route path="maps" element={<PermissionGuard perm="maps.view" moduleName="Map"><MapsPage /></PermissionGuard>} />
           <Route path="models" element={<PermissionGuard perm="ai.configure" moduleName="AI Engine Models"><ModelLibraryPage /></PermissionGuard>} />
           <Route path="alerts" element={<PermissionGuard perm="alerts.view" moduleName="Real-Time Alerts"><AlertsPage /></PermissionGuard>} />
           <Route path="incidents" element={<PermissionGuard perm="alerts.view" moduleName="Incidents Desk"><IncidentsPage /></PermissionGuard>} />

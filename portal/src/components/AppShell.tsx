@@ -119,7 +119,7 @@ export default function AppShell() {
               <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
               Edge Core Online
             </span>
-            <span className="font-mono text-[10px]">v1.0.4</span>
+            <span className="font-mono text-[10px]">v1.0.9</span>
           </div>
         </div>
 

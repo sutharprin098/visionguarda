@@ -44,7 +44,6 @@ export const NAV: { group: string; items: NavItem[] }[] = [
       { to: "/app/cameras", label: "Cameras", icon: Video, perm: "cameras.manage" },
       { to: "/app/camera-groups", label: "Camera Groups", icon: Layers, perm: "cameras.manage" },
       { to: "/app/sites", label: "Sites", icon: MapPin, perm: "cameras.manage" },
-      { to: "/app/maps", label: "Map", icon: Map, perm: "maps.view" },
       { to: "/app/models", label: "AI Model Library", icon: BrainCircuit, superOnly: true },
     ],
   },

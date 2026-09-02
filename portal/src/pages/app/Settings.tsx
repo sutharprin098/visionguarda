@@ -153,8 +153,8 @@ function AboutTab() {
         </div>
       </div>
       <div className="card space-y-2 p-4 text-sm text-ink-2">
-        <div className="flex justify-between"><span className="text-ink-3">Portal version</span><span className="font-semibold text-ink-1">v1.0.7</span></div>
-        <div className="flex justify-between"><span className="text-ink-3">Desktop client installer</span><span className="font-semibold text-accent">v1.0.7 (Win64)</span></div>
+        <div className="flex justify-between"><span className="text-ink-3">Portal version</span><span className="font-semibold text-ink-1">v1.0.9</span></div>
+        <div className="flex justify-between"><span className="text-ink-3">Desktop client installer</span><span className="font-semibold text-accent">v1.0.9 (Win64)</span></div>
         <div className="flex justify-between"><span className="text-ink-3">AWS Cloud GPU Engine</span><span className="font-mono text-xs text-blue-400">Active (http://13.203.71.14:8000)</span></div>
         <div className="flex justify-between"><span className="text-ink-3">Inference Backend</span><span>YOLOX + OpenCV + Zero-DCE Night Vision</span></div>
         <div className="flex justify-between"><span className="text-ink-3">Stream Sync</span><span>Zero-Lag MJPEG Burn-In & Ghost Eviction</span></div>
