@@ -30,17 +30,17 @@ const DEFAULT_FALLBACK_RELEASES: GithubRelease[] = [
     name: "CamAI Desktop v1.0.9 (Windows Release)",
     version: "v1.0.9",
     prerelease: false,
-    published_at: "2026-09-02T22:30:00Z",
+    published_at: "2026-09-03T01:25:00Z",
     asset_id: 110,
     asset_name: "CamAI-Desktop-Setup-1.0.9.exe",
-    size_bytes: 356715000,
+    size_bytes: 356707397,
     content_type: "application/octet-stream",
     download_url: `/downloads/CamAI-Desktop-Setup-1.0.9.exe`,
-    checksum_sha256: "e9f8a127b409c5d31206f7b82410a8b417e9231f827103ab68912c45e81f9a2b",
+    checksum_sha256: "27b124bb7c21cced5d0dbc33ab23144bbeeb9beccaaee6b545a273611d6bb281",
     release_notes: `
-### 🚀 CamAI Desktop v1.0.9 & Mobile v1.0.1 Unified Release
-- **CamAI Desktop v1.0.9**: Bundled high-speed AI vision engine for Windows x64. Streamlined interface, removed legacy map component for maximum GPU/CPU efficiency and zero-lag performance.
-- **Signed Android APK v1.0.1**: Production release key signed APK with 24/7 background AI notification alerts and 1-Click OTA updates.
+### 🚀 CamAI Desktop v1.0.9 & Mobile v1.0.9 Unified Release
+- **CamAI Desktop v1.0.9**: Synchronized MJPEG frame burn-in overlay, aggressive RTSP socket backlog flushing, and sub-50ms hardware frame decoding.
+- **Signed Android APK v1.0.9**: High-performance mobile client with 0-lag video-bounding-box synchronization and 24/7 background AI notification alerts.
     `,
   },
   {
