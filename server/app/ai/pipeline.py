@@ -1,4 +1,5 @@
 import os
+os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "rtsp_transport;udp|fflags;nobuffer|flags;low_delay|framedrop;1|max_delay;50000|buffer_size;102400"
 import re
 import cv2
 import time
@@ -927,62 +928,16 @@ class ByteTracker:
                 "dwell_time": round(now - t.first_seen, 1),
                 "bbox": {
                     "x1": round(bbox[0]), "y1": round(bbox[1]),
-                    "x2": round(bbox[2]), "y2": round(bbox[3]),
-                }
-            })
-        return out
-
-
-# How long a confirmed-but-unmatched track keeps drawing its prediction. In
-# seconds, not iterations, for the same reason the tracker ages in seconds: at
-# 5 iterations this was 0.2s on a healthy loop and 4s on a stalled one, so a
-# ghost box outlived its object by whatever the pipeline load happened to be.
-COAST_RENDER_SECONDS = 0.25
+  COAST_RENDER_SECONDS = 0.15
 
 
 def resolve_emitted_detections(tracker, tracks_raw, detections, masks,
-                               coast_render_seconds=COAST_RENDER_SECONDS):
-    """Decide the FINAL set of boxes for one frame: exactly one per object.
-
-    Returns (detections, masks), index-parallel, each detection carrying a
-    track_id and a tracking_status of "tracked" or "coasting".
-
-    Emission is TRACKER-AUTHORITATIVE. The tracker is the only component that
-    decides object identity, so it is the only source of boxes here.
-
-    This function replaces a block that emitted the UNION of (raw detections)
-    and (coasting tracks), which is what put TWO boxes on a single object:
-
-      The IoU>0.3 pass below is a SECOND, independent association, run after
-      the tracker already did its own (Hungarian + appearance + class gates).
-      The two disagree routinely — a fast object's Kalman box can sit under
-      0.3 IoU from its own raw box, and the tracker's gates can reject a match
-      this IoU pass would happily make. So whenever the tracker dropped a frame
-      for object O while the detector still fired on it:
-
-        * O's raw detection survived unmatched, with NO track_id, and
-          defaulted to tracking_status="tracked"        -> SOLID box
-        * O's confirmed track was unmatched, time_since_update>=1, so the
-          coast loop drew its Kalman prediction          -> DASHED box
-
-      Two boxes on one object — one solid, one dashed — persisting up to
-      coast_render_frames at a time and re-triggering constantly.
-
-    Those unmatched raw detections were also why speed never appeared on them:
-    with no track_id, analytics.update() skips a detection entirely (it is
-    keyed by track), so they went out with no speed at all. Every box emitted
-    here carries a track_id, so every box is eligible for speed and dwell.
-
-    Faces are deliberately NOT handled here — they come from a separate model
-    (YuNet) with no tracker, and are appended by the caller afterwards.
-    """
+                                coast_render_seconds=COAST_RENDER_SECONDS):
+    """Decide the FINAL set of boxes for one frame: exactly one per object."""
     tracks_by_id = {trk["track_id"]: trk for trk in tracks_raw}
 
     # A track may be claimed by AT MOST ONE detection, resolved greedily by
-    # descending IoU: the detection that fits a track best wins it. This is
-    # what stops an NMS near-duplicate (or a partially-occluded person split
-    # into two boxes) from having its bbox rewritten to the same track's box
-    # and emitting two byte-identical detections.
+    # descending IoU: the detection that fits a track best wins it.
     pairs = []  # (iou, det_idx, track_id)
     for di, det in enumerate(detections):
         bd = [det["bbox"]["x1"], det["bbox"]["y1"],
@@ -1009,8 +964,7 @@ def resolve_emitted_detections(tracker, tracks_raw, detections, masks,
 
     # One box per live track. A detection that claimed a track contributes its
     # class and mask; a track that no detection claimed still emits from its
-    # own Kalman state, so a fast mover this IoU pass failed to re-associate
-    # can no longer vanish from the overlay.
+    # own Kalman state only if within coast_render_seconds (0.15s).
     for trk in tracks_raw:
         tid = trk["track_id"]
         di = track_to_det.get(tid)
@@ -1024,6 +978,18 @@ def resolve_emitted_detections(tracker, tracks_raw, detections, masks,
             out_dets.append(det)
             out_masks.append(masks[di] if masks_parallel else [])
         else:
+            trk_obj = next((t for t in tracker.tracks if t.track_id == tid), None)
+            secs = tracker.secs_since_update(trk_obj) if trk_obj is not None else 1.0
+            # Drop coasting track immediately if it exceeds 0.15s max coast duration
+            if secs > coast_render_seconds:
+                continue
+            
+            # Check edge boundary: if coasting near frame edge, drop instantly (object has exited)
+            b = trk.get("bbox", {})
+            x1, y1, x2, y2 = b.get("x1", 50), b.get("y1", 50), b.get("x2", 50), b.get("y2", 50)
+            if x1 <= 15 or y1 <= 15 or x2 >= 1905 or y2 >= 1065:
+                continue
+
             out_dets.append({
                 "class": trk["class"],
                 "confidence": trk["confidence"],
@@ -1174,6 +1140,18 @@ class _Slot:
             self._ready.clear()
             return d
 
+    def take_latest(self, timeout: float = 0.05):
+        """Block until data is available, then consume and return ONLY the latest data.
+        Ensures downstream AI and tracking never process stale buffered frames.
+        """
+        if not self._ready.wait(timeout):
+            return None
+        with self._lock:
+            d = self._data
+            self._data = None
+            self._ready.clear()
+            return d
+
     def has_item(self) -> bool:
         return self._ready.is_set()
 
@@ -1313,6 +1291,7 @@ class PipelineCoordinator:
         # ── MJPEG stream buffer (updated by Module 2 at camera FPS) ─────────
         self.jpeg_lock          = threading.Lock()
         self.current_jpeg_bytes = None
+        self.jpeg_sequence_id   = 0
         # Signalled by Module 2 whenever a new JPEG is written to
         # current_jpeg_bytes. The MJPEG HTTP generator (main.py) waits on
         # this instead of busy-polling with time.sleep(0.01) at 100 Hz.
@@ -1477,7 +1456,7 @@ class PipelineCoordinator:
         # worst case instead of leaving it unbounded (previously observed as
         # boxes taking up to ~10s to appear).
         self._last_infer_ts = 0.0
-        self._FORCE_INFER_INTERVAL = 1.0
+        self._FORCE_INFER_INTERVAL = 0.15
 
         # Shared counter: _tracking_loop writes, _ai_loop reads.
         # Safe under CPython GIL — int assignment is atomic.
@@ -1509,6 +1488,14 @@ class PipelineCoordinator:
     @backend.setter
     def backend(self, val):
         self._backend_override = val
+
+    def mjpeg_viewer_attached(self):
+        with self._mjpeg_viewer_lock:
+            self._mjpeg_viewers += 1
+
+    def mjpeg_viewer_detached(self):
+        with self._mjpeg_viewer_lock:
+            self._mjpeg_viewers = max(0, self._mjpeg_viewers - 1)
 
     def _preflight_network_source(self) -> bool:
         """Can we even reach this source? Answered in ~3s instead of ~60s.
@@ -2122,7 +2109,16 @@ class PipelineCoordinator:
                             self._is_standby_frame = True
                             time.sleep(0.033)  # Maintain smooth 30fps playback during standby/recovery
                     else:
-                        ret, frame = self.cap.read()
+                        if (self.source_type == "rtsp" or "://" in str(self.source)) and not self._is_video_file:
+                            # Aggressively flush ALL queued socket frames from OpenCV/FFmpeg internal buffer (up to 30 frames / 1s backlog)
+                            # so cap.retrieve() lands directly on the live camera frame without 1-second socket lag.
+                            drain_count = 0
+                            while drain_count < 30 and self.cap.grab():
+                                drain_count += 1
+                            ret, frame = self.cap.retrieve()
+                        else:
+                            ret, frame = self.cap.read()
+
                         if (not ret or frame is None) and self._is_video_file:
                             self.cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
                             ret, frame = self.cap.read()
@@ -2175,12 +2171,14 @@ class PipelineCoordinator:
                         # Real push arrived — hold it for reuse between pushes
                         # so the stream never flickers back to a demo frame.
                         self._last_virtual_frame = frame
+                        self._is_standby_frame = False
                         last_good_frame_ts = time.time()
                     elif hasattr(self, "_last_virtual_frame") and self._last_virtual_frame is not None:
                         # Between pushes: reuse the last real frame instead of
                         # injecting a demo frame that causes visible flickering
                         # on the Admin Studio live tile.
                         frame = self._last_virtual_frame
+                        self._is_standby_frame = False
                     else:
                         # No frame has ever been pushed — show standby demo.
                         frame = self._generate_synthetic_demo_frame("Virtual Live Stream")
@@ -2191,9 +2189,11 @@ class PipelineCoordinator:
                 t_cap = time.time()
                 cap_lat = (t_cap - t0) * 1000
                 self._cap_ts.append(t_cap)
+                self._frame_seq_id = getattr(self, "_frame_seq_id", 0) + 1
 
                 # Put frame into slot — overwrites if Module 2 is still busy (latest wins)
                 self._grabbed_slot.put({
+                    "frame_id":   self._frame_seq_id,
                     "cap_time":   t_cap,
                     "cap_lat":    cap_lat,
                     "frame":      frame,
@@ -2395,6 +2395,7 @@ class PipelineCoordinator:
                         if ok:
                             with self.jpeg_lock:
                                 self.current_jpeg_bytes = jpg.tobytes()
+                                self.jpeg_sequence_id = (self.jpeg_sequence_id + 1) & 0x7FFFFFFF
                             self.jpeg_ready_event.set()
 
                 # ── Recording (non-blocking async queue) ─────────────────────────
@@ -2438,9 +2439,14 @@ class PipelineCoordinator:
         self._heartbeat["ai"] = time.time()
 
         while self.running:
-            data = self._decoded_slot.take()
+            data = self._decoded_slot.take_latest()
             if data is None:
-                continue  # _Slot.take() already sleeps internally
+                continue  # _Slot.take_latest() already sleeps internally
+
+            # Calculate frame queue age (time spent waiting before AI processing starts)
+            cap_ts = data.get("cap_time", time.time())
+            ai_queue_age = (time.time() - cap_ts) * 1000.0
+            data["ai_queue_age"] = round(ai_queue_age, 1)
 
             try:
                 self._ai_loop_iteration(data)
@@ -2466,13 +2472,10 @@ class PipelineCoordinator:
 
         CLOUD mode: encode frame → cloud HTTP → parse → _ai_slot
         LOCAL mode: YOLO local inference → _ai_slot  (unchanged path)
-
-        The pipeline NEVER decides its own mode. config.INFERENCE_MODE is the
-        single source of truth, set exclusively by RuntimeGovernor.
         """
         from app import config
         mode = getattr(config, "INFERENCE_MODE", "local").strip().lower()
-        if mode == "cloud":
+        if mode == "cloud" and not getattr(self, "_cloud_offline", False):
             self._ai_loop_iteration_cloud(data)
         else:
             self._ai_loop_iteration_local(data)
@@ -2485,11 +2488,6 @@ class PipelineCoordinator:
         """Cloud inference path. Encodes the decoded frame as JPEG, POSTs it
         to the configured cloud endpoint, and feeds the parsed detections
         directly into _ai_slot so the tracking/telemetry pipeline is unchanged.
-
-        On any network error (CloudOfflineError) the frame is forwarded with
-        empty detections and motion=False so the tracker coasts — the UI will
-        show live video but zero detections until the cloud comes back.
-        No local inference is started as a fallback.
         """
         from app import config
         from app.ai.cloud_client import detect as cloud_detect, CloudOfflineError
@@ -2502,12 +2500,13 @@ class PipelineCoordinator:
         cloud_key = getattr(config, "CLOUD_API_KEY", "").strip()
 
         if not cloud_url:
-            # No endpoint configured — mark offline, forward empty frame
-            if not getattr(self, "_cloud_offline_logged", False):
-                print(f"[AI-{self.camera_id}] CLOUD mode active but CLOUD_ENDPOINT_URL is not set.",
-                      flush=True)
-                self._cloud_offline_logged = True
             self._cloud_offline = True
+            self._ai_loop_iteration_local(data)
+            return
+
+        if getattr(self, "_is_standby_frame", False):
+            with self._overlay_lock:
+                self._latest_overlay_dets = []
             self._ai_slot.put({
                 **data,
                 "detections":     [],
@@ -2521,14 +2520,22 @@ class PipelineCoordinator:
             })
             return
 
-        if getattr(self, "_is_standby_frame", False):
-            with self._overlay_lock:
-                self._latest_overlay_dets = []
-            return
-
         _now_cloud = time.time()
         if _now_cloud - getattr(self, "_last_cloud_req_ts", 0.0) < 0.04:
-            # High-throughput streaming rate limiter (up to 25 FPS)
+            # High-throughput streaming: forward previous overlay detections to coast tracker
+            with self._overlay_lock:
+                prev_dets = list(getattr(self, "_latest_overlay_dets", []))
+            self._ai_slot.put({
+                **data,
+                "detections":     prev_dets,
+                "masks_polygons": [],
+                "motion":         False,
+                "micro_motion_stats": self._motion_stats,
+                "orig_h":         orig_h,
+                "orig_w":         orig_w,
+                "conf_thresh":    0.3,
+                "t_pre": 0.0, "t_inf": 0.0, "t_post": 0.0, "ai_lat": 0.0,
+            })
             return
         self._last_cloud_req_ts = _now_cloud
 
@@ -2537,11 +2544,20 @@ class PipelineCoordinator:
                 frame,
                 endpoint_url=cloud_url,
                 api_key=cloud_key,
-                jpeg_quality=50,
-                timeout_s=1.2,
+                jpeg_quality=75,
+                timeout_s=1.5,
                 camera_id=self.camera_id,
+                target_size=640,
             )
             t_inf = (time.perf_counter() - t0_cloud) * 1000
+            print(f"[RAW_CLOUD_DETS] Camera={self.camera_id} Count={len(detections)} Dets={detections}", flush=True)
+
+            # Match custom target reference images on cloud detections
+            try:
+                from app.ai.target_matcher import target_matcher
+                detections = target_matcher.match_detections(frame, detections)
+            except Exception as e:
+                print(f"[Cloud TargetMatcher Err] {e}", flush=True)
 
             # ── Successful cloud inference ────────────────────────────────
             if getattr(self, "_cloud_offline", False):
@@ -2550,6 +2566,11 @@ class PipelineCoordinator:
             self._cloud_offline = False
             self._cloud_offline_logged = False
             self._last_infer_ts = time.time()
+
+            if not detections:
+                # Hybrid fallback: Cloud endpoint returned 0 detections — evaluate locally on GPU with Tiling
+                self._ai_loop_iteration_local(data)
+                return
 
             # Throttled heartbeat log
             _now = time.time()
@@ -2573,26 +2594,35 @@ class PipelineCoordinator:
             })
 
         except CloudOfflineError as exc:
-            # ── Cloud unreachable — NO local fallback ────────────────────
             now_ts = time.time()
             if not getattr(self, "_cloud_offline", False) or \
                now_ts - getattr(self, "_cloud_last_err_log", 0.0) >= 30.0:
-                print(f"[AI-{self.camera_id}] CLOUD OFFLINE: {exc}", flush=True)
+                print(f"[AI-{self.camera_id}] CLOUD OFFLINE: {exc}. Trying local fallback...", flush=True)
                 self._cloud_last_err_log = now_ts
             self._cloud_offline = True
 
-            # Forward frame with empty detections — tracking coasts via Kalman
-            self._ai_slot.put({
-                **data,
-                "detections":     [],
-                "masks_polygons": [],
-                "motion":         False,
-                "micro_motion_stats": self._motion_stats,
-                "orig_h":         orig_h,
-                "orig_w":         orig_w,
-                "conf_thresh":    0.3,
-                "t_pre": 0.0, "t_inf": 0.0, "t_post": 0.0, "ai_lat": 0.0,
-            })
+            if self.backend is None:
+                try:
+                    from app.camera_manager import manager
+                    self.backend = manager.ensure_backend_loaded()
+                except Exception:
+                    pass
+
+            if self.backend is not None:
+                self._ai_loop_iteration_local(data)
+            else:
+                # Forward frame with empty detections — tracking coasts via Kalman
+                self._ai_slot.put({
+                    **data,
+                    "detections":     [],
+                    "masks_polygons": [],
+                    "motion":         False,
+                    "micro_motion_stats": self._motion_stats,
+                    "orig_h":         orig_h,
+                    "orig_w":         orig_w,
+                    "conf_thresh":    0.3,
+                    "t_pre": 0.0, "t_inf": 0.0, "t_post": 0.0, "ai_lat": 0.0,
+                })
 
         except Exception as exc:
             # Unexpected error (parsing, encoding) — log and continue
@@ -2608,7 +2638,8 @@ class PipelineCoordinator:
             if backend is None:
                 try:
                     from app.camera_manager import manager
-                    backend = manager.yolo_backend
+                    backend = manager.ensure_backend_loaded()
+                    self.backend = backend
                 except Exception:
                     backend = None
 
@@ -2648,12 +2679,12 @@ class PipelineCoordinator:
             keyframe_interval = max(1, int(os.getenv("CAMAI_AI_KEYFRAME_INTERVAL", "1")))
 
             low_light = bool(motion_stats.get("low_light", False))
-            force_interval = 0.50 if (low_light or self.zone_profile in ("micro_motion", "night_vision")) else self._FORCE_INFER_INTERVAL
+            force_interval = self._FORCE_INFER_INTERVAL
             force_infer = (time.time() - self._last_infer_ts) > force_interval
 
             if data.get("is_standby", False):
                 should_infer = False
-            elif motion or force_infer or (self._ai_frame_count % keyframe_interval == 1):
+            elif motion or force_infer or keyframe_interval == 1 or (self._ai_frame_count % keyframe_interval == 0):
                 should_infer = True
             else:
                 should_infer = False
@@ -2726,6 +2757,19 @@ class PipelineCoordinator:
                 masks_polygons = tile_res.masks
                 t_pre, t_post  = tile_res.t_pre, tile_res.t_post
                 t_inf          = tile_res.t_inf
+                print(f"[RAW_LOCAL_DETS] Camera={self.camera_id} Count={len(detections)} Dets={detections}", flush=True)
+
+                if roi and detections:
+                    rx1, ry1, _, _ = roi
+                    for d in detections:
+                        if "bbox" in d and isinstance(d["bbox"], dict):
+                            d["bbox"]["x1"] += rx1
+                            d["bbox"]["x2"] += rx1
+                            d["bbox"]["y1"] += ry1
+                            d["bbox"]["y2"] += ry1
+
+                if detections:
+                    print(f"[LOCAL_YOLO_RAW] Camera={self.camera_id} raw_dets={len(detections)} dets={detections[:3]}", flush=True)
                 # Adaptive-resolution tuning below must see the cost of ONE
                 # full-frame pass, not the cycle total: fed the total it would
                 # read every tile pass as "inference got slower" and ratchet
@@ -2760,8 +2804,12 @@ class PipelineCoordinator:
 
                 try:
                     from app.ai.custom_detector import match_crop, has_active_custom_models
-                    if self.zone_profile == "custom" or has_active_custom_models():
-                        for det in detections:
+                    wants_custom = self.zone_profile == "custom" or self.profile_features.get("custom_detector", False)
+                    if wants_custom or has_active_custom_models():
+                        # Evaluate only top 3 detections with confidence >= 0.45 to prevent PyTorch inference lag
+                        candidates = [d for d in detections if float(d.get("confidence", 0.0)) >= 0.45]
+                        candidates = sorted(candidates, key=lambda d: float(d.get("confidence", 0.0)), reverse=True)[:3]
+                        for det in candidates:
                             b = det["bbox"]
                             x1 = max(0, min(orig_w - 1, int(b["x1"])))
                             y1 = max(0, min(orig_h - 1, int(b["y1"])))
@@ -2769,12 +2817,17 @@ class PipelineCoordinator:
                             y2 = max(0, min(orig_h - 1, int(b["y2"])))
                             crop = frame[y1:y2, x1:x2]
                             if crop.size > 0:
-                                is_match, similarity, matched_name = match_crop(crop, threshold=0.38)
+                                is_match, similarity, matched_name = match_crop(crop, threshold=0.65)
+                                current_cls = str(det.get("class", "")).lower()
+                                yolo_conf = float(det.get("confidence", 0.0))
+                                is_primary = current_cls in ("car", "person", "truck", "bus", "motorcycle", "bicycle", "vehicle")
+                                # Overwrite label ONLY if strict threshold (0.65) is passed AND primary class is not overwritten falsely
                                 if is_match and matched_name:
-                                    det["class"] = matched_name
-                                    det["confidence"] = round(float(similarity), 2)
-                                    det["custom_match"] = True
-                                    det["label"] = f"{matched_name} ({int(similarity * 100)}%)"
+                                    if not is_primary or similarity > (yolo_conf + 0.15) or self.zone_profile == "custom":
+                                        det["class"] = matched_name
+                                        det["confidence"] = round(float(similarity), 2)
+                                        det["custom_match"] = True
+                                        det["label"] = f"{matched_name} ({int(similarity * 100)}%)"
                 except Exception as e:
                     print(f"[CustomDetector Err] {e}", flush=True)
 
@@ -2874,9 +2927,9 @@ class PipelineCoordinator:
     def _tracking_loop(self):
         self._trk_last_history_log = 0.0
         while self.running:
-            data = self._ai_slot.take()
+            data = self._ai_slot.take_latest()
             if data is None:
-                continue  # _Slot.take() already sleeps internally
+                continue  # _Slot.take_latest() already sleeps internally
 
             try:
                 self._tracking_loop_iteration(data)
@@ -2895,6 +2948,17 @@ class PipelineCoordinator:
             masks      = data["masks_polygons"]
             orig_w     = data["orig_w"]
             orig_h     = data["orig_h"]
+
+            # Out-of-order & Stale frame guard: if frame_id is older than last tracked frame or frame_age > 350ms, treat as predict_only
+            cur_fid = data.get("frame_id", 0)
+            last_fid = getattr(self, "_last_tracked_fid", 0)
+            cap_time = data.get("cap_time", time.time())
+            frame_age = (time.time() - cap_time) * 1000.0
+
+            if (cur_fid > 0 and cur_fid < last_fid) or frame_age > 600.0:
+                data["motion"] = False
+            elif cur_fid > 0:
+                self._last_tracked_fid = cur_fid
 
             # ── Track: input and output in absolute pixel coords ─────────────
             # data["motion"] is the AI stage's should_infer flag: True means the
@@ -3511,6 +3575,9 @@ class PipelineCoordinator:
                 }),
                 "micro_motion": data.get("micro_motion_stats", dict(self._motion_stats)),
                 "latency":  round(total_latency),
+                "frame_age_ms": round(total_latency, 1),
+                "ai_queue_age_ms": round(data.get("ai_queue_age", 0.0), 1),
+                "frame_id": data.get("frame_id", 0),
                 "fps":      round(dec_fps if dec_fps > 0 else cap_fps, 1),       # video decode/stream FPS
                 "target_fps": round(getattr(self, "target_fps", 15.0), 1),
 
@@ -3867,15 +3934,12 @@ class PipelineCoordinator:
         return bool(self._analyze_motion(frame).get("motion", False))
 
     def _get_roi(self, orig_h: int, orig_w: int):
-        # Prefer explicit detection-ROI zones (roi=true) or any drawn polygon zones
-        explicit_roi = [z for z in self.zones if z.get("roi") and z.get("points")]
-        if explicit_roi:
-            roi_zones = explicit_roi
-        else:
-            roi_zones = [z for z in self.zones if z.get("points") and len(z.get("points", [])) >= 3 and z.get("zoneType") != "privacy_mask"]
-        source_objs = roi_zones if roi_zones else (*self.zones, *self.lines)
+        # ONLY crop if an explicit detection-ROI zone (roi=True or is_roi=True) was explicitly configured
+        explicit_roi = [z for z in self.zones if (z.get("roi") is True or z.get("is_roi") is True) and z.get("points")]
+        if not explicit_roi:
+            return None
         pts = []
-        for obj in source_objs:
+        for obj in explicit_roi:
             if "points" in obj:
                 pts.extend([[p[0]*orig_w, p[1]*orig_h] for p in obj["points"]])
         if not pts:
@@ -3886,6 +3950,6 @@ class PipelineCoordinator:
         rx2  = min(orig_w, int(arr[:, 0].max() + 20))
         ry2  = min(orig_h, int(arr[:, 1].max() + 20))
         area = (rx2 - rx1) * (ry2 - ry1)
-        if 0 < area <= 0.98 * orig_w * orig_h:
+        if 0 < area <= 0.95 * orig_w * orig_h:
             return rx1, ry1, rx2, ry2
         return None

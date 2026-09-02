@@ -65,13 +65,14 @@ def _object_category(class_name: str) -> str:
 #     COCO_CLASS_MAP, so the detector cannot emit them.
 #   - "face" IS listed for security and factory: YuNet genuinely produces it.
 PRODUCIBLE_VEHICLE_CLASSES = {"car", "bus", "truck", "motorcycle", "bicycle"}
+PRODUCIBLE_ANIMAL_CLASSES = {"dog", "cat", "cow", "horse", "sheep", "animal"}
 
 PROFILE_CLASSES = {
     "traffic": set(PRODUCIBLE_VEHICLE_CLASSES) | {"person", "traffic_light", "stop_sign", "helmet", "no_helmet", "number_plate"},
-    "security": set(PRODUCIBLE_VEHICLE_CLASSES) | {"person", "backpack", "handbag", "suitcase", "umbrella", "face"},
-    "factory": set(PRODUCIBLE_VEHICLE_CLASSES) | {"person", "face"},
-    "micro_motion": set(PRODUCIBLE_VEHICLE_CLASSES) | {"person", "backpack", "handbag", "suitcase", "umbrella", "face", "micro_motion"},
-    "custom": set(PRODUCIBLE_VEHICLE_CLASSES) | {"person", "backpack", "handbag", "suitcase", "umbrella", "face", "custom_object"},
+    "security": set(PRODUCIBLE_VEHICLE_CLASSES) | set(PRODUCIBLE_ANIMAL_CLASSES) | {"person", "backpack", "handbag", "suitcase", "umbrella", "face"},
+    "factory": set(PRODUCIBLE_VEHICLE_CLASSES) | set(PRODUCIBLE_ANIMAL_CLASSES) | {"person", "face"},
+    "micro_motion": set(PRODUCIBLE_VEHICLE_CLASSES) | set(PRODUCIBLE_ANIMAL_CLASSES) | {"person", "backpack", "handbag", "suitcase", "umbrella", "face", "micro_motion"},
+    "custom": set(PRODUCIBLE_VEHICLE_CLASSES) | set(PRODUCIBLE_ANIMAL_CLASSES) | {"person", "backpack", "handbag", "suitcase", "umbrella", "face", "custom_object"},
 }
 
 
@@ -83,6 +84,7 @@ FEATURE_CLASSES = {
     "vehicle_detection": set(PRODUCIBLE_VEHICLE_CLASSES),
     "vehicle_classification": set(PRODUCIBLE_VEHICLE_CLASSES),
     "vehicle_counting": set(PRODUCIBLE_VEHICLE_CLASSES),
+    "animal_detection": set(PRODUCIBLE_ANIMAL_CLASSES),
     "face_detection": {"face"},
     "helmet_detection": {"helmet", "no_helmet"},
     "anpr": {"number_plate"},
@@ -332,6 +334,12 @@ CLASS_HEIGHT_M = {
     "ambulance": 2.20,
     "police_car": 1.50,
     "fire_truck": 3.20,
+    "dog": 0.60,
+    "cat": 0.35,
+    "cow": 1.40,
+    "horse": 1.60,
+    "sheep": 0.75,
+    "animal": 0.70,
 }
 
 # --- Homography Transformation for Enterprise Speed Detection ---

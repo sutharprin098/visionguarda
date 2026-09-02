@@ -12,7 +12,7 @@
 // model (e.g. a Haar/YuNet face pass). None ship today.
 
 /** Mirrors server/app/analytics.py _object_category() — keep in sync. */
-export type ModuleKey = "person" | "vehicle" | "item" | "face";
+export type ModuleKey = "person" | "vehicle" | "item" | "animal" | "face";
 
 export interface AiModule {
   key: ModuleKey;
@@ -30,6 +30,7 @@ export interface AiModule {
 export const AI_MODULES: AiModule[] = [
   { key: "person", label: "Person Detection", classes: ["person"] },
   { key: "vehicle", label: "Vehicle Detection", classes: ["bicycle", "car", "motorcycle", "bus", "truck"] },
+  { key: "animal", label: "Animals & Pets", classes: ["dog", "cat", "cow", "horse", "sheep", "animal"] },
   { key: "item", label: "Unattended Items", classes: ["backpack", "umbrella", "handbag", "suitcase"] },
   // Enabled per-camera in the zone-profile editor (face_detection), which is
   // what actually gates the engine-side pass; this entry only controls whether
@@ -39,7 +40,7 @@ export const AI_MODULES: AiModule[] = [
 
 export type ModuleState = Record<ModuleKey, boolean>;
 
-export const DEFAULT_MODULES: ModuleState = { person: true, vehicle: true, item: true, face: true };
+export const DEFAULT_MODULES: ModuleState = { person: true, vehicle: true, animal: true, item: true, face: true };
 
 const KEY = (cameraId: string) => `camai.modules.${cameraId}`;
 

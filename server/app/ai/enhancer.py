@@ -61,12 +61,16 @@ class ZeroDCEEnhancer:
             gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         return float(np.mean(gray))
 
-    def _enhance_curves_lut(self, mean_lum: float, thresh: float, iterations: int = 6, target_lum: float = 145.0, force_enable: bool = False) -> np.ndarray:
+    def _enhance_curves_lut(self, mean_lum: float, thresh: float, iterations: int = 4, target_lum: float = 145.0, force_enable: bool = False) -> np.ndarray:
         """
         Ultra-fast C-speed Lookup Table (LUT) solver for Zero-DCE curve equation:
         LE_n(x) = LE_{n-1}(x) + A * LE_{n-1}(x) * (1 - LE_{n-1}(x))
         Applies smooth Zero-Reference tone-curve mapping with highlight protection.
         """
+        cache_key = (round(mean_lum, 1), round(thresh, 1), force_enable)
+        if getattr(self, "_last_lut_params", None) == cache_key and getattr(self, "_last_lut_cache", None) is not None:
+            return self._last_lut_cache
+
         lut_in = np.linspace(0.0, 1.0, 256, dtype=np.float32)
         mean_norm = mean_lum / 255.0
         
@@ -83,7 +87,10 @@ class ZeroDCEEnhancer:
         for _ in range(iterations):
             enhanced_lut = enhanced_lut + alpha * enhanced_lut * (1.0 - enhanced_lut)
         
-        return (np.clip(enhanced_lut, 0.0, 1.0) * 255.0).astype(np.uint8)
+        lut_res = (np.clip(enhanced_lut, 0.0, 1.0) * 255.0).astype(np.uint8)
+        self._last_lut_params = cache_key
+        self._last_lut_cache = lut_res
+        return lut_res
 
 
     def enhance(
@@ -119,16 +126,12 @@ class ZeroDCEEnhancer:
             stats["latency_ms"] = round((time.time() - t0) * 1000.0, 2)
             return frame, stats
 
-        # Sub-millisecond Color-Preserving Luminance Zero-DCE Curve Solver
-        ycrcb = cv2.cvtColor(frame, cv2.COLOR_BGR2YCrCb)
-        y_channel = ycrcb[:, :, 0]
-        
-        lut_y = self._enhance_curves_lut(mean_lum, thresh, iterations=6, target_lum=145.0, force_enable=force_enable)
-        ycrcb[:, :, 0] = cv2.LUT(y_channel, lut_y)
-        enhanced_bgr = cv2.cvtColor(ycrcb, cv2.COLOR_YCrCb2BGR)
+        # Direct 3-channel C-speed Zero-DCE Curve Solver (eliminates expensive cvtColor back-and-forth)
+        lut_y = self._enhance_curves_lut(mean_lum, thresh, iterations=4, target_lum=145.0, force_enable=force_enable)
+        enhanced_bgr = cv2.LUT(frame, lut_y)
         
         stats["zero_dce_applied"] = True
-        stats["method"] = "lut_curve_solver"
+        stats["method"] = "fast_bgr_lut"
         stats["latency_ms"] = round((time.time() - t0) * 1000.0, 2)
         return enhanced_bgr, stats
 

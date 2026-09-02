@@ -55,10 +55,10 @@ def detect(
     frame: np.ndarray,
     endpoint_url: str,
     api_key: str = "",
-    jpeg_quality: int = 60,
-    timeout_s: float = 2.0,
+    jpeg_quality: int = 70,
+    timeout_s: float = 0.40,
     camera_id: str = "default",
-    target_size: int = 320,
+    target_size: int = 640,
 ) -> List[Dict[str, Any]]:
     """Send `frame` to the cloud endpoint and return a list of detections."""
     t0 = time.perf_counter()
@@ -151,15 +151,34 @@ def detect(
 
 
 def ping(endpoint_url: str, timeout_s: float = 2.0) -> bool:
-    """Return True if the cloud endpoint answers a GET /health or /api/status within timeout_s."""
+    """Return True if the cloud endpoint actually answers a POST /api/detect request within timeout_s."""
     base = endpoint_url.rstrip("/")
-    for path in ["/health", "/api/status", "/"]:
-        url = base + path
+    url = base + "/api/detect"
+    try:
+        body = json.dumps({"image_b64": "", "target_size": 320}).encode("utf-8")
+        req = urllib.request.Request(
+            url,
+            data=body,
+            headers={"Content-Type": "application/json", "User-Agent": "CamAI/1.0"},
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=timeout_s) as resp:
+            if resp.getcode() >= 200 and resp.getcode() < 300:
+                return True
+    except Exception:
+        pass
+
+    # Also check /health or /api/status if endpoint has health check
+    for path in ["/health", "/api/status"]:
+        url_h = base + path
         try:
-            req = urllib.request.Request(url, headers={"User-Agent": "CamAI/1.0"})
+            req = urllib.request.Request(url_h, headers={"User-Agent": "CamAI/1.0"})
             with urllib.request.urlopen(req, timeout=timeout_s) as resp:
                 if resp.getcode() == 200:
-                    return True
+                    # Make sure it's not a generic web portal by checking body for 'cloud' or 'status'
+                    content = resp.read().decode("utf-8", errors="ignore").lower()
+                    if "cloud" in content or "inference" in content or "gpu" in content or "yolo" in content:
+                        return True
         except Exception:
             pass
     return False

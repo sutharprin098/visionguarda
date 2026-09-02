@@ -113,6 +113,12 @@ COCO_CLASS_MAP = {
     7: "truck",
     9: "traffic_light",
     11: "stop_sign",
+    # Animal classes - enabled for livestock, pets, and stray animal detection
+    15: "cat",
+    16: "dog",
+    17: "horse",
+    18: "sheep",
+    19: "cow",
     # Unattended-item classes — enabled specifically so abandoned-object
     # detection (CameraAnalytics.ITEM_CLASSES) has real detections to work
     # with instead of being permanently a no-op.
@@ -153,6 +159,12 @@ _GEOMETRY_BOUNDS = {
     "car":        {"min_area_frac": 0.00010, "max_area_frac": 0.85, "max_aspect": 6.0},
     "bus":        {"min_area_frac": 0.00010, "max_area_frac": 0.90, "max_aspect": 8.0},
     "truck":      {"min_area_frac": 0.00010, "max_area_frac": 0.90, "max_aspect": 8.0},
+    "dog":        {"min_area_frac": 0.00005, "max_area_frac": 0.85, "max_aspect": 6.0},
+    "cat":        {"min_area_frac": 0.00005, "max_area_frac": 0.85, "max_aspect": 6.0},
+    "cow":        {"min_area_frac": 0.00010, "max_area_frac": 0.90, "max_aspect": 6.0},
+    "horse":      {"min_area_frac": 0.00010, "max_area_frac": 0.90, "max_aspect": 6.0},
+    "sheep":      {"min_area_frac": 0.00005, "max_area_frac": 0.85, "max_aspect": 6.0},
+    "animal":     {"min_area_frac": 0.00005, "max_area_frac": 0.90, "max_aspect": 6.0},
     "traffic_light": {"min_area_frac": 0.00001, "max_area_frac": 0.20, "max_aspect": 8.0},
     "stop_sign":     {"min_area_frac": 0.00002, "max_area_frac": 0.25, "max_aspect": 4.0},
 }

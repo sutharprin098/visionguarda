@@ -113,7 +113,7 @@ class TemporalFusion:
 
         history_s = float(getattr(settings, "temporal_history_s", 0.5))
         max_carry = int(getattr(settings, "temporal_max_carry", 2))
-        smooth = float(getattr(settings, "temporal_smoothing", 0.5))
+        smooth = float(getattr(settings, "temporal_smoothing", 0.15))
 
         matched_obs = set()
         stats = {"carried": 0, "suppressed": 0, "new": 0, "smoothed": 0}
@@ -130,13 +130,16 @@ class TemporalFusion:
                     best, best_iou = ob, v
             if best is not None and best_iou >= float(getattr(settings, "temporal_iou", 0.3)):
                 matched_obs.add(best)
-                # Smooth the box toward the new measurement instead of snapping
-                # to it. Pure snapping is what makes an overlay shake on an
-                # object that is standing still: consecutive detections of the
-                # same person differ by a few px and the box visibly buzzes.
+                # Dynamic velocity-adaptive smoothing:
+                # Stationary/slow objects (disp < 12px) get smoothing to prevent overlay buzzing.
+                # Fast-moving objects (disp >= 12px) reduce smoothing to 0.0 so the box never lags behind!
                 if smooth > 0:
-                    a = 1.0 - smooth
-                    best.box = tuple(a * n + smooth * o for n, o in zip(box, best.box))
+                    cx_n, cy_n = (box[0] + box[2]) / 2.0, (box[1] + box[3]) / 2.0
+                    cx_o, cy_o = (best.box[0] + best.box[2]) / 2.0, (best.box[1] + best.box[3]) / 2.0
+                    disp = ((cx_n - cx_o) ** 2 + (cy_n - cy_o) ** 2) ** 0.5
+                    eff_smooth = smooth if disp < 12.0 else max(0.0, smooth * (1.0 - min(1.0, (disp - 12.0) / 25.0)))
+                    a = 1.0 - eff_smooth
+                    best.box = tuple(a * n + eff_smooth * o for n, o in zip(box, best.box))
                     stats["smoothed"] += 1
                 else:
                     best.box = box
@@ -210,12 +213,8 @@ class TemporalFusion:
         if not getattr(settings, "verify_enabled", True):
             return "accept"
 
-        try:
-            from app.ai.custom_detector import has_active_custom_models
-            if has_active_custom_models():
-                return "accept"
-        except Exception:
-            pass
+        if ob.cls.startswith("TARGET:") or getattr(ob, "custom_match", False):
+            return "accept"
 
         hi = float(getattr(settings, "verify_accept_conf", 0.95))
         mid = float(getattr(settings, "verify_second_pass_conf", 0.80))

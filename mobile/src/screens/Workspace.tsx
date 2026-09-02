@@ -123,15 +123,8 @@ export default function Workspace({
             return;
           }
 
-          // 5. On root Cameras view: Require double press to exit
-          const now = Date.now();
-          if (now - lastBackPressRef.current < 2000) {
-            CapApp.exitApp();
-          } else {
-            lastBackPressRef.current = now;
-            setShowExitToast(true);
-            setTimeout(() => setShowExitToast(false), 2000);
-          }
+          // 5. On root Cameras view: Minimize app to background (do not terminate app process)
+          CapApp.minimizeApp();
         });
       } catch (e) {
         console.warn("Capacitor App backButton listener:", e);

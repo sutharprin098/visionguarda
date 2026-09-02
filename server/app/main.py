@@ -739,10 +739,11 @@ def set_confidence(payload: ConfidencePayload):
 from app.ai.target_matcher import target_matcher
 
 @app.post("/api/target/upload")
+@app.post("/api/targets/enroll")
 async def upload_target_image(
     file: UploadFile = File(...),
     name: str = "Custom Target",
-    threshold: float = 0.70
+    threshold: float = 0.55
 ):
     try:
         contents = await file.read()
@@ -772,10 +773,12 @@ async def upload_target_image(
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/target/list")
+@app.get("/api/targets")
 def list_target_images():
     return {"targets": target_matcher.list_targets()}
 
 @app.delete("/api/target/{target_id}")
+@app.delete("/api/targets/{target_id}")
 def delete_target_image(target_id: str):
     success = target_matcher.remove_target(target_id)
     if not success:
@@ -1252,39 +1255,28 @@ async def get_mjpeg_stream(camera_id: str):
     # this; it was simply never wired up here.
     jpeg_event = getattr(thread, "jpeg_ready_event", None)
 
-    async def _wait_for_frame(timeout: float) -> bool:
-        if jpeg_event is None:
-            await asyncio.sleep(0.01)
-            return True
-        # Event.wait() blocks a thread, so it goes to the default executor
-        # rather than stalling the loop. Returns False on timeout.
-        return await asyncio.to_thread(jpeg_event.wait, timeout)
-
     async def mjpeg_generator():
         last_jpeg = None
+        last_seq = -1
         started = time.time()
         last_frame_ts = None
-        # The preview encode is demand-driven: Module 2 does no JPEG work at
-        # all for a camera with no viewers. The try/finally is what makes that
-        # safe — a client that navigates away, a tile that unmounts, or a
-        # cancelled request must still release its count, or the camera would
-        # keep encoding forever for a viewer that no longer exists.
         attach = getattr(thread, "mjpeg_viewer_attached", None)
         detach = getattr(thread, "mjpeg_viewer_detached", None)
         if attach:
             attach()
         try:
             while thread.running:
-                await _wait_for_frame(0.04)
                 jpeg_bytes = getattr(thread, "current_jpeg_bytes", None)
-                if jpeg_bytes is not None and jpeg_bytes is not last_jpeg:
+                curr_seq = getattr(thread, "jpeg_sequence_id", 0)
+                if jpeg_bytes is not None and (curr_seq != last_seq or jpeg_bytes is not last_jpeg):
                     last_jpeg = jpeg_bytes
+                    last_seq = curr_seq
                     last_frame_ts = time.time()
-                    if jpeg_event is not None:
-                        jpeg_event.clear()
                     yield (b'--frame\r\n'
                            b'Content-Type: image/jpeg\r\n\r\n' + jpeg_bytes + b'\r\n')
+                    await asyncio.sleep(0.02)
                 else:
+                    await asyncio.sleep(0.015)
                     idle_since = last_frame_ts if last_frame_ts is not None else started
                     if time.time() - idle_since > NO_FRAME_GRACE_S:
                         return
@@ -1541,7 +1533,11 @@ if __name__ == "__main__":
     import uvicorn
     from app.config import HOST, PORT
 
-    dev_reload = os.getenv("CAMAI_DEV_RELOAD", "").strip().lower() in ("1", "true", "yes")
+    is_headless = "--headless" in sys.argv or "--daemon" in sys.argv
+    if is_headless:
+        print("[CamAI Background Daemon] Starting continuous 24/7 headless camera & intrusion alert service...", flush=True)
+
+    dev_reload = os.getenv("CAMAI_DEV_RELOAD", "").strip().lower() in ("1", "true", "yes") and not is_headless
 
     # Wait if socket is temporarily busy in TIME_WAIT
     for attempt in range(1, 6):

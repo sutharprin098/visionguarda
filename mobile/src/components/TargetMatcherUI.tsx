@@ -13,7 +13,7 @@ interface EnrolledTarget {
 export default function TargetMatcherUI() {
   const [targets, setTargets] = useState<EnrolledTarget[]>([]);
   const [name, setName] = useState("");
-  const [threshold, setThreshold] = useState(0.70);
+  const [threshold, setThreshold] = useState(0.55);
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);

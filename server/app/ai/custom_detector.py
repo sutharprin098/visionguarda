@@ -105,7 +105,7 @@ def _ensure_cache_loaded(force_reload=False):
                 legacy_meta = {
                     "id": legacy_id,
                     "name": "Custom Product",
-                    "active": True,
+                    "active": False,
                     "reference_count": int(legacy_arr.shape[0]),
                     "created_at": time.time()
                 }
@@ -279,7 +279,7 @@ def has_active_custom_models():
         return any(m["meta"].get("active", True) for m in _cached_models.values())
 
 
-def match_crop(crop_bgr, threshold=0.38):
+def match_crop(crop_bgr, threshold=0.65):
     """
     Matches an incoming frame crop against all ACTIVE custom models.
     Returns: (is_match, similarity_score, matched_model_name)

@@ -1,9 +1,9 @@
 [
   {
-    "id": "model_bbc978ae",
-    "name": "Box",
-    "active": true,
-    "reference_count": 6,
-    "created_at": 1787164401.4751537
+    "id": "model_legacy_default",
+    "name": "Custom Product",
+    "active": false,
+    "reference_count": 3,
+    "created_at": 1788374663.2783213
   }
 ]

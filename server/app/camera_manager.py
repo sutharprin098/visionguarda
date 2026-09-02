@@ -123,6 +123,20 @@ class CameraManager:
                 self.startup_error = str(e)
                 raise
 
+    def ensure_backend_loaded(self):
+        """Force load the local YOLO backend model even if cloud mode is set."""
+        if self.yolo_backend is None:
+            model_name = getattr(self, "selected_model_name", "yolox_tiny") or "yolox_tiny"
+            try:
+                print(f"[CameraManager] Lazy-loading fallback local model: {model_name}...", flush=True)
+                backend = EngineBackend(model_name)
+                self._apply_hardware_profile(backend)
+                self.yolo_backend = backend
+                self.startup_status = "ready"
+            except Exception as e:
+                print(f"[CameraManager] Lazy-load local model failed: {e}", flush=True)
+        return self.yolo_backend
+
     def start_cameras(self):
         from app import config
         is_cloud = getattr(config, "INFERENCE_MODE", "local").strip().lower() == "cloud"

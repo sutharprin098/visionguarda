@@ -37,7 +37,7 @@ const HEARTBEAT_TIMEOUT_MS = 12000;
 // capture stream is presumed dead and re-acquired. Declared with the original
 // watchdog design but never wired to anything until checkFrameFlow() below —
 // see the note in startFrameLoop for what that cost.
-const SEND_STALL_TIMEOUT_MS = 25000;
+const SEND_STALL_TIMEOUT_MS = 4000;
 // Ceiling on un-drained WebSocket bytes before frames start being skipped.
 //
 // Sized to roughly two frames (128KB), ensuring fast throughput at 30 FPS.
@@ -428,20 +428,14 @@ export class MediaShareSession {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
     if (Date.now() - this.lastSendOkTs <= SEND_STALL_TIMEOUT_MS) return;
 
-    // Check if media stream track is still active
-    const hasLiveTrack = this.stream?.getVideoTracks().some((t: MediaStreamTrack) => t.readyState === "live");
-    if (hasLiveTrack) {
-      // Stream is alive (e.g. paused rendering during tab transition), refresh timestamp
-      this.lastSendOkTs = Date.now();
-      return;
-    }
-
+    console.warn("[MediaShare] Frame flow stalled (>4s since last send). Re-acquiring capture stream...", {
+      cameraId: this.cameraId,
+      kind: this.kind,
+    });
     this.setStatus("reconnecting", "no frames from capture source");
-    // Reset first: acquireStream() is async and this check runs on an
-    // interval, so without it the same stall re-fires a re-acquire every tick
-    // while the first one is still in flight.
     this.lastSendOkTs = Date.now();
-    this.ensureStream();
+    this.releaseStream();
+    this.scheduleStreamReacquire();
   }
 
   private stopFrameLoop(): void {

@@ -51,11 +51,13 @@ const COLORS: Record<string, string> = {
   person: "#6366f1",
   vehicle: "#06b6d4",
   twowheeler: "#10b981",
+  animal: "#ec4899",       // vibrant magenta/pink for animals & pets
   face: "#f59e0b",
   helmet: "#22c55e",      // compliant rider — green
   no_helmet: "#ef4444",   // violation — red, reads as an alert
   number_plate: "#eab308", // amber — reads against vehicle cyan
   micro_motion: "#00ff66", // vibrant neon green for subtle motion
+  target_match: "#f43f5e", // bright rose red for enrolled target match
   other: "#8b5cf6",
 };
 
@@ -65,14 +67,16 @@ const VEHICLE_CLS_SET = new Set([
   "ambulance", "police_car", "fire_truck"
 ]);
 
+const ANIMAL_CLS_SET = new Set([
+  "dog", "cat", "cow", "horse", "sheep", "animal"
+]);
+
 function colorFor(det: TelemetryDetection): string {
   const c = det.class.toLowerCase();
   
+  if (det.custom_match || c.startsWith("target:")) return COLORS.target_match;
+
   // Color coding by speed for vehicle classes:
-  // Green: 0 to 40 km/h
-  // Yellow: 41 to 60 km/h
-  // Orange: 61 to 80 km/h
-  // Red: Above speed limit / overspeed
   if (VEHICLE_CLS_SET.has(c) && det.speed != null) {
     const spd = det.speed;
     const limit = det.speed_limit || 50;
@@ -83,7 +87,7 @@ function colorFor(det: TelemetryDetection): string {
     return "#ef4444";               // Red (> 80 km/h)
   }
 
-  if (det.custom_match) return "#a855f7";
+  if (ANIMAL_CLS_SET.has(c)) return COLORS.animal;
   if (["car", "truck", "bus", "van", "auto_rickshaw", "tractor", "emergency_vehicle"].includes(c)) return COLORS.vehicle;
   if (["motorcycle", "bicycle"].includes(c)) return COLORS.twowheeler;
   if (c === "person") return COLORS.person;
@@ -133,6 +137,7 @@ function labelFor(det: TelemetryDetection): string {
 
 export default function DetectionOverlay({ detections, mediaRef, fit = "cover" }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const rectRef = useRef<{ width: number; height: number } | null>(null);
 
   const draw = useCallback(() => {
     const canvas = canvasRef.current;
@@ -141,10 +146,12 @@ export default function DetectionOverlay({ detections, mediaRef, fit = "cover" }
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
-    // Match the canvas backing store to its CSS box (and to DPR, or boxes are
-    // blurry on the scaled displays these run on). Reassigning width/height
-    // also clears the canvas, so this is the resize AND the clear.
-    const rect = media.getBoundingClientRect();
+    let rect = rectRef.current;
+    if (!rect || rect.width === 0 || rect.height === 0) {
+      const b = media.getBoundingClientRect();
+      rect = { width: b.width, height: b.height };
+      rectRef.current = rect;
+    }
     const dpr = window.devicePixelRatio || 1;
     if (rect.width === 0 || rect.height === 0) return;
     const bw = Math.round(rect.width * dpr);
@@ -254,7 +261,18 @@ export default function DetectionOverlay({ detections, mediaRef, fit = "cover" }
   useEffect(() => {
     const media = mediaRef.current;
     if (!media) return;
-    const ro = new ResizeObserver(() => scheduleDraw());
+    const ro = new ResizeObserver((entries) => {
+      if (entries[0] && entries[0].contentRect) {
+        rectRef.current = {
+          width: entries[0].contentRect.width,
+          height: entries[0].contentRect.height,
+        };
+      } else {
+        const b = media.getBoundingClientRect();
+        rectRef.current = { width: b.width, height: b.height };
+      }
+      scheduleDraw();
+    });
     ro.observe(media);
     return () => ro.disconnect();
   }, [mediaRef, scheduleDraw]);

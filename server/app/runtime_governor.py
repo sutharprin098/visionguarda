@@ -172,8 +172,8 @@ class RuntimeGovernor:
         await asyncio.to_thread(manager.start_cameras)
 
         if self.last_error and "CLOUD OFFLINE" in self.last_error:
-            self.state = RuntimeState.FAILED
-            print(f"[RuntimeGovernor] [CLOUD] Cloud mode started with notice: {self.last_error}", flush=True)
+            print(f"[RuntimeGovernor] [CLOUD] Cloud endpoint offline ({self.last_error}). Falling back to LOCAL mode for seamless detection...", flush=True)
+            await self._activate_local_mode(manager)
         else:
             self.state = RuntimeState.CLOUD_ACTIVE
             print("[RuntimeGovernor] [CLOUD] Cloud mode ACTIVE.", flush=True)
@@ -184,6 +184,7 @@ class RuntimeGovernor:
         2. Loads the local YOLO backend.
         3. Starts camera threads — they will route AI via local EngineBackend.
         """
+        config.INFERENCE_MODE = "local"
         print("[RuntimeGovernor] [LOCAL] Stopping all camera threads...", flush=True)
         await asyncio.to_thread(manager.stop_all)
 
