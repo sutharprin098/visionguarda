@@ -41,7 +41,7 @@ export default function MobileAppShowcaseSection() {
             className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-white border border-sky-300 text-sky-800 text-xs font-bold uppercase tracking-wider mb-3 shadow-sm"
           >
             <Smartphone className="w-4 h-4 text-sky-600 animate-bounce" />
-            <span>MOBILE VISION HUB • ANDROID APK v1.0.0</span>
+            <span>MOBILE VISION HUB • ANDROID APK v1.0.9</span>
           </motion.div>
 
           <motion.h2
@@ -77,13 +77,13 @@ export default function MobileAppShowcaseSection() {
             className="mt-6 flex flex-col sm:flex-row items-center justify-center gap-3"
           >
             <a
-              href="/downloads/CamAI-Mobile-v1.0.1.apk"
+              href="/downloads/CamAI-Mobile-v1.0.9.apk"
               target="_blank"
               rel="noopener noreferrer"
               className="w-full sm:w-auto px-6 py-3.5 rounded-2xl bg-gradient-to-r from-sky-500 via-blue-600 to-indigo-600 hover:from-sky-400 hover:to-blue-500 text-white font-bold text-xs sm:text-sm shadow-xl shadow-sky-500/25 flex items-center justify-center gap-2.5 transition-all hover:scale-105"
             >
               <Smartphone size={18} />
-              <span>Download Android APK (v1.0.1)</span>
+              <span>Download Android APK (v1.0.9)</span>
               <span className="px-2 py-0.5 rounded-full bg-white/20 text-[10px] font-mono font-bold">Direct Link</span>
             </a>
 

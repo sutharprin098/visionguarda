@@ -49,7 +49,7 @@ export default function SettingsMenuModal({ isOpen, onClose, onSignOut }: Settin
     
     setTimeout(() => {
       setUpdating(false);
-      setUpdateMsg("App is updated to version v1.0.0! Reloading latest web assets & downloading APK...");
+      setUpdateMsg("App is updated to version v1.0.9! Reloading latest web assets & downloading APK...");
       if ('serviceWorker' in navigator) {
         navigator.serviceWorker.getRegistrations().then((regs) => {
           regs.forEach((r) => r.update());
@@ -57,7 +57,7 @@ export default function SettingsMenuModal({ isOpen, onClose, onSignOut }: Settin
       }
       // Trigger in-app reload & open APK download
       try {
-        window.open("https://camai.princesite.in/downloads/CamAI-Mobile-v1.0.1.apk", "_system");
+        window.open("https://camai.princesite.in/downloads/CamAI-Mobile-v1.0.9.apk", "_system");
       } catch (e) {
         console.warn("Direct download link trigger:", e);
       }
@@ -111,7 +111,7 @@ export default function SettingsMenuModal({ isOpen, onClose, onSignOut }: Settin
             </div>
             <div>
               <h2 className="text-base font-semibold text-zinc-100">Settings & Updates</h2>
-              <p className="text-xs text-zinc-400">CamAI Mobile Client v1.0.0</p>
+              <p className="text-xs text-zinc-400">CamAI Mobile Client v1.0.9</p>
             </div>
           </div>
           <button
@@ -138,7 +138,7 @@ export default function SettingsMenuModal({ isOpen, onClose, onSignOut }: Settin
                 <span>1-Click App Update (In-App OTA)</span>
               </div>
               <span className="rounded bg-accent/20 px-2 py-0.5 text-[10px] font-bold text-accent">
-                v1.0.0
+                v1.0.9
               </span>
             </div>
             <p className="text-[11px] text-zinc-400 leading-relaxed">

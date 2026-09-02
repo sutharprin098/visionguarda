@@ -42,7 +42,7 @@ export default function HeroSection() {
               <Cloud size={13} className="text-sky-600" /> CLOUD &amp; HYBRID AI INFERENCE MATRIX
             </span>
             <span className="text-slate-300">•</span>
-            <span className="text-sky-600 font-extrabold">DESKTOP v1.0.9 &amp; MOBILE v1.0.1</span>
+            <span className="text-sky-600 font-extrabold">DESKTOP v1.0.9 &amp; MOBILE v1.0.9</span>
           </div>
         </motion.div>
 
@@ -88,13 +88,13 @@ export default function HeroSection() {
             </a>
 
             <a
-              href="/downloads/CamAI-Mobile-v1.0.1.apk"
+              href="/downloads/CamAI-Mobile-v1.0.9.apk"
               target="_blank"
               rel="noopener noreferrer"
               className="w-full sm:w-auto px-7 py-4 rounded-xl justify-center flex items-center gap-2.5 border border-sky-300 bg-white/90 hover:bg-sky-50 text-sky-800 font-bold text-sm shadow-md backdrop-blur-md transition-all hover:scale-[1.03]"
             >
               <Smartphone size={18} />
-              <span>Mobile App (v1.0.1 .apk)</span>
+              <span>Mobile App (v1.0.9 .apk)</span>
             </a>
 
             <Link
