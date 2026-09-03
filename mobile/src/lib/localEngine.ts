@@ -32,6 +32,35 @@ export function getEngineBase(): string {
 export const ENGINE_BASE = getEngineBase();
 let registered = new Set<string>();
 
+const decryptedCache = new Map<string, string>();
+
+export async function getDecryptedCameraSource(cameraId: string, rawSource?: string): Promise<string> {
+  if (!cameraId) return rawSource || "";
+  if (decryptedCache.has(cameraId)) {
+    return decryptedCache.get(cameraId)!;
+  }
+  if (rawSource && !rawSource.startsWith("gcm:v1:")) {
+    decryptedCache.set(cameraId, rawSource);
+    return rawSource;
+  }
+  try {
+    const sb = await getSupabase();
+    const { data } = await sb.functions.invoke<{ connection?: string; error?: string }>(
+      "decrypt-camera",
+      { body: { camera_id: cameraId } }
+    );
+    if (data?.connection) {
+      decryptedCache.set(cameraId, data.connection);
+      return data.connection;
+    }
+  } catch {
+    /* ignore error */
+  }
+  const fallback = rawSource || "";
+  decryptedCache.set(cameraId, fallback);
+  return fallback;
+}
+
 // Proves to the engine that a configuration write came from this app rather
 // than from some other local process (see server/app/config.py:API_TOKEN).
 // Cached because every camera sync would otherwise cross the IPC bridge, and

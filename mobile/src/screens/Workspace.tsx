@@ -2,7 +2,7 @@ import { useEffect, useState, useRef, useCallback, useMemo, memo } from "react";
 import { Video, Bell, Settings2, LogOut, Wifi, WifiOff, Sliders, Activity, AlertTriangle, RotateCw, Maximize2, Minimize2, Lock, Send, Check, Loader2, MessageCircle, ChevronDown, ChevronRight, Copy, Cloud, Cpu, Globe, Plus, MoreVertical } from "lucide-react";
 import clsx from "clsx";
 import { startRealtimeSync, DeactivatedError, SyncBundle } from "../lib/sync";
-import { syncAiModelToLocalEngine, syncAiConfidenceToLocalEngine, syncAiInferenceModeToLocalEngine, mjpegStreamUrl, resetLocalEngineState, getEngineBase } from "../lib/localEngine";
+import { syncAiModelToLocalEngine, syncAiConfidenceToLocalEngine, syncAiInferenceModeToLocalEngine, mjpegStreamUrl, resetLocalEngineState, getEngineBase, getDecryptedCameraSource } from "../lib/localEngine";
 import { MediaShareSession, ShareStatus } from "../lib/mediaShare";
 import { TelemetrySession, TelemetryDetection, CameraTelemetry, TelemetryStatus, detectionsRenderEqual, telemetryHub } from "../lib/telemetry";
 import type { ZoneProfileKey } from "../lib/zoneProfiles";
@@ -1361,20 +1361,29 @@ const CameraTile = memo(function CameraTile({ camera: c, site, engineOnline, onF
 
   // The media element the overlay measures: the local <video> while sharing,
   // otherwise the MJPEG <img>. Both show the same frames the engine analysed.
+  const [realSource, setRealSource] = useState<string>(c.source || "");
+
+  useEffect(() => {
+    let active = true;
+    getDecryptedCameraSource(c.id, c.source).then((dec) => {
+      if (active && dec) setRealSource(dec);
+    });
+    return () => { active = false; };
+  }, [c.id, c.source]);
+
   const ytEmbedUrl = useMemo(() => {
-    const src = c.source || "";
+    const src = realSource || c.source || "";
     const match = src.match(/(?:youtu\.be\/|youtube\.com\/(?:embed\/|v\/|watch\?v=|watch\?.+&v=))([\w-]{11})/);
     if (match && match[1]) {
       return `https://www.youtube.com/embed/${match[1]}?autoplay=1&mute=1&playsinline=1&controls=0&modestbranding=1&enablejsapi=1`;
     }
     return null;
-  }, [c.source]);
+  }, [realSource, c.source]);
 
   const isDirectVideo = useMemo(() => {
-    if (!c.source) return false;
-    const s = c.source.toLowerCase();
-    return s.endsWith(".m3u8") || s.endsWith(".mp4") || s.endsWith(".webm") || c.source_type === "hls";
-  }, [c.source, c.source_type]);
+    const src = (realSource || c.source || "").toLowerCase();
+    return src.endsWith(".m3u8") || src.endsWith(".mp4") || src.endsWith(".webm") || c.source_type === "hls";
+  }, [realSource, c.source, c.source_type]);
 
   const imgRef = useRef<HTMLImageElement>(null);
   const mediaRef = (sharingType !== null ? videoRef : imgRef) as React.RefObject<HTMLVideoElement | HTMLImageElement>;
@@ -1599,7 +1608,7 @@ const CameraTile = memo(function CameraTile({ camera: c, site, engineOnline, onF
           />
         ) : isDirectVideo ? (
           <video
-            src={c.source}
+            src={realSource || c.source}
             autoPlay
             playsInline
             muted
@@ -1644,7 +1653,11 @@ const CameraTile = memo(function CameraTile({ camera: c, site, engineOnline, onF
             </div>
           </div>
         ) : (
-          <FallbackTileLiveFeed cameraName={c.name} detections={shownDetections} />
+          <div className="flex flex-col items-center justify-center gap-2 p-4 text-center">
+            <Video size={32} className="text-zinc-600 animate-pulse" />
+            <span className="text-xs font-semibold text-zinc-400">Connecting to Stream...</span>
+            <span className="text-[10px] text-zinc-600 font-mono max-w-[200px] truncate">{c.name}</span>
+          </div>
         )}
 
         {/* Boxes sit above the media and below the status chips. object-cover
