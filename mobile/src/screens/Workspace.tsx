@@ -1573,7 +1573,7 @@ const CameraTile = memo(function CameraTile({ camera: c, site, engineOnline, onF
             controls={false}
             className={`${mediaClass} bg-black`}
           />
-        ) : showStream && !streamFailed ? (
+        ) : showStream ? (
           <img
             key={`${c.id}-${retryCount}`}
             ref={imgRef}
@@ -1583,13 +1583,14 @@ const CameraTile = memo(function CameraTile({ camera: c, site, engineOnline, onF
             className={mediaClass}
             onLoad={() => {
               corsProvenRef.current = imgCors;
-              setStreamFailed(false);
             }}
             onError={() => {
               if (imgCors && !corsProvenRef.current) {
                 setImgCors(false);
               }
-              setStreamFailed(true);
+              setTimeout(() => {
+                setRetryCount((r) => r + 1);
+              }, 1000);
             }}
           />
         ) : isScreenShareCam ? (

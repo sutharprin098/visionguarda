@@ -1259,33 +1259,45 @@ async def get_mjpeg_stream(camera_id: str):
     cam_name = getattr(thread, "config", {}).get("name", camera_id) if thread and isinstance(getattr(thread, "config", None), dict) else camera_id
 
     async def mjpeg_generator():
-        last_jpeg = None
-        last_seq = -1
         frame_counter = 0
         attach = getattr(thread, "mjpeg_viewer_attached", None) if thread else None
         detach = getattr(thread, "mjpeg_viewer_detached", None) if thread else None
         if attach:
-            attach()
+            try:
+                attach()
+            except Exception:
+                pass
         try:
             while True:
-                jpeg_bytes = getattr(thread, "current_jpeg_bytes", None) if thread else None
-                curr_seq = getattr(thread, "jpeg_sequence_id", 0) if thread else 0
-                if jpeg_bytes is not None and (curr_seq != last_seq or jpeg_bytes is not last_jpeg):
-                    last_jpeg = jpeg_bytes
-                    last_seq = curr_seq
-                    yield (b'--frame\r\n'
-                           b'Content-Type: image/jpeg\r\n\r\n' + jpeg_bytes + b'\r\n')
-                    await asyncio.sleep(0.03)
-                else:
+                try:
+                    active_thread = manager.camera_threads.get(camera_id) or thread
+                    jpeg_bytes = getattr(active_thread, "current_jpeg_bytes", None) if active_thread else None
+                    if jpeg_bytes is not None and len(jpeg_bytes) > 0:
+                        yield (b'--frame\r\n'
+                               b'Content-Type: image/jpeg\r\n\r\n' + jpeg_bytes + b'\r\n')
+                        await asyncio.sleep(0.033)
+                    else:
+                        frame_counter += 1
+                        fallback = _generate_mjpeg_standby_frame(cam_name, frame_counter)
+                        if fallback:
+                            yield (b'--frame\r\n'
+                                   b'Content-Type: image/jpeg\r\n\r\n' + fallback + b'\r\n')
+                        await asyncio.sleep(0.04)
+                except (asyncio.CancelledError, GeneratorExit):
+                    break
+                except Exception:
                     frame_counter += 1
                     fallback = _generate_mjpeg_standby_frame(cam_name, frame_counter)
                     if fallback:
                         yield (b'--frame\r\n'
                                b'Content-Type: image/jpeg\r\n\r\n' + fallback + b'\r\n')
-                    await asyncio.sleep(0.06)
+                    await asyncio.sleep(0.05)
         finally:
             if detach:
-                detach()
+                try:
+                    detach()
+                except Exception:
+                    pass
 
     return StreamingResponse(
         mjpeg_generator(),
