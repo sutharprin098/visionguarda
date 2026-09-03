@@ -4,3 +4,6 @@ dist
 # Large demo videos — host via CDN, not the deploy upload (slow-link safe)
 public/demo.mp4
 public/features-demo.mp4
+
+# Large binary installers exceeding Vercel 100MB static asset limit
+public/downloads/*.exe

@@ -713,7 +713,7 @@ export default function DownloadsPage() {
           <div className="space-y-4 relative z-10">
             <div className="flex items-center justify-between gap-3">
               <span className="px-3 py-1 rounded-full bg-indigo-500/20 border border-indigo-500/30 text-indigo-300 text-xs font-bold uppercase tracking-wider flex items-center gap-1.5">
-                <MonitorSmartphone size={13} strokeWidth={2.5} /> Mobile Release (v1.0.1)
+                <MonitorSmartphone size={13} strokeWidth={2.5} /> Mobile Release (v1.0.9)
               </span>
               <span className="text-xs font-mono font-bold text-sky-400 bg-sky-500/10 px-2.5 py-1 rounded-md border border-sky-500/20">
                 Production Signed APK
@@ -744,20 +744,20 @@ export default function DownloadsPage() {
               </div>
               <div className="rounded-xl border border-slate-800 bg-slate-900/80 p-3">
                 <span className="text-[10px] uppercase font-bold text-slate-400 block">Signature</span>
-                <span className="text-xs font-bold text-emerald-400 mt-0.5 block">Signed Keystore (v1.0.1)</span>
+                <span className="text-xs font-bold text-emerald-400 mt-0.5 block">Signed Keystore (v1.0.9)</span>
               </div>
             </div>
           </div>
 
           <div className="mt-8 pt-6 border-t border-slate-800 space-y-3 relative z-10">
             <a
-              href="/downloads/CamAI-Mobile-v1.0.1.apk"
+              href="/downloads/CamAI-Mobile-v1.0.9.apk"
               target="_blank"
               rel="noopener noreferrer"
               className="w-full py-4 px-6 rounded-2xl bg-gradient-to-r from-indigo-500 via-purple-600 to-sky-600 hover:from-indigo-400 hover:to-sky-500 text-white font-extrabold text-sm shadow-xl shadow-indigo-500/20 flex items-center justify-center gap-2.5 transition-all hover:scale-[1.01] active:scale-95"
             >
               <Download size={18} />
-              <span>DOWNLOAD ANDROID APK (v1.0.1)</span>
+              <span>DOWNLOAD ANDROID APK (v1.0.9)</span>
             </a>
             <div className="flex items-center justify-between text-[11px] text-slate-400 px-1">
               <span>Direct Public Link</span>
