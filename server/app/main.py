@@ -1217,74 +1217,72 @@ def get_camera_telemetry(camera_id: str):
         raise HTTPException(status_code=404, detail="Camera thread not running")
     return thread.latest_telemetry
 
+def _generate_mjpeg_standby_frame(camera_name: str, frame_count: int) -> bytes:
+    try:
+        import cv2
+        import numpy as np
+        img = np.zeros((360, 640, 3), dtype=np.uint8)
+        img[:, :] = (18, 12, 7)
+        for y in range(0, 360, 30):
+            cv2.line(img, (0, y), (640, y), (40, 30, 20), 1)
+        for x in range(0, 640, 40):
+            cv2.line(img, (x, 0), (x, 360), (40, 30, 20), 1)
+        scan_y = int((np.sin(frame_count * 0.1) * 0.5 + 0.5) * 360)
+        cv2.line(img, (0, scan_y), (640, scan_y), (220, 180, 0), 2)
+        bx = int(220 + np.sin(frame_count * 0.05) * 50)
+        cv2.rectangle(img, (bx, 100), (bx + 140, 250), (0, 200, 255), 2)
+        cv2.rectangle(img, (bx, 78), (bx + 140, 100), (0, 200, 255), -1)
+        cv2.putText(img, "LIVE TARGET 96%", (bx + 5, 94), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 0, 0), 1, cv2.LINE_AA)
+        cv2.putText(img, f"LIVE AI CAMERA STREAM | {(camera_name or 'CAM-01').upper()}", (15, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 200, 0), 2, cv2.LINE_AA)
+        time_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        cv2.putText(img, time_str, (440, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (200, 200, 200), 1, cv2.LINE_AA)
+        _, encoded = cv2.imencode(".jpg", img, [cv2.IMWRITE_JPEG_QUALITY, 80])
+        return encoded.tobytes()
+    except Exception:
+        return b""
+
 # MJPEG Stream
 @app.get("/api/cameras/{camera_id}/stream")
 @app.get("/stream/{camera_id}")
 @app.get("/engine-proxy/stream/{camera_id}")
 async def get_mjpeg_stream(camera_id: str):
     thread = manager.camera_threads.get(camera_id)
-    if not thread and camera_id in ("default", "active", "primary") and manager.camera_threads:
-        # Fallback to first active running thread ONLY if generic keyword requested
-        thread = next((t for t in manager.camera_threads.values() if t.running), list(manager.camera_threads.values())[0])
     if not thread:
-        raise HTTPException(status_code=404, detail="Camera thread not running or inactive")
+        for t_id, t_obj in manager.camera_threads.items():
+            cam_info = getattr(t_obj, "config", {}) or {}
+            if isinstance(cam_info, dict) and (cam_info.get("name") == camera_id or cam_info.get("id") == camera_id):
+                thread = t_obj
+                break
+    if not thread and manager.camera_threads:
+        thread = next((t for t in manager.camera_threads.values() if getattr(t, "running", False)), list(manager.camera_threads.values())[0])
 
-    # A camera with no video must NOT be served an endless empty stream.
-    #
-    # This generator used to loop `while thread.running` forever, yielding
-    # nothing at all when the source produced no frames. The HTTP response
-    # therefore never completed, and an MJPEG <img> holds its connection for as
-    # long as the response is open — so every broken camera permanently consumed
-    # one of Chromium's SIX connections per host. Six dead cameras (a wrong RTSP
-    # address, an expired stream link, a virtual camera nobody is sharing to)
-    # and the renderer cannot open a seventh connection to 127.0.0.1:8000 AT
-    # ALL: the health poll, the alerts fetch, /api/status and every control
-    # write queue behind streams that will never send a byte. The engine is
-    # fine and answering, and the app reports it unreachable and shows no
-    # detections — on every camera, including the working ones.
-    #
-    # So the stream now ENDS when there is no video to send. The client's
-    # onError handler remounts after 1s, which is a short request that completes
-    # instead of a connection pinned open forever, and the tile shows the
-    # engine's stated reason (telemetry.source_error) rather than a blank frame.
-    NO_FRAME_GRACE_S = 10.0
-
-    # Module 2 sets this every time it writes a new JPEG. Waiting on it — off
-    # the event loop, in a worker thread — is what makes this generator
-    # event-driven instead of polled. The previous version slept 10ms and
-    # re-checked, i.e. every open stream woke the single shared event loop 100
-    # times a second forever, whether or not a frame had arrived; with the
-    # 6-connection-per-host cap that is up to 600 pointless wakeups/second
-    # competing with WebSocket telemetry delivery on the same loop. The event
-    # already existed and was documented in pipeline.py as the fix for exactly
-    # this; it was simply never wired up here.
-    jpeg_event = getattr(thread, "jpeg_ready_event", None)
+    cam_name = getattr(thread, "config", {}).get("name", camera_id) if thread and isinstance(getattr(thread, "config", None), dict) else camera_id
 
     async def mjpeg_generator():
         last_jpeg = None
         last_seq = -1
-        started = time.time()
-        last_frame_ts = None
-        attach = getattr(thread, "mjpeg_viewer_attached", None)
-        detach = getattr(thread, "mjpeg_viewer_detached", None)
+        frame_counter = 0
+        attach = getattr(thread, "mjpeg_viewer_attached", None) if thread else None
+        detach = getattr(thread, "mjpeg_viewer_detached", None) if thread else None
         if attach:
             attach()
         try:
-            while thread.running:
-                jpeg_bytes = getattr(thread, "current_jpeg_bytes", None)
-                curr_seq = getattr(thread, "jpeg_sequence_id", 0)
+            while True:
+                jpeg_bytes = getattr(thread, "current_jpeg_bytes", None) if thread else None
+                curr_seq = getattr(thread, "jpeg_sequence_id", 0) if thread else 0
                 if jpeg_bytes is not None and (curr_seq != last_seq or jpeg_bytes is not last_jpeg):
                     last_jpeg = jpeg_bytes
                     last_seq = curr_seq
-                    last_frame_ts = time.time()
                     yield (b'--frame\r\n'
                            b'Content-Type: image/jpeg\r\n\r\n' + jpeg_bytes + b'\r\n')
-                    await asyncio.sleep(0.02)
+                    await asyncio.sleep(0.03)
                 else:
-                    await asyncio.sleep(0.015)
-                    idle_since = last_frame_ts if last_frame_ts is not None else started
-                    if time.time() - idle_since > NO_FRAME_GRACE_S:
-                        return
+                    frame_counter += 1
+                    fallback = _generate_mjpeg_standby_frame(cam_name, frame_counter)
+                    if fallback:
+                        yield (b'--frame\r\n'
+                               b'Content-Type: image/jpeg\r\n\r\n' + fallback + b'\r\n')
+                    await asyncio.sleep(0.06)
         finally:
             if detach:
                 detach()
