@@ -1264,6 +1264,7 @@ async def get_mjpeg_stream(camera_id: str):
     async def mjpeg_generator():
         frame_counter = 0
         attached_threads = set()
+        last_seq = -1
         try:
             while True:
                 try:
@@ -1277,11 +1278,16 @@ async def get_mjpeg_stream(camera_id: str):
                             except Exception:
                                 pass
 
-                    jpeg_bytes = getattr(active_thread, "current_jpeg_bytes", None) if active_thread else None
-                    if jpeg_bytes is not None and len(jpeg_bytes) > 0:
-                        yield (b'--frame\r\n'
-                               b'Content-Type: image/jpeg\r\n\r\n' + jpeg_bytes + b'\r\n')
-                        await asyncio.sleep(0.033)
+                    if active_thread:
+                        seq = getattr(active_thread, "jpeg_sequence_id", 0)
+                        jpeg_bytes = getattr(active_thread, "current_jpeg_bytes", None)
+                        if seq != last_seq and jpeg_bytes is not None and len(jpeg_bytes) > 0:
+                            last_seq = seq
+                            yield (b'--frame\r\n'
+                                   b'Content-Type: image/jpeg\r\n\r\n' + jpeg_bytes + b'\r\n')
+                            await asyncio.sleep(0.005)
+                        else:
+                            await asyncio.sleep(0.01)
                     else:
                         frame_counter += 1
                         fallback = _generate_mjpeg_standby_frame(cam_name, frame_counter)
