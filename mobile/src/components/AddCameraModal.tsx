@@ -269,12 +269,12 @@ export default function AddCameraModal({
             </div>
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-1.5">
-                <h2 className="text-sm sm:text-base font-bold text-slate-900 tracking-tight truncate">SEARCH LOCAL NETWORK</h2>
+                <h2 className="text-sm sm:text-base font-bold text-slate-900 tracking-tight truncate">ADD NEW CAMERA</h2>
                 <span className="rounded-full bg-cyan-500/15 px-2 py-0.5 text-[9px] sm:text-[10px] font-bold text-cyan-700 border border-cyan-300/50 shrink-0">
-                  ONVIF LIVE
+                  RTSP & YOUTUBE LIVE
                 </span>
               </div>
-              <p className="text-[11px] sm:text-xs font-medium text-slate-500 truncate">Auto-Detect ONVIF & RTSP Cameras on Wi-Fi/LAN</p>
+              <p className="text-[11px] sm:text-xs font-medium text-slate-500 truncate">Connect IP Cameras, RTSP or YouTube Live Streams</p>
             </div>
           </div>
           <button
@@ -282,6 +282,24 @@ export default function AddCameraModal({
             className="rounded-xl p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700 transition shrink-0"
           >
             <X size={18} />
+          </button>
+        </div>
+
+        {/* Navigation Mode Tabs */}
+        <div className="flex items-center gap-2 pt-3 pb-1 border-b border-sky-100">
+          <button
+            type="button"
+            onClick={() => { setStep("scanning"); startNetworkScan(); }}
+            className={`px-3 py-1.5 text-xs font-bold rounded-xl transition ${step !== "manual" ? "bg-sky-600 text-white shadow-md" : "bg-slate-100 text-slate-600 hover:bg-slate-200"}`}
+          >
+            🔍 Auto Wi-Fi Scan
+          </button>
+          <button
+            type="button"
+            onClick={() => setStep("manual")}
+            className={`px-3 py-1.5 text-xs font-bold rounded-xl transition ${step === "manual" ? "bg-sky-600 text-white shadow-md" : "bg-slate-100 text-slate-600 hover:bg-slate-200"}`}
+          >
+            🌐 Add RTSP / YouTube URL
           </button>
         </div>
 
@@ -590,9 +608,10 @@ export default function AddCameraModal({
                   onChange={(e) => setManualType(e.target.value as any)}
                   className="w-full rounded-xl border border-slate-300 bg-white px-3.5 py-2.5 text-xs text-slate-900 focus:border-sky-500 focus:outline-none shadow-sm"
                 >
-                  <option value="rtsp">RTSP Stream (IP Camera)</option>
-                  <option value="hls">HLS (.m3u8 Stream)</option>
-                  <option value="http">HTTP Video Stream</option>
+                  <option value="youtube">🔴 YouTube Live Stream (YouTube Link)</option>
+                  <option value="rtsp">📹 RTSP Stream (IP Camera)</option>
+                  <option value="hls">🌐 HLS (.m3u8 Stream)</option>
+                  <option value="http">💻 HTTP Video Stream</option>
                 </select>
               </div>
 
@@ -600,11 +619,51 @@ export default function AddCameraModal({
                 <label className="block text-xs font-bold text-slate-700 mb-1">Stream URL</label>
                 <input
                   type="text"
-                  placeholder="rtsp://admin:password@192.168.1.100:554/stream1"
+                  placeholder="https://www.youtube.com/watch?v=... OR rtsp://admin:pass@ip:554/stream"
                   value={manualUrl}
                   onChange={(e) => setManualUrl(e.target.value)}
                   className="w-full rounded-xl border border-slate-300 bg-white px-3.5 py-2.5 text-xs font-mono text-slate-900 focus:border-sky-500 focus:outline-none shadow-sm"
                 />
+              </div>
+
+              {/* Sample Presets */}
+              <div className="space-y-1.5 pt-1">
+                <label className="block text-[10px] font-extrabold text-slate-500 uppercase tracking-wider">Quick Test Presets (1-Tap)</label>
+                <div className="flex flex-wrap gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setManualName("NASA Earth Live (YouTube)");
+                      setManualType("youtube" as any);
+                      setManualUrl("https://www.youtube.com/watch?v=21X5lGlDOfg");
+                    }}
+                    className="px-2.5 py-1 text-[10px] font-bold rounded-lg bg-red-50 text-red-700 border border-red-200 hover:bg-red-100 transition flex items-center gap-1"
+                  >
+                    <span>🔴 NASA YouTube Live</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setManualName("City Live Cam (YouTube)");
+                      setManualType("youtube" as any);
+                      setManualUrl("https://www.youtube.com/watch?v=1EiC9bvVGnk");
+                    }}
+                    className="px-2.5 py-1 text-[10px] font-bold rounded-lg bg-amber-50 text-amber-700 border border-amber-200 hover:bg-amber-100 transition flex items-center gap-1"
+                  >
+                    <span>🏙️ City Traffic Live</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setManualName("Public RTSP HD Feed");
+                      setManualType("rtsp");
+                      setManualUrl("rtsp://wowzaec2demo.streamlock.net/vod/mp4:BigBuckBunny_115k.mov");
+                    }}
+                    className="px-2.5 py-1 text-[10px] font-bold rounded-lg bg-sky-50 text-sky-700 border border-sky-200 hover:bg-sky-100 transition flex items-center gap-1"
+                  >
+                    <span>📹 Demo RTSP Feed</span>
+                  </button>
+                </div>
               </div>
             </div>
 

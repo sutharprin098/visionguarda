@@ -1048,8 +1048,13 @@ function CamerasView({
   isAddModalOpen: boolean;
   setIsAddModalOpen: (open: boolean) => void;
 }) {
-  const handleCameraAdded = () => {
-    window.location.reload();
+  const handleCameraAdded = async () => {
+    try {
+      const { fetchBundle } = await import("../lib/sync");
+      await fetchBundle();
+    } catch {
+      window.location.reload();
+    }
   };
 
   const isCloudMode = orgInferenceMode === "cloud" || healthInfo?.mode === "cloud" || (healthInfo as any)?.processing_mode === "cloud";
