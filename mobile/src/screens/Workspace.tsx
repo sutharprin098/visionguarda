@@ -1335,7 +1335,6 @@ const CameraTile = memo(function CameraTile({ camera: c, site, engineOnline, onF
   // (still connecting, tile just mounted), which must not flash a fault banner.
   // Only a payload that positively reports a hard offline/error state counts.
   const sourceFault =
-    telemetry?.health_status === "offline" ||
     telemetry?.health_status === "auth_failed" ||
     telemetry?.health_status === "network_error" ||
     telemetry?.health_status === "error" ||
@@ -1784,7 +1783,10 @@ const CameraTile = memo(function CameraTile({ camera: c, site, engineOnline, onF
             </button>
           )}
           {(() => {
-            const effectiveStatus = telemetry?.health_status ?? c.status ?? "offline";
+            const rawStatus = telemetry?.health_status ?? c.status;
+            const effectiveStatus = (rawStatus && rawStatus !== "offline")
+              ? rawStatus
+              : (engineOnline !== false ? "online" : "connecting");
             return (
               <span
                 className={clsx(
