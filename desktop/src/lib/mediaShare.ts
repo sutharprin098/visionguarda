@@ -1,17 +1,10 @@
 // Persistent screen/webcam sharing session pushed to the local AI engine's
-// /ws endpoint (see server/app/main.py "screen_frame" handling). Replaces
-// the previous fire-and-forget WebSocket + MediaStream wiring in
-// Workspace.tsx, which tore the whole share down (including stopping the
-// user's MediaStream tracks) on any transient disconnect — a network blip,
-// display sleep, or the engine restarting meant the operator had to notice
-// and manually click "Share" again.
+// /ws endpoint (see server/app/main.py "screen_frame" handling).
 //
-// This module keeps the MediaStream and the WebSocket as independently
-// recoverable: a dropped socket reconnects with backoff without touching
-// the stream; a stream the OS tears down (sleep, permission change, device
-// unplug) gets silently re-acquired — Electron's main process auto-grants
-// both getDisplayMedia and getUserMedia in this app (see electron/main.ts),
-// so re-acquisition never needs a user gesture.
+// Keeps the MediaStream and the WebSocket independently recoverable:
+// - A dropped socket reconnects with bounded exponential backoff without touching the stream.
+// - A stream torn down by OS (sleep, display change, device unplug) gets re-acquired via Electron IPC.
+// - Diagnostics are logged for all lifecycle transitions.
 
 export type ShareStatus = "idle" | "acquiring" | "connecting" | "live" | "reconnecting" | "error" | "source_gone";
 
@@ -20,30 +13,17 @@ export interface ShareCallbacks {
   onStream?: (stream: MediaStream | null) => void;
 }
 
-// "127.0.0.1", not "localhost" — deliberately matches ENGINE_BASE in
-// localEngine.ts. Measured directly on a real machine: "localhost" resolves
-// to ::1 (IPv6) *first* here (Windows getaddrinfo ordering), and the engine
-// only binds the IPv4 loopback (see server/app/config.py HOST) — connecting
-// via "localhost" cost 2.3s of failed-then-fallback connection setup per
-// attempt vs 0.02s for "127.0.0.1" in direct measurement, and some clients
-// don't even complete the IPv4 fallback at all, so every reconnect attempt
-// fails the same way forever. This was very likely the actual root cause of
-// screen/webcam shares getting stuck "reconnecting" indefinitely.
 const WS_URL = "ws://127.0.0.1:8000/ws";
 const FRAME_INTERVAL_MS = 33;
 const HEARTBEAT_INTERVAL_MS = 5000;
 const HEARTBEAT_TIMEOUT_MS = 12000;
-// How long the socket may stay open with NO frame actually sent before the
-// capture stream is presumed dead and re-acquired. Declared with the original
-// watchdog design but never wired to anything until checkFrameFlow() below —
-// see the note in startFrameLoop for what that cost.
 const SEND_STALL_TIMEOUT_MS = 12000;
-// Ceiling on un-drained WebSocket bytes before frames start being skipped.
-//
-// Sized to roughly two frames (128KB), ensuring fast throughput at 30 FPS.
 const MAX_WS_BUFFERED_BYTES = 128 * 1024;
 const STREAM_REACQUIRE_DELAY_MS = 1500;
-const RECONNECT_BACKOFF_MS = [500, 1000, 2000, 4000, 8000, 15000, 30000];
+
+// Bounded reconnect strategy
+const MAX_RECONNECT_ATTEMPTS = 6;
+const RECONNECT_BACKOFF_MS = [1000, 2000, 3000, 5000, 8000, 10000];
 
 export class MediaShareSession {
   private cameraId: string;
@@ -63,34 +43,46 @@ export class MediaShareSession {
 
   private lastPongTs = 0;
   private lastSendOkTs = 0;
-  /** Frames skipped because the socket was backed up — surfaced for the debug panel. */
   private droppedFrames = 0;
-  /** Frames that actually reached the socket. */
   private sentFrames = 0;
   private reconnectAttempt = 0;
   private stopped = true;
   private status: ShareStatus = "idle";
-  /** desktopCapturer id of the exact surface to capture ("screen" kind only). */
   private sourceId: string | null = null;
   private unsubPower: (() => void) | null = null;
 
-  private readonly onOnline = () => { if (!this.stopped) this.ensureConnected(); };
-  private readonly onOffline = () => { if (!this.stopped) this.setStatus("reconnecting", "network offline"); };
+  private readonly onOnline = () => {
+    this.logDiag("info", "Network online event received");
+    if (!this.stopped) this.ensureConnected();
+  };
+
+  private readonly onOffline = () => {
+    this.logDiag("warn", "Network offline event received");
+    if (!this.stopped) this.setStatus("reconnecting", "Network offline");
+  };
 
   constructor(cameraId: string, kind: "screen" | "webcam", cb: ShareCallbacks = {}, sourceId?: string) {
     this.cameraId = cameraId;
     this.kind = kind;
     this.cb = cb;
     this.sourceId = sourceId ?? null;
+    this.logDiag("info", `Created session instance (kind=${kind}, sourceId=${sourceId ?? "none"})`);
+  }
+
+  private logDiag(level: "info" | "warn" | "error", message: string, details?: unknown): void {
+    const prefix = `[MediaShare Session:${this.cameraId}]`;
+    if (level === "error") {
+      console.error(prefix, message, details ?? "");
+    } else if (level === "warn") {
+      console.warn(prefix, message, details ?? "");
+    } else {
+      console.log(prefix, message, details ?? "");
+    }
   }
 
   getStream(): MediaStream | null { return this.stream; }
   getStatus(): ShareStatus { return this.status; }
 
-  /** Push-side counters for the performance HUD. `buffered` is the socket's
-   *  un-drained byte count — a number that climbs and stays high is the engine
-   *  failing to keep up, which is invisible from the engine's own telemetry
-   *  because those frames never arrived. */
   getPushStats(): { sent: number; dropped: number; buffered: number; stalledMs: number } {
     return {
       sent: this.sentFrames,
@@ -102,30 +94,36 @@ export class MediaShareSession {
 
   async start(): Promise<void> {
     if (!this.stopped) return;
+    this.logDiag("info", "Starting media share session");
     this.stopped = false;
     this.reconnectAttempt = 0;
+
     window.addEventListener("online", this.onOnline);
     window.addEventListener("offline", this.onOffline);
-    this.unsubPower = window.camai.onPowerEvent((evt) => {
+
+    this.unsubPower = window.camai?.onPowerEvent?.((evt) => {
       if (this.stopped) return;
+      this.logDiag("info", `Power event received: ${evt}`);
       if (evt === "resume" || evt === "unlock-screen") {
-        // The capture source may have been silently torn down while
-        // suspended (screen share ends, webcam device resets) — verify and
-        // recover both halves instead of waiting for their own timeouts.
         this.ensureStream();
         this.ensureConnected();
       }
     });
+
     await this.acquireStream();
     this.connectWs();
   }
 
   stop(): void {
+    if (this.stopped) return;
+    this.logDiag("info", "Stopping media share session");
     this.stopped = true;
+
     window.removeEventListener("online", this.onOnline);
     window.removeEventListener("offline", this.onOffline);
     this.unsubPower?.();
     this.unsubPower = null;
+
     this.clearTimers();
     this.closeWs();
     this.releaseStream();
@@ -133,34 +131,39 @@ export class MediaShareSession {
   }
 
   private setStatus(s: ShareStatus, detail?: string): void {
+    if (this.status !== s) {
+      this.logDiag("info", `Status transition: ${this.status} -> ${s}` + (detail ? ` (${detail})` : ""));
+    }
     this.status = s;
     this.cb.onStatus?.(s, detail);
   }
 
-  // ---- MediaStream acquisition ----
+  // ---- MediaStream Acquisition ----
 
   private async acquireStream(): Promise<void> {
     if (this.stopped) return;
     this.setStatus("acquiring");
+    this.logDiag("info", `Acquiring stream (kind=${this.kind}, sourceId=${this.sourceId})`);
+
     try {
       const constraints: MediaStreamConstraints = { video: { width: 960, height: 540, frameRate: 30 } };
       let stream: MediaStream;
+
       if (this.kind === "screen") {
         if (!this.sourceId) {
-          // Refuse rather than let the main process fall back to a surface the
-          // operator never chose. A share with no pick is a bug, not a default.
-          throw new Error("no capture source selected");
+          throw new Error("No capture source selected for screen share");
         }
-        // Tell main which source this very next getDisplayMedia call means.
-        // The two are ordered, not raced: setSource resolves over IPC before
-        // getDisplayMedia is issued, and the main handler reads it synchronously.
-        await window.camai.capture.setSource(this.sourceId);
+        if (window.camai?.capture?.setSource) {
+          this.logDiag("info", `Setting IPC capture source: ${this.sourceId}`);
+          await window.camai.capture.setSource(this.sourceId);
+        }
         stream = await navigator.mediaDevices.getDisplayMedia(constraints);
       } else {
         stream = await navigator.mediaDevices.getUserMedia(constraints);
       }
 
       if (this.stopped) {
+        this.logDiag("info", "Session stopped during stream acquisition, releasing tracks");
         stream.getTracks().forEach((t) => t.stop());
         return;
       }
@@ -169,18 +172,27 @@ export class MediaShareSession {
       this.cb.onStream?.(stream);
 
       const track = stream.getVideoTracks()[0];
-      // Fires when the shared window closes, or the operator hits Chromium's
-      // own "Stop sharing". The former is unrecoverable for this source.
-      track.onended = () => {
-        if (this.stopped) return;
-        this.stream = null;
-        this.cb.onStream?.(null);
-        void this.sourceIsGone().then((gone) => {
+      if (track) {
+        this.logDiag("info", `MediaStream track acquired (label=${track.label}, readyState=${track.readyState})`);
+
+        track.onended = () => {
+          this.logDiag("warn", `MediaStream track ended (label=${track.label})`);
           if (this.stopped) return;
-          if (gone) this.setStatus("source_gone", "Selected source is no longer available.");
-          else this.scheduleStreamReacquire();
-        });
-      };
+          this.stream = null;
+          this.cb.onStream?.(null);
+          void this.sourceIsGone().then((gone) => {
+            if (this.stopped) return;
+            if (gone) {
+              this.setStatus("source_gone", "Selected source is no longer available.");
+            } else {
+              this.scheduleStreamReacquire();
+            }
+          });
+        };
+
+        track.onmute = () => this.logDiag("warn", `MediaStream track muted by OS (label=${track.label})`);
+        track.onunmute = () => this.logDiag("info", `MediaStream track unmuted by OS (label=${track.label})`);
+      }
 
       if (!this.video) {
         this.video = document.createElement("video");
@@ -189,7 +201,7 @@ export class MediaShareSession {
         this.video.autoplay = true;
       }
       this.video.srcObject = stream;
-      this.video.play().catch(() => {});
+      this.video.play().catch((err) => this.logDiag("warn", "Video play catch:", err));
 
       if (!this.canvas) {
         this.canvas = document.createElement("canvas");
@@ -202,70 +214,94 @@ export class MediaShareSession {
         this.setStatus(this.ws?.readyState === WebSocket.OPEN ? "live" : "connecting");
       }
     } catch (err) {
-      // A window that has been closed can never be re-acquired, so retrying it
-      // on a timer forever just burns CPU and leaves the operator staring at
-      // "reconnecting". Distinguish "gone for good" from a transient failure
-      // and make the dead case terminal + nameable.
+      const errMsg = err instanceof Error ? err.message : String(err);
+      this.logDiag("error", `Failed to acquire stream: ${errMsg}`);
+
       if (await this.sourceIsGone()) {
         this.setStatus("source_gone", "Selected source is no longer available.");
         return;
       }
-      this.setStatus("error", err instanceof Error ? err.message : "failed to acquire media");
+      this.setStatus("error", errMsg);
       this.scheduleStreamReacquire();
     }
   }
 
-  /** True only when we're capturing a specific surface and it has vanished. */
   private async sourceIsGone(): Promise<boolean> {
     if (this.kind !== "screen" || !this.sourceId) return false;
     try {
-      const { exists } = await window.camai.capture.sourceExists(this.sourceId);
-      return !exists;
+      if (window.camai?.capture?.sourceExists) {
+        const { exists } = await window.camai.capture.sourceExists(this.sourceId);
+        return !exists;
+      }
+      return false;
     } catch {
-      return false; // can't prove it's gone — treat as transient
+      return false;
     }
   }
 
-  /** Re-check the current stream is still live; re-acquire only if it isn't. Safe to call often — never spams getDisplayMedia/getUserMedia while a good stream exists. */
   private ensureStream(): void {
     if (this.stopped) return;
     const track = this.stream?.getVideoTracks()[0];
     if (!this.stream || !track || track.readyState !== "live") {
+      this.logDiag("info", "ensureStream: track not live, re-acquiring");
       void this.acquireStream();
     }
   }
 
   private releaseStream(): void {
-    this.stream?.getTracks().forEach((t) => { t.onended = null; t.stop(); });
-    this.stream = null;
+    if (this.stream) {
+      this.logDiag("info", "Releasing stream tracks");
+      this.stream.getTracks().forEach((t) => {
+        t.onended = null;
+        t.onmute = null;
+        t.onunmute = null;
+        t.stop();
+      });
+      this.stream = null;
+    }
     this.cb.onStream?.(null);
     if (this.video) this.video.srcObject = null;
   }
 
   private scheduleStreamReacquire(): void {
     if (this.stopped || this.streamReacquireTimer) return;
+    this.logDiag("info", `Scheduling stream re-acquisition in ${STREAM_REACQUIRE_DELAY_MS}ms`);
     this.streamReacquireTimer = setTimeout(() => {
       this.streamReacquireTimer = null;
       if (!this.stopped) void this.acquireStream();
     }, STREAM_REACQUIRE_DELAY_MS);
   }
 
-  // ---- WebSocket push, with heartbeat + reconnect independent of the stream ----
+  // ---- WebSocket Push & Bounded Reconnect ----
 
   private connectWs(): void {
-    if (this.stopped || this.ws) return;
+    if (this.stopped) return;
+    if (this.ws) {
+      this.logDiag("info", "connectWs called while socket exists, cleaning old socket first");
+      this.closeWs();
+    }
+
+    if (this.reconnectAttempt >= MAX_RECONNECT_ATTEMPTS) {
+      this.logDiag("error", `Max reconnect attempts (${MAX_RECONNECT_ATTEMPTS}) reached. Stopping reconnect loop.`);
+      this.setStatus("error", "Local AI engine connection failed after maximum retries.");
+      return;
+    }
+
     this.setStatus(this.reconnectAttempt > 0 ? "reconnecting" : "connecting");
+    this.logDiag("info", `Connecting WebSocket to ${WS_URL} (attempt ${this.reconnectAttempt + 1}/${MAX_RECONNECT_ATTEMPTS})`);
 
     let ws: WebSocket;
     try {
       ws = new WebSocket(WS_URL);
-    } catch {
+    } catch (err) {
+      this.logDiag("error", "WebSocket constructor threw error:", err);
       this.scheduleReconnect();
       return;
     }
     this.ws = ws;
 
     ws.onopen = () => {
+      this.logDiag("info", `WebSocket connected (OPEN) on ${WS_URL}`);
       this.reconnectAttempt = 0;
       this.lastPongTs = Date.now();
       this.setStatus("live");
@@ -276,15 +312,32 @@ export class MediaShareSession {
     ws.onmessage = (evt) => {
       try {
         const msg = JSON.parse(evt.data);
-        if (msg?.type === "pong") this.lastPongTs = Date.now();
-      } catch { /* not a JSON control message */ }
+        if (msg?.type === "pong") {
+          this.lastPongTs = Date.now();
+        }
+      } catch {
+        /* not a JSON control message */
+      }
     };
 
-    ws.onclose = () => {
+    ws.onerror = (evt) => {
+      this.logDiag("warn", "WebSocket error event triggered:", evt);
+    };
+
+    ws.onclose = (evt) => {
+      this.logDiag("warn", `WebSocket closed (code=${evt.code}, reason='${evt.reason}', wasClean=${evt.wasClean})`);
       this.ws = null;
       this.stopFrameLoop();
       this.stopHeartbeat();
+
       if (this.stopped) return;
+
+      if (evt.code === 1008) {
+        this.logDiag("error", "WebSocket closed with code 1008 (Disallowed Origin). Halting reconnect.");
+        this.setStatus("error", "Engine rejected connection origin.");
+        return;
+      }
+
       this.scheduleReconnect();
     };
   }
@@ -295,28 +348,50 @@ export class MediaShareSession {
     if (this.ws) {
       const ws = this.ws;
       this.ws = null;
+      ws.onopen = null;
+      ws.onmessage = null;
+      ws.onerror = null;
       ws.onclose = null;
-      try { ws.close(); } catch { /* already closing */ }
+      try {
+        ws.close();
+      } catch {
+        /* ignore */
+      }
     }
-    if (this.reconnectTimer) { clearTimeout(this.reconnectTimer); this.reconnectTimer = null; }
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
   }
 
   private ensureConnected(): void {
     if (this.stopped) return;
     if (!this.ws || this.ws.readyState === WebSocket.CLOSED) {
-      if (this.reconnectTimer) { clearTimeout(this.reconnectTimer); this.reconnectTimer = null; }
+      if (this.reconnectTimer) {
+        clearTimeout(this.reconnectTimer);
+        this.reconnectTimer = null;
+      }
       this.connectWs();
     }
   }
 
   private scheduleReconnect(): void {
     if (this.stopped || this.reconnectTimer) return;
+
+    if (this.reconnectAttempt >= MAX_RECONNECT_ATTEMPTS) {
+      this.logDiag("error", `Max reconnect attempts (${MAX_RECONNECT_ATTEMPTS}) reached. Terminating retry loop.`);
+      this.setStatus("error", "Local AI engine connection failed after maximum retries.");
+      return;
+    }
+
     const delay = RECONNECT_BACKOFF_MS[Math.min(this.reconnectAttempt, RECONNECT_BACKOFF_MS.length - 1)];
     this.reconnectAttempt++;
+    this.logDiag("info", `Scheduling reconnect attempt ${this.reconnectAttempt}/${MAX_RECONNECT_ATTEMPTS} in ${delay}ms`);
+
     this.setStatus("reconnecting");
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null;
-      this.connectWs();
+      if (!this.stopped) this.connectWs();
     }, delay);
   }
 
@@ -324,48 +399,45 @@ export class MediaShareSession {
     this.stopHeartbeat();
     this.heartbeatTimer = setInterval(() => {
       if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
+
       if (Date.now() - this.lastPongTs > HEARTBEAT_TIMEOUT_MS) {
-        // The socket object still reports OPEN but the server hasn't
-        // answered a ping in far longer than one round trip should ever
-        // take — a half-open connection (sleep, dead peer) that will never
-        // fire its own onclose. Force it closed and reconnect.
+        this.logDiag("warn", `Heartbeat timeout (> ${HEARTBEAT_TIMEOUT_MS}ms since last pong). Forcing reconnect.`);
         this.forceReconnect();
         return;
       }
+
       try {
         this.ws.send(JSON.stringify({ type: "ping", ts: Date.now() }));
-      } catch { /* onclose will follow and trigger reconnect */ }
+      } catch {
+        /* onclose handles cleanup */
+      }
 
-      // Socket liveness and video liveness are separate failures and need
-      // separate detectors. The ping above covers the socket; this covers the
-      // case where the socket answers perfectly and no pixels are moving.
       this.checkFrameFlow();
     }, HEARTBEAT_INTERVAL_MS);
   }
 
   private stopHeartbeat(): void {
-    if (this.heartbeatTimer) { clearInterval(this.heartbeatTimer); this.heartbeatTimer = null; }
+    if (this.heartbeatTimer) {
+      clearInterval(this.heartbeatTimer);
+      this.heartbeatTimer = null;
+    }
   }
 
   private forceReconnect(): void {
-    if (this.ws) {
-      const ws = this.ws;
-      this.ws = null;
-      ws.onclose = null;
-      try { ws.close(); } catch { /* ignore */ }
-    }
-    this.stopFrameLoop();
-    this.stopHeartbeat();
+    this.logDiag("info", "Force reconnecting WebSocket");
+    this.closeWs();
     this.scheduleReconnect();
   }
 
-  // ---- Frame push ----
+  // ---- Frame Push ----
 
   private startFrameLoop(): void {
     this.stopFrameLoop();
     this.lastSendOkTs = Date.now();
+
     this.frameTimer = setInterval(() => {
       if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
+
       const video = this.video;
       const track = this.stream?.getVideoTracks()[0];
       const isTrackLive = track && track.readyState === "live";
@@ -390,8 +462,8 @@ export class MediaShareSession {
             const frame = this.canvas.toDataURL("image/jpeg", 0.85);
             this.ws.send(JSON.stringify({ type: "screen_frame", camera_id: this.cameraId, frame }));
             this.sentFrames++;
-          } catch {
-            // transient encode/send failure — ignore
+          } catch (err) {
+            this.logDiag("warn", "Frame encode/send exception:", err);
           }
         }
       }
@@ -404,31 +476,35 @@ export class MediaShareSession {
 
     const track = this.stream?.getVideoTracks()[0];
     if (track && track.readyState === "live") {
-      // The MediaStream capture track is active and producing frames.
-      // Do not tear down the stream or force "reconnecting" status.
       return;
     }
 
     if (Date.now() - this.lastSendOkTs <= SEND_STALL_TIMEOUT_MS) return;
 
-    console.warn("[MediaShare] Frame flow stalled (>12s since last send). Re-acquiring capture stream...", {
-      cameraId: this.cameraId,
-      kind: this.kind,
-    });
-    this.setStatus("reconnecting", "no frames from capture source");
+    this.logDiag("warn", `Frame flow stalled (> ${SEND_STALL_TIMEOUT_MS}ms). Re-acquiring stream.`);
+    this.setStatus("reconnecting", "No frames from capture source");
     this.lastSendOkTs = Date.now();
     this.releaseStream();
     this.scheduleStreamReacquire();
   }
 
   private stopFrameLoop(): void {
-    if (this.frameTimer) { clearInterval(this.frameTimer); this.frameTimer = null; }
+    if (this.frameTimer) {
+      clearInterval(this.frameTimer);
+      this.frameTimer = null;
+    }
   }
 
-  private clearTimers(): void {
+  clearTimers(): void {
     this.stopFrameLoop();
     this.stopHeartbeat();
-    if (this.reconnectTimer) { clearTimeout(this.reconnectTimer); this.reconnectTimer = null; }
-    if (this.streamReacquireTimer) { clearTimeout(this.streamReacquireTimer); this.streamReacquireTimer = null; }
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+    if (this.streamReacquireTimer) {
+      clearTimeout(this.streamReacquireTimer);
+      this.streamReacquireTimer = null;
+    }
   }
 }

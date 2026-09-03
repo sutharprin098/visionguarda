@@ -1439,10 +1439,14 @@ const CameraTile = memo(function CameraTile({ camera: c, site, engineOnline, onF
 
         {/* Terminal state: the window we were capturing is gone. Offer a re-pick
             rather than retrying an id that can never resolve again. */}
-        {shareStatus === "source_gone" && (
+        {(shareStatus === "source_gone" || shareStatus === "error") && (
           <div className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-3 bg-surface-0/95 p-4 text-center">
             <AlertTriangle size={22} className="text-warn" />
-            <div className="text-xs text-zinc-300">Selected source is no longer available.</div>
+            <div className="text-xs text-zinc-300">
+              {shareStatus === "source_gone"
+                ? "Selected source is no longer available."
+                : "Engine connection failed. Check local AI engine status."}
+            </div>
             <div className="flex gap-2">
               <button onClick={() => setPickerOpen(true)}
                       className="rounded bg-accent/20 px-2.5 py-1.5 text-xs font-semibold text-accent hover:bg-accent/30">
