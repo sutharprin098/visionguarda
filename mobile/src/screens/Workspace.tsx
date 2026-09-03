@@ -1576,22 +1576,8 @@ const CameraTile = memo(function CameraTile({ camera: c, site, engineOnline, onF
             alt={c.name}
             className={mediaClass}
             onLoad={() => { corsProvenRef.current = imgCors; }}
-            onError={(e) => {
-              if (imgCors && !corsProvenRef.current) {
-                console.warn(`[Alerts] stream for ${c.id} refused CORS — snapshots disabled for this tile`);
-                setImgCors(false);
-                return;
-              }
-              const target = e.currentTarget;
-              setTimeout(() => {
-                if (target && target.src) {
-                  try {
-                    const url = new URL(target.src);
-                    url.searchParams.set("_t", String(Date.now()));
-                    target.src = url.toString();
-                  } catch { /* ignore */ }
-                }
-              }, 4000);
+            onError={() => {
+              setStreamFailed(true);
             }}
           />
         ) : isScreenShareCam ? (
@@ -1774,10 +1760,17 @@ const CameraTile = memo(function CameraTile({ camera: c, site, engineOnline, onF
       <div className="flex items-center justify-between px-3 py-2 bg-surface-1">
         <span className="text-sm text-zinc-200">{c.name}</span>
         <div className="flex items-center gap-2">
-          {sharingType !== null && (
+          {sharingType === null ? (
+            <button
+              onClick={() => startSharing("webcam")}
+              className="text-[10px] bg-sky-500/20 text-sky-400 hover:bg-sky-500/30 px-2 py-0.5 rounded font-bold transition flex items-center gap-1"
+            >
+              <span>📱 Open Cam</span>
+            </button>
+          ) : (
             <button
               onClick={stopSharing}
-              className="text-[10px] text-red-400 hover:text-red-300 hover:underline mr-1"
+              className="text-[10px] text-red-400 hover:text-red-300 hover:underline mr-1 font-bold"
             >
               Stop Share
             </button>
