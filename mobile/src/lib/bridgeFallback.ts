@@ -37,7 +37,7 @@ if (typeof window !== "undefined" && !window.camai) {
             device_name: "CamAI Mobile Security Node",
             os_info: { os: "Android", userAgent: navigator.userAgent },
             hardware: { platform: "Mobile" },
-            app_version: "1.0.2",
+            app_version: "1.0.1",
           }),
         });
 
