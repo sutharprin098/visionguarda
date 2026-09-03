@@ -1402,7 +1402,7 @@ const CameraTile = memo(function CameraTile({ camera: c, site, engineOnline, onF
       // payload carries a fresh array, so an unconditional commit re-rendered
       // this tile and repainted the canvas at telemetry rate even for a camera
       // sending nothing but empty arrays — see detectionsRenderEqual.
-      const nextDets = t.detections ?? [];
+      const nextDets = Array.isArray(t?.detections) ? t.detections : [];
       if (!detectionsRenderEqual(detectionsRef.current, nextDets)) {
         detectionsRef.current = nextDets;
         setDetections(nextDets);

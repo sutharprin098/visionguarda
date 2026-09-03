@@ -101,8 +101,9 @@ const CLAIMED_CLASSES: ReadonlySet<string> = new Set(AI_MODULES.flatMap((m) => m
  * unowned classes changed behaviour, from "always dropped" to "always drawn".
  */
 export function filterDetections<T extends { class: string }>(dets: T[], state: ModuleState): T[] {
+  if (!Array.isArray(dets)) return [];
   const allow = enabledClasses(state);
-  return dets.filter((d) => allow.has(d.class) || !CLAIMED_CLASSES.has(d.class));
+  return dets.filter((d) => d && d.class && (allow.has(d.class) || !CLAIMED_CLASSES.has(d.class)));
 }
 
 export function activeModules(state: ModuleState): AiModule[] {

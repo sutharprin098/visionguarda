@@ -173,7 +173,10 @@ export default function DetectionOverlay({ detections, mediaRef, fit = "cover" }
     const ox = (rect.width - dw) / 2;
     const oy = (rect.height - dh) / 2;
 
-    for (const det of detections) {
+    const safeDetections = Array.isArray(detections) ? detections : [];
+
+    for (const det of safeDetections) {
+      if (!det || typeof det !== "object" || !det.bbox) continue;
       if (det.confidence != null && det.confidence < 0.10) continue;
       const x1 = ox + det.bbox.x1 * dw;
       const y1 = oy + det.bbox.y1 * dh;
