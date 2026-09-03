@@ -1555,24 +1555,6 @@ const CameraTile = memo(function CameraTile({ camera: c, site, engineOnline, onF
             muted
             className={`${mediaClass} bg-black`}
           />
-        ) : ytEmbedUrl ? (
-          <iframe
-            src={ytEmbedUrl}
-            title={c.name}
-            className="w-full h-full border-0 pointer-events-none object-cover bg-black"
-            allow="autoplay; encrypted-media; picture-in-picture"
-            allowFullScreen
-          />
-        ) : isDirectVideo ? (
-          <video
-            src={realSource || c.source}
-            autoPlay
-            playsInline
-            muted
-            loop
-            controls={false}
-            className={`${mediaClass} bg-black`}
-          />
         ) : showStream ? (
           <img
             key={c.id}

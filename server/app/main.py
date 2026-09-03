@@ -1263,17 +1263,20 @@ async def get_mjpeg_stream(camera_id: str):
 
     async def mjpeg_generator():
         frame_counter = 0
-        attach = getattr(thread, "mjpeg_viewer_attached", None) if thread else None
-        detach = getattr(thread, "mjpeg_viewer_detached", None) if thread else None
-        if attach:
-            try:
-                attach()
-            except Exception:
-                pass
+        attached_threads = set()
         try:
             while True:
                 try:
                     active_thread = resolve_active_thread(camera_id)
+                    if active_thread and active_thread not in attached_threads:
+                        attach = getattr(active_thread, "mjpeg_viewer_attached", None)
+                        if attach:
+                            try:
+                                attach()
+                                attached_threads.add(active_thread)
+                            except Exception:
+                                pass
+
                     jpeg_bytes = getattr(active_thread, "current_jpeg_bytes", None) if active_thread else None
                     if jpeg_bytes is not None and len(jpeg_bytes) > 0:
                         yield (b'--frame\r\n'
@@ -1296,11 +1299,13 @@ async def get_mjpeg_stream(camera_id: str):
                                b'Content-Type: image/jpeg\r\n\r\n' + fallback + b'\r\n')
                     await asyncio.sleep(0.05)
         finally:
-            if detach:
-                try:
-                    detach()
-                except Exception:
-                    pass
+            for t in attached_threads:
+                detach = getattr(t, "mjpeg_viewer_detached", None)
+                if detach:
+                    try:
+                        detach()
+                    except Exception:
+                        pass
 
     return StreamingResponse(
         mjpeg_generator(),
