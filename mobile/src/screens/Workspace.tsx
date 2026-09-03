@@ -13,6 +13,7 @@ import ProfileDashboard from "../components/ProfileDashboard";
 import SourcePicker from "../components/SourcePicker";
 import AddCameraModal from "../components/AddCameraModal";
 import SettingsMenuModal from "../components/SettingsMenuModal";
+import FallbackTileLiveFeedShared from "../components/FallbackTileLiveFeed";
 import { lockReason } from "../lib/rbac";
 import { getSupabase } from "../lib/session";
 import type { CaptureSource } from "../lib/bridge";
@@ -1222,61 +1223,7 @@ const SHARE_STATUS_TONES: Record<ShareStatus, string> = {
  * who is watching — this only changes who is pulling pixels.
  */
 function FallbackTileLiveFeed({ cameraName, detections }: { cameraName: string; detections: any[] }) {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  useEffect(() => {
-    let animId: number;
-    let time = 0;
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
-    const render = () => {
-      time += 0.05;
-      const w = (canvas.width = canvas.parentElement?.clientWidth || 400);
-      const h = (canvas.height = canvas.parentElement?.clientHeight || 225);
-
-      const grad = ctx.createLinearGradient(0, 0, w, h);
-      grad.addColorStop(0, "#090d16");
-      grad.addColorStop(0.5, "#0e1626");
-      grad.addColorStop(1, "#050810");
-      ctx.fillStyle = grad;
-      ctx.fillRect(0, 0, w, h);
-
-      ctx.strokeStyle = "rgba(255, 255, 255, 0.04)";
-      ctx.lineWidth = 1;
-      for (let x = 0; x < w; x += 40) {
-        ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, h); ctx.stroke();
-      }
-      for (let y = 0; y < h; y += 40) {
-        ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke();
-      }
-
-      const activeDets = detections;
-
-      activeDets.forEach((d: any) => {
-        const [bx, by, bw, bh] = d.bbox || [0.3, 0.3, 0.2, 0.3];
-        const rx = bx * w; const ry = by * h; const rw = bw * w; const rh = bh * h;
-        ctx.strokeStyle = d.label === "person" ? "#06b6d4" : "#10b981";
-        ctx.lineWidth = 2;
-        ctx.strokeRect(rx, ry, rw, rh);
-        ctx.fillStyle = d.label === "person" ? "rgba(6, 182, 212, 0.15)" : "rgba(16, 185, 129, 0.15)";
-        ctx.fillRect(rx, ry, rw, rh);
-        ctx.fillStyle = "#ffffff";
-        ctx.font = "bold 10px sans-serif";
-        ctx.fillText(`${d.label.toUpperCase()} #${d.track_id || 1}`, rx + 4, ry - 4);
-      });
-
-      ctx.fillStyle = "#06b6d4";
-      ctx.font = "bold 10px monospace";
-      ctx.fillText(`● LIVE AI STREAM | ${cameraName.toUpperCase()}`, 10, 20);
-
-      animId = requestAnimationFrame(render);
-    };
-    render();
-    return () => cancelAnimationFrame(animId);
-  }, [cameraName, detections]);
-
-  return <canvas ref={canvasRef} className="h-full w-full object-cover bg-black" />;
+  return <FallbackTileLiveFeedShared cameraName={cameraName} detections={detections} />;
 }
 
 const CameraTile = memo(function CameraTile({ camera: c, site, engineOnline, onFullscreen, paused }: { camera: any; site: string; engineOnline: boolean | null; onFullscreen: (id: string) => void; paused: boolean }) {
@@ -1616,7 +1563,7 @@ const CameraTile = memo(function CameraTile({ camera: c, site, engineOnline, onF
             controls={false}
             className={`${mediaClass} bg-black`}
           />
-        ) : showStream ? (
+        ) : showStream && !streamFailed ? (
           <img
             key={`${c.id}-${retryCount}`}
             ref={imgRef}
@@ -1629,9 +1576,10 @@ const CameraTile = memo(function CameraTile({ camera: c, site, engineOnline, onF
               setStreamFailed(false);
             }}
             onError={() => {
-              setTimeout(() => {
-                setRetryCount((r) => r + 1);
-              }, 2000);
+              if (imgCors && !corsProvenRef.current) {
+                setImgCors(false);
+              }
+              setStreamFailed(true);
             }}
           />
         ) : isScreenShareCam ? (
@@ -1653,11 +1601,7 @@ const CameraTile = memo(function CameraTile({ camera: c, site, engineOnline, onF
             </div>
           </div>
         ) : (
-          <div className="flex flex-col items-center justify-center gap-2 p-4 text-center">
-            <Video size={32} className="text-zinc-600 animate-pulse" />
-            <span className="text-xs font-semibold text-zinc-400">Connecting to Stream...</span>
-            <span className="text-[10px] text-zinc-600 font-mono max-w-[200px] truncate">{c.name}</span>
-          </div>
+          <FallbackTileLiveFeed cameraName={c.name} detections={shownDetections} />
         )}
 
         {/* Boxes sit above the media and below the status chips. object-cover

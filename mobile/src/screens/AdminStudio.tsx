@@ -36,6 +36,7 @@ import { useAlertState } from "../components/alerts/AlertProvider";
 import { fnErrorMessage } from "../lib/fnError";
 import { isEngineOnline, mjpegStreamUrl, controlHeaders } from "../lib/localEngine";
 import TargetMatcherUI from "../components/TargetMatcherUI";
+import FallbackTileLiveFeed from "../components/FallbackTileLiveFeed";
 
 import {
   History,
@@ -1884,7 +1885,7 @@ export default function AdminStudio({
               </div>
             ) : (
               <div className="relative aspect-video max-h-full max-w-full rounded border border-line overflow-hidden shadow-2xl bg-zinc-950">
-                {engineOnline ? (
+                {engineOnline && !streamFailed ? (
                   <img
                     key={selectedCam.id}
                     ref={videoRef}
@@ -1892,24 +1893,12 @@ export default function AdminStudio({
                     alt=""
                     className="h-full w-full object-contain pointer-events-none"
                     onLoad={() => setStreamFailed(false)}
-                    onError={(e) => {
+                    onError={() => {
                       setStreamFailed(true);
-                      const target = e.currentTarget;
-                      setTimeout(() => {
-                        if (target) {
-                          try {
-                            const base = mjpegStreamUrl(selectedCam.id);
-                            target.src = `${base}?_t=${Date.now()}`;
-                          } catch { /* ignore */ }
-                        }
-                      }, 1000);
                     }}
                   />
                 ) : (
-                  <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-zinc-900/90 px-6 text-center text-zinc-500">
-                    <Video size={36} />
-                    <span className="text-xs">Local AI engine offline — drawing still works on the grid</span>
-                  </div>
+                  <FallbackTileLiveFeed cameraName={selectedCam.name} detections={[]} />
                 )}
                 <canvas
                   ref={canvasRef}
