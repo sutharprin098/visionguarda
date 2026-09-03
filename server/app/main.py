@@ -1246,16 +1246,19 @@ def _generate_mjpeg_standby_frame(camera_name: str, frame_count: int) -> bytes:
 @app.get("/stream/{camera_id}")
 @app.get("/engine-proxy/stream/{camera_id}")
 async def get_mjpeg_stream(camera_id: str):
-    thread = manager.camera_threads.get(camera_id)
-    if not thread:
+    def resolve_active_thread(cid: str):
+        t = manager.camera_threads.get(cid)
+        if t:
+            return t
         for t_id, t_obj in manager.camera_threads.items():
             cam_info = getattr(t_obj, "config", {}) or {}
-            if isinstance(cam_info, dict) and (cam_info.get("name") == camera_id or cam_info.get("id") == camera_id):
-                thread = t_obj
-                break
-    if not thread and manager.camera_threads:
-        thread = next((t for t in manager.camera_threads.values() if getattr(t, "running", False)), list(manager.camera_threads.values())[0])
+            if isinstance(cam_info, dict) and (cam_info.get("name") == cid or cam_info.get("id") == cid):
+                return t_obj
+        if manager.camera_threads:
+            return next((t for t in manager.camera_threads.values() if getattr(t, "running", False)), list(manager.camera_threads.values())[0])
+        return None
 
+    thread = resolve_active_thread(camera_id)
     cam_name = getattr(thread, "config", {}).get("name", camera_id) if thread and isinstance(getattr(thread, "config", None), dict) else camera_id
 
     async def mjpeg_generator():
@@ -1270,7 +1273,7 @@ async def get_mjpeg_stream(camera_id: str):
         try:
             while True:
                 try:
-                    active_thread = manager.camera_threads.get(camera_id) or thread
+                    active_thread = resolve_active_thread(camera_id)
                     jpeg_bytes = getattr(active_thread, "current_jpeg_bytes", None) if active_thread else None
                     if jpeg_bytes is not None and len(jpeg_bytes) > 0:
                         yield (b'--frame\r\n'

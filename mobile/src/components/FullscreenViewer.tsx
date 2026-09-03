@@ -183,9 +183,10 @@ export default function FullscreenViewer({
   const handleImageError = () => {
     if (imgCors && !corsProvenRef.current) {
       setImgCors(false);
-      return;
     }
-    setStreamFailed(true);
+    setTimeout(() => {
+      setRetryCount((r) => r + 1);
+    }, 1000);
   };
 
   const step = useCallback((delta: number) => {
@@ -245,31 +246,22 @@ export default function FullscreenViewer({
           className="w-full h-full flex items-center justify-center transition-transform duration-300"
           style={{ transform: `rotate(${rotation}deg)` }}
         >
-          {!streamFailed ? (
-            <img
-              key={`${cameraId}_${retryCount}_${imgCors ? "cors" : "plain"}`}
-              ref={imgRef}
-              crossOrigin={imgCors ? "anonymous" : undefined}
-              src={mjpegStreamUrl(cameraId)}
-              alt={cam?.name ?? cameraId}
-              className="h-full w-full object-contain"
-              onLoad={() => { corsProvenRef.current = imgCors; }}
-              onError={handleImageError}
-            />
-          ) : (
-            <FallbackLiveCameraFeed
-              cameraName={cam?.name ?? cameraId}
-              detections={shown}
-            />
-          )}
+          <img
+            key={`${cameraId}_${retryCount}_${imgCors ? "cors" : "plain"}`}
+            ref={imgRef}
+            crossOrigin={imgCors ? "anonymous" : undefined}
+            src={`${mjpegStreamUrl(cameraId)}?t=${retryCount}`}
+            alt={cam?.name ?? cameraId}
+            className="h-full w-full object-contain"
+            onLoad={() => { corsProvenRef.current = imgCors; }}
+            onError={handleImageError}
+          />
 
-          {!streamFailed && (
-            <DetectionOverlay
-              detections={shown}
-              mediaRef={imgRef as React.RefObject<HTMLImageElement>}
-              fit="contain"
-            />
-          )}
+          <DetectionOverlay
+            detections={shown}
+            mediaRef={imgRef as React.RefObject<HTMLImageElement>}
+            fit="contain"
+          />
         </div>
       </div>
 

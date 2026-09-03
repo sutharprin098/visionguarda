@@ -1308,7 +1308,7 @@ const CameraTile = memo(function CameraTile({ camera: c, site, engineOnline, onF
   // `engineOnline !== false` ensures stream renders even if health status fetch is pending.
   // Keep stream element active during source fault so synthetic standby/recovery stream renders with live telemetry overlays.
   const showStream =
-    engineOnline !== false && !streamFailed && !isScreenShareCam && !paused;
+    engineOnline !== false && !isScreenShareCam && !paused;
 
   // Show the reason banner for a real camera whose source is faulted, and for a
   // screen share that WAS running and has stopped being pushed. Not for an
