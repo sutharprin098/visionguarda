@@ -185,6 +185,8 @@ export class MediaShareSession {
       if (!this.video) {
         this.video = document.createElement("video");
         this.video.muted = true;
+        this.video.playsInline = true;
+        this.video.autoplay = true;
       }
       this.video.srcObject = stream;
       this.video.play().catch(() => {});
@@ -365,19 +367,14 @@ export class MediaShareSession {
     this.frameTimer = setInterval(() => {
       if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
       const video = this.video;
+      const track = this.stream?.getVideoTracks()[0];
+      const isTrackLive = track && track.readyState === "live";
 
-      // ── Backpressure: never queue a frame the socket cannot drain ─────────
-      // ws.send() buffers without bound. When the engine is busy (a slow
-      // inference cycle, another camera saturating the loop) the encoded
-      // frames pile up in bufferedAmount instead of going anywhere — the
-      // renderer's memory grows, and every frame that does arrive is already
-      // stale by the length of the backlog. Skipping while backed up is the
-      // "drop old frames instead of queueing" rule applied at the only place
-      // in this path that can actually queue.
-      if (video && video.readyState >= video.HAVE_CURRENT_DATA) {
-        // Video element is active and producing frames
+      if (isTrackLive) {
         this.lastSendOkTs = Date.now();
+      }
 
+      if (video && (video.readyState >= video.HAVE_CURRENT_DATA || (video.videoWidth > 0 && video.videoHeight > 0))) {
         if (this.ws.bufferedAmount > MAX_WS_BUFFERED_BYTES) {
           this.droppedFrames++;
           return;
@@ -385,6 +382,10 @@ export class MediaShareSession {
 
         if (this.ctx && this.canvas) {
           try {
+            if (video.videoWidth > 0 && (this.canvas.width !== video.videoWidth || this.canvas.height !== video.videoHeight)) {
+              this.canvas.width = video.videoWidth;
+              this.canvas.height = video.videoHeight;
+            }
             this.ctx.drawImage(video, 0, 0, this.canvas.width, this.canvas.height);
             const frame = this.canvas.toDataURL("image/jpeg", 0.85);
             this.ws.send(JSON.stringify({ type: "screen_frame", camera_id: this.cameraId, frame }));
@@ -394,44 +395,23 @@ export class MediaShareSession {
           }
         }
       }
-      // NOTE: the `else` branch here used to refresh lastSendOkTs whenever the
-      // video element was not ready, on the reasoning that a loading stream
-      // should not trip the watchdog. That is exactly backwards, and it is the
-      // bug behind "No frames are being pushed":
-      //
-      // A capture track that has ended (screen share revoked, monitor
-      // unplugged, laptop lid closed, OS reclaimed the surface) leaves the
-      // <video> permanently below HAVE_CURRENT_DATA. That branch then refreshed
-      // the freshness timestamp forever, so nothing downstream could ever tell
-      // "starting up" from "dead". The socket stays open, ping/pong keeps
-      // answering, the heartbeat below is satisfied — and zero frames flow, for
-      // as long as the app is left running. The engine correctly reports "No
-      // frames are being pushed to this virtual camera" and nothing on this
-      // side ever tries to fix it.
-      //
-      // Now the timestamp only moves on a real send, and checkFrameFlow()
-      // below turns a stalled stream into a re-acquire.
     }, FRAME_INTERVAL_MS);
   }
 
-  /**
-   * Frame-flow watchdog: detects "socket healthy, but no video".
-   *
-   * The heartbeat proves the SOCKET is alive; it says nothing about whether the
-   * capture is producing pixels. Those two fail independently, and the failure
-   * that stranded virtual cameras was the second one — which had no detector at
-   * all (lastSendOkTs was written in three places and read in none, so the
-   * watchdog it existed for was never actually built).
-   *
-   * Re-acquiring the stream is the right recovery because the socket is fine:
-   * tearing down and reconnecting the WebSocket would not bring the video back.
-   */
   private checkFrameFlow(): void {
     if (this.stopped) return;
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
+
+    const track = this.stream?.getVideoTracks()[0];
+    if (track && track.readyState === "live") {
+      // The MediaStream capture track is active and producing frames.
+      // Do not tear down the stream or force "reconnecting" status.
+      return;
+    }
+
     if (Date.now() - this.lastSendOkTs <= SEND_STALL_TIMEOUT_MS) return;
 
-    console.warn("[MediaShare] Frame flow stalled (>4s since last send). Re-acquiring capture stream...", {
+    console.warn("[MediaShare] Frame flow stalled (>12s since last send). Re-acquiring capture stream...", {
       cameraId: this.cameraId,
       kind: this.kind,
     });
