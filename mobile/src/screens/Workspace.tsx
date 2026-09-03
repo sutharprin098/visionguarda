@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef, useCallback, memo } from "react";
+import { useEffect, useState, useRef, useCallback, useMemo, memo } from "react";
 import { Video, Bell, Settings2, LogOut, Wifi, WifiOff, Sliders, Activity, AlertTriangle, RotateCw, Maximize2, Minimize2, Lock, Send, Check, Loader2, MessageCircle, ChevronDown, ChevronRight, Copy, Cloud, Cpu, Globe, Plus, MoreVertical } from "lucide-react";
 import clsx from "clsx";
 import { startRealtimeSync, DeactivatedError, SyncBundle } from "../lib/sync";
@@ -1361,9 +1361,24 @@ const CameraTile = memo(function CameraTile({ camera: c, site, engineOnline, onF
 
   // The media element the overlay measures: the local <video> while sharing,
   // otherwise the MJPEG <img>. Both show the same frames the engine analysed.
+  const ytEmbedUrl = useMemo(() => {
+    const src = c.source || "";
+    const match = src.match(/(?:youtu\.be\/|youtube\.com\/(?:embed\/|v\/|watch\?v=|watch\?.+&v=))([\w-]{11})/);
+    if (match && match[1]) {
+      return `https://www.youtube.com/embed/${match[1]}?autoplay=1&mute=1&playsinline=1&controls=0&modestbranding=1&enablejsapi=1`;
+    }
+    return null;
+  }, [c.source]);
+
+  const isDirectVideo = useMemo(() => {
+    if (!c.source) return false;
+    const s = c.source.toLowerCase();
+    return s.endsWith(".m3u8") || s.endsWith(".mp4") || s.endsWith(".webm") || c.source_type === "hls";
+  }, [c.source, c.source_type]);
+
   const imgRef = useRef<HTMLImageElement>(null);
   const mediaRef = (sharingType !== null ? videoRef : imgRef) as React.RefObject<HTMLVideoElement | HTMLImageElement>;
-  const showingMedia = sharingType !== null || showStream;
+  const showingMedia = sharingType !== null || ytEmbedUrl !== null || isDirectVideo || showStream;
 
   // ---- smart-snapshot capture source --------------------------------------
   //
@@ -1572,6 +1587,24 @@ const CameraTile = memo(function CameraTile({ camera: c, site, engineOnline, onF
             autoPlay
             playsInline
             muted
+            className={`${mediaClass} bg-black`}
+          />
+        ) : ytEmbedUrl ? (
+          <iframe
+            src={ytEmbedUrl}
+            title={c.name}
+            className="w-full h-full border-0 pointer-events-none object-cover bg-black"
+            allow="autoplay; encrypted-media; picture-in-picture"
+            allowFullScreen
+          />
+        ) : isDirectVideo ? (
+          <video
+            src={c.source}
+            autoPlay
+            playsInline
+            muted
+            loop
+            controls={false}
             className={`${mediaClass} bg-black`}
           />
         ) : showStream ? (
