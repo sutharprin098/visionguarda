@@ -1251,10 +1251,7 @@ function FallbackTileLiveFeed({ cameraName, detections }: { cameraName: string; 
         ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke();
       }
 
-      const activeDets = detections.length > 0 ? detections : [
-        { label: "person", confidence: 0.94, bbox: [0.25 + Math.sin(time * 0.4) * 0.05, 0.28, 0.18, 0.46], track_id: 101 },
-        { label: "vehicle", confidence: 0.9, bbox: [0.6 + Math.cos(time * 0.3) * 0.04, 0.48, 0.26, 0.36], track_id: 204 },
-      ];
+      const activeDets = detections;
 
       activeDets.forEach((d: any) => {
         const [bx, by, bw, bh] = d.bbox || [0.3, 0.3, 0.2, 0.3];
@@ -1290,6 +1287,7 @@ const CameraTile = memo(function CameraTile({ camera: c, site, engineOnline, onF
   const goFullscreen = useCallback(() => onFullscreen(c.id), [onFullscreen, c.id]);
 
   const [streamFailed, setStreamFailed] = useState(false);
+  const [retryCount, setRetryCount] = useState(0);
   const [sharingType, setSharingType] = useState<"screen" | "webcam" | null>(null);
   const [shareStatus, setShareStatus] = useState<ShareStatus>("idle");
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
@@ -1578,15 +1576,20 @@ const CameraTile = memo(function CameraTile({ camera: c, site, engineOnline, onF
           />
         ) : showStream ? (
           <img
-            key={c.id}
+            key={`${c.id}-${retryCount}`}
             ref={imgRef}
             crossOrigin={imgCors ? "anonymous" : undefined}
-            src={mjpegStreamUrl(c.id)}
+            src={`${mjpegStreamUrl(c.id)}?t=${retryCount}`}
             alt={c.name}
             className={mediaClass}
-            onLoad={() => { corsProvenRef.current = imgCors; }}
+            onLoad={() => {
+              corsProvenRef.current = imgCors;
+              setStreamFailed(false);
+            }}
             onError={() => {
-              setStreamFailed(true);
+              setTimeout(() => {
+                setRetryCount((r) => r + 1);
+              }, 2000);
             }}
           />
         ) : isScreenShareCam ? (
@@ -1769,14 +1772,7 @@ const CameraTile = memo(function CameraTile({ camera: c, site, engineOnline, onF
       <div className="flex items-center justify-between px-3 py-2 bg-surface-1">
         <span className="text-sm text-zinc-200">{c.name}</span>
         <div className="flex items-center gap-2">
-          {sharingType === null ? (
-            <button
-              onClick={() => startSharing("webcam")}
-              className="text-[10px] bg-sky-500/20 text-sky-400 hover:bg-sky-500/30 px-2 py-0.5 rounded font-bold transition flex items-center gap-1"
-            >
-              <span>📱 Open Cam</span>
-            </button>
-          ) : (
+          {sharingType !== null && (
             <button
               onClick={stopSharing}
               className="text-[10px] text-red-400 hover:text-red-300 hover:underline mr-1 font-bold"
