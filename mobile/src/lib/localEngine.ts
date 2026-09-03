@@ -21,12 +21,7 @@ export function getEngineBase(): string {
       return custom.trim().replace(/\/+$/, "");
     }
   }
-  const isMobile =
-    typeof window !== "undefined" &&
-    (Boolean((window as any).Capacitor) ||
-      /Android|iPhone|iPad|iPod/i.test(navigator.userAgent));
-
-  return isMobile ? "http://13.203.71.14:8000" : "http://127.0.0.1:8000";
+  return "http://127.0.0.1:8000";
 }
 
 export const ENGINE_BASE = getEngineBase();

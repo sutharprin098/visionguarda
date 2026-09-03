@@ -1235,6 +1235,16 @@ const CameraTile = memo(function CameraTile({ camera: c, site, engineOnline, onF
 
   const [streamFailed, setStreamFailed] = useState(false);
   const [retryCount, setRetryCount] = useState(0);
+
+  // Periodic stream reconnect attempt when stream has failed
+  useEffect(() => {
+    if (!streamFailed) return;
+    const timer = setTimeout(() => {
+      setStreamFailed(false);
+      setRetryCount((r) => r + 1);
+    }, 4000);
+    return () => clearTimeout(timer);
+  }, [streamFailed]);
   const [sharingType, setSharingType] = useState<"screen" | "webcam" | null>(null);
   const [shareStatus, setShareStatus] = useState<ShareStatus>("idle");
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
