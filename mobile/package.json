@@ -1,6 +1,6 @@
 {
   "name": "camai-mobile",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "CamAI Mobile — Enterprise AI CCTV Android Client",
   "private": true,
   "type": "module",

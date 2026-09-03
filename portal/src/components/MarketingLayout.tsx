@@ -108,12 +108,12 @@ export default function MarketingLayout() {
                 </a>
 
                 <a
-                  href="/downloads/CamAI-Mobile-v1.0.1.apk"
-                  download="CamAI-Mobile-v1.0.1.apk"
+                  href="/downloads/CamAI-Mobile-v1.0.2.apk"
+                  download="CamAI-Mobile-v1.0.2.apk"
                   className="w-full py-2.5 rounded-xl border border-slate-300 bg-slate-100 text-slate-700 text-xs font-mono font-bold text-center flex items-center justify-center gap-2"
                 >
                   <Download size={14} className="text-slate-600" />
-                  Download Mobile App v1.0.1 (.apk)
+                  Download Mobile App v1.0.2 (.apk)
                 </a>
 
                 <Link to="/signin" onClick={() => setOpen(false)} className="w-full py-2.5 rounded-xl border border-slate-200 bg-slate-100 text-slate-700 text-xs font-bold text-center hover:bg-slate-200 mt-1">
@@ -174,8 +174,8 @@ export default function MarketingLayout() {
                   </a>
                 </li>
                 <li>
-                  <a href="/downloads/CamAI-Mobile-v1.0.1.apk" download="CamAI-Mobile-v1.0.1.apk" className="text-slate-700 font-bold hover:underline flex items-center gap-1">
-                    <Download size={11} /> Mobile App v1.0.1 (.apk)
+                  <a href="/downloads/CamAI-Mobile-v1.0.2.apk" download="CamAI-Mobile-v1.0.2.apk" className="text-slate-700 font-bold hover:underline flex items-center gap-1">
+                    <Download size={11} /> Mobile App v1.0.2 (.apk)
                   </a>
                 </li>
               </ul>

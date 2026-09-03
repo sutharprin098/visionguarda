@@ -751,12 +751,12 @@ export default function DownloadsPage() {
 
           <div className="mt-8 pt-6 border-t border-slate-800 space-y-3 relative z-10">
             <a
-              href="/downloads/CamAI-Mobile-v1.0.1.apk"
-              download="CamAI-Mobile-v1.0.1.apk"
+              href="/downloads/CamAI-Mobile-v1.0.2.apk"
+              download="CamAI-Mobile-v1.0.2.apk"
               className="w-full py-4 px-6 rounded-2xl bg-gradient-to-r from-indigo-500 via-purple-600 to-sky-600 hover:from-indigo-400 hover:to-sky-500 text-white font-extrabold text-sm shadow-xl shadow-indigo-500/20 flex items-center justify-center gap-2.5 transition-all hover:scale-[1.01] active:scale-95"
             >
               <Download size={18} />
-              <span>DOWNLOAD ANDROID APK (v1.0.1)</span>
+              <span>DOWNLOAD ANDROID APK (v1.0.2)</span>
             </a>
             <div className="flex items-center justify-between text-[11px] text-slate-400 px-1">
               <span>Direct Public Link</span>
