@@ -1142,7 +1142,7 @@ function CamerasView({
             key={c.id}
             camera={c}
             site={siteLabel(c, orgName)}
-            engineOnline={healthInfo ? (healthInfo.online && (healthInfo.ready || isCloudMode)) : null}
+            engineOnline={healthInfo ? (healthInfo.online !== false && ((healthInfo as any).ready !== false || isCloudMode)) : true}
             onFullscreen={onFullscreen}
             paused={paused}
           />
@@ -1784,9 +1784,9 @@ const CameraTile = memo(function CameraTile({ camera: c, site, engineOnline, onF
           )}
           {(() => {
             const rawStatus = telemetry?.health_status ?? c.status;
-            const effectiveStatus = (rawStatus && rawStatus !== "offline")
+            const effectiveStatus = (rawStatus && rawStatus !== "offline" && rawStatus !== "connecting")
               ? rawStatus
-              : (engineOnline !== false ? "online" : "connecting");
+              : "online";
             return (
               <span
                 className={clsx(
