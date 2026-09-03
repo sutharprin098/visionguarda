@@ -312,7 +312,12 @@ def _ws_origin_allowed(websocket: WebSocket) -> bool:
         return True
     if "*" in CORS_ORIGINS:
         return True
-    return origin in CORS_ORIGINS
+    if origin in CORS_ORIGINS:
+        return True
+    # Allow local loopback, electron, and app domains
+    if any(k in origin for k in ("127.0.0.1", "localhost", "princesite.in")) or origin.startswith(("app://", "file://", "capacitor://")):
+        return True
+    return False
 
 
 _decode_fail_count = 0
