@@ -2114,15 +2114,7 @@ class PipelineCoordinator:
                             self._is_standby_frame = True
                             time.sleep(0.033)  # Maintain smooth 30fps playback during standby/recovery
                     else:
-                        if (self.source_type == "rtsp" or "://" in str(self.source)) and not self._is_video_file:
-                            # Aggressively flush ALL queued socket frames from OpenCV/FFmpeg internal buffer (up to 30 frames / 1s backlog)
-                            # so cap.retrieve() lands directly on the live camera frame without 1-second socket lag.
-                            drain_count = 0
-                            while drain_count < 30 and self.cap.grab():
-                                drain_count += 1
-                            ret, frame = self.cap.retrieve()
-                        else:
-                            ret, frame = self.cap.read()
+                        ret, frame = self.cap.read()
 
                         if (not ret or frame is None) and self._is_video_file:
                             self.cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
