@@ -1,5 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { Check, Cloud, Lock } from "lucide-react";
 import { supabase, getErrorMessage } from "../../lib/supabase";
 import { audit } from "../../lib/audit";
 import { useAuth } from "../../contexts/AuthContext";
@@ -599,6 +600,261 @@ function AiTab({ canConfigure }: { canConfigure: boolean }) {
           </div>
         </div>
       </div>
+
+      {/* Admin AI Profiles, Target Detection Classes & Confidence Control */}
+      <InteractiveAiSettingsPanel
+        orgId={org?.id ?? null}
+        currentSettings={current ?? []}
+        canConfigure={canConfigure}
+      />
+    </div>
+  );
+}
+
+function InteractiveAiSettingsPanel({
+  orgId,
+  currentSettings,
+  canConfigure,
+}: {
+  orgId: string | null;
+  currentSettings: any[];
+  canConfigure: boolean;
+}) {
+  const getSetting = (key: string, fallback: any) => {
+    const found = currentSettings?.find((s: any) => s.key === key);
+    return found ? found.value : fallback;
+  };
+
+  const [profile, setProfile] = useState<string>(getSetting("ai.profile", "General Security"));
+  const [activeClasses, setActiveClasses] = useState<string[]>(() => {
+    const val = getSetting("ai.classes", null);
+    return Array.isArray(val) && val.length > 0
+      ? val
+      : ["person", "vehicle", "car", "bus", "dog", "rodent", "micro_motion"];
+  });
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (currentSettings && currentSettings.length > 0) {
+      setProfile(getSetting("ai.profile", "General Security"));
+      const classesVal = getSetting("ai.classes", null);
+      if (Array.isArray(classesVal) && classesVal.length > 0) {
+        setActiveClasses(classesVal);
+      }
+    }
+  }, [currentSettings]);
+
+  const availableClasses = [
+    { id: "person", label: "👤 Person / Human", desc: "Detect people and individuals" },
+    { id: "vehicle", label: "🚗 Vehicles & Transport", desc: "Cars, trucks, buses, bikes" },
+    { id: "car", label: "🚘 Cars", desc: "Standard passenger vehicles" },
+    { id: "bus", label: "🚌 Buses & Heavy Vehicles", desc: "Large commercial transport" },
+    { id: "dog", label: "🐕 Animals / Pets", desc: "Dogs, cats, domestic animals" },
+    { id: "rodent", label: "🐀 Rodents / Pests", desc: "Small pest motion in darkness" },
+    { id: "micro_motion", label: "🌙 Night Micro-Motion", desc: "Low-contrast night vector movement" },
+    { id: "intrusion", label: "🚨 ROI Breach / Intrusion", desc: "Zone violation alarms" },
+  ];
+
+  const profiles = [
+    { id: "General Security", label: "🛡️ General Security", classes: ["person", "vehicle", "car", "bus", "dog", "rodent", "micro_motion", "intrusion"] },
+    { id: "Traffic & Transport", label: "🚦 Traffic & Vehicles", classes: ["vehicle", "car", "bus", "person"] },
+    { id: "Perimeter Shield", label: "🚨 Perimeter Shield", classes: ["person", "intrusion", "micro_motion"] },
+    { id: "Night Vision Mode", label: "🌙 Night Vision & Micro-Motion", classes: ["person", "rodent", "micro_motion"] },
+  ];
+
+  async function toggleClass(clsId: string) {
+    if (!canConfigure) return;
+    const next = activeClasses.includes(clsId)
+      ? activeClasses.filter((c) => c !== clsId)
+      : [...activeClasses, clsId];
+    setActiveClasses(next);
+    await saveSettings(profile, next);
+  }
+
+  async function selectProfile(p: typeof profiles[0]) {
+    if (!canConfigure) return;
+    setProfile(p.id);
+    setActiveClasses(p.classes);
+    await saveSettings(p.id, p.classes);
+  }
+
+  async function saveSettings(nextProfile: string, nextClasses: string[]) {
+    if (!orgId || !canConfigure) return;
+    setSaving(true);
+    try {
+      await supabase.from("settings").upsert([
+        { org_id: orgId, scope: "org", key: "ai.profile", value: nextProfile },
+        { org_id: orgId, scope: "org", key: "ai.classes", value: nextClasses },
+      ], { onConflict: "org_id,scope,key" });
+    } catch {
+      /* local state maintained */
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="space-y-6">
+      {/* Profile Selector */}
+      <div className="rounded-xl border border-line bg-surface-1 p-5 shadow-xl">
+        <div className="flex items-center justify-between border-b border-line pb-3">
+          <div>
+            <h3 className="text-sm font-bold text-ink-1">AI Detection Profile</h3>
+            <p className="text-xs text-ink-3">Select pre-configured AI detection rules for organization cameras</p>
+          </div>
+          <span className="flex items-center space-x-1 rounded bg-blue-500/20 px-2.5 py-1 text-[11px] font-semibold text-blue-400 border border-blue-500/30">
+            <Cloud className="h-3.5 w-3.5 animate-pulse" />
+            <span>AWS Cloud GPU Synced</span>
+          </span>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 mt-4">
+          {profiles.map((p) => (
+            <button
+              key={p.id}
+              disabled={!canConfigure}
+              onClick={() => selectProfile(p)}
+              className={`flex flex-col text-left p-3.5 rounded-lg border transition-all ${
+                profile === p.id
+                  ? "bg-accent/15 border-accent text-accent shadow-md font-medium"
+                  : "bg-surface-2/60 border-line text-ink-3 hover:border-line/80 hover:text-ink-1"
+              }`}
+            >
+              <span className="font-semibold text-xs text-ink-1">{p.label}</span>
+              <span className="text-[10px] text-ink-3 mt-1">{p.classes.length} detection rules enabled</span>
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Target Detection Classes Toggle Grid */}
+      <div className="rounded-xl border border-line bg-surface-1 p-5 shadow-xl">
+        <div className="flex items-center justify-between border-b border-line pb-3">
+          <div>
+            <h3 className="text-sm font-bold text-ink-1">Target Detection Classes</h3>
+            <p className="text-xs text-ink-3">Click any class below to enable or disable live AI bounding boxes for this org</p>
+          </div>
+          {saving && <span className="text-xs text-accent animate-pulse">Syncing...</span>}
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 mt-4">
+          {availableClasses.map((c) => {
+            const active = activeClasses.includes(c.id);
+            return (
+              <button
+                key={c.id}
+                disabled={!canConfigure}
+                onClick={() => toggleClass(c.id)}
+                className={`flex items-start space-x-3 p-3 rounded-lg border text-left transition-all ${
+                  active
+                    ? "bg-emerald-500/10 border-emerald-500/80 text-emerald-300"
+                    : "bg-surface-2/40 border-line text-ink-3 hover:border-line/80"
+                }`}
+              >
+                <div className={`mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded border ${
+                  active ? "bg-emerald-500 border-emerald-400 text-black" : "border-line bg-surface-2"
+                }`}>
+                  {active && <Check className="h-3 w-3 stroke-[3]" />}
+                </div>
+                <div>
+                  <div className="text-xs font-semibold text-ink-1">{c.label}</div>
+                  <div className="text-[10px] text-ink-3 mt-0.5">{c.desc}</div>
+                </div>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Confidence Control */}
+      <div className="rounded-xl border border-line bg-surface-1 p-5 shadow-xl">
+        <ConfidenceControl
+          orgId={orgId}
+          value={typeof getSetting("ai.confidence", 0.25) === "number" ? getSetting("ai.confidence", 0.25) : 0.25}
+          canEdit={canConfigure}
+        />
+      </div>
+    </div>
+  );
+}
+
+function ConfidenceControl({
+  orgId,
+  value,
+  canEdit,
+}: {
+  orgId: string | null;
+  value: number;
+  canEdit: boolean;
+}) {
+  const [draft, setDraft] = useState(value);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const dragging = useRef(false);
+
+  useEffect(() => {
+    if (!dragging.current) setDraft(value);
+  }, [value]);
+
+  async function commit(next: number) {
+    if (!orgId || !canEdit) return;
+    if (next === value) return;
+    setSaving(true);
+    setError(null);
+    try {
+      const { error: err } = await supabase.from("settings").upsert(
+        { org_id: orgId, scope: "org", key: "ai.confidence", value: next as any },
+        { onConflict: "org_id,scope,key" },
+      );
+      if (err) {
+        setError(err.message);
+        setDraft(value);
+      }
+    } catch (e: any) {
+      setError(e?.message ?? "Could not save");
+      setDraft(value);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="pt-2">
+      <div className="flex items-center justify-between">
+        <div className="text-xs font-bold text-ink-1 uppercase tracking-wider">
+          Global Detection Confidence Floor
+        </div>
+        <div className="text-xs font-mono font-bold text-accent">{Math.round(draft * 100)}%</div>
+      </div>
+      <input
+        type="range"
+        min={0.1}
+        max={0.9}
+        step={0.05}
+        value={draft}
+        disabled={!canEdit || !orgId || saving}
+        onPointerDown={() => { dragging.current = true; }}
+        onChange={(e) => setDraft(Number(e.target.value))}
+        onPointerUp={() => { dragging.current = false; void commit(draft); }}
+        onKeyUp={() => { void commit(draft); }}
+        className="mt-3 w-full accent-accent disabled:opacity-40 disabled:cursor-not-allowed"
+      />
+      <div className="mt-1 flex items-center justify-between text-[10px] text-ink-3">
+        <span>More detections (10%)</span>
+        <span>Fewer, surer (90%)</span>
+      </div>
+      {canEdit ? (
+        <div className="mt-2 text-[11px] text-ink-3">
+          {saving
+            ? "Saving…"
+            : "Applies to every camera in this organization in real-time — live cloud & local engine update."}
+        </div>
+      ) : (
+        <div className="mt-2 flex items-center gap-1 text-[11px] text-ink-3">
+          <Lock size={12} /> Admin permission required to edit confidence floor.
+        </div>
+      )}
+      {error && <div className="mt-1 text-[11px] text-danger">Could not save: {error}</div>}
     </div>
   );
 }

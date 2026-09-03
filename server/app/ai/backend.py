@@ -153,22 +153,22 @@ VISDRONE_CLASS_MAP = {
 # gate — narrow bounds here would just trade false positives for false
 # negatives, which the goal cares about equally.
 _GEOMETRY_BOUNDS = {
-    "person":     {"min_area_frac": 0.00005, "max_area_frac": 0.90, "max_aspect": 6.0},
-    "bicycle":    {"min_area_frac": 0.00005, "max_area_frac": 0.60, "max_aspect": 6.0},
-    "motorcycle": {"min_area_frac": 0.00005, "max_area_frac": 0.60, "max_aspect": 6.0},
-    "car":        {"min_area_frac": 0.00010, "max_area_frac": 0.85, "max_aspect": 6.0},
-    "bus":        {"min_area_frac": 0.00010, "max_area_frac": 0.90, "max_aspect": 8.0},
-    "truck":      {"min_area_frac": 0.00010, "max_area_frac": 0.90, "max_aspect": 8.0},
-    "dog":        {"min_area_frac": 0.00005, "max_area_frac": 0.85, "max_aspect": 6.0},
-    "cat":        {"min_area_frac": 0.00005, "max_area_frac": 0.85, "max_aspect": 6.0},
-    "cow":        {"min_area_frac": 0.00010, "max_area_frac": 0.90, "max_aspect": 6.0},
-    "horse":      {"min_area_frac": 0.00010, "max_area_frac": 0.90, "max_aspect": 6.0},
-    "sheep":      {"min_area_frac": 0.00005, "max_area_frac": 0.85, "max_aspect": 6.0},
-    "animal":     {"min_area_frac": 0.00005, "max_area_frac": 0.90, "max_aspect": 6.0},
-    "traffic_light": {"min_area_frac": 0.00001, "max_area_frac": 0.20, "max_aspect": 8.0},
-    "stop_sign":     {"min_area_frac": 0.00002, "max_area_frac": 0.25, "max_aspect": 4.0},
+    "person":     {"min_area_frac": 0.000005, "max_area_frac": 0.90, "max_aspect": 8.0},
+    "bicycle":    {"min_area_frac": 0.000005, "max_area_frac": 0.60, "max_aspect": 8.0},
+    "motorcycle": {"min_area_frac": 0.000005, "max_area_frac": 0.60, "max_aspect": 8.0},
+    "car":        {"min_area_frac": 0.000005, "max_area_frac": 0.85, "max_aspect": 8.0},
+    "bus":        {"min_area_frac": 0.000005, "max_area_frac": 0.90, "max_aspect": 8.0},
+    "truck":      {"min_area_frac": 0.000005, "max_area_frac": 0.90, "max_aspect": 8.0},
+    "dog":        {"min_area_frac": 0.000005, "max_area_frac": 0.85, "max_aspect": 8.0},
+    "cat":        {"min_area_frac": 0.000005, "max_area_frac": 0.85, "max_aspect": 8.0},
+    "cow":        {"min_area_frac": 0.000005, "max_area_frac": 0.90, "max_aspect": 8.0},
+    "horse":      {"min_area_frac": 0.000005, "max_area_frac": 0.90, "max_aspect": 8.0},
+    "sheep":      {"min_area_frac": 0.000005, "max_area_frac": 0.85, "max_aspect": 8.0},
+    "animal":     {"min_area_frac": 0.000005, "max_area_frac": 0.90, "max_aspect": 8.0},
+    "traffic_light": {"min_area_frac": 0.000005, "max_area_frac": 0.20, "max_aspect": 8.0},
+    "stop_sign":     {"min_area_frac": 0.000005, "max_area_frac": 0.25, "max_aspect": 6.0},
 }
-_DEFAULT_GEOMETRY_BOUNDS = {"min_area_frac": 0.00005, "max_area_frac": 0.90, "max_aspect": 8.0}
+_DEFAULT_GEOMETRY_BOUNDS = {"min_area_frac": 0.000005, "max_area_frac": 0.90, "max_aspect": 8.0}
 
 
 def _passes_geometry_filter(class_name, x1, y1, x2, y2, frame_w, frame_h) -> bool:

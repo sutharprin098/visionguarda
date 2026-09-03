@@ -105,7 +105,17 @@ class FakeBackend:
             })
         return dets, [[] for _ in dets], 0.1
 
-    _crop_origin = (0, 0)
+    @property
+    def _crop_origin(self):
+        if not hasattr(self, "_tl"):
+            self._tl = threading.local()
+        return getattr(self._tl, "crop_origin", (0, 0))
+
+    @_crop_origin.setter
+    def _crop_origin(self, val):
+        if not hasattr(self, "_tl"):
+            self._tl = threading.local()
+        self._tl.crop_origin = val
 
 
 class OriginTrackingBackend(FakeBackend):
@@ -158,6 +168,7 @@ def _isolated_settings():
     # nothing to do with what it asserts. Reset the whole closed loop.
     governor._headroom = 1.0
     governor._last_probe = 0.0
+    governor._cpu_prev = None
     governor._probe_cache = {"percent": 0.0, "mem_percent": None, "temp_c": None,
                              "cpu": None}
     set_tiling_settings(prewarm=False)
@@ -165,6 +176,10 @@ def _isolated_settings():
     tiling._active_engines.clear()
     governor._cameras.clear()
     governor._headroom = 1.0
+    governor._cpu_prev = None
+    governor._last_probe = 0.0
+    governor._probe_cache = {"percent": 0.0, "mem_percent": None, "temp_c": None,
+                             "cpu": None}
     set_tiling_settings(**{k: getattr(before, k) for k in TilingSettings.__dataclass_fields__})
 
 
@@ -634,11 +649,15 @@ def test_parallel_tiles_produce_the_same_result_as_sequential():
 
     set_tiling_settings(workers=1, **common)
     b1 = OriginTrackingBackend(objs, frame, min_visible_px=30)
-    seq = _infer(_warm(_engine(), b1, frame), b1, frame)
+    e1 = _engine()
+    seq = _infer(_warm(e1, b1, frame), b1, frame)
+    governor.release(e1.camera_id)
 
     set_tiling_settings(workers=4, **common)
     b2 = OriginTrackingBackend(objs, frame, min_visible_px=30)
-    par = _infer(_warm(_engine(), b2, frame), b2, frame)
+    e2 = _engine()
+    par = _infer(_warm(e2, b2, frame), b2, frame)
+    governor.release(e2.camera_id)
 
     def key(r):
         return sorted((d["class"], tuple(sorted(d["bbox"].items()))) for d in r.detections)

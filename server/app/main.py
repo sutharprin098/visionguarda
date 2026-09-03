@@ -1223,8 +1223,8 @@ def get_camera_telemetry(camera_id: str):
 @app.get("/engine-proxy/stream/{camera_id}")
 async def get_mjpeg_stream(camera_id: str):
     thread = manager.camera_threads.get(camera_id)
-    if not thread and manager.camera_threads:
-        # Fallback to first active running thread if exact ID match is missing
+    if not thread and camera_id in ("default", "active", "primary") and manager.camera_threads:
+        # Fallback to first active running thread ONLY if generic keyword requested
         thread = next((t for t in manager.camera_threads.values() if t.running), list(manager.camera_threads.values())[0])
     if not thread:
         raise HTTPException(status_code=404, detail="Camera thread not running or inactive")

@@ -60,6 +60,20 @@ hiddenimports += [
 
 # Our own package.
 hiddenimports += collect_submodules("app")
+hiddenimports += collect_submodules("app.ai")
+hiddenimports += [
+    "app.ai.pipeline", "app.ai.backend", "app.ai.accelerator",
+    "app.ai.cloud_client", "app.ai.custom_detector", "app.ai.enhancer",
+    "app.ai.face", "app.ai.helmet", "app.ai.helmet_worker",
+    "app.ai.plate", "app.ai.plate_debug", "app.ai.plate_format",
+    "app.ai.plate_ocr", "app.ai.plate_track", "app.ai.plate_worker",
+    "app.ai.screen_motion_detector", "app.ai.stream_resolver",
+    "app.ai.target_matcher", "app.ai.tile_governor", "app.ai.tile_temporal",
+    "app.ai.tiling", "app.analytics", "app.camera_manager",
+    "app.camera_test", "app.config", "app.gpu_monitor",
+    "app.health", "app.health_probe", "app.main",
+    "app.recorder", "app.runtime_governor", "app.storage"
+]
 
 block_cipher = None
 

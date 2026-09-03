@@ -65,7 +65,7 @@ def _object_category(class_name: str) -> str:
 #     COCO_CLASS_MAP, so the detector cannot emit them.
 #   - "face" IS listed for security and factory: YuNet genuinely produces it.
 PRODUCIBLE_VEHICLE_CLASSES = {"car", "bus", "truck", "motorcycle", "bicycle"}
-PRODUCIBLE_ANIMAL_CLASSES = {"dog", "cat", "cow", "horse", "sheep", "animal"}
+PRODUCIBLE_ANIMAL_CLASSES = {"dog", "cat", "cow", "horse", "sheep"}
 
 PROFILE_CLASSES = {
     "traffic": set(PRODUCIBLE_VEHICLE_CLASSES) | {"person", "traffic_light", "stop_sign", "helmet", "no_helmet", "number_plate"},
@@ -97,30 +97,91 @@ FEATURE_CLASSES = {
 
 
 def filter_by_features(detections, features):
-    """Drop classes whose every owning feature is switched off.
+    """Drop classes whose owning feature is switched off, or whose detection confidence
+    is below the selected feature confidence threshold, or whose class is not included in
+    the feature's allowed object classes list.
 
     Complements filter_by_profile(): the profile says what this KIND of camera
     reports, the features say what this operator asked for. Both must hold.
-
-    An empty/absent features dict means "not configured" and drops nothing —
-    a camera with no profile config must not silently stop reporting.
     """
-    if not features:
+    if not features or not detections:
         return detections
-    enabled, disabled = set(), set()
+
+    enabled_classes = set()
+    disabled_classes = set()
+    class_min_conf = {}
+    class_allowed_subclasses = {}
+
     for key, cfg in features.items():
         owned = FEATURE_CLASSES.get(key)
         if not owned:
             continue
-        if isinstance(cfg, dict) and cfg.get("enabled"):
-            enabled |= owned
+
+        is_enabled = False
+        conf_thresh = None
+        allowed_classes = None
+
+        if isinstance(cfg, dict):
+            is_enabled = cfg.get("enabled", True)
+            for c_key in ("confidence", "conf_threshold", "threshold", "min_confidence"):
+                if c_key in cfg and cfg[c_key] is not None:
+                    try:
+                        v = float(cfg[c_key])
+                        if v > 1.0:
+                            v = v / 100.0
+                        conf_thresh = v
+                        break
+                    except (ValueError, TypeError):
+                        pass
+
+            if "classes" in cfg and isinstance(cfg["classes"], (list, set, tuple)) and len(cfg["classes"]) > 0:
+                allowed_classes = set(cfg["classes"])
+        elif isinstance(cfg, bool):
+            is_enabled = cfg
+
+        if is_enabled:
+            enabled_classes |= owned
+            if conf_thresh is not None:
+                for cls_name in owned:
+                    if cls_name not in class_min_conf or conf_thresh > class_min_conf[cls_name]:
+                        class_min_conf[cls_name] = conf_thresh
+            if allowed_classes:
+                for cls_name in owned:
+                    if cls_name not in class_allowed_subclasses:
+                        class_allowed_subclasses[cls_name] = set(allowed_classes)
+                    else:
+                        class_allowed_subclasses[cls_name] |= set(allowed_classes)
         else:
-            disabled |= owned
-    drop = disabled - enabled
-    drop.discard("micro_motion")
-    if not drop:
-        return detections
-    return [d for d in detections if d.get("class") not in drop or d.get("class") == "micro_motion"]
+            disabled_classes |= owned
+
+    drop_classes = disabled_classes - enabled_classes
+    drop_classes.discard("micro_motion")
+
+    filtered = []
+    for d in detections:
+        cls_name = d.get("class")
+        if cls_name == "micro_motion" or d.get("custom_match"):
+            filtered.append(d)
+            continue
+
+        # 1. Drop if class belongs to a disabled feature
+        if cls_name in drop_classes:
+            continue
+
+        # 2. Check confidence threshold set by operator (e.g. 0.6)
+        det_conf = float(d.get("confidence", 0.0))
+        required_conf = class_min_conf.get(cls_name)
+        if required_conf is not None and det_conf < required_conf:
+            continue
+
+        # 3. Check allowed sub-classes filter if specified
+        allowed_subs = class_allowed_subclasses.get(cls_name)
+        if allowed_subs is not None and len(allowed_subs) > 0 and cls_name not in allowed_subs:
+            continue
+
+        filtered.append(d)
+
+    return filtered
 
 
 def filter_by_profile(detections, zone_profile):
@@ -190,18 +251,32 @@ def _direction_label(dx: float, dy: float) -> str:
 def _point_in_zone_shape(px: float, py: float, pts, shape_type: str) -> bool:
     """True if point (px, py) falls inside a zone's configured shape.
     Shared by zone occupancy analytics and lane assignment so both agree on
-    exactly the same geometry test."""
-    if shape_type == "circle" and len(pts) >= 2:
-        cx_c, cy_c = pts[0][0], pts[0][1]
-        ex_c, ey_c = pts[1][0], pts[1][1]
+    exactly the same geometry test. Auto-normalizes points if in percentage [0..100]
+    or pixel coordinates."""
+    if not pts:
+        return False
+    pts_arr = np.array(pts, dtype=np.float32)
+    if pts_arr.size == 0 or pts_arr.ndim < 2 or pts_arr.shape[1] < 2:
+        return False
+
+    max_val = float(pts_arr.max())
+    if max_val > 100.0:
+        pts_arr[:, 0] = pts_arr[:, 0] / 1920.0
+        pts_arr[:, 1] = pts_arr[:, 1] / 1080.0
+    elif max_val > 1.0:
+        pts_arr = pts_arr / 100.0
+
+    pts_list = pts_arr.tolist()
+    if shape_type == "circle" and len(pts_list) >= 2:
+        cx_c, cy_c = pts_list[0][0], pts_list[0][1]
+        ex_c, ey_c = pts_list[1][0], pts_list[1][1]
         radius = np.sqrt((ex_c - cx_c) ** 2 + (ey_c - cy_c) ** 2)
         return np.sqrt((px - cx_c) ** 2 + (py - cy_c) ** 2) <= radius
-    if shape_type in ("rect", "rectangle") and len(pts) >= 2:
-        x1 = min(pts[0][0], pts[1][0]); x2 = max(pts[0][0], pts[1][0])
-        y1 = min(pts[0][1], pts[1][1]); y2 = max(pts[0][1], pts[1][1])
+    if shape_type in ("rect", "rectangle") and len(pts_list) >= 2:
+        x1 = min(pts_list[0][0], pts_list[1][0]); x2 = max(pts_list[0][0], pts_list[1][0])
+        y1 = min(pts_list[0][1], pts_list[1][1]); y2 = max(pts_list[0][1], pts_list[1][1])
         return (x1 <= px <= x2) and (y1 <= py <= y2)
-    poly_points = np.array(pts, dtype=np.float32)
-    return cv2.pointPolygonTest(poly_points, (px, py), False) >= 0
+    return cv2.pointPolygonTest(pts_arr, (px, py), False) >= 0
 
 
 def _lane_for_point(px: float, py: float, zones) -> str:
@@ -691,13 +766,21 @@ class CameraAnalytics:
         alerts = []
         now = time.time()
         
-        # Filter detections inside privacy masks or exclusion zones
+        # Filter detections inside privacy masks / exclusion zones, or outside active inclusion ROI zones
         filtered_detections = []
+        inclusion_zones = [
+            z for z in zones
+            if z.get("zoneType") not in ("privacy_mask", "exclusion_zone", "speed_zone", "calibration_line", "heatmap_area")
+            and len(z.get("points", [])) >= 2
+        ]
+
         for det in detections:
             bbox = det["bbox"]
             cx = (bbox["x1"] + bbox["x2"]) / 2.0 / frame_w
             cy = (bbox["y1"] + bbox["y2"]) / 2.0 / frame_h
-            
+            bottom_y = bbox["y2"] / frame_h
+
+            # 1. Privacy mask & Exclusion zone check
             is_masked = False
             for zone in zones:
                 z_type = zone.get("zoneType")
@@ -707,8 +790,22 @@ class CameraAnalytics:
                     if len(pts) >= 2 and _point_in_zone_shape(cx, cy, pts, shape_type):
                         is_masked = True
                         break
-            if not is_masked:
-                filtered_detections.append(det)
+            if is_masked:
+                continue
+
+            # 2. Inclusion ROI zone check (if inclusion zones are defined, object must be inside at least one)
+            if inclusion_zones:
+                in_any_zone = False
+                for zone in inclusion_zones:
+                    pts = zone.get("points", [])
+                    shape_type = zone.get("shapeType", "polygon")
+                    if _point_in_zone_shape(cx, cy, pts, shape_type) or _point_in_zone_shape(cx, bottom_y, pts, shape_type):
+                        in_any_zone = True
+                        break
+                if not in_any_zone:
+                    continue
+
+            filtered_detections.append(det)
         detections = filtered_detections
         
         # Read or initialize metadata tracking structures

@@ -249,10 +249,10 @@ class TilingSettings:
     temporal_iou: float = 0.3
     # Feature 9 — confidence verification
     verify_enabled: bool = True
-    verify_accept_conf: float = 0.95
-    verify_second_pass_conf: float = 0.80
-    verify_history_conf: float = 0.60
-    verify_min_hits: int = 2
+    verify_accept_conf: float = 0.65
+    verify_second_pass_conf: float = 0.45
+    verify_history_conf: float = 0.30
+    verify_min_hits: int = 1
     # Feature 10 — false-positive filter
     fp_motion_validation: bool = True
     fp_neighbour_agreement: bool = True
@@ -1107,7 +1107,8 @@ class AdaptiveTileEngine:
         if cycle_budget_ms is not None and cycle_budget_ms > 0:
             spent = t_inf_base if t_inf_base > 0 else (self._base_ms_ema or 0.0)
             slack = cycle_budget_ms - spent - _NON_INFER_STAGE_MS
-            effective_budget_ms = max(0.0, min(effective_budget_ms, slack))
+            floor = (alloc.budget_ms * 0.5) if s.enabled else 0.0
+            effective_budget_ms = max(floor, min(effective_budget_ms, slack))
 
         budget_tiles = 0 if per_tile is None else int(
             _clamp(int(effective_budget_ms / max(1.0, per_tile) + 0.15), 0, alloc.max_tiles)

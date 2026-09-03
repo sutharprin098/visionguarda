@@ -928,7 +928,12 @@ class ByteTracker:
                 "dwell_time": round(now - t.first_seen, 1),
                 "bbox": {
                     "x1": round(bbox[0]), "y1": round(bbox[1]),
-  COAST_RENDER_SECONDS = 0.15
+                    "x2": round(bbox[2]), "y2": round(bbox[3])
+                }
+            })
+        return out
+
+COAST_RENDER_SECONDS = 0.45
 
 
 def resolve_emitted_detections(tracker, tracks_raw, detections, masks,
@@ -979,7 +984,7 @@ def resolve_emitted_detections(tracker, tracks_raw, detections, masks,
             out_masks.append(masks[di] if masks_parallel else [])
         else:
             trk_obj = next((t for t in tracker.tracks if t.track_id == tid), None)
-            secs = tracker.secs_since_update(trk_obj) if trk_obj is not None else 1.0
+            secs = tracker.secs_since_update(trk_obj) if trk_obj is not None else 0.0
             # Drop coasting track immediately if it exceeds 0.15s max coast duration
             if secs > coast_render_seconds:
                 continue
@@ -996,7 +1001,7 @@ def resolve_emitted_detections(tracker, tracks_raw, detections, masks,
                 "track_id": tid,
                 "dwell_time": trk["dwell_time"],
                 "bbox": dict(trk["bbox"]),
-                "tracking_status": "coasting",
+                "tracking_status": "tracked",
             })
             out_masks.append([])
 
@@ -2753,7 +2758,7 @@ class PipelineCoordinator:
                     # allowance no matter how fast we are trying to run, which
                     # measured 141.6ms/cycle against a 66ms period (7.1 fps on
                     # hardware good for 28.8). See AdaptiveTileEngine.infer.
-                    cycle_budget_ms=1000.0 / max(1.0, self.target_fps),
+                    cycle_budget_ms=max(getattr(config, "TILING_LATENCY_BUDGET_MS", 80.0), 1000.0 / max(1.0, self.target_fps)),
                 )
                 detections     = tile_res.detections
                 masks_polygons = tile_res.masks
@@ -3235,6 +3240,44 @@ class PipelineCoordinator:
                 detections, self.zones, self.lines, orig_w, orig_h, frame=frame, rules=self.rules,
                 zone_profile=self.zone_profile, profile_features=self.profile_features
             )
+
+            # Restrict detections ONLY to explicit ROI zones (if defined) or apply privacy masks/exclusion zones
+            if self.zones:
+                _incl_zones = [
+                    z for z in self.zones
+                    if (z.get("roi") or z.get("zoneType") in ("roi", "roi_zone"))
+                    and len(z.get("points", [])) >= 2
+                ]
+                _zone_filtered = []
+                for det in detections:
+                    bbox = det["bbox"]
+                    cx = (bbox["x1"] + bbox["x2"]) / 2.0 / orig_w
+                    cy = (bbox["y1"] + bbox["y2"]) / 2.0 / orig_h
+                    bottom_y = bbox["y2"] / orig_h
+
+                    is_masked = False
+                    for z in self.zones:
+                        if z.get("zoneType") in ("privacy_mask", "exclusion_zone"):
+                            pts = z.get("points", [])
+                            st = z.get("shapeType", "polygon")
+                            if len(pts) >= 2 and _point_in_zone_shape(cx, cy, pts, st):
+                                is_masked = True
+                                break
+                    if is_masked:
+                        continue
+
+                    if _incl_zones:
+                        in_any = False
+                        for z in _incl_zones:
+                            pts = z.get("points", [])
+                            st = z.get("shapeType", "polygon")
+                            if _point_in_zone_shape(cx, cy, pts, st) or _point_in_zone_shape(cx, bottom_y, pts, st):
+                                in_any = True
+                                break
+                        if not in_any:
+                            continue
+                    _zone_filtered.append(det)
+                detections = _zone_filtered
 
             # ── Why speed is/isn't a number, decided once per frame ──────────
             # "Speed Estimation" is a per-camera zone-profile toggle

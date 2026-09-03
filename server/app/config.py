@@ -406,11 +406,10 @@ TILING_MAX_GRID = _env_int("CAMAI_TILING_MAX_GRID", 3)
 # is whole in at least one tile. Clamped to 0.15-0.25.
 TILING_OVERLAP = _env_float("CAMAI_TILING_OVERLAP", 0.20)
 # Hard ceiling on EXTRA inference passes per camera per cycle, on top of the
-# full-frame pass. 1 maintains high FPS while keeping zoom capability.
-TILING_MAX_TILES = _env_int("CAMAI_TILING_MAX_TILES", 1)
+# full-frame pass. 3 enables high-resolution tile zoom for distant objects.
+TILING_MAX_TILES = _env_int("CAMAI_TILING_MAX_TILES", 3)
 # Wall-clock inference time (ms) the engine may spend on tiles.
-# Sized to 25.0 ms so inference never blocks high-FPS processing.
-TILING_LATENCY_BUDGET_MS = _env_float("CAMAI_TILING_LATENCY_BUDGET_MS", 25.0)
+TILING_LATENCY_BUDGET_MS = _env_float("CAMAI_TILING_LATENCY_BUDGET_MS", 60.0)
 
 # Frame rate each camera's AI stage aims for.
 TARGET_FPS = _env_float("CAMAI_TARGET_FPS", 40.0)

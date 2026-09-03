@@ -335,11 +335,9 @@ export default function Workspace({
   const allowedTabs = bundle
     ? ([
         (hasPermission("cameras.manage") || hasPermission("cameras.assign")) && "cameras",
-        (hasPermission("maps.view") || hasPermission("cameras.manage")) && "maps",
         hasPermission("alerts.view") && "alerts",
-        hasPermission("ai.configure") && "settings",
         "engine",
-      ].filter(Boolean) as ("cameras" | "maps" | "alerts" | "settings" | "engine")[])
+      ].filter(Boolean) as ("cameras" | "alerts" | "engine")[])
     : [];
 
   // Auto-switch to first available authorized tab if active tab is unauthorized
@@ -370,16 +368,10 @@ export default function Workspace({
     );
   }
 
-  const aiSettings = Object.fromEntries(
-    bundle.settings.filter((s) => s.scope === "org").map((s) => [s.key, s.value]),
-  );
-
   // Filter navigation items based on active permissions
   const navItems = ([
     { id: "cameras", label: `Cameras (${bundle.cameras.length})`, icon: Video },
-    { id: "maps", label: "Map", icon: Map },
     { id: "alerts", label: `Alerts (${bundle.notifications.length})`, icon: Bell },
-    { id: "settings", label: "AI Settings", icon: Settings2 },
     { id: "engine", label: "Engine Health", icon: Activity },
   ] as const).filter((item) => allowedTabs.includes(item.id));
 
@@ -511,78 +503,8 @@ export default function Workspace({
             orgInferenceMode={orgInferenceMode}
           />
         </div>
-        {tab === "maps" && (
-          <FloorPlanView
-            bundle={bundle}
-            healthInfo={healthInfo}
-            onSelectCamera={setFullscreenCamId}
-          />
-        )}
         {tab === "alerts" && (
           <AlertsTab orgId={bundle.organization?.id ?? null} hasPermission={hasPermission} active={true} />
-        )}
-        {tab === "settings" && (
-          <div className="space-y-6">
-            <Panel title="AI Profile & Rules">
-              <div className="rounded-lg bg-surface-1 border border-line p-5">
-                <div className="flex items-center gap-3">
-                  <div className="h-10 w-10 rounded bg-accent/15 flex items-center justify-center text-accent text-lg font-semibold uppercase">
-                    {String(aiSettings["ai.profile"] || "Traffic").charAt(0)}
-                  </div>
-                  <div>
-                    <h3 className="text-sm font-semibold text-zinc-200 capitalize">
-                      Active Profile: {aiSettings["ai.profile"] || "Traffic"}
-                    </h3>
-                    <div className="text-xs text-zinc-500 mt-0.5">
-                      Configured via CamAI cloud and synchronized to this client.
-                    </div>
-                  </div>
-                </div>
-
-                <div className="mt-6 space-y-4 border-t border-line/60 pt-4">
-                  <div>
-                    <div className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider">Detection Classes</div>
-                    <div className="flex flex-wrap gap-1.5 mt-2">
-                      {Array.isArray(aiSettings["ai.classes"]) ? (
-                        (aiSettings["ai.classes"] as string[]).map((c) => (
-                          <span key={c} className="text-xs bg-surface-2 px-2.5 py-1 rounded text-zinc-400 capitalize">
-                            {c}
-                          </span>
-                        ))
-                      ) : (
-                        <span className="text-xs text-zinc-500">No classes active.</span>
-                      )}
-                    </div>
-                  </div>
-
-                  <ConfidenceControl
-                    orgId={bundle.organization?.id ?? null}
-                    value={typeof aiSettings["ai.confidence"] === "number" ? (aiSettings["ai.confidence"] as number) : 0.25}
-                    canEdit={hasPermission("ai.configure")}
-                  />
-
-                  <div className="grid grid-cols-2 gap-4 pt-2">
-                    <div>
-                      <div className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider">Engine Synchronization</div>
-                      <div className="mt-1 text-xs text-ok flex items-center gap-1.5 font-medium">
-                        <span className="relative flex h-2 w-2">
-                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-ok opacity-75"></span>
-                          <span className="relative inline-flex rounded-full h-2 w-2 bg-ok"></span>
-                        </span>
-                        Active & Running
-                      </div>
-                    </div>
-                    <div>
-                      <div className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider">Active Configuration Rules</div>
-                      <div className="mt-1 text-xs text-zinc-400 font-mono">
-                        {Array.isArray(aiSettings["ai.classes"]) ? `${(aiSettings["ai.classes"] as string[]).length} rules loaded` : "Default rules"}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </Panel>
-          </div>
         )}
         {tab === "engine" && (
           <EngineHealthPanel orgInferenceMode={orgInferenceMode} cloudUrl={orgCloudUrl} />

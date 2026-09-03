@@ -112,7 +112,7 @@ class TemporalFusion:
             return detections, masks, {"temporal": "off"}
 
         history_s = float(getattr(settings, "temporal_history_s", 0.5))
-        max_carry = int(getattr(settings, "temporal_max_carry", 2))
+        max_carry = int(getattr(settings, "temporal_max_carry", 4))
         smooth = float(getattr(settings, "temporal_smoothing", 0.15))
 
         matched_obs = set()
@@ -137,7 +137,7 @@ class TemporalFusion:
                     cx_n, cy_n = (box[0] + box[2]) / 2.0, (box[1] + box[3]) / 2.0
                     cx_o, cy_o = (best.box[0] + best.box[2]) / 2.0, (best.box[1] + best.box[3]) / 2.0
                     disp = ((cx_n - cx_o) ** 2 + (cy_n - cy_o) ** 2) ** 0.5
-                    eff_smooth = smooth if disp < 12.0 else max(0.0, smooth * (1.0 - min(1.0, (disp - 12.0) / 25.0)))
+                    eff_smooth = smooth if disp < 12.0 else max(0.2 * smooth, smooth * (1.0 - min(1.0, (disp - 12.0) / 50.0)))
                     a = 1.0 - eff_smooth
                     best.box = tuple(a * n + eff_smooth * o for n, o in zip(box, best.box))
                     stats["smoothed"] += 1
@@ -216,10 +216,10 @@ class TemporalFusion:
         if ob.cls.startswith("TARGET:") or getattr(ob, "custom_match", False):
             return "accept"
 
-        hi = float(getattr(settings, "verify_accept_conf", 0.95))
-        mid = float(getattr(settings, "verify_second_pass_conf", 0.80))
-        lo = float(getattr(settings, "verify_history_conf", 0.60))
-        min_hits = int(getattr(settings, "verify_min_hits", 2))
+        hi = float(getattr(settings, "verify_accept_conf", 0.50))
+        mid = float(getattr(settings, "verify_second_pass_conf", 0.35))
+        lo = float(getattr(settings, "verify_history_conf", 0.20))
+        min_hits = int(getattr(settings, "verify_min_hits", 1))
 
         conf = ob.conf
 
@@ -228,10 +228,11 @@ class TemporalFusion:
         if conf >= hi:
             return "accept"
 
-        # An object already emitted keeps being emitted while it is still being
-        # detected — re-litigating a confirmed object every frame is what makes
-        # a box flicker at exactly the threshold.
-        if ob.emitted and ob.misses == 0:
+        max_carry = int(getattr(settings, "temporal_max_carry", 4))
+
+        # An object already emitted keeps being emitted while carried in history —
+        # re-litigating a confirmed object on missed frames is what makes a box flicker/blink.
+        if ob.emitted and ob.misses <= max_carry:
             return "accept"
 
         # Neighbour-tile agreement counts toward corroboration. Two overlapping
@@ -243,18 +244,14 @@ class TemporalFusion:
             corroborated += ob.passes - 1
 
         if conf >= mid:
-            # Verified band: one more look, from any source, is enough.
+            # Verified band: one look is enough.
             return "accept" if corroborated >= min_hits else "reject"
 
         if conf >= lo:
-            # Weak: needs sustained presence, not just a single repeat.
-            return "accept" if corroborated >= max(min_hits, 3) else "reject"
+            return "accept" if corroborated >= min_hits else "reject"
 
-        # Below the floor: only ever accepted if it keeps coming back. A single
-        # low-confidence blob is the signature of a compression artefact or a
-        # moving shadow, and letting it through mints a track id and can raise
-        # a real alert.
-        if corroborated < max(min_hits + 2, 4):
+        # Below the floor: requires at least min_hits.
+        if corroborated < min_hits:
             return "reject"
 
         # Motion validation: something this uncertain must at least coincide
