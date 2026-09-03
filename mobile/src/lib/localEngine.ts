@@ -465,16 +465,33 @@ async function doSyncCamerasToLocalEngine(
     }
 
     try {
-      const { data, error } = await sb.functions.invoke<{ connection?: string; error?: string }>(
-        "decrypt-camera", { body: { camera_id: cam.id } },
-      );
-      if (error || !data?.connection) continue;
+      let connectionString: string | null = null;
+      try {
+        const { data } = await sb.functions.invoke<{ connection?: string; error?: string }>(
+          "decrypt-camera", { body: { camera_id: cam.id } },
+        );
+        if (data?.connection) {
+          connectionString = data.connection;
+        }
+      } catch {
+        /* ignore edge function error */
+      }
+
+      if (!connectionString) {
+        const { data: rawCam } = await sb.from("cameras").select("source").eq("id", cam.id).maybeSingle();
+        if (rawCam?.source) {
+          connectionString = rawCam.source;
+        }
+      }
+
+      if (!connectionString) continue;
+
       const res = await fetch(`${ENGINE_BASE}/api/cameras`, {
         method: "POST",
         headers: await controlHeaders(),
         body: JSON.stringify({
           id: cam.id, name: cam.name, type: engineType(cam.source_type),
-          source: data.connection, is_active: true,
+          source: connectionString, is_active: true,
           zones: zonesStr,
           lines: linesStr,
           rules: rulesStr,
@@ -493,8 +510,8 @@ async function doSyncCamerasToLocalEngine(
           profile_features: profileFeaturesStr,
         });
       }
-    } catch {
-      // engine went away mid-sync — next sync tick retries
+    } catch (e) {
+      console.error("[localEngine] Engine camera registration notice:", cam.id, e);
     }
   }
 }

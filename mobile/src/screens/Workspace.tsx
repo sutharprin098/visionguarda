@@ -1051,7 +1051,11 @@ function CamerasView({
   const handleCameraAdded = async () => {
     try {
       const { fetchBundle } = await import("../lib/sync");
-      await fetchBundle();
+      const { syncCamerasToLocalEngine } = await import("../lib/localEngine");
+      const freshBundle = await fetchBundle();
+      if (freshBundle?.cameras) {
+        await syncCamerasToLocalEngine(freshBundle.cameras, freshBundle.rule_engine_rules || [], freshBundle.zone_profile_configs || []);
+      }
     } catch {
       window.location.reload();
     }
