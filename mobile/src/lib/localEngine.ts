@@ -14,7 +14,22 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { getSupabase } from "./session";
 
-const ENGINE_BASE = "http://127.0.0.1:8000";
+export function getEngineBase(): string {
+  if (typeof window !== "undefined") {
+    const custom = localStorage.getItem("camai_engine_url");
+    if (custom && custom.trim()) {
+      return custom.trim().replace(/\/+$/, "");
+    }
+  }
+  const isMobile =
+    typeof window !== "undefined" &&
+    (Boolean((window as any).Capacitor) ||
+      /Android|iPhone|iPad|iPod/i.test(navigator.userAgent));
+
+  return isMobile ? "http://13.203.71.14:8000" : "http://127.0.0.1:8000";
+}
+
+export const ENGINE_BASE = getEngineBase();
 let registered = new Set<string>();
 
 // Proves to the engine that a configuration write came from this app rather
@@ -40,7 +55,7 @@ export async function controlHeaders(): Promise<Record<string, string>> {
 
 
 export function mjpegStreamUrl(cameraId: string): string {
-  return `${ENGINE_BASE}/api/cameras/${cameraId}/stream`;
+  return `${getEngineBase()}/api/cameras/${cameraId}/stream`;
 }
 
 /**

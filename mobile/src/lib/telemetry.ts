@@ -212,7 +212,14 @@ export function detectionsRenderEqual(
   return true;
 }
 
-const WS_URL = "ws://127.0.0.1:8000/ws";
+import { getEngineBase } from "./localEngine";
+
+export function getWsUrl(): string {
+  const base = getEngineBase();
+  const wsProto = base.startsWith("https") ? "wss" : "ws";
+  const host = base.replace(/^https?:\/\//, "");
+  return `${wsProto}://${host}/ws`;
+}
 
 class MultiTelemetryHub {
   private ws: WebSocket | null = null;
@@ -264,7 +271,7 @@ class MultiTelemetryHub {
     }
 
     try {
-      this.ws = new WebSocket(WS_URL);
+      this.ws = new WebSocket(getWsUrl());
     } catch {
       this.scheduleReconnect();
       return;

@@ -2,7 +2,7 @@ import { useEffect, useState, useRef, useCallback, memo } from "react";
 import { Video, Bell, Settings2, LogOut, Wifi, WifiOff, Sliders, Activity, AlertTriangle, RotateCw, Maximize2, Minimize2, Lock, Send, Check, Loader2, MessageCircle, ChevronDown, ChevronRight, Copy, Cloud, Cpu, Globe, Plus, MoreVertical } from "lucide-react";
 import clsx from "clsx";
 import { startRealtimeSync, DeactivatedError, SyncBundle } from "../lib/sync";
-import { syncAiModelToLocalEngine, syncAiConfidenceToLocalEngine, syncAiInferenceModeToLocalEngine, mjpegStreamUrl, resetLocalEngineState } from "../lib/localEngine";
+import { syncAiModelToLocalEngine, syncAiConfidenceToLocalEngine, syncAiInferenceModeToLocalEngine, mjpegStreamUrl, resetLocalEngineState, getEngineBase } from "../lib/localEngine";
 import { MediaShareSession, ShareStatus } from "../lib/mediaShare";
 import { TelemetrySession, TelemetryDetection, CameraTelemetry, TelemetryStatus, detectionsRenderEqual, telemetryHub } from "../lib/telemetry";
 import type { ZoneProfileKey } from "../lib/zoneProfiles";
@@ -205,7 +205,7 @@ export default function Workspace({
         }
       } else {
         try {
-          const res = await fetch("http://127.0.0.1:8000/health", {
+          const res = await fetch(`${getEngineBase()}/health`, {
             signal: AbortSignal.timeout(HEALTH_TIMEOUT_MS),
             cache: "no-store",
           });
@@ -1673,7 +1673,7 @@ const CameraTile = memo(function CameraTile({ camera: c, site, engineOnline, onF
                   const sb = await getSupabase();
                   await sb.from("cameras").update({ source_type: "virtual", type: "virtual" }).eq("id", c.id);
                   try {
-                    await fetch("http://127.0.0.1:8000/api/cameras", {
+                    await fetch(`${getEngineBase()}/api/cameras`, {
                       method: "POST",
                       headers: { "Content-Type": "application/json" },
                       body: JSON.stringify({
@@ -2220,7 +2220,7 @@ function CloudModeSwitcher({
     setUpdating(true);
     try {
       // 1. Sync to local FastAPI engine
-      await fetch("http://127.0.0.1:8000/api/cloud-mode", {
+      await fetch(`${getEngineBase()}/api/cloud-mode`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ mode: newMode }),

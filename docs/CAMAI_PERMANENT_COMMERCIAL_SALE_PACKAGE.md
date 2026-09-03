@@ -9,8 +9,8 @@
 
 | Asset Package | Valuation Range (INR) | Valuation Range (USD) | Scope Included |
 | :--- | :--- | :--- | :--- |
-| **Full Intellectual Property (IP) & Source Code Buyout** | **₹25,000,000 – ₹35,000,000** | **$30,000 – $45,000 USD** | Complete Git Repositories, Desktop Client, Mobile Android App, Web Portal, AI Server Engine, License Key System, & White-Label Rights |
-| **Whitelabel Franchise Partner License** | **₹5,000,000 – ₹10,000,000** | **$6,000 – $12,000 USD** | Re-brandable distribution rights for a specific territory/region |
+| **Full Intellectual Property (IP) & Source Code Buyout** | **₹2,500,000 – ₹3,500,000 (25-35 Lakhs)** | **$30,000 – $45,000 USD** | Complete Git Repositories, Desktop Client, Mobile Android App, Web Portal, AI Server Engine, License Key System, & White-Label Rights |
+| **Whitelabel Franchise Partner License** | **₹500,000 – ₹1,000,000 (5-10 Lakhs)** | **$6,000 – $12,000 USD** | Re-brandable distribution rights for a specific territory/region |
 
 ---
 
