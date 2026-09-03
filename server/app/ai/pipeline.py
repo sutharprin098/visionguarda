@@ -2393,7 +2393,7 @@ class PipelineCoordinator:
 
                         # Enable frame-synchronized MJPEG overlay burn-in: ensures bounding boxes and video pixels
                         # are 100% frame-locked in the exact same JPEG frame, eliminating browser HTTP/WebSocket desync.
-                        burnin_overlay = os.getenv("CAMAI_BURNIN_OVERLAY", "1").strip() != "0"
+                        burnin_overlay = os.getenv("CAMAI_BURNIN_OVERLAY", "0").strip() == "1"
                         if burnin_overlay and latest_dets and (time.time() - latest_ts < 0.6):
                             _draw_normalized_overlay_boxes(mjpeg_f, latest_dets)
 
