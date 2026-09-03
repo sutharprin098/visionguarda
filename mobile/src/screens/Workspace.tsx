@@ -1575,22 +1575,29 @@ const CameraTile = memo(function CameraTile({ camera: c, site, engineOnline, onF
           />
         ) : showStream ? (
           <img
-            key={`${c.id}-${retryCount}`}
+            key={c.id}
             ref={imgRef}
             crossOrigin={imgCors ? "anonymous" : undefined}
-            src={`${mjpegStreamUrl(c.id)}?t=${retryCount}`}
+            src={mjpegStreamUrl(c.id)}
             alt={c.name}
             className={mediaClass}
             onLoad={() => {
               corsProvenRef.current = imgCors;
             }}
-            onError={() => {
+            onError={(e) => {
               if (imgCors && !corsProvenRef.current) {
                 setImgCors(false);
               }
+              const target = e.currentTarget;
               setTimeout(() => {
-                setRetryCount((r) => r + 1);
-              }, 1000);
+                if (target && target.src) {
+                  try {
+                    const url = new URL(target.src);
+                    url.searchParams.set("_t", String(Date.now()));
+                    target.src = url.toString();
+                  } catch { /* ignore */ }
+                }
+              }, 1500);
             }}
           />
         ) : isScreenShareCam ? (

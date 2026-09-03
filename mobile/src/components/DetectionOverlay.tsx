@@ -30,9 +30,9 @@ interface Props {
 
 function sourceSize(el: HTMLVideoElement | HTMLImageElement | null): { w: number; h: number } | null {
   if (!el) return null;
-  const w = (el as HTMLVideoElement).videoWidth || (el as HTMLImageElement).naturalWidth;
-  const h = (el as HTMLVideoElement).videoHeight || (el as HTMLImageElement).naturalHeight;
-  return w && h ? { w, h } : null;
+  const w = (el as HTMLVideoElement).videoWidth || (el as HTMLImageElement).naturalWidth || el.clientWidth || 1280;
+  const h = (el as HTMLVideoElement).videoHeight || (el as HTMLImageElement).naturalHeight || el.clientHeight || 720;
+  return w && h ? { w, h } : { w: 1280, h: 720 };
 }
 
 /** Black or white, whichever is readable on `hex`. The label chip is filled with
@@ -146,14 +146,12 @@ export default function DetectionOverlay({ detections, mediaRef, fit = "cover" }
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
-    let rect = rectRef.current;
-    if (!rect || rect.width === 0 || rect.height === 0) {
-      const b = media.getBoundingClientRect();
-      rect = { width: b.width, height: b.height };
-      rectRef.current = rect;
-    }
+    const b = media.getBoundingClientRect();
+    if (b.width === 0 || b.height === 0) return;
+    const rect = { width: b.width, height: b.height };
+    rectRef.current = rect;
+
     const dpr = window.devicePixelRatio || 1;
-    if (rect.width === 0 || rect.height === 0) return;
     const bw = Math.round(rect.width * dpr);
     const bh = Math.round(rect.height * dpr);
     if (canvas.width !== bw || canvas.height !== bh) {
@@ -164,11 +162,8 @@ export default function DetectionOverlay({ detections, mediaRef, fit = "cover" }
     ctx.clearRect(0, 0, rect.width, rect.height);
 
     const src = sourceSize(media);
-    if (!src) return; // stream not up yet — next telemetry tick redraws
+    if (!src) return;
 
-    // Replicate object-fit so normalised source coords land where the pixel
-    // they describe is actually painted: cover scales up and centre-crops,
-    // contain scales down and letterboxes.
     const scale =
       fit === "cover"
         ? Math.max(rect.width / src.w, rect.height / src.h)
@@ -179,7 +174,7 @@ export default function DetectionOverlay({ detections, mediaRef, fit = "cover" }
     const oy = (rect.height - dh) / 2;
 
     for (const det of detections) {
-      if (det.confidence != null && det.confidence < 0.35) continue;
+      if (det.confidence != null && det.confidence < 0.10) continue;
       const x1 = ox + det.bbox.x1 * dw;
       const y1 = oy + det.bbox.y1 * dh;
       const w = (det.bbox.x2 - det.bbox.x1) * dw;

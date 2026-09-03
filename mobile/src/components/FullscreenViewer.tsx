@@ -180,13 +180,20 @@ export default function FullscreenViewer({
     };
   }, [cameraId, orgName, ingestAlert, imgCors]);
 
-  const handleImageError = () => {
+  const handleImageError = (e: React.SyntheticEvent<HTMLImageElement, Event>) => {
     if (imgCors && !corsProvenRef.current) {
       setImgCors(false);
     }
+    const target = e.currentTarget;
     setTimeout(() => {
-      setRetryCount((r) => r + 1);
-    }, 1000);
+      if (target && target.src) {
+        try {
+          const url = new URL(target.src);
+          url.searchParams.set("_t", String(Date.now()));
+          target.src = url.toString();
+        } catch { /* ignore */ }
+      }
+    }, 1500);
   };
 
   const step = useCallback((delta: number) => {
@@ -247,10 +254,10 @@ export default function FullscreenViewer({
           style={{ transform: `rotate(${rotation}deg)` }}
         >
           <img
-            key={`${cameraId}_${retryCount}_${imgCors ? "cors" : "plain"}`}
+            key={cameraId}
             ref={imgRef}
             crossOrigin={imgCors ? "anonymous" : undefined}
-            src={`${mjpegStreamUrl(cameraId)}?t=${retryCount}`}
+            src={mjpegStreamUrl(cameraId)}
             alt={cam?.name ?? cameraId}
             className="h-full w-full object-contain"
             onLoad={() => { corsProvenRef.current = imgCors; }}
