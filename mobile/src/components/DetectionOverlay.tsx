@@ -138,6 +138,7 @@ function labelFor(det: TelemetryDetection): string {
 export default function DetectionOverlay({ detections, mediaRef, fit = "cover" }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const rectRef = useRef<{ width: number; height: number } | null>(null);
+  const cacheRef = useRef<Map<string, { det: TelemetryDetection; ts: number }>>(new Map());
 
   const draw = useCallback(() => {
     const canvas = canvasRef.current;
@@ -173,9 +174,24 @@ export default function DetectionOverlay({ detections, mediaRef, fit = "cover" }
     const ox = (rect.width - dw) / 2;
     const oy = (rect.height - dh) / 2;
 
+    const now = Date.now();
     const safeDetections = Array.isArray(detections) ? detections : [];
 
     for (const det of safeDetections) {
+      if (!det || typeof det !== "object" || !det.bbox) continue;
+      const key = det.track_id != null ? `tr_${det.track_id}` : `cls_${det.class}_${Math.round(det.bbox.x1 * 50)}_${Math.round(det.bbox.y1 * 50)}`;
+      cacheRef.current.set(key, { det, ts: now });
+    }
+
+    for (const [k, v] of cacheRef.current.entries()) {
+      if (now - v.ts > 400) {
+        cacheRef.current.delete(k);
+      }
+    }
+
+    const activeDetections = Array.from(cacheRef.current.values()).map((v) => v.det);
+
+    for (const det of activeDetections) {
       if (!det || typeof det !== "object" || !det.bbox) continue;
       if (det.confidence != null && det.confidence < 0.10) continue;
       const x1 = ox + det.bbox.x1 * dw;

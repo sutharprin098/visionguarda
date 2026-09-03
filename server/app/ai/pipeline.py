@@ -2830,14 +2830,16 @@ class PipelineCoordinator:
                 except Exception as e:
                     print(f"[CustomDetector Err] {e}", flush=True)
 
-                # ── Strict polygon ROI gate: cameras with explicit ROI zones
-                # only detect/track/analyze objects whose centroid or feet position
-                # falls inside the union of those admin-defined ROI polygons.
-                # Detections outside the explicit ROI area are dropped here.
-                # Regular alert/intrusion zones do NOT crop full-frame detections.
-                roi_zones = [z for z in self.zones if (z.get("roi") or z.get("zoneType") == "roi") and z.get("points")]
+                # ── User Polygon Zone Gate ────────────────────────────────────
+                # Only detect/track/analyze objects whose centroid or bottom position
+                # falls inside user-defined active zone polygons when zones exist.
+                active_user_zones = [
+                    z for z in self.zones
+                    if z.get("points") and len(z.get("points")) >= 3
+                    and str(z.get("zoneType", "")).lower() not in ("privacy_mask", "exclusion_zone", "heatmap_area")
+                ]
 
-                if roi_zones and detections:
+                if active_user_zones and detections:
                     kept = []
                     for i, det in enumerate(detections):
                         cx = (det["bbox"]["x1"] + det["bbox"]["x2"]) / 2.0 / orig_w
@@ -2847,7 +2849,7 @@ class PipelineCoordinator:
                         inside = any(
                             _point_in_zone_shape(cx, cy, z["points"], z.get("shapeType", "polygon")) or
                             _point_in_zone_shape(bx, by, z["points"], z.get("shapeType", "polygon"))
-                            for z in roi_zones
+                            for z in active_user_zones
                         )
                         if inside:
                             kept.append(i)
