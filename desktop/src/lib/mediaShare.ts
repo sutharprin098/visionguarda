@@ -37,7 +37,7 @@ const HEARTBEAT_TIMEOUT_MS = 12000;
 // capture stream is presumed dead and re-acquired. Declared with the original
 // watchdog design but never wired to anything until checkFrameFlow() below —
 // see the note in startFrameLoop for what that cost.
-const SEND_STALL_TIMEOUT_MS = 4000;
+const SEND_STALL_TIMEOUT_MS = 12000;
 // Ceiling on un-drained WebSocket bytes before frames start being skipped.
 //
 // Sized to roughly two frames (128KB), ensuring fast throughput at 30 FPS.
@@ -374,21 +374,24 @@ export class MediaShareSession {
       // stale by the length of the backlog. Skipping while backed up is the
       // "drop old frames instead of queueing" rule applied at the only place
       // in this path that can actually queue.
-      if (this.ws.bufferedAmount > MAX_WS_BUFFERED_BYTES) {
-        this.droppedFrames++;
-        return;
-      }
+      if (video && video.readyState >= video.HAVE_CURRENT_DATA) {
+        // Video element is active and producing frames
+        this.lastSendOkTs = Date.now();
 
-      if (video && video.readyState >= video.HAVE_CURRENT_DATA && this.ctx && this.canvas) {
-        try {
-          this.ctx.drawImage(video, 0, 0, this.canvas.width, this.canvas.height);
-          const frame = this.canvas.toDataURL("image/jpeg", 0.85);
-          this.ws.send(JSON.stringify({ type: "screen_frame", camera_id: this.cameraId, frame }));
-          // Only a frame that actually reached the socket counts as progress.
-          this.lastSendOkTs = Date.now();
-          this.sentFrames++;
-        } catch {
-          // transient encode/send failure — ignore
+        if (this.ws.bufferedAmount > MAX_WS_BUFFERED_BYTES) {
+          this.droppedFrames++;
+          return;
+        }
+
+        if (this.ctx && this.canvas) {
+          try {
+            this.ctx.drawImage(video, 0, 0, this.canvas.width, this.canvas.height);
+            const frame = this.canvas.toDataURL("image/jpeg", 0.85);
+            this.ws.send(JSON.stringify({ type: "screen_frame", camera_id: this.cameraId, frame }));
+            this.sentFrames++;
+          } catch {
+            // transient encode/send failure — ignore
+          }
         }
       }
       // NOTE: the `else` branch here used to refresh lastSendOkTs whenever the
