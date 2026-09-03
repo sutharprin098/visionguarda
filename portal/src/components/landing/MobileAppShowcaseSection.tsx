@@ -77,9 +77,8 @@ export default function MobileAppShowcaseSection() {
             className="mt-6 flex flex-col sm:flex-row items-center justify-center gap-3"
           >
             <a
-              href="https://github.com/sutharprin098/visionguarda/releases/download/v1.0.9/CamAI-Mobile-v1.0.1.apk"
-              target="_blank"
-              rel="noopener noreferrer"
+              href="/downloads/CamAI-Mobile-v1.0.1.apk"
+              download="CamAI-Mobile-v1.0.1.apk"
               className="w-full sm:w-auto px-6 py-3.5 rounded-2xl bg-gradient-to-r from-sky-500 via-blue-600 to-indigo-600 hover:from-sky-400 hover:to-blue-500 text-white font-bold text-xs sm:text-sm shadow-xl shadow-sky-500/25 flex items-center justify-center gap-2.5 transition-all hover:scale-105"
             >
               <Smartphone size={18} />
@@ -88,9 +87,8 @@ export default function MobileAppShowcaseSection() {
             </a>
 
             <a
-              href="https://github.com/sutharprin098/visionguarda/releases/download/v1.0.9/CamAI-Desktop-Setup-1.0.9.exe"
-              target="_blank"
-              rel="noopener noreferrer"
+              href="/downloads/CamAI-Desktop-Setup-1.0.9.exe"
+              download="CamAI-Desktop-Setup-1.0.9.exe"
               className="w-full sm:w-auto px-5 py-3 rounded-2xl bg-white hover:bg-sky-50 text-slate-800 border border-sky-200 font-bold text-xs shadow-sm flex items-center justify-center gap-2 transition-all hover:scale-105"
             >
               <Download size={15} className="text-sky-600" />
