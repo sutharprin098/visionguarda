@@ -1,9 +1,67 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "outputDirectory": "dist",
+  "headers": [
+    {
+      "source": "/downloads/(.*\\.apk)",
+      "headers": [
+        {
+          "key": "Content-Type",
+          "value": "application/vnd.android.package-archive"
+        },
+        {
+          "key": "Content-Disposition",
+          "value": "attachment; filename=\"$1\""
+        },
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=3600, must-revalidate"
+        }
+      ]
+    },
+    {
+      "source": "/downloads/(.*\\.exe)",
+      "headers": [
+        {
+          "key": "Content-Type",
+          "value": "application/octet-stream"
+        },
+        {
+          "key": "Content-Disposition",
+          "value": "attachment; filename=\"$1\""
+        },
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=3600, must-revalidate"
+        }
+      ]
+    }
+  ],
+  "redirects": [
+    {
+      "source": "/downloads/CamAI-Desktop-Setup-1.0.9.exe",
+      "destination": "https://github.com/sutharprin098/visionguarda/releases/download/v1.0.9/CamAI-Desktop-Setup-1.0.9.exe",
+      "permanent": false
+    },
+    {
+      "source": "/downloads/CamAI-Desktop-Setup-1.0.8.exe",
+      "destination": "https://github.com/sutharprin098/visionguarda/releases/download/v1.0.8/CamAI-Desktop-Setup-1.0.8.exe",
+      "permanent": false
+    },
+    {
+      "source": "/downloads/camai-engine.zip",
+      "destination": "https://github.com/sutharprin098/visionguarda/releases/download/v1.0.9/CamAI-Desktop-Setup-1.0.9.exe",
+      "permanent": false
+    },
+    {
+      "source": "/downloads/(.*\\.exe)",
+      "destination": "https://github.com/sutharprin098/visionguarda/releases/download/v1.0.9/CamAI-Desktop-Setup-1.0.9.exe",
+      "permanent": false
+    }
+  ],
   "rewrites": [
     {
-      "source": "/(.*)",
+      "source": "/((?!downloads/).*)",
       "destination": "/index.html"
     }
   ]

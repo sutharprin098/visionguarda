@@ -78,8 +78,9 @@ export default function HeroSection() {
             className="mt-9 flex flex-col sm:flex-row items-center justify-center gap-3.5 sm:gap-4"
           >
             <a
-              href="/downloads/CamAI-Desktop-Setup-1.0.9.exe"
-              download="CamAI-Desktop-Setup-1.0.9.exe"
+              href="https://github.com/sutharprin098/visionguarda/releases/download/v1.0.9/CamAI-Desktop-Setup-1.0.9.exe"
+              target="_blank"
+              rel="noopener noreferrer"
               className="w-full sm:w-auto px-7 py-4 rounded-xl justify-center flex items-center gap-2.5 bg-gradient-to-r from-sky-500 via-blue-600 to-indigo-600 hover:from-sky-400 hover:to-indigo-500 text-white font-bold text-sm shadow-xl shadow-sky-500/25 transition-all hover:scale-[1.03]"
             >
               <Download size={18} />

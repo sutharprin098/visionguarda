@@ -1,7 +1,5 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "buildCommand": "cd portal && npm install && npm run build",
-  "outputDirectory": "portal/dist",
   "headers": [
     {
       "source": "/downloads/(.*\\.apk)",
@@ -12,20 +10,55 @@
         },
         {
           "key": "Content-Disposition",
-          "value": "attachment"
+          "value": "attachment; filename=\"$1\""
         },
         {
           "key": "Cache-Control",
-          "value": "public, max-age=3600"
+          "value": "public, max-age=3600, must-revalidate"
+        }
+      ]
+    },
+    {
+      "source": "/downloads/(.*\\.exe)",
+      "headers": [
+        {
+          "key": "Content-Type",
+          "value": "application/octet-stream"
+        },
+        {
+          "key": "Content-Disposition",
+          "value": "attachment; filename=\"$1\""
+        },
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=3600, must-revalidate"
         }
       ]
     }
   ],
-  "rewrites": [
+  "redirects": [
     {
-      "source": "/downloads/(.*)",
-      "destination": "/downloads/$1"
+      "source": "/downloads/CamAI-Desktop-Setup-1.0.9.exe",
+      "destination": "https://github.com/sutharprin098/visionguarda/releases/download/v1.0.9/CamAI-Desktop-Setup-1.0.9.exe",
+      "permanent": false
     },
+    {
+      "source": "/downloads/CamAI-Desktop-Setup-1.0.8.exe",
+      "destination": "https://github.com/sutharprin098/visionguarda/releases/download/v1.0.8/CamAI-Desktop-Setup-1.0.8.exe",
+      "permanent": false
+    },
+    {
+      "source": "/downloads/camai-engine.zip",
+      "destination": "https://github.com/sutharprin098/visionguarda/releases/download/v1.0.9/CamAI-Desktop-Setup-1.0.9.exe",
+      "permanent": false
+    },
+    {
+      "source": "/downloads/(.*\\.exe)",
+      "destination": "https://github.com/sutharprin098/visionguarda/releases/download/v1.0.9/CamAI-Desktop-Setup-1.0.9.exe",
+      "permanent": false
+    }
+  ],
+  "rewrites": [
     {
       "source": "/((?!downloads/).*)",
       "destination": "/index.html"

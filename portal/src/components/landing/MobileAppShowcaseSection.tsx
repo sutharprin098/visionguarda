@@ -87,8 +87,9 @@ export default function MobileAppShowcaseSection() {
             </a>
 
             <a
-              href="/downloads/CamAI-Desktop-Setup-1.0.9.exe"
-              download="CamAI-Desktop-Setup-1.0.9.exe"
+              href="https://github.com/sutharprin098/visionguarda/releases/download/v1.0.9/CamAI-Desktop-Setup-1.0.9.exe"
+              target="_blank"
+              rel="noopener noreferrer"
               className="w-full sm:w-auto px-5 py-3 rounded-2xl bg-white hover:bg-sky-50 text-slate-800 border border-sky-200 font-bold text-xs shadow-sm flex items-center justify-center gap-2 transition-all hover:scale-105"
             >
               <Download size={15} className="text-sky-600" />
