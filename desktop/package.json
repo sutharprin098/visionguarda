@@ -44,7 +44,7 @@
   "build": {
     "appId": "ai.camai.desktop",
     "productName": "CamAI Desktop",
-    "compression": "store",
+    "compression": "normal",
     "directories": {
       "output": "release"
     },

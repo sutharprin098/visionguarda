@@ -322,7 +322,7 @@ export default function FullscreenViewer({
           "absolute bottom-4 left-4 z-20 rounded bg-black/70 px-3 py-1 text-xs font-semibold text-zinc-100 shadow transition-opacity",
           showChrome ? "opacity-100" : "opacity-0",
         )}>
-          {shown.length} shown · {(telemetry.fps ?? 0).toFixed(1)} fps
+          {shown.length} shown · {(telemetry.fps ?? telemetry.decode_fps ?? telemetry.camera_fps ?? 0).toFixed(1)} fps
           {telemetry.device ? ` · ${telemetry.device.toUpperCase()}` : ""}
         </div>
       )}

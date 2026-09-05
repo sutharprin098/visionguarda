@@ -754,6 +754,22 @@ def test_carry_forward_is_bounded():
     assert out == [], "carried-forward detection outlived its bound"
 
 
+def test_moving_object_does_not_spawn_trailing_ghost_boxes():
+    """When an object moves fast across frames, it must not spawn trailing ghost boxes."""
+    tf, s = _temporal(temporal_max_carry=3)
+    frames = [
+        (700, 330, 745, 375),
+        (705, 360, 750, 405),
+        (705, 390, 750, 435),
+        (705, 420, 750, 465),
+        (705, 450, 750, 495),
+    ]
+    for i, box in enumerate(frames):
+        out, _, _ = tf.update([_d(box, conf=0.98)], [[]], settings=s, now=1000.0 + i * 0.05)
+        assert len(out) == 1, f"Frame {i} spawned {len(out)} boxes instead of 1 on moving object"
+
+
+
 def test_box_smoothing_reduces_jitter():
     """A box that snaps to every measurement visibly buzzes on a stationary
     object. Smoothing is what makes the overlay look stable."""

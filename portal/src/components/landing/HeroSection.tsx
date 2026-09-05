@@ -78,9 +78,8 @@ export default function HeroSection() {
             className="mt-9 flex flex-col sm:flex-row items-center justify-center gap-3.5 sm:gap-4"
           >
             <a
-              href="https://github.com/sutharprin098/visionguarda/releases/download/v1.0.9/CamAI-Desktop-Setup-1.0.9.exe"
-              target="_blank"
-              rel="noopener noreferrer"
+              href="/downloads/CamAI-Desktop-Setup-1.0.9.exe"
+              download="CamAI-Desktop-Setup-1.0.9.exe"
               className="w-full sm:w-auto px-7 py-4 rounded-xl justify-center flex items-center gap-2.5 bg-gradient-to-r from-sky-500 via-blue-600 to-indigo-600 hover:from-sky-400 hover:to-indigo-500 text-white font-bold text-sm shadow-xl shadow-sky-500/25 transition-all hover:scale-[1.03]"
             >
               <Download size={18} />
@@ -88,12 +87,12 @@ export default function HeroSection() {
             </a>
 
             <a
-              href="/downloads/CamAI-Mobile-v1.0.1.apk"
-              download="CamAI-Mobile-v1.0.1.apk"
+              href="/downloads/CamAI-Mobile-v1.0.9.apk"
+              download="CamAI-Mobile-v1.0.9.apk"
               className="w-full sm:w-auto px-7 py-4 rounded-xl justify-center flex items-center gap-2.5 border border-sky-300 bg-white/90 hover:bg-sky-50 text-sky-800 font-bold text-sm shadow-md backdrop-blur-md transition-all hover:scale-[1.03]"
             >
               <Smartphone size={18} />
-              <span>Mobile App (v1.0.1 .apk)</span>
+              <span>Mobile App (v1.0.9 .apk)</span>
             </a>
 
             <Link

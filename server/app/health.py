@@ -167,15 +167,14 @@ def performance():
     online_cams = [t for t in running if getattr(t, "_health_status", "") == "online"]
     target_cams = online_cams if online_cams else running
 
+    avg_fps = round(sum(t.latest_telemetry.get("fps", 0) for t in target_cams) / len(target_cams), 1) if target_cams else 0.0
+    avg_latency = round(sum(t.latest_telemetry.get("latency", 0) for t in target_cams) / len(target_cams), 1) if target_cams else 0.0
+
     if is_cloud:
-        avg_fps = 0.0
-        avg_latency = 0.0
-        cpu, mem = 0.0, 0.0
+        cpu, mem = _proc_metrics()
         gpu = 0
         device = "AWS Cloud GPU Node"
     else:
-        avg_fps = round(sum(t.latest_telemetry.get("fps", 0) for t in target_cams) / len(target_cams), 1) if target_cams else 0.0
-        avg_latency = round(sum(t.latest_telemetry.get("latency", 0) for t in target_cams) / len(target_cams), 1) if target_cams else 0.0
         cpu, mem = _proc_metrics()
         gpu = get_gpu_usage()
         device = _device()

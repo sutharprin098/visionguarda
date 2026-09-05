@@ -230,7 +230,7 @@ export default function FloorPlanView({ bundle, healthInfo, onSelectCamera }: Fl
               <div style="margin-top: 6px; font-size: 10px; color: #374151; display: grid; grid-template-columns: 1fr 1fr; gap: 4px; border-top: 1px solid #e5e7eb; padding-top: 6px;">
                 <div>🚗 Vehicles: <strong>${t?.vehicles ?? 0}</strong></div>
                 <div>👤 People: <strong>${t?.people ?? 0}</strong></div>
-                <div>⚡ FPS: <strong>${t?.fps ? t.fps.toFixed(1) : '--'}</strong></div>
+                <div>⚡ FPS: <strong>${(t?.fps || t?.decode_fps || t?.camera_fps) ? (t?.fps || t?.decode_fps || t?.camera_fps)!.toFixed(1) : '--'}</strong></div>
                 <div>👁️ Dets: <strong>${t?.detections?.length ?? 0}</strong></div>
               </div>
             ` : ''}
@@ -570,7 +570,7 @@ export default function FloorPlanView({ bundle, healthInfo, onSelectCamera }: Fl
                     <Activity size={14} className="text-emerald-400" />
                     <div>
                       <div className="text-[9px] text-zinc-400 uppercase font-semibold">AI FPS</div>
-                      <div className="text-xs font-bold text-zinc-100">{selectedTelemetry?.fps ? selectedTelemetry.fps.toFixed(1) : "--"}</div>
+                      <div className="text-xs font-bold text-zinc-100">{(selectedTelemetry?.fps || selectedTelemetry?.decode_fps || selectedTelemetry?.camera_fps) ? (selectedTelemetry?.fps || selectedTelemetry?.decode_fps || selectedTelemetry?.camera_fps)!.toFixed(1) : "--"}</div>
                     </div>
                   </div>
                   <div className="rounded bg-surface-2 p-2 border border-line/40 flex items-center gap-2">

@@ -67,8 +67,8 @@ _SOCKET_TIMEOUT_S = 15
 # rather than a filter, so a stream published only above 1080p still
 # resolves instead of failing with "no formats".
 _FORMAT = (
-    "best[protocol^=m3u8][height<=?1080]/best[protocol^=m3u8]"
-    "/best[height<=?1080]/best"
+    "best[protocol^=m3u8][height<=?720]/best[protocol^=m3u8][height<=?1080]"
+    "/best[height<=?720]/best[height<=?1080]/best"
 )
 
 

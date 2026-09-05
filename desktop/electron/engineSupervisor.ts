@@ -276,20 +276,23 @@ async function resolveEngine(): Promise<ResolvedEngine | null> {
   } else {
     // Dev mode: repo-relative ../../server from desktop/dist-electron.
     const devDir = join(__dirname, "..", "..", "server");
-    const devExe = join(devDir, "dist", "camai-engine", "camai-engine.exe");
-    if (existsSync(devExe)) {
-      candidates.push({ frozenExe: devExe, engineDir: join(devDir, "dist", "camai-engine") });
-    }
+    // Prioritize active Python environment in dev mode so code edits immediately take effect
     candidates.push({ pythonPath: join(devDir, ".venv-build", "Scripts", "python.exe"), engineDir: devDir });
     candidates.push({ pythonPath: join(devDir, ".venv", "Scripts", "python.exe"), engineDir: devDir });
     candidates.push({ pythonPath: join(devDir, "venv", "Scripts", "python.exe"), engineDir: devDir });
     candidates.push({ pythonPath: "python", engineDir: devDir });
+
+    const devExe = join(devDir, "dist", "camai-engine", "camai-engine.exe");
+    if (existsSync(devExe)) {
+      candidates.push({ frozenExe: devExe, engineDir: join(devDir, "dist", "camai-engine") });
+    }
   }
 
   for (const c of candidates) {
     if (c.frozenExe && existsSync(c.frozenExe)) return c;
-    if (!looksLikeEngineDir(c.engineDir)) continue;
-    if (c.pythonPath && (c.pythonPath === "python" || existsSync(c.pythonPath))) return c;
+    if (c.pythonPath && (c.pythonPath === "python" || existsSync(c.pythonPath))) {
+      if (looksLikeEngineDir(c.engineDir)) return c;
+    }
   }
   return null;
 }

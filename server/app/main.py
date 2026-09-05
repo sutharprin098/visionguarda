@@ -565,21 +565,20 @@ def get_system_status():
     else:
         cpu_percent, memory_mb = 0.0, 0.0
 
+    avg_fps_res = round(avg_fps, 1)
+    avg_latency_res = round(avg_latency, 1)
+
     if is_cloud:
         gpu_usage = 0
         device = "AWS Cloud GPU Node"
-        avg_fps_res = 0.0
-        avg_latency_res = 0.0
-        engine_status = "disabled"
-        engine_message = "Disabled — Cloud Mode Active"
+        engine_status = "active"
+        engine_message = "Active — AWS Cloud GPU Node"
         local_engine_state = "disabled"
         cloud_engine_state = "error" if runtime_governor.last_error else "active"
     else:
         gpu_usage = get_gpu_usage()
         backend = getattr(manager, "yolo_backend", None)
         device = getattr(backend, "backend_device", "cpu").upper() if backend else "CPU"
-        avg_fps_res = round(avg_fps, 1)
-        avg_latency_res = round(avg_latency, 1)
         engine_status = manager.startup_status
         engine_message = manager.startup_error or ("Model Ready" if manager.yolo_model is not None else "Model Not Loaded")
         local_engine_state = "active" if manager.startup_status == "ready" and manager.yolo_model is not None else manager.startup_status
@@ -1285,9 +1284,9 @@ async def get_mjpeg_stream(camera_id: str):
                             last_seq = seq
                             yield (b'--frame\r\n'
                                    b'Content-Type: image/jpeg\r\n\r\n' + jpeg_bytes + b'\r\n')
-                            await asyncio.sleep(0.005)
+                            await asyncio.sleep(0.001)
                         else:
-                            await asyncio.sleep(0.01)
+                            await asyncio.sleep(0.005)
                     else:
                         frame_counter += 1
                         fallback = _generate_mjpeg_standby_frame(cam_name, frame_counter)

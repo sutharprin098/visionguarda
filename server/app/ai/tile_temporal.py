@@ -121,14 +121,38 @@ class TemporalFusion:
         # --- 1. Associate this frame's detections with existing observations
         for i, det in enumerate(detections):
             box = _xyxy(det)
-            best, best_iou = None, 0.0
+            bw = max(1.0, box[2] - box[0])
+            bh = max(1.0, box[3] - box[1])
+            bcx = (box[0] + box[2]) / 2.0
+            bcy = (box[1] + box[3]) / 2.0
+            bdiag = (bw * bw + bh * bh) ** 0.5
+
+            best, best_score = None, 0.0
             for ob in self._obs:
                 if ob in matched_obs or not _compatible(ob.cls, det["class"]):
                     continue
                 v = _iou(ob.box, box)
-                if v > best_iou:
-                    best, best_iou = ob, v
-            if best is not None and best_iou >= float(getattr(settings, "temporal_iou", 0.3)):
+                ow = max(1.0, ob.box[2] - ob.box[0])
+                oh = max(1.0, ob.box[3] - ob.box[1])
+                ocx = (ob.box[0] + ob.box[2]) / 2.0
+                ocy = (ob.box[1] + ob.box[3]) / 2.0
+                odiag = (ow * ow + oh * oh) ** 0.5
+                cdist = ((bcx - ocx) ** 2 + (bcy - ocy) ** 2) ** 0.5
+                max_reach = max(bdiag, odiag) * 1.6
+
+                score = 0.0
+                if v >= float(getattr(settings, "temporal_iou", 0.3)):
+                    score = 2.0 + v
+                elif v > 0.05 and cdist <= max_reach:
+                    score = 1.0 + v
+                elif cdist <= max_reach and (0.35 <= bw / ow <= 2.8) and (0.35 <= bh / oh <= 2.8):
+                    # Proximity match for moving object whose box shifted across frame interval
+                    score = 0.5 * (1.0 - cdist / max_reach)
+
+                if score > best_score:
+                    best, best_score = ob, score
+
+            if best is not None and best_score > 0.0:
                 matched_obs.add(best)
                 # Dynamic velocity-adaptive smoothing:
                 # Stationary/slow objects (disp < 12px) get smoothing to prevent overlay buzzing.
@@ -137,7 +161,7 @@ class TemporalFusion:
                     cx_n, cy_n = (box[0] + box[2]) / 2.0, (box[1] + box[3]) / 2.0
                     cx_o, cy_o = (best.box[0] + best.box[2]) / 2.0, (best.box[1] + best.box[3]) / 2.0
                     disp = ((cx_n - cx_o) ** 2 + (cy_n - cy_o) ** 2) ** 0.5
-                    eff_smooth = smooth if disp < 12.0 else max(0.2 * smooth, smooth * (1.0 - min(1.0, (disp - 12.0) / 50.0)))
+                    eff_smooth = smooth if disp < 12.0 else max(0.0, smooth * (1.0 - min(1.0, (disp - 12.0) / 40.0)))
                     a = 1.0 - eff_smooth
                     best.box = tuple(a * n + eff_smooth * o for n, o in zip(box, best.box))
                     stats["smoothed"] += 1
@@ -160,13 +184,28 @@ class TemporalFusion:
                 stats["new"] += 1
 
         # --- 2. Age everything that was not seen this frame
+        fresh_boxes = [(_xyxy(d), d["class"]) for d in detections]
+        surviving_obs = []
         for ob in self._obs:
             if ob.last_seen != now:
                 ob.misses += 1
-        self._obs = [
-            ob for ob in self._obs
-            if (now - ob.last_seen) <= history_s and ob.misses <= max_carry
-        ]
+                # If a fresh detection of compatible class is nearby in its motion corridor,
+                # the object has moved! The old position is superseded and must not linger as a ghost.
+                ocx = (ob.box[0] + ob.box[2]) / 2.0
+                ocy = (ob.box[1] + ob.box[3]) / 2.0
+                ow = max(1.0, ob.box[2] - ob.box[0])
+                oh = max(1.0, ob.box[3] - ob.box[1])
+                max_move = max(ow, oh) * 2.5
+                superseded = any(
+                    _compatible(ob.cls, fcls) and (((ocx - (fb[0] + fb[2]) / 2.0) ** 2 + (ocy - (fb[1] + fb[3]) / 2.0) ** 2) ** 0.5 <= max_move)
+                    for fb, fcls in fresh_boxes
+                )
+                if superseded:
+                    continue
+
+            if (now - ob.last_seen) <= history_s and ob.misses <= max_carry:
+                surviving_obs.append(ob)
+        self._obs = surviving_obs
 
         # --- 3. Verify and emit
         out_dets, out_masks = [], []
@@ -177,10 +216,19 @@ class TemporalFusion:
                 continue
             fresh = ob.last_seen == now
             if not fresh:
-                # Carried forward: the model saw this object within the history
-                # window but missed it on this frame. Re-emitting its last
-                # measured position closes a single-frame hole rather than
-                # letting the object blink out.
+                # Never emit carried forward ghost if any fresh detection of compatible class exists nearby
+                ocx = (ob.box[0] + ob.box[2]) / 2.0
+                ocy = (ob.box[1] + ob.box[3]) / 2.0
+                ow = max(1.0, ob.box[2] - ob.box[0])
+                oh = max(1.0, ob.box[3] - ob.box[1])
+                max_move = max(ow, oh) * 2.5
+                has_nearby_fresh = any(
+                    _compatible(ob.cls, fcls) and (((ocx - (fb[0] + fb[2]) / 2.0) ** 2 + (ocy - (fb[1] + fb[3]) / 2.0) ** 2) ** 0.5 <= max_move)
+                    for fb, fcls in fresh_boxes
+                )
+                if has_nearby_fresh:
+                    continue
+
                 stats["carried"] += 1
             ob.emitted = True
             x1, y1, x2, y2 = ob.box

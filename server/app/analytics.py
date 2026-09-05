@@ -1832,35 +1832,74 @@ class CameraAnalytics:
             if zone_profile == "traffic":
                 wrong_way_cfg = features.get("wrong_way_detection", {})
                 if wrong_way_cfg.get("enabled"):
-                    allowed_heading = float(wrong_way_cfg.get("allowed_heading", 0.0))
-                    for det in detections:
-                        track_id = det.get("track_id")
-                        if track_id is None:
-                            continue
-                        cls_name = self.track_classes.get(track_id, "person")
-                        if _object_category(cls_name) != "vehicle":
-                            continue
-                        hist = self.track_history.get(track_id, [])
-                        if len(hist) >= 3:
-                            p_start = hist[-3]
-                            p_end = hist[-1]
-                            dx = p_end[0] - p_start[0]
-                            dy = p_end[1] - p_start[1]
-                            import math
-                            angle_rad = math.atan2(dx, -dy)
-                            heading = (math.degrees(angle_rad) + 360.0) % 360.0
-                            
-                            diff = abs(heading - allowed_heading)
-                            diff = min(diff, 360.0 - diff)
-                            if diff > 120.0:
-                                alert_key = f"traffic_wrong_way_{track_id}"
-                                if now - self.alert_cooldowns.get(alert_key, 0) > 15.0:
-                                    alerts.append({
-                                        "type": "wrong_direction",
-                                        "message": f"Wrong-Way Alert: Vehicle (ID: {track_id}) moving opposite to permitted direction ({int(heading)}° vs allowed {int(allowed_heading)}°)",
-                                        "track_id": track_id
-                                    })
-                                    self.alert_cooldowns[alert_key] = now
+                    params = wrong_way_cfg.get("params", {}) if isinstance(wrong_way_cfg.get("params"), dict) else wrong_way_cfg
+                    
+                    # Direction map for string representations
+                    DIR_MAP = {
+                        "north": 0.0, "n": 0.0,
+                        "north_east": 45.0, "ne": 45.0,
+                        "east": 90.0, "e": 90.0,
+                        "south_east": 135.0, "se": 135.0,
+                        "south": 180.0, "s": 180.0,
+                        "south_west": 225.0, "sw": 225.0,
+                        "west": 270.0, "w": 270.0,
+                        "north_west": 315.0, "nw": 315.0,
+                    }
+                    raw_dir = params.get("allowed_direction") or wrong_way_cfg.get("allowed_direction")
+                    raw_heading = params.get("allowed_heading") or wrong_way_cfg.get("allowed_heading")
+                    
+                    allowed_heading = None
+                    if raw_heading is not None:
+                        try:
+                            allowed_heading = float(raw_heading) % 360.0
+                        except (ValueError, TypeError):
+                            allowed_heading = None
+                    elif raw_dir and str(raw_dir).strip().lower() in DIR_MAP:
+                        allowed_heading = DIR_MAP[str(raw_dir).strip().lower()]
+
+                    # Only run if user has explicitly calibrated/configured a permitted heading.
+                    # Do not blindly assume North (0.0°) or trigger on bidirectional streets.
+                    if allowed_heading is not None and str(raw_dir or "").strip().lower() not in ("both", "bidirectional", "any", "none"):
+                        min_speed = float(params.get("min_speed") or 10.0)
+                        for det in detections:
+                            track_id = det.get("track_id")
+                            if track_id is None:
+                                continue
+                            cls_name = self.track_classes.get(track_id, "person")
+                            if _object_category(cls_name) != "vehicle":
+                                continue
+
+                            # 1. Skip stationary / stopped / slow crawling vehicles
+                            speed = det.get("speed")
+                            if speed is not None and speed < min_speed:
+                                continue
+
+                            # 2. Check trajectory history over at least 8 frames to eliminate centroid jitter
+                            hist = self.track_history.get(track_id, [])
+                            if len(hist) >= 8:
+                                p_start = hist[-8]
+                                p_end = hist[-1]
+                                dx = p_end[0] - p_start[0]
+                                dy = p_end[1] - p_start[1]
+                                import math
+                                dist_px = math.hypot(dx, dy)
+                                if dist_px < 30.0:
+                                    continue  # Not moving sufficiently to establish travel direction
+
+                                angle_rad = math.atan2(dx, -dy)
+                                heading = (math.degrees(angle_rad) + 360.0) % 360.0
+                                
+                                diff = abs(heading - allowed_heading)
+                                diff = min(diff, 360.0 - diff)
+                                if diff > 130.0:
+                                    alert_key = f"traffic_wrong_way_{track_id}"
+                                    if now - self.alert_cooldowns.get(alert_key, 0) > 60.0:
+                                        alerts.append({
+                                            "type": "wrong_direction",
+                                            "message": f"Wrong-Way Alert: Vehicle (ID: {track_id}) moving opposite to permitted direction ({int(heading)}° vs allowed {int(allowed_heading)}°)",
+                                            "track_id": track_id
+                                        })
+                                        self.alert_cooldowns[alert_key] = now
 
                 speed_limit_cfg = features.get("speed_limit", {})
                 if speed_limit_cfg.get("enabled"):
@@ -1891,11 +1930,13 @@ class CameraAnalytics:
                 restricted_cfg = features.get("restricted_area", {})
                 if restricted_cfg.get("enabled"):
                     for zone in zones:
-                        z_type = zone.get("zoneType")
-                        if z_type in ("privacy_mask", "exclusion_zone"):
+                        z_type = str(zone.get("zoneType", "")).lower()
+                        if z_type in ("privacy_mask", "exclusion_zone", "speed_zone", "calibration_line", "heatmap_area"):
+                            continue
+                        z_name = zone.get("name", "Restricted Area")
+                        if z_type not in ("restricted_area", "restricted", "danger_zone", "intrusion_zone") and "restricted" not in z_name.lower():
                             continue
                         z_id = zone.get("id")
-                        z_name = zone.get("name", "Restricted Area")
                         current_active = self.zone_active_tracks.get(z_id, {})
                         for tid in current_active:
                             cls_name = self.track_classes.get(tid, "person")

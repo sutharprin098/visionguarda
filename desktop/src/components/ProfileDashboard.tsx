@@ -45,7 +45,8 @@ function countClass(t: CameraTelemetry, ...classes: string[]): number {
 
 function tilesFor(profile: ZoneProfileKey | null, t: CameraTelemetry): Tile[] {
   const c = t.counters ?? {};
-  const fps = { label: "FPS", value: fmt(t.fps) };
+  const rawFps = (t.fps && t.fps > 0) ? t.fps : ((t.decode_fps && t.decode_fps > 0) ? t.decode_fps : ((t.camera_fps && t.camera_fps > 0) ? t.camera_fps : t.fps));
+  const fps = { label: "FPS", value: fmt(rawFps) };
   
   const nv = t.night_vision;
   let nvVal = "Standby";

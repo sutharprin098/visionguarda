@@ -36,28 +36,7 @@
       ]
     }
   ],
-  "redirects": [
-    {
-      "source": "/downloads/CamAI-Desktop-Setup-1.0.9.exe",
-      "destination": "https://github.com/sutharprin098/visionguarda/releases/download/v1.0.9/CamAI-Desktop-Setup-1.0.9.exe",
-      "permanent": false
-    },
-    {
-      "source": "/downloads/CamAI-Desktop-Setup-1.0.8.exe",
-      "destination": "https://github.com/sutharprin098/visionguarda/releases/download/v1.0.8/CamAI-Desktop-Setup-1.0.8.exe",
-      "permanent": false
-    },
-    {
-      "source": "/downloads/camai-engine.zip",
-      "destination": "https://github.com/sutharprin098/visionguarda/releases/download/v1.0.9/CamAI-Desktop-Setup-1.0.9.exe",
-      "permanent": false
-    },
-    {
-      "source": "/downloads/(.*\\.exe)",
-      "destination": "https://github.com/sutharprin098/visionguarda/releases/download/v1.0.9/CamAI-Desktop-Setup-1.0.9.exe",
-      "permanent": false
-    }
-  ],
+  "redirects": [],
   "rewrites": [
     {
       "source": "/((?!downloads/).*)",

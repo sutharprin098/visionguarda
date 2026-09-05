@@ -21,6 +21,7 @@ import {
 import { useAlertIngest, useAlertState } from "../components/alerts/AlertProvider";
 import { siteLabel } from "../components/alerts/alertUtils";
 import AlertsPage from "../components/alerts/AlertsPage";
+import NotificationPreferencesCard from "../components/NotificationPreferencesCard";
 import { getTelegramConfig, invalidateTelegramConfig, sendTelegramTest } from "../lib/localTelegram";
 
 // Remembered across launches by name, not id — see startSharing().
@@ -337,7 +338,7 @@ export default function Workspace({
         (hasPermission("cameras.manage") || hasPermission("cameras.assign")) && "cameras",
         hasPermission("alerts.view") && "alerts",
         "engine",
-      ].filter(Boolean) as ("cameras" | "alerts" | "engine")[])
+      ].filter(Boolean) as ("cameras" | "maps" | "alerts" | "settings" | "engine")[])
     : [];
 
   // Auto-switch to first available authorized tab if active tab is unauthorized
@@ -1066,12 +1067,14 @@ const CameraTile = memo(function CameraTile({ camera: c, site, engineOnline, onF
       telemetryRef.current = t;
       const now = Date.now();
       const fpsDue = now - lastFpsCommitRef.current >= FPS_COMMIT_INTERVAL_MS;
+      const prevFps = prev ? (prev.fps ?? prev.decode_fps ?? prev.camera_fps ?? 0) : 0;
+      const currFps = t.fps ?? t.decode_fps ?? t.camera_fps ?? 0;
       const changed =
         prev == null ||
         prev.health_status !== t.health_status ||
         prev.source_error !== t.source_error ||
         prev.device !== t.device ||
-        (fpsDue && (prev.fps ?? 0).toFixed(1) !== (t.fps ?? 0).toFixed(1));
+        (fpsDue && prevFps.toFixed(1) !== currFps.toFixed(1));
       if (changed) {
         if (fpsDue) lastFpsCommitRef.current = now;
         setTelemetry(t);
@@ -1333,7 +1336,7 @@ const CameraTile = memo(function CameraTile({ camera: c, site, engineOnline, onF
             on top of the banner that explains why. */}
         {showingMedia && telemetry && !showSourceFault && (
           <div className="absolute bottom-2 left-2 z-20 rounded bg-black/70 px-2 py-0.5 text-[10px] font-semibold text-zinc-200 shadow">
-            {shownDetections.length} shown · {(telemetry.fps ?? 0).toFixed(1)} fps
+            {shownDetections.length} shown · {(telemetry.fps ?? telemetry.decode_fps ?? telemetry.camera_fps ?? 0).toFixed(1)} fps
             {telemetry.device ? ` · ${telemetry.device.toUpperCase()}` : ""}
           </div>
         )}
@@ -1815,6 +1818,9 @@ function AlertsTab({ orgId, hasPermission, active }: { orgId: string | null; has
           )}
         </div>
       </div>
+
+      {/* Notification Preferences — User controls which alert messages arrive */}
+      <NotificationPreferencesCard />
 
       {/* The Alerts page. This is the only place an alert is ever rendered —
           realtime, filterable, exportable — see AlertsPage.tsx. */}

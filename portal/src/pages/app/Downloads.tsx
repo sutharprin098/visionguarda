@@ -35,7 +35,7 @@ const DEFAULT_FALLBACK_RELEASES: GithubRelease[] = [
     asset_name: "CamAI-Desktop-Setup-1.0.9.exe",
     size_bytes: 356707397,
     content_type: "application/octet-stream",
-    download_url: `${REPO_URL}/releases/download/v1.0.9/CamAI-Desktop-Setup-1.0.9.exe`,
+    download_url: `/downloads/CamAI-Desktop-Setup-1.0.9.exe`,
     checksum_sha256: "27b124bb7c21cced5d0dbc33ab23144bbeeb9beccaaee6b545a273611d6bb281",
     release_notes: `
 ### 🚀 CamAI Desktop v1.0.9 & Mobile v1.0.9 Unified Release

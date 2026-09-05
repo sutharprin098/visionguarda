@@ -305,7 +305,7 @@ const TRAFFIC: ProfileDef = {
       params: [directionParam],
     },
     {
-      key: "wrong_way_detection", label: "Wrong Way Detection", group: "Events & Violations", requiresGeometry: "direction", defaultEnabled: true,
+      key: "wrong_way_detection", label: "Wrong Way Detection", group: "Events & Violations", requiresGeometry: "direction", defaultEnabled: false,
       description: "Flag vehicles moving against the permitted direction of travel.",
       params: [
         { key: "allowed_direction", label: "Allowed Direction", type: "select", default: "north", options: [

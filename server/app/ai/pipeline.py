@@ -78,7 +78,7 @@ _prewarm_scipy()
 # PipelineCoordinator._preflight_network_source, which is where that problem is
 # actually solved.
 os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = (
-    "rtsp_transport;tcp|threads;4|fflags;nobuffer|flags;low_delay"
+    "rtsp_transport;tcp|threads;4|fflags;nobuffer|flags;low_delay|framedrop;1|max_delay;500000"
 )
 
 
@@ -778,7 +778,7 @@ class ByteTracker:
         # any IoU comparison), which is exactly why it needed a separate
         # fix rather than a wider IoU threshold here. Still required by the
         # goal ("Prevent duplicate IDs") for the genuinely-co-located case.
-        DUP_IOU_THRESH = 0.6
+        DUP_IOU_THRESH = 0.30
         merged_ids = set()
         for i in range(len(self.tracks)):
             ti = self.tracks[i]
@@ -786,12 +786,22 @@ class ByteTracker:
                 continue
             for j in range(i + 1, len(self.tracks)):
                 tj = self.tracks[j]
-                if (tj.track_id in merged_ids or tj.state != "confirmed"
-                        or tj.class_name != ti.class_name):
+                if tj.track_id in merged_ids or tj.state != "confirmed":
+                    continue
+                if not (tj.class_name == ti.class_name or _vehicle_classes_compatible(ti.class_name, tj.class_name)):
                     continue
                 if min(ti.time_since_update, tj.time_since_update) > 1:
                     continue  # neither matched recently -- not a live duplicate conflict
-                if self._compute_iou(ti.get_bbox(), tj.get_bbox()) >= DUP_IOU_THRESH:
+                bi = ti.get_bbox()
+                bj = tj.get_bbox()
+                iou = self._compute_iou(bi, bj)
+                ci_x, ci_y = (bi[0] + bi[2]) / 2.0, (bi[1] + bi[3]) / 2.0
+                cj_x, cj_y = (bj[0] + bj[2]) / 2.0, (bj[1] + bj[3]) / 2.0
+                wi, hi = max(1.0, bi[2] - bi[0]), max(1.0, bi[3] - bi[1])
+                wj, hj = max(1.0, bj[2] - bj[0]), max(1.0, bj[3] - bj[1])
+                cdist = ((ci_x - cj_x) ** 2 + (ci_y - cj_y) ** 2) ** 0.5
+                max_reach = max(wi, hi, wj, hj) * 0.75
+                if iou >= DUP_IOU_THRESH or cdist <= max_reach:
                     dup = tj if ti.hits >= tj.hits else ti
                     merged_ids.add(dup.track_id)
         if merged_ids:
@@ -1042,6 +1052,31 @@ def resolve_emitted_detections(tracker, tracks_raw, detections, masks,
         if not (t.time_since_update > 0 and tracker.secs_since_update(t) <= coast_render_seconds):
             continue
         cbbox = t.get_bbox()
+        tcx = (cbbox[0] + cbbox[2]) / 2.0
+        tcy = (cbbox[1] + cbbox[3]) / 2.0
+        tw = max(1.0, cbbox[2] - cbbox[0])
+        th = max(1.0, cbbox[3] - cbbox[1])
+        t_reach = max(tw, th) * 1.5
+
+        # Suppress coasting track if an active tracked object of compatible class is nearby
+        suppressed_by_active = False
+        for od in out_dets:
+            if od.get("tracking_status") != "tracked":
+                continue
+            if not (od.get("class") == t.class_name or _vehicle_classes_compatible(t.class_name, od.get("class"))):
+                continue
+            obx = od["bbox"]
+            ocx = (obx["x1"] + obx["x2"]) / 2.0
+            ocy = (obx["y1"] + obx["y2"]) / 2.0
+            dist = ((tcx - ocx) ** 2 + (tcy - ocy) ** 2) ** 0.5
+            iou = tracker._compute_iou(cbbox, [obx["x1"], obx["y1"], obx["x2"], obx["y2"]])
+            if iou > 0.15 or dist <= t_reach:
+                suppressed_by_active = True
+                break
+
+        if suppressed_by_active:
+            continue
+
         out_dets.append({
             "class": t.class_name,
             "confidence": round(float(t.confidence), 2),
@@ -1073,10 +1108,18 @@ def resolve_emitted_detections(tracker, tracks_raw, detections, masks,
             box_i = [bi["x1"], bi["y1"], bi["x2"], bi["y2"]]
             dup = False
             for j in keep:
-                if out_dets[j]["class"] != out_dets[i]["class"]:
+                if not (out_dets[j]["class"] == out_dets[i]["class"] or _vehicle_classes_compatible(out_dets[j]["class"], out_dets[i]["class"])):
                     continue
                 bj = out_dets[j]["bbox"]
-                if tracker._compute_iou(box_i, [bj["x1"], bj["y1"], bj["x2"], bj["y2"]]) > 0.7:
+                box_j = [bj["x1"], bj["y1"], bj["x2"], bj["y2"]]
+                iou = tracker._compute_iou(box_i, box_j)
+                ci_x, ci_y = (box_i[0] + box_i[2]) / 2.0, (box_i[1] + box_i[3]) / 2.0
+                cj_x, cj_y = (box_j[0] + box_j[2]) / 2.0, (box_j[1] + box_j[3]) / 2.0
+                wi, hi = max(1.0, box_i[2] - box_i[0]), max(1.0, box_i[3] - box_i[1])
+                wj, hj = max(1.0, box_j[2] - box_j[0]), max(1.0, box_j[3] - box_j[1])
+                cdist = ((ci_x - cj_x) ** 2 + (ci_y - cj_y) ** 2) ** 0.5
+                max_reach = max(wi, hi, wj, hj) * 0.75
+                if iou > 0.30 or cdist <= max_reach:
                     dup = True
                     break
             if not dup:
@@ -1161,17 +1204,17 @@ class _Slot:
         return self._ready.is_set()
 
 
-def _fps(ts_deque: deque, window: float = 3.0) -> float:
+def _fps(ts_deque: deque, window: float = 5.0) -> float:
     """Sliding-window FPS from a timestamp deque (trims in-place from the left)."""
     now = time.time()
     while ts_deque and now - ts_deque[0] > window:
         ts_deque.popleft()
     if len(ts_deque) < 2:
         return 0.0
-    if now - ts_deque[-1] > 1.5:
+    if now - ts_deque[-1] > window:
         return 0.0
     span = ts_deque[-1] - ts_deque[0]
-    if span <= 0.0:
+    if span <= 0.001:
         return 0.0
     calc_fps = (len(ts_deque) - 1) / span
     return min(60.0, calc_fps)
@@ -1312,13 +1355,14 @@ class PipelineCoordinator:
         # Synchronized MJPEG burn-in overlay state
         self._overlay_lock        = threading.Lock()
         self._latest_overlay_dets = []
+        self._latest_raw_dets     = []
         self._latest_overlay_ts   = 0.0
 
         # Display-only encode knobs, mutable at runtime via update_display_config().
         # Plain int/float attributes are fine to read/write without a lock here —
         # this only affects how Module 2 encodes the MJPEG preview, never the AI path.
         self.display_max_width = 1280
-        self.jpeg_quality = 85
+        self.jpeg_quality = 70
 
         # ── Per-stage FPS sliding windows ───────────────────────────────────
         # maxlen bounds memory even if the stage that normally trims a given
@@ -2039,7 +2083,8 @@ class PipelineCoordinator:
         self._file_frame_interval = 0.0
 
         def _refresh_file_pacing():
-            if (not self._is_video_file and not getattr(self, "_is_page_url", False)) or self.cap is None:
+            if not self._is_video_file or self.cap is None:
+                self._file_frame_interval = 0.0
                 return
             try:
                 declared = float(self.cap.get(cv2.CAP_PROP_FPS))
@@ -2061,7 +2106,8 @@ class PipelineCoordinator:
                 self.cap = self._open_capture(src, hw_accel=self._cap_hw_accel)
                 if self.cap.isOpened():
                     self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-                    self.cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
+                    if self.source_type in ("usb", "webcam") or isinstance(self.source, int):
+                        self.cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
                     _refresh_file_pacing()
                     print(f"[Cap-{self.camera_id}] Opened source: {self._source_label(src)}", flush=True)
                 else:
@@ -2097,7 +2143,8 @@ class PipelineCoordinator:
                                     self.cap = self._open_capture(src, hw_accel=self._cap_hw_accel)
                                     if self.cap and self.cap.isOpened():
                                         self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-                                        self.cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
+                                        if self.source_type in ("usb", "webcam") or isinstance(self.source, int):
+                                            self.cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
                                         _refresh_file_pacing()
                                         next_frame_due = time.time()
                                         self._cap_consecutive_failures = 0
@@ -2294,25 +2341,23 @@ class PipelineCoordinator:
                         thresh = 140.0
 
                     force_on = (mode in ("on", "always_on", "forced", "always", "manual", "true", "1")) or (self.zone_profile in ("micro_motion", "night_vision"))
-                    if is_enabled and (force_on or mode != "off"):
-                        # Enhance and keep local + data in sync so every downstream
-                        # consumer (MJPEG encoder, recorder, AI slot) sees the same
-                        # restored, high-contrast frame.
+                    lum_fast = round(zero_dce.calculate_luminance(frame), 1)
+                    scene_is_dark = lum_fast < max(70.0, min(120.0, thresh))
+                    if is_enabled and mode != "off" and (scene_is_dark or (force_on and lum_fast < 130.0)):
+                        # Enhance low-light frames
                         frame, dce_stats = zero_dce.enhance(
                             frame,
                             override_threshold=thresh,
-                            force_enable=force_on,
+                            force_enable=force_on and scene_is_dark,
                         )
                         data["frame"] = frame          # AI slot reads data["frame"]
                         data["zero_dce_stats"] = dce_stats
                     else:
-                        # Enhancement disabled — record luminance for HUD telemetry
-                        # only; do not touch the frame.
-                        mean_lum = round(zero_dce.calculate_luminance(frame), 1)
+                        # Daylight/normal light bypass — record luminance for HUD telemetry with 0ms latency
                         data["zero_dce_stats"] = {
                             "zero_dce_applied": False,
-                            "mean_luminance": mean_lum,
-                            "method": "off",
+                            "mean_luminance": lum_fast,
+                            "method": "daylight_bypass" if is_enabled else "off",
                             "latency_ms": 0.0,
                         }
                 except Exception as e:
@@ -2389,7 +2434,7 @@ class PipelineCoordinator:
                         if burnin_overlay and latest_dets and (time.time() - latest_ts < 0.6):
                             _draw_normalized_overlay_boxes(mjpeg_f, latest_dets)
 
-                        q = max(60, min(90, self.jpeg_quality))
+                        q = max(50, min(85, self.jpeg_quality))
                         ok, jpg = cv2.imencode('.jpg', mjpeg_f, [cv2.IMWRITE_JPEG_QUALITY, q])
                         if ok:
                             with self.jpeg_lock:
@@ -2506,6 +2551,7 @@ class PipelineCoordinator:
         if getattr(self, "_is_standby_frame", False):
             with self._overlay_lock:
                 self._latest_overlay_dets = []
+                self._latest_raw_dets     = []
             self._ai_slot.put({
                 **data,
                 "detections":     [],
@@ -2521,9 +2567,10 @@ class PipelineCoordinator:
 
         _now_cloud = time.time()
         if _now_cloud - getattr(self, "_last_cloud_req_ts", 0.0) < 0.04:
-            # High-throughput streaming: forward previous overlay detections to coast tracker
+            # High-throughput streaming: forward previous raw pixel detections to coast tracker
             with self._overlay_lock:
-                prev_dets = list(getattr(self, "_latest_overlay_dets", []))
+                prev_dets = list(getattr(self, "_latest_raw_dets", []))
+            self._ai_ts.append(time.time())
             self._ai_slot.put({
                 **data,
                 "detections":     prev_dets,
@@ -2549,7 +2596,6 @@ class PipelineCoordinator:
                 target_size=640,
             )
             t_inf = (time.perf_counter() - t0_cloud) * 1000
-            print(f"[RAW_CLOUD_DETS] Camera={self.camera_id} Count={len(detections)} Dets={detections}", flush=True)
 
             # Match custom target reference images on cloud detections
             try:
@@ -2566,10 +2612,9 @@ class PipelineCoordinator:
             self._cloud_offline_logged = False
             self._last_infer_ts = time.time()
 
-            if not detections:
-                # Hybrid fallback: Cloud endpoint returned 0 detections — evaluate locally on GPU with Tiling
-                self._ai_loop_iteration_local(data)
-                return
+            # Cache latest raw detections for tracker coasting
+            with self._overlay_lock:
+                self._latest_raw_dets = list(detections) if detections else []
 
             # Throttled heartbeat log
             _now = time.time()
@@ -2583,7 +2628,7 @@ class PipelineCoordinator:
                 **data,
                 "detections":     detections,
                 "masks_polygons": [],
-                "motion":         True,  # always run tracker on cloud results
+                "motion":         True if detections else False,
                 "micro_motion_stats": self._motion_stats,
                 "orig_h":         orig_h,
                 "orig_w":         orig_w,
@@ -2643,7 +2688,19 @@ class PipelineCoordinator:
                     backend = None
 
             if backend is None:
-                time.sleep(0.1)
+                self._ai_ts.append(time.time())
+                self._ai_slot.put({
+                    **data,
+                    "detections":     [],
+                    "masks_polygons": [],
+                    "motion":         False,
+                    "micro_motion_stats": self._motion_stats,
+                    "orig_h":         orig_h,
+                    "orig_w":         orig_w,
+                    "conf_thresh":    0.3,
+                    "t_pre": 0.0, "t_inf": 0.0, "t_post": 0.0, "ai_lat": 0.0,
+                })
+                time.sleep(0.033)
                 return
 
             frame   = data["frame"]
@@ -3475,7 +3532,8 @@ class PipelineCoordinator:
             # Save latest tracked detections for Module 2 smooth high-FPS MJPEG stream
             with self._overlay_lock:
                 self._latest_overlay_dets = list(client_dets) if client_dets else []
-                self._latest_overlay_ts = time.time()
+                self._latest_raw_dets     = list(detections) if detections else []
+                self._latest_overlay_ts   = time.time()
 
             self._tracking_slot.put({
                 **data,
@@ -3617,7 +3675,7 @@ class PipelineCoordinator:
                 "frame_age_ms": round(total_latency, 1),
                 "ai_queue_age_ms": round(data.get("ai_queue_age", 0.0), 1),
                 "frame_id": data.get("frame_id", 0),
-                "fps":      round(dec_fps if dec_fps > 0 else cap_fps, 1),       # video decode/stream FPS
+                "fps":      round(dec_fps if dec_fps > 0 else (cap_fps if cap_fps > 0 else (ai_fps if ai_fps > 0 else trk_fps)), 1),
                 "target_fps": round(getattr(self, "target_fps", 15.0), 1),
 
 

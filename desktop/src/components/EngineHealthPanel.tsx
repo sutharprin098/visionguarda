@@ -202,15 +202,15 @@ export default function EngineHealthPanel({
         )}
 
         <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
-          <Metric icon={Cpu} label="CPU" value={isCloud ? "0% (Cloud)" : (eng ? `${eng.cpu_percent.toFixed(0)}%` : "—")} />
-          <Metric icon={Gauge} label="GPU" value={isCloud ? "0% (Cloud)" : (eng ? `${eng.gpu_percent.toFixed(0)}%` : "—")} />
+          <Metric icon={Cpu} label="CPU" value={isCloud ? "Offloaded (Cloud)" : (eng ? `${eng.cpu_percent.toFixed(0)}%` : "—")} />
+          <Metric icon={Gauge} label="GPU" value={isCloud ? "AWS GPU" : (eng ? `${eng.gpu_percent.toFixed(0)}%` : "—")} />
           <Metric icon={MemoryStick} label="Memory" value={isCloud ? "—" : (eng ? `${(eng.memory_mb / 1024).toFixed(2)} GB` : "—")} />
-          <Metric icon={Activity} label="Avg FPS" value={isCloud ? "— (Cloud AI)" : (eng ? eng.avg_fps.toFixed(1) : "—")} />
+          <Metric icon={Activity} label="Avg FPS" value={eng ? `${eng.avg_fps.toFixed(1)} FPS` : "—"} />
         </div>
         <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4 text-xs text-zinc-500">
           <div>Profile: <span className="text-zinc-300">{app?.selectedModel ? (app.selectedModel.includes("PPE") ? "Factory Safety" : "Standard Detection") : "—"}</span></div>
           <div>Processor: <span className="text-zinc-300">{isCloud ? "AWS Cloud GPU Node" : (eng?.device ? (eng.device.toLowerCase().includes("cpu") ? "Local CPU" : "Hardware Accelerated (GPU)") : "—")}</span></div>
-          <div>Inference latency: <span className="text-zinc-300">{isCloud ? "Offloaded to Cloud" : (eng ? `${eng.avg_latency_ms.toFixed(0)} ms` : "—")}</span></div>
+          <div>Inference latency: <span className="text-zinc-300">{eng && eng.avg_latency_ms > 0 ? `${eng.avg_latency_ms.toFixed(0)} ms` : (isCloud ? "AWS Cloud Node" : "—")}</span></div>
           <div>Active cameras: <span className="text-zinc-300">{eng?.active_cameras ?? 0}</span></div>
         </div>
       </div>

@@ -171,8 +171,8 @@ export default function SignIn() {
             </Link>
           </p>
           <a
-            href="/downloads/CamAI-Mobile-v1.0.1.apk"
-            download="CamAI-Mobile-v1.0.1.apk"
+            href="/downloads/CamAI-Mobile-v1.0.9.apk"
+            download="CamAI-Mobile-v1.0.9.apk"
             className="text-[9px] text-[var(--ap-accent)] hover:underline font-semibold flex items-center gap-1 mt-1"
           >
             <span>📱 Download Android App (.apk)</span>

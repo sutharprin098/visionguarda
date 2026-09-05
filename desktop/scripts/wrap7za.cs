@@ -1,30 +1,40 @@
 using System;
 using System.Diagnostics;
+using System.IO;
 using System.Text;
 
-// Wrapper resolved via USE_SYSTEM_7ZA=true + PATH (see 7zip-bin/index.js),
-// so the real, unmodified vendored binary in node_modules is never touched.
-// Only purpose: append -snl- on extraction so 7-Zip writes plain files
-// instead of true OS symlinks, avoiding SeCreateSymbolicLinkPrivilege.
 class Wrap7za
 {
-    const string RealPath = @"D:\camAI\desktop\node_modules\7zip-bin\win\x64\7za.exe";
-
     static int Main(string[] args)
     {
+        string dir = Path.GetDirectoryName(typeof(Wrap7za).Assembly.Location);
+        string realPath = Path.Combine(dir, "7za_real.exe");
+        if (!File.Exists(realPath))
+        {
+            realPath = @"D:\camAI\desktop\node_modules\7zip-bin\win\x64\7za_real.exe";
+        }
+
         var sb = new StringBuilder();
         bool isExtract = args.Length > 0 && (args[0] == "x" || args[0] == "e");
         foreach (var a in args)
         {
+            string token = a;
+            if (token.StartsWith("-mx="))
+            {
+                token = "-mx=3 -md=32m -mmt=2";
+            }
             if (sb.Length > 0) sb.Append(' ');
-            if (a.Contains(" "))
-                sb.Append('"').Append(a).Append('"');
+            if (token.Contains(" ") && !token.StartsWith("-mx="))
+                sb.Append('"').Append(token).Append('"');
             else
-                sb.Append(a);
+                sb.Append(token);
         }
         if (isExtract) sb.Append(" -snl-");
 
-        var psi = new ProcessStartInfo(RealPath, sb.ToString()) { UseShellExecute = false };
+        var psi = new ProcessStartInfo(realPath, sb.ToString())
+        {
+            UseShellExecute = false
+        };
         using (var p = Process.Start(psi))
         {
             p.WaitForExit();
