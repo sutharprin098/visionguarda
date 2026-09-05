@@ -65,6 +65,7 @@ kernel.errors.txt
 # Large binaries & release installers — upload via GitHub Release, not git source
 *.exe
 *.apk
+!portal/public/downloads/*.apk
 *.zip
 *.mp4
 videos/

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Minimize2, ChevronLeft, ChevronRight, Video, RotateCw, ArrowLeft } from "lucide-react";
 import clsx from "clsx";
 import DetectionOverlay from "./DetectionOverlay";
@@ -135,6 +135,20 @@ export default function FullscreenViewer({
   const modules = loadModules(cameraId);
   const shown = filterDetections(detections, modules);
 
+  const ytEmbedUrl = useMemo(() => {
+    const src = (cam as any)?.source || "";
+    const match = src.match(/(?:youtu\.be\/|youtube\.com\/(?:embed\/|v\/|watch\?v=|watch\?.+&v=))([\w-]{11})/);
+    if (match && match[1]) {
+      return `https://www.youtube.com/embed/${match[1]}?autoplay=1&mute=1&playsinline=1&controls=1&modestbranding=1&enablejsapi=1`;
+    }
+    return null;
+  }, [cam]);
+
+  const isDirectVideo = useMemo(() => {
+    const src = ((cam as any)?.source || "").toLowerCase();
+    return src.endsWith(".m3u8") || src.endsWith(".mp4") || src.endsWith(".webm") || (cam as any)?.source_type === "hls";
+  }, [cam]);
+
   const winApi = (window as any)?.camai?.window as
     | typeof window.camai.window
     | undefined;
@@ -184,16 +198,7 @@ export default function FullscreenViewer({
     if (imgCors && !corsProvenRef.current) {
       setImgCors(false);
     }
-    const target = e.currentTarget;
-    setTimeout(() => {
-      if (target && target.src) {
-        try {
-          const url = new URL(target.src);
-          url.searchParams.set("_t", String(Date.now()));
-          target.src = url.toString();
-        } catch { /* ignore */ }
-      }
-    }, 1500);
+    setStreamFailed(true);
   };
 
   const step = useCallback((delta: number) => {
@@ -253,22 +258,68 @@ export default function FullscreenViewer({
           className="w-full h-full flex items-center justify-center transition-transform duration-300"
           style={{ transform: `rotate(${rotation}deg)` }}
         >
-          <img
-            key={cameraId}
-            ref={imgRef}
-            crossOrigin={imgCors ? "anonymous" : undefined}
-            src={mjpegStreamUrl(cameraId)}
-            alt={cam?.name ?? cameraId}
-            className="h-full w-full object-contain"
-            onLoad={() => { corsProvenRef.current = imgCors; }}
-            onError={handleImageError}
-          />
+          {ytEmbedUrl !== null ? (
+            <iframe
+              src={ytEmbedUrl}
+              title={cam?.name ?? cameraId}
+              className="h-full w-full border-0 bg-black"
+              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+              allowFullScreen
+            />
+          ) : isDirectVideo ? (
+            <video
+              src={(cam as any)?.source}
+              autoPlay
+              playsInline
+              muted
+              loop
+              controls
+              className="h-full w-full object-contain bg-black"
+              onError={() => setStreamFailed(true)}
+            />
+          ) : !streamFailed ? (
+            <>
+              <img
+                key={cameraId}
+                ref={imgRef}
+                crossOrigin={imgCors ? "anonymous" : undefined}
+                src={mjpegStreamUrl(cameraId)}
+                alt={cam?.name ?? cameraId}
+                className="h-full w-full object-contain"
+                onLoad={() => {
+                  corsProvenRef.current = imgCors;
+                  setStreamFailed(false);
+                }}
+                onError={handleImageError}
+              />
 
-          <DetectionOverlay
-            detections={shown}
-            mediaRef={imgRef as React.RefObject<HTMLImageElement>}
-            fit="contain"
-          />
+              <DetectionOverlay
+                detections={shown}
+                mediaRef={imgRef as React.RefObject<HTMLImageElement>}
+                fit="contain"
+              />
+            </>
+          ) : (
+            <div className="relative h-full w-full flex items-center justify-center">
+              <FallbackLiveCameraFeed
+                cameraName={cam?.name ?? cameraId}
+                detections={shown}
+              />
+              <div className="absolute top-16 left-4 z-40 flex items-center gap-2 rounded bg-black/80 px-3 py-1.5 text-xs text-zinc-300 backdrop-blur-sm border border-zinc-700/60 shadow">
+                <span className="h-2 w-2 rounded-full bg-cyan-400 animate-pulse" />
+                <span>Synthetic CCTV Live Backup</span>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setStreamFailed(false);
+                  }}
+                  className="ml-2 rounded bg-sky-500/20 px-2 py-0.5 text-xs font-bold text-sky-400 hover:bg-sky-500/30 transition"
+                >
+                  Retry Stream
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       </div>
 

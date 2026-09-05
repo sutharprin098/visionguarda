@@ -7,3 +7,4 @@ public/features-demo.mp4
 
 # Large binary installers exceeding Vercel 100MB static asset limit
 public/downloads/*.exe
+public/downloads/*.zip

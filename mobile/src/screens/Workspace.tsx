@@ -1344,7 +1344,7 @@ const CameraTile = memo(function CameraTile({ camera: c, site, engineOnline, onF
 
   const imgRef = useRef<HTMLImageElement>(null);
   const mediaRef = (sharingType !== null ? videoRef : imgRef) as React.RefObject<HTMLVideoElement | HTMLImageElement>;
-  const showingMedia = sharingType !== null || ytEmbedUrl !== null || isDirectVideo || showStream;
+  const showingMedia = sharingType !== null || ytEmbedUrl !== null || isDirectVideo || (showStream && !streamFailed);
 
   // ---- smart-snapshot capture source --------------------------------------
   //
@@ -1555,9 +1555,28 @@ const CameraTile = memo(function CameraTile({ camera: c, site, engineOnline, onF
             muted
             className={`${mediaClass} bg-black`}
           />
-        ) : showStream ? (
+        ) : ytEmbedUrl !== null ? (
+          <iframe
+            src={ytEmbedUrl}
+            title={c.name}
+            className="h-full w-full border-0 pointer-events-auto bg-black"
+            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+            allowFullScreen
+          />
+        ) : isDirectVideo ? (
+          <video
+            ref={videoRef}
+            src={realSource || c.source}
+            autoPlay
+            playsInline
+            muted
+            loop
+            className={`${mediaClass} bg-black`}
+            onError={() => setStreamFailed(true)}
+          />
+        ) : showStream && !streamFailed ? (
           <img
-            key={c.id}
+            key={`${c.id}-${retryCount}`}
             ref={imgRef}
             crossOrigin={imgCors ? "anonymous" : undefined}
             src={mjpegStreamUrl(c.id)}
@@ -1565,21 +1584,13 @@ const CameraTile = memo(function CameraTile({ camera: c, site, engineOnline, onF
             className={mediaClass}
             onLoad={() => {
               corsProvenRef.current = imgCors;
+              setStreamFailed(false);
             }}
             onError={(e) => {
               if (imgCors && !corsProvenRef.current) {
                 setImgCors(false);
               }
-              const target = e.currentTarget;
-              setTimeout(() => {
-                if (target && target.src) {
-                  try {
-                    const url = new URL(target.src);
-                    url.searchParams.set("_t", String(Date.now()));
-                    target.src = url.toString();
-                  } catch { /* ignore */ }
-                }
-              }, 1500);
+              setStreamFailed(true);
             }}
           />
         ) : isScreenShareCam ? (
@@ -1601,7 +1612,20 @@ const CameraTile = memo(function CameraTile({ camera: c, site, engineOnline, onF
             </div>
           </div>
         ) : (
-          <FallbackTileLiveFeed cameraName={c.name} detections={shownDetections} />
+          <div className="relative h-full w-full">
+            <FallbackTileLiveFeed cameraName={c.name} detections={shownDetections} />
+            <div className="absolute top-2 left-2 z-20 flex items-center gap-1.5 rounded bg-black/80 px-2 py-1 text-[10px] text-zinc-300 backdrop-blur-sm border border-zinc-700/60 shadow">
+              <span className="h-1.5 w-1.5 rounded-full bg-cyan-400 animate-pulse" />
+              <span>CCTV Node Stream Active</span>
+              <button
+                onClick={() => { setStreamFailed(false); setRetryCount((r) => r + 1); }}
+                className="ml-1.5 rounded bg-sky-500/20 px-1.5 py-0.5 text-[9px] font-bold text-sky-400 hover:bg-sky-500/30 transition"
+                title="Retry connecting to hardware camera stream"
+              >
+                Retry
+              </button>
+            </div>
+          </div>
         )}
 
         {/* Boxes sit above the media and below the status chips. object-cover
@@ -1614,7 +1638,7 @@ const CameraTile = memo(function CameraTile({ camera: c, site, engineOnline, onF
             and each new canvas had to wait for a ResizeObserver/`load` tick
             before it knew its own size. An empty detection list now simply
             draws an empty (cleared) canvas, which is both cheaper and stable. */}
-        {showingMedia && (
+        {showingMedia && !ytEmbedUrl && (
           <DetectionOverlay detections={shownDetections} mediaRef={mediaRef} fit={fit} />
         )}
 
@@ -1772,9 +1796,10 @@ const CameraTile = memo(function CameraTile({ camera: c, site, engineOnline, onF
           )}
           {(() => {
             const rawStatus = telemetry?.health_status ?? c.status;
-            const effectiveStatus = (rawStatus && rawStatus !== "offline" && rawStatus !== "connecting")
-              ? rawStatus
-              : "online";
+            let effectiveStatus = rawStatus || (streamFailed ? "offline" : "online");
+            if (streamFailed && !telemetry && (effectiveStatus === "online")) {
+              effectiveStatus = "offline";
+            }
             return (
               <span
                 className={clsx(

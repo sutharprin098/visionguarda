@@ -2,9 +2,32 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "buildCommand": "cd portal && npm install && npm run build",
   "outputDirectory": "portal/dist",
+  "headers": [
+    {
+      "source": "/downloads/(.*\\.apk)",
+      "headers": [
+        {
+          "key": "Content-Type",
+          "value": "application/vnd.android.package-archive"
+        },
+        {
+          "key": "Content-Disposition",
+          "value": "attachment"
+        },
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=3600"
+        }
+      ]
+    }
+  ],
   "rewrites": [
     {
-      "source": "/(.*)",
+      "source": "/downloads/(.*)",
+      "destination": "/downloads/$1"
+    },
+    {
+      "source": "/((?!downloads/).*)",
       "destination": "/index.html"
     }
   ]

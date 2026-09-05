@@ -15,6 +15,7 @@ import {
   RefreshCw
 } from "lucide-react";
 import { getDesktopNotificationSettings, saveDesktopNotificationSettings, DesktopNotificationSettings } from "../lib/notifications";
+import { getEngineBase, setEngineBase } from "../lib/localEngine";
 
 interface SettingsMenuModalProps {
   isOpen: boolean;
@@ -24,7 +25,7 @@ interface SettingsMenuModalProps {
 
 export default function SettingsMenuModal({ isOpen, onClose, onSignOut }: SettingsMenuModalProps) {
   const [serverUrl, setServerUrl] = useState(() => {
-    return localStorage.getItem("camai_server_url") || "https://camai.princesite.in";
+    return localStorage.getItem("camai_engine_url") || localStorage.getItem("camai_server_url") || getEngineBase();
   });
   const [updating, setUpdating] = useState(false);
   const [updateMsg, setUpdateMsg] = useState<string | null>(null);
@@ -33,13 +34,14 @@ export default function SettingsMenuModal({ isOpen, onClose, onSignOut }: Settin
 
   useEffect(() => {
     setNotifSettings(getDesktopNotificationSettings());
+    setServerUrl(getEngineBase());
   }, [isOpen]);
 
   if (!isOpen) return null;
 
   const handleSaveServerUrl = () => {
-    localStorage.setItem("camai_server_url", serverUrl);
-    setUpdateMsg("Server URL saved successfully.");
+    setEngineBase(serverUrl);
+    setUpdateMsg("Server / Engine URL saved successfully.");
     setTimeout(() => setUpdateMsg(null), 3000);
   };
 

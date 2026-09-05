@@ -16,12 +16,34 @@ import { getSupabase } from "./session";
 
 export function getEngineBase(): string {
   if (typeof window !== "undefined") {
-    const custom = localStorage.getItem("camai_engine_url");
+    const custom = localStorage.getItem("camai_engine_url") || localStorage.getItem("camai_server_url");
     if (custom && custom.trim()) {
       return custom.trim().replace(/\/+$/, "");
     }
+    // On mobile / Capacitor, localhost (127.0.0.1) does not run Python. Fall back to cloud node.
+    const isMobile = Boolean(
+      (window as any).Capacitor?.isNativePlatform?.() ||
+      (window as any).Capacitor ||
+      /Android|iPhone|iPad|iPod/i.test(navigator.userAgent)
+    );
+    if (isMobile) {
+      return "http://13.203.71.14:8000";
+    }
   }
   return "http://127.0.0.1:8000";
+}
+
+export function setEngineBase(url: string): void {
+  if (typeof window !== "undefined") {
+    const clean = (url || "").trim().replace(/\/+$/, "");
+    if (clean) {
+      localStorage.setItem("camai_engine_url", clean);
+      localStorage.setItem("camai_server_url", clean);
+    } else {
+      localStorage.removeItem("camai_engine_url");
+      localStorage.removeItem("camai_server_url");
+    }
+  }
 }
 
 export const ENGINE_BASE = getEngineBase();
