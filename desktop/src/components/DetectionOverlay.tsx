@@ -135,10 +135,54 @@ function labelFor(det: TelemetryDetection): string {
   return `${titleClass}${idStr}${confStr}${speedStr}`;
 }
 
+function dedupDetections(dets: TelemetryDetection[]): TelemetryDetection[] {
+  if (!dets || dets.length <= 1) return dets || [];
+  const sorted = [...dets].sort((a, b) => (b.confidence || 0) - (a.confidence || 0));
+  const kept: TelemetryDetection[] = [];
+
+  for (const d of sorted) {
+    if (!d || !d.bbox) continue;
+    const b1 = d.bbox;
+    const a1 = Math.max(0, b1.x2 - b1.x1) * Math.max(0, b1.y2 - b1.y1);
+    if (a1 <= 0) continue;
+
+    let duplicate = false;
+    for (const k of kept) {
+      const b2 = k.bbox;
+      const ix1 = Math.max(b1.x1, b2.x1);
+      const iy1 = Math.max(b1.y1, b2.y1);
+      const ix2 = Math.min(b1.x2, b2.x2);
+      const iy2 = Math.min(b1.y2, b2.y2);
+      const iw = Math.max(0, ix2 - ix1);
+      const ih = Math.max(0, iy2 - iy1);
+      const inter = iw * ih;
+      if (inter > 0) {
+        const a2 = Math.max(0, b2.x2 - b2.x1) * Math.max(0, b2.y2 - b2.y1);
+        const union = a1 + a2 - inter;
+        const iou = union > 0 ? inter / union : 0;
+        const overlap1 = inter / a1;
+        const overlap2 = inter / a2;
+        const dCls = (d.class || "").toLowerCase();
+        const kCls = (k.class || "").toLowerCase();
+        const sameCategory =
+          dCls === kCls ||
+          (VEHICLE_CLS_SET.has(dCls) && VEHICLE_CLS_SET.has(kCls));
+        if (sameCategory && (iou > 0.35 || overlap1 > 0.60 || overlap2 > 0.60)) {
+          duplicate = true;
+          break;
+        }
+      }
+    }
+    if (!duplicate) {
+      kept.push(d);
+    }
+  }
+  return kept;
+}
+
 export default function DetectionOverlay({ detections, mediaRef, fit = "cover" }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const rectRef = useRef<{ width: number; height: number } | null>(null);
-  const activeTracksRef = useRef<Map<string, { det: TelemetryDetection; lastSeen: number }>>(new Map());
 
   const draw = useCallback(() => {
     const canvas = canvasRef.current;
@@ -179,26 +223,7 @@ export default function DetectionOverlay({ detections, mediaRef, fit = "cover" }
     const ox = (rect.width - dw) / 2;
     const oy = (rect.height - dh) / 2;
 
-    const now = Date.now();
-    const trackMap = activeTracksRef.current;
-
-    // Update track cache with current detections
-    for (const det of detections) {
-      if (det.confidence != null && det.confidence < 0.15) continue;
-      const key = det.track_id != null
-        ? `trk_${det.track_id}`
-        : `${det.class}_${det.bbox.x1.toFixed(2)}_${det.bbox.y1.toFixed(2)}`;
-      trackMap.set(key, { det, lastSeen: now });
-    }
-
-    // Clean up tracks not seen for over 1.2s to bridge cloud inference jitter
-    for (const [key, item] of trackMap.entries()) {
-      if (now - item.lastSeen > 1200) {
-        trackMap.delete(key);
-      }
-    }
-
-    const renderDets = Array.from(trackMap.values()).map((v) => v.det);
+    const renderDets = dedupDetections(Array.isArray(detections) ? detections : []);
 
     for (const det of renderDets) {
       if (det.confidence != null && det.confidence < 0.15) continue;
@@ -210,9 +235,7 @@ export default function DetectionOverlay({ detections, mediaRef, fit = "cover" }
 
       const color = colorFor(det);
 
-      // One solid rectangle. Never dashed, and never a second outline: the
-      // dashed/solid pair operators used to see was one object arriving as two
-      // detections (fixed engine-side), not a stroke style.
+      // One solid rectangle. Never dashed, and never a second outline
       ctx.save();
       ctx.strokeStyle = color;
       ctx.lineWidth = 2;
@@ -228,10 +251,6 @@ export default function DetectionOverlay({ detections, mediaRef, fit = "cover" }
       // Flip the label inside the box when the detection touches the top edge,
       // otherwise it renders off-canvas and vanishes.
       const ly = y1 - lh < 0 ? y1 + 2 : y1 - lh - 2;
-      // Same reasoning horizontally, which was missing: a detection near the
-      // right edge (very common — that is where vehicles leave frame, and where
-      // a plate is read last) pushed its chip past the canvas and the text was
-      // simply cut off. Clamp into the visible box instead of overflowing it.
       const lx = Math.max(0, Math.min(x1 - 1, rect.width - lw));
       ctx.fillStyle = color;
       ctx.fillRect(lx, ly, lw, lh);

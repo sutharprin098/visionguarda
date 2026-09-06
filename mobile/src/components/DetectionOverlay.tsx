@@ -135,10 +135,54 @@ function labelFor(det: TelemetryDetection): string {
   return `${titleClass}${idStr}${confStr}${speedStr}`;
 }
 
+function dedupDetections(dets: TelemetryDetection[]): TelemetryDetection[] {
+  if (!dets || dets.length <= 1) return dets || [];
+  const sorted = [...dets].sort((a, b) => (b.confidence || 0) - (a.confidence || 0));
+  const kept: TelemetryDetection[] = [];
+
+  for (const d of sorted) {
+    if (!d || !d.bbox) continue;
+    const b1 = d.bbox;
+    const a1 = Math.max(0, b1.x2 - b1.x1) * Math.max(0, b1.y2 - b1.y1);
+    if (a1 <= 0) continue;
+
+    let duplicate = false;
+    for (const k of kept) {
+      const b2 = k.bbox;
+      const ix1 = Math.max(b1.x1, b2.x1);
+      const iy1 = Math.max(b1.y1, b2.y1);
+      const ix2 = Math.min(b1.x2, b2.x2);
+      const iy2 = Math.min(b1.y2, b2.y2);
+      const iw = Math.max(0, ix2 - ix1);
+      const ih = Math.max(0, iy2 - iy1);
+      const inter = iw * ih;
+      if (inter > 0) {
+        const a2 = Math.max(0, b2.x2 - b2.x1) * Math.max(0, b2.y2 - b2.y1);
+        const union = a1 + a2 - inter;
+        const iou = union > 0 ? inter / union : 0;
+        const overlap1 = inter / a1;
+        const overlap2 = inter / a2;
+        const dCls = (d.class || "").toLowerCase();
+        const kCls = (k.class || "").toLowerCase();
+        const sameCategory =
+          dCls === kCls ||
+          (VEHICLE_CLS_SET.has(dCls) && VEHICLE_CLS_SET.has(kCls));
+        if (sameCategory && (iou > 0.35 || overlap1 > 0.60 || overlap2 > 0.60)) {
+          duplicate = true;
+          break;
+        }
+      }
+    }
+    if (!duplicate) {
+      kept.push(d);
+    }
+  }
+  return kept;
+}
+
 export default function DetectionOverlay({ detections, mediaRef, fit = "cover" }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const rectRef = useRef<{ width: number; height: number } | null>(null);
-  const cacheRef = useRef<Map<string, { det: TelemetryDetection; ts: number }>>(new Map());
 
   const draw = useCallback(() => {
     const canvas = canvasRef.current;
@@ -174,22 +218,7 @@ export default function DetectionOverlay({ detections, mediaRef, fit = "cover" }
     const ox = (rect.width - dw) / 2;
     const oy = (rect.height - dh) / 2;
 
-    const now = Date.now();
-    const safeDetections = Array.isArray(detections) ? detections : [];
-
-    for (const det of safeDetections) {
-      if (!det || typeof det !== "object" || !det.bbox) continue;
-      const key = det.track_id != null ? `tr_${det.track_id}` : `cls_${det.class}_${Math.round(det.bbox.x1 * 50)}_${Math.round(det.bbox.y1 * 50)}`;
-      cacheRef.current.set(key, { det, ts: now });
-    }
-
-    for (const [k, v] of cacheRef.current.entries()) {
-      if (now - v.ts > 400) {
-        cacheRef.current.delete(k);
-      }
-    }
-
-    const activeDetections = Array.from(cacheRef.current.values()).map((v) => v.det);
+    const activeDetections = dedupDetections(Array.isArray(detections) ? detections : []);
 
     for (const det of activeDetections) {
       if (!det || typeof det !== "object" || !det.bbox) continue;

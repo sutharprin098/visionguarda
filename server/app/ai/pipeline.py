@@ -943,7 +943,7 @@ class ByteTracker:
             })
         return out
 
-COAST_RENDER_SECONDS = 2.0
+COAST_RENDER_SECONDS = 0.08
 
 
 def resolve_emitted_detections(tracker, tracks_raw, detections, masks,
@@ -2590,10 +2590,10 @@ class PipelineCoordinator:
                 frame,
                 endpoint_url=cloud_url,
                 api_key=cloud_key,
-                jpeg_quality=75,
-                timeout_s=1.5,
+                jpeg_quality=65,
+                timeout_s=1.0,
                 camera_id=self.camera_id,
-                target_size=640,
+                target_size=480,
             )
             t_inf = (time.perf_counter() - t0_cloud) * 1000
 

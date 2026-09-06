@@ -188,7 +188,9 @@ def ping(endpoint_url: str, timeout_s: float = 2.0) -> bool:
 # Response parser with Coordinate Scaling & NMS Duplicate Filtering
 # ---------------------------------------------------------------------------
 
-def _nms(dets: List[Dict[str, Any]], iou_thresh: float = 0.45) -> List[Dict[str, Any]]:
+VEHICLE_CLASSES = {"car", "truck", "bus", "van", "vehicle", "automobile", "auto_rickshaw", "motorcycle", "bicycle"}
+
+def _nms(dets: List[Dict[str, Any]], iou_thresh: float = 0.35) -> List[Dict[str, Any]]:
     if not dets:
         return []
     # Sort by confidence descending
@@ -201,6 +203,7 @@ def _nms(dets: List[Dict[str, Any]], iou_thresh: float = 0.45) -> List[Dict[str,
         if area <= 0:
             continue
         duplicate = False
+        d_cls = str(d.get("class", "")).lower()
         for k in keep:
             kb = k["bbox"]
             kx1, ky1, kx2, ky2 = kb["x1"], kb["y1"], kb["x2"], kb["y2"]
@@ -213,8 +216,10 @@ def _nms(dets: List[Dict[str, Any]], iou_thresh: float = 0.45) -> List[Dict[str,
             iarea = iw * ih
             if iarea > 0:
                 iou = iarea / float(area + karea - iarea)
-                # If IoU > threshold or box is 80%+ contained inside higher-confidence box of same class
-                if (d.get("class") == k.get("class")) and (iou > iou_thresh or (iarea / float(area)) > 0.80):
+                k_cls = str(k.get("class", "")).lower()
+                same_cat = (d_cls == k_cls) or (d_cls in VEHICLE_CLASSES and k_cls in VEHICLE_CLASSES)
+                # If IoU > threshold or box is 65%+ contained inside higher-confidence box
+                if same_cat and (iou > iou_thresh or (iarea / float(area)) > 0.65 or (iarea / float(karea)) > 0.65):
                     duplicate = True
                     break
         if not duplicate:
