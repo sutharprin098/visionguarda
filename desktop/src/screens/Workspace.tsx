@@ -855,12 +855,12 @@ function CamerasView({
 }
 
 const STATUS_LABELS: Record<string, string> = {
-  online: "Online", offline: "Offline", connecting: "Connecting",
+  online: "Online", offline: "Offline", connecting: "Connecting…",
   auth_failed: "Authentication Failed", network_error: "Network Error", error: "Error",
 };
 const STATUS_TONES: Record<string, string> = {
   online: "bg-ok/15 text-ok",
-  connecting: "bg-warn/15 text-warn",
+  connecting: "bg-warn/20 text-warn animate-pulse",
   auth_failed: "bg-danger/15 text-danger",
   network_error: "bg-danger/15 text-danger",
   offline: "bg-surface-3 text-zinc-500",
@@ -1433,7 +1433,9 @@ const CameraTile = memo(function CameraTile({ camera: c, site, engineOnline, onF
             </button>
           )}
           {(() => {
-            const effectiveStatus = telemetry?.health_status ?? c.status ?? "offline";
+            const effectiveStatus =
+              telemetry?.health_status ??
+              (c.status && c.status !== "offline" ? c.status : "connecting");
             return (
               <span
                 className={clsx(

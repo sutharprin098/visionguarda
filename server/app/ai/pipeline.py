@@ -943,7 +943,7 @@ class ByteTracker:
             })
         return out
 
-COAST_RENDER_SECONDS = 0.08
+COAST_RENDER_SECONDS = 0.25
 
 
 def resolve_emitted_detections(tracker, tracks_raw, detections, masks,
@@ -1753,7 +1753,7 @@ class PipelineCoordinator:
             # should probe a host that was just refused.
             return
         if self.source_type in ("usb", "webcam"):
-            self._health_status = "offline" if self._cap_consecutive_failures >= 1 else "connecting"
+            self._health_status = "offline" if self._cap_consecutive_failures >= 4 else "connecting"
             return
         if self._cap_consecutive_failures == 0:
             self._health_status = "connecting"
@@ -1774,7 +1774,7 @@ class PipelineCoordinator:
         if result in ("auth_failed", "network_error"):
             self._health_status = result
         else:
-            self._health_status = "offline" if self._cap_consecutive_failures >= 1 else "connecting"
+            self._health_status = "offline" if self._cap_consecutive_failures >= 4 else "connecting"
 
     # -----------------------------------------------------------------------
     # Lifecycle

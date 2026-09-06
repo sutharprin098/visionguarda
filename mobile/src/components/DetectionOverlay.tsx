@@ -180,9 +180,34 @@ function dedupDetections(dets: TelemetryDetection[]): TelemetryDetection[] {
   return kept;
 }
 
+interface ActiveTrackRecord {
+  det: TelemetryDetection;
+  lastSeen: number;
+}
+
 export default function DetectionOverlay({ detections, mediaRef, fit = "cover" }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const rectRef = useRef<{ width: number; height: number } | null>(null);
+  const tracksMapRef = useRef<Map<string, ActiveTrackRecord>>(new Map());
+
+  // Ingest detections into active tracks map with 280ms anti-flicker holding
+  useEffect(() => {
+    const now = Date.now();
+    const rawList = Array.isArray(detections) ? detections : [];
+    
+    // Clean up expired tracks (> 280ms)
+    tracksMapRef.current.forEach((val, key) => {
+      if (now - val.lastSeen > 280) {
+        tracksMapRef.current.delete(key);
+      }
+    });
+
+    for (const d of rawList) {
+      if (!d || !d.bbox) continue;
+      const key = d.track_id != null ? `id_${d.track_id}` : `c_${d.class}_${(d.bbox.x1).toFixed(2)}_${(d.bbox.y1).toFixed(2)}`;
+      tracksMapRef.current.set(key, { det: d, lastSeen: now });
+    }
+  }, [detections]);
 
   const draw = useCallback(() => {
     const canvas = canvasRef.current;
@@ -218,7 +243,17 @@ export default function DetectionOverlay({ detections, mediaRef, fit = "cover" }
     const ox = (rect.width - dw) / 2;
     const oy = (rect.height - dh) / 2;
 
-    const activeDetections = dedupDetections(Array.isArray(detections) ? detections : []);
+    const now = Date.now();
+    const activeList: TelemetryDetection[] = [];
+    tracksMapRef.current.forEach((val, key) => {
+      if (now - val.lastSeen <= 280) {
+        activeList.push(val.det);
+      } else {
+        tracksMapRef.current.delete(key);
+      }
+    });
+
+    const activeDetections = dedupDetections(activeList);
 
     for (const det of activeDetections) {
       if (!det || typeof det !== "object" || !det.bbox) continue;
@@ -259,21 +294,11 @@ export default function DetectionOverlay({ detections, mediaRef, fit = "cover" }
       ctx.fillStyle = inkFor(color);
       ctx.fillText(label, lx + 5, ly + 12);
     }
-  }, [detections, mediaRef, fit]);
+  }, [mediaRef, fit]);
 
-  // Coalesce repaints onto the next animation frame.
-  //
-  // draw() calls getBoundingClientRect() (a forced layout) and then issues a
-  // few hundred canvas ops. Calling it straight from an effect ran it once per
-  // telemetry message on the main thread, synchronously, whether or not the
-  // browser was ready to paint — so a burst of messages (or several tiles
-  // updating together) did that work repeatedly between two actual frames and
-  // threw all but the last result away. Scheduling instead means at most one
-  // draw per displayed frame, always with the freshest detections, and the
-  // paint lands with the compositor rather than fighting it.
   const rafRef = useRef<number | null>(null);
   const scheduleDraw = useCallback(() => {
-    if (rafRef.current != null) return;   // one already pending; it will read the latest
+    if (rafRef.current != null) return;
     rafRef.current = requestAnimationFrame(() => {
       rafRef.current = null;
       draw();
@@ -282,15 +307,26 @@ export default function DetectionOverlay({ detections, mediaRef, fit = "cover" }
 
   useEffect(() => {
     scheduleDraw();
-    // Cancelling on cleanup is what stops a queued callback from firing against
-    // an unmounted canvas (and keeps a fullscreen enter/exit from leaving an
-    // orphaned frame request behind).
     return () => {
       if (rafRef.current != null) {
         cancelAnimationFrame(rafRef.current);
         rafRef.current = null;
       }
     };
+  }, [detections, scheduleDraw]);
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      const now = Date.now();
+      let hasExpired = false;
+      tracksMapRef.current.forEach((val) => {
+        if (now - val.lastSeen > 280) hasExpired = true;
+      });
+      if (hasExpired) {
+        scheduleDraw();
+      }
+    }, 100);
+    return () => clearInterval(timer);
   }, [scheduleDraw]);
 
   // The canvas is sized from the media element's CSS box, which changes on

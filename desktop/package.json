@@ -51,7 +51,7 @@
       "output": "release"
     },
     "win": {
-      "target": "nsis",
+      "target": "portable",
       "artifactName": "CamAI-Desktop-Setup-${version}.exe",
       "icon": "build/icon.ico",
       "signingHashAlgorithms": [
