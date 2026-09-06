@@ -152,6 +152,29 @@ function tilesFor(profile: ZoneProfileKey | null, t: CameraTelemetry): Tile[] {
     // detector that does not exist.
   }
 
+  if (profile === "retail") {
+    return [
+      { label: "Footfall", value: `${c.people_in ?? 0} in / ${c.people_out ?? 0} out` },
+      { label: "Shoppers", value: String(t.people ?? 0) },
+      { label: "Queue Alerts", value: String(alerts(t, "overcrowding", "crowd_density")) },
+      { label: "Loitering", value: String(alerts(t, "loitering")) },
+      nvTile,
+      fps,
+    ];
+  }
+
+  if (profile === "smart_city") {
+    return [
+      { label: "Pedestrians", value: String(t.people ?? 0) },
+      { label: "Vehicles", value: String(t.vehicles ?? 0) },
+      { label: "Crowd Gatherings", value: String(alerts(t, "crowd_density", "overcrowding")) },
+      { label: "Plates Read", value: String(alerts(t, "number_plate")) },
+      { label: "Helmet Violations", value: String(alerts(t, "helmet_violation", "triple_riding")) },
+      nvTile,
+      fps,
+    ];
+  }
+
   if (profile === "micro_motion") {
     return [
       { label: "Subtle Motion", value: String(t.items ?? 0) },

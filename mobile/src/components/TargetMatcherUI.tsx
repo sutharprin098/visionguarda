@@ -1,6 +1,6 @@
 import { useEffect, useState, FormEvent, ChangeEvent } from "react";
 import { Target, Upload, Trash2, CheckCircle2, AlertCircle, RefreshCw } from "lucide-react";
-import { controlHeaders } from "../lib/localEngine";
+import { controlHeaders, getEngineBase } from "../lib/localEngine";
 
 interface EnrolledTarget {
   target_id: string;
@@ -8,12 +8,14 @@ interface EnrolledTarget {
   threshold: number;
   created_at: number;
   image_path?: string;
+  thumbnail?: string;
+  has_face?: boolean;
 }
 
 export default function TargetMatcherUI() {
   const [targets, setTargets] = useState<EnrolledTarget[]>([]);
   const [name, setName] = useState("");
-  const [threshold, setThreshold] = useState(0.55);
+  const [threshold, setThreshold] = useState(0.65);
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
@@ -21,7 +23,7 @@ export default function TargetMatcherUI() {
 
   const fetchTargets = async () => {
     try {
-      const res = await fetch("http://127.0.0.1:8000/api/target/list");
+      const res = await fetch(`${getEngineBase()}/api/target/list`);
       if (res.ok) {
         const data = await res.json();
         setTargets(data.targets || []);
@@ -59,13 +61,13 @@ export default function TargetMatcherUI() {
 
     try {
       const headers = await controlHeaders();
-      // Remove Content-Type header so browser sets multipart boundary automatically
       const fetchHeaders: Record<string, string> = {};
       if (headers["X-CamAI-Token"]) {
         fetchHeaders["X-CamAI-Token"] = headers["X-CamAI-Token"];
       }
 
-      const res = await fetch("http://127.0.0.1:8000/api/target/upload", {
+      const url = `${getEngineBase()}/api/target/upload?name=${encodeURIComponent(name.trim())}&threshold=${threshold}`;
+      const res = await fetch(url, {
         method: "POST",
         headers: fetchHeaders,
         body: formData,
@@ -73,7 +75,7 @@ export default function TargetMatcherUI() {
 
       const data = await res.json();
       if (res.ok && data.success) {
-        setStatusMsg({ type: "success", text: `Target "${data.name}" enrolled & tracking activated!` });
+        setStatusMsg({ type: "success", text: `Target "${data.name}" enrolled & live tracking activated!` });
         setName("");
         setFile(null);
         setPreview(null);
@@ -92,7 +94,7 @@ export default function TargetMatcherUI() {
     if (!confirm(`Delete search target "${targetName}"?`)) return;
     try {
       const headers = await controlHeaders();
-      const res = await fetch(`http://127.0.0.1:8000/api/target/${targetId}`, {
+      const res = await fetch(`${getEngineBase()}/api/target/${targetId}`, {
         method: "DELETE",
         headers,
       });
@@ -113,7 +115,7 @@ export default function TargetMatcherUI() {
           </div>
           <div>
             <h3 className="font-bold text-ink-1 text-sm">Target Image Upload &amp; Tracker</h3>
-            <p className="text-[10px] text-ink-3">Desktop Client One-Shot Appearance Matcher Engine</p>
+            <p className="text-[10px] text-ink-3">Mobile One-Shot Neural Appearance &amp; Face Matcher Engine</p>
           </div>
         </div>
         <button
@@ -143,7 +145,7 @@ export default function TargetMatcherUI() {
 
           <div>
             <label className="block text-[10px] font-semibold uppercase tracking-wider text-ink-3 mb-1">
-              Match Sensitivity: {(threshold * 100).toFixed(0)}%
+              Match Sensitivity: {(threshold * 100).toFixed(0)}% (Far-Distance Tolerant)
             </label>
             <input
               type="range"
@@ -216,27 +218,41 @@ export default function TargetMatcherUI() {
 
       {targets.length > 0 && (
         <div className="space-y-2 pt-2 border-t border-line/60">
-          <div className="text-[10px] font-semibold uppercase tracking-wider text-ink-3">
-            Enrolled Active Search Targets ({targets.length})
+          <div className="flex items-center justify-between text-[10px] font-semibold uppercase tracking-wider text-ink-3">
+            <span>Enrolled Active Search Targets ({targets.length})</span>
+            <span className="text-emerald-400 font-mono">● Real-Time Scanning</span>
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
             {targets.map((t) => (
               <div
                 key={t.target_id}
-                className="flex items-center justify-between p-2.5 rounded bg-surface-1 border border-line"
+                className="flex items-center justify-between p-2.5 rounded bg-surface-1 border border-line gap-2"
               >
-                <div className="flex items-center gap-2 truncate">
-                  <Target size={14} className="text-accent shrink-0" />
+                <div className="flex items-center gap-2.5 truncate">
+                  {t.thumbnail ? (
+                    <img
+                      src={t.thumbnail}
+                      alt={t.name}
+                      className="h-9 w-9 rounded object-cover border border-accent/40 shrink-0"
+                    />
+                  ) : (
+                    <div className="flex h-9 w-9 items-center justify-center rounded bg-accent/20 text-accent shrink-0">
+                      <Target size={16} />
+                    </div>
+                  )}
                   <div className="truncate">
                     <div className="font-bold text-ink-1 truncate">{t.name}</div>
-                    <div className="text-[10px] text-ink-3 font-mono">
-                      Match Threshold: {(t.threshold * 100).toFixed(0)}%
+                    <div className="flex items-center gap-1.5 text-[10px] text-ink-3">
+                      <span className="font-mono text-accent">Thresh: {(t.threshold * 100).toFixed(0)}%</span>
+                      {t.has_face && (
+                        <span className="px-1 py-0.2 rounded bg-sky-500/20 text-sky-300 text-[9px]">Face+Body</span>
+                      )}
                     </div>
                   </div>
                 </div>
                 <button
                   onClick={() => handleDelete(t.target_id, t.name)}
-                  className="text-ink-3 hover:text-rose-400 p-1.5 transition"
+                  className="text-ink-3 hover:text-rose-400 p-1.5 transition shrink-0"
                   title="Remove Search Target"
                 >
                   <Trash2 size={14} />

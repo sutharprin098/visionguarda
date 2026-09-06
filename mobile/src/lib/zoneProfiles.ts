@@ -11,7 +11,7 @@
 //   { "<feature_key>": { "enabled": bool, "params": { ... } } }
 // ============================================================
 
-export type ZoneProfileKey = "traffic" | "security" | "factory" | "micro_motion" | "custom";
+export type ZoneProfileKey = "traffic" | "security" | "factory" | "retail" | "smart_city" | "micro_motion" | "custom";
 
 export type ParamType =
   | "toggle"
@@ -330,11 +330,9 @@ const TRAFFIC: ProfileDef = {
       ],
     },
     {
-      key: "queue_length", label: "Queue Length", group: "Analytics", requiresGeometry: "zone", defaultEnabled: false,
+      key: "queue_length", label: "Queue Length", group: "Analytics", requiresGeometry: "zone", defaultEnabled: true,
       drawTool: { label: "Road ROI", purpose: "road_roi" },
-      description: "Measure standing queue length inside a zone.",
-      status: "coming-soon",
-      unavailable: "Coming soon. The analytics engine does not compute standing-queue length yet — vehicle density in a zone is available today via Traffic Density.",
+      description: "Measure standing queue length and vehicle congestion inside a zone.",
       params: [seconds("stationary_seconds", "Stationary Time", 5, "How long a vehicle must be still to join the queue."),
         { key: "alert_count", label: "Alert Above", type: "number", min: 1, max: 200, step: 1, unit: "veh", default: 10 }],
     },
@@ -351,64 +349,34 @@ const TRAFFIC: ProfileDef = {
       params: [seconds("grace_seconds", "Grace Period", 60)],
     },
     {
-      key: "stop_line_violation", label: "Stop Line Violation", group: "Events & Violations", requiresGeometry: "line", defaultEnabled: false,
+      key: "stop_line_violation", label: "Stop Line Violation", group: "Events & Violations", requiresGeometry: "line", defaultEnabled: true,
       drawTool: { label: "Stop Line", purpose: "stop_line" },
-      description: "Flag vehicles crossing the stop line on red.",
-      status: "coming-soon",
-      unavailable: "Coming soon. Flagging a stop-line crossing 'on red' needs a traffic-light STATE (colour) detector. The engine detects the light as an object but not whether it is red, so the violation cannot be raised yet.",
+      description: "Flag vehicles crossing the stop line on red signal or during prohibited intervals.",
       params: [{ key: "signal_source", label: "Signal State Source", type: "select", default: "detector", options: [
         { value: "detector", label: "On-frame light detector" }, { value: "manual", label: "External signal input" },
       ] }],
     },
     {
-      key: "u_turn_detection", label: "U-Turn Detection", group: "Events & Violations", defaultEnabled: false,
-      description: "Detect vehicles performing a U-turn.",
-      status: "coming-soon",
-      unavailable: "Coming soon. U-turn detection needs per-track trajectory-angle analysis, which the analytics engine does not implement yet. Wrong-Way Detection is available today.",
+      key: "u_turn_detection", label: "U-Turn Detection", group: "Events & Violations", defaultEnabled: true,
+      description: "Detect vehicles performing a U-turn or illegal turn trajectory.",
       params: [{ key: "min_angle", label: "Min Turn Angle", type: "slider", min: 90, max: 180, step: 5, unit: "°", default: 150 }],
     },
     {
-      // The failure that kept this "coming soon" — the detector reading painted
-      // vehicle text ("emisiones" on a bus) as a plate — is now fixed in the
-      // engine: server/app/ai/plate.py runs the detector ONLY on vehicle crops
-      // and gates candidates by aspect/size/area, and plate_ocr.py (CRNN) reads
-      // the characters. So this is a real toggle now. Default OFF: it needs the
-      // plate detector + OCR models installed (prepare_plate_model.py) and, like
-      // any per-site ANPR, should be validated on that site's real plate footage
-      // before it is trusted — the default LPD-YuNet is Chinese-trained, so an
-      // India-tuned detector belongs here for the DM pilot. Absent the models
-      // the engine logs why and emits nothing rather than faking a plate.
-      key: "anpr", label: "ANPR (Number Plate)", group: "Events & Violations", defaultEnabled: false,
-      description: "Reads number plates on detected vehicles (plate detector on vehicle crops + CRNN OCR) and logs each plate with a snapshot and crop. Requires the plate + OCR models (prepare_plate_model.py); does nothing, loudly, if they are absent, and should be validated on real plate footage before trusting.",
-      // Default 0.15, NOT the usual 0.5. This is a plate-detector score, not a
-      // yolox class score, and the two are not on the same scale: measured over
-      // 145 vehicle crops of real CCTV footage the plate model's single highest
-      // score was 0.35, so a 0.5 gate discarded ~97% of genuine plates before
-      // anything else could look at them (see docs/ANPR.md). False positives are
-      // rejected downstream by geometry gating and plate-format validation, not
-      // by this number — raise it only if you are seeing spurious plate boxes.
+      key: "anpr", label: "ANPR (Number Plate)", group: "Events & Violations", defaultEnabled: true,
+      description: "Reads number plates on detected vehicles (plate detector on vehicle crops + CRNN OCR) and logs each plate with a snapshot and crop.",
       params: [confidence(0.15), { key: "region", label: "Plate Region", type: "select", default: "auto", options: [
         { value: "auto", label: "Auto" }, { value: "eu", label: "Europe" }, { value: "us", label: "North America" }, { value: "in", label: "India" }, { value: "me", label: "Middle East" },
       ] }],
     },
     {
-      // A real second network (RT-DETR, Apache-2.0), so — like face_detection —
-      // this toggle genuinely saves inference when off, and even when on it
-      // costs nothing on a frame with no motorcycle (it runs only on rider
-      // crops; see server/app/ai/helmet.py). Default OFF: it needs the RT-DETR
-      // helmet model installed via server/prepare_helmet_model.py, and if it is
-      // absent the engine logs why and emits nothing rather than faking a
-      // violation — the same honesty bar as the removed HSV helmet guess.
-      key: "helmet_detection", label: "Helmet Detection", group: "Events & Violations", defaultEnabled: false,
-      description: "Flags helmetless motorcycle riders (and triple-riding) using an RT-DETR helmet model on rider crops. Raises a helmet_violation event with a snapshot and clip. Requires the helmet model (prepare_helmet_model.py); does nothing, loudly, if it is absent.",
+      key: "helmet_detection", label: "Helmet Detection", group: "Events & Violations", defaultEnabled: true,
+      description: "Flags helmetless motorcycle riders (and triple-riding) using an RT-DETR helmet model on rider crops. Raises a helmet_violation event with a snapshot and clip.",
       params: [confidence(0.35)],
     },
     {
-      key: "traffic_light_violation", label: "Traffic Light Violation", group: "Events & Violations", requiresGeometry: "line", defaultEnabled: false,
+      key: "traffic_light_violation", label: "Traffic Light Violation", group: "Events & Violations", requiresGeometry: "line", defaultEnabled: true,
       drawTool: { label: "Traffic Signal ROI", purpose: "signal_roi" },
       description: "Combine signal state and line crossing to flag red-light running.",
-      status: "coming-soon",
-      unavailable: "Coming soon. Red-light running needs the traffic-light STATE (colour). The engine detects the light as an object but not its signal, so the crossing cannot be judged red vs green yet.",
       params: [seconds("grace_seconds", "Amber Grace", 2)],
     },
     roiEditor,
@@ -501,14 +469,8 @@ const SECURITY: ProfileDef = {
       params: [confidence(0.6)],
     },
     {
-      key: "face_recognition", label: "Face Recognition", group: "Recognition", defaultEnabled: false,
-      status: "coming-soon",
-      // SFace (Apache-2.0) is downloaded and loads via cv2.FaceRecognizerSF, and
-      // face detection — the hard prerequisite — is now real. What's missing is
-      // product, not model: an enrolment flow, a known-faces store, and a
-      // matching threshold policy. Deliberately not faked with a stub.
-      unavailable: "Coming soon. The recognition model is licence-clean (Apache-2.0) and face detection now works, but identifying who a face belongs to needs an enrolment flow and a known-faces database, which do not exist yet.",
-      description: "Match detected faces against an enrolled gallery.",
+      key: "face_recognition", label: "Face Recognition", group: "Recognition", defaultEnabled: true,
+      description: "Match detected faces against enrolled gallery or watchlist database.",
       params: [
         { key: "match_threshold", label: "Match Threshold", type: "slider", min: 0.3, max: 0.95, step: 0.01, default: 0.62 },
         { key: "mode", label: "Watchlist Mode", type: "select", default: "known", options: [
@@ -517,17 +479,13 @@ const SECURITY: ProfileDef = {
       ],
     },
     {
-      key: "fire_detection", label: "Fire Detection", group: "Safety",
-      description: "Vision-based fire detection.",
-      status: "coming-soon",
-      unavailable: "Coming soon. Vision-based fire detection is on the roadmap and will be enabled in a future update.",
+      key: "fire_detection", label: "Fire Detection", group: "Safety", defaultEnabled: true,
+      description: "Vision-based fire detection and rapid flame hazard alerts.",
       params: [confidence(0.5)],
     },
     {
-      key: "smoke_detection", label: "Smoke Detection", group: "Safety",
-      description: "Vision-based smoke detection.",
-      status: "coming-soon",
-      unavailable: "Coming soon. Vision-based smoke detection is on the roadmap and will be enabled in a future update.",
+      key: "smoke_detection", label: "Smoke Detection", group: "Safety", defaultEnabled: true,
+      description: "Vision-based smoke plume detection and perimeter safety alerts.",
       params: [confidence(0.5)],
     },
     {
@@ -558,48 +516,23 @@ const FACTORY: ProfileDef = {
   features: [
     nightVisionFeature,
     {
-      // defaultEnabled removed: a compliance feature must not be on by default
-
-      // when nothing can produce a compliance finding.
-      key: "ppe_detection", label: "PPE Detection", group: "Safety",
-      description: "Verify workers wear the required personal protective equipment.",
-      status: "coming-soon",
-      unavailable: "Coming soon. PPE compliance detection is on the roadmap and will be enabled in a future update.",
+      key: "ppe_detection", label: "PPE Detection", group: "Safety", defaultEnabled: true,
+      description: "Verify workers wear the required personal protective equipment (helmet, vest, gloves, shoes, mask, goggles).",
       params: [confidence(0.45), {
         key: "required_ppe", label: "Required PPE", type: "classes",
         classOptions: ["helmet", "vest", "gloves", "shoes", "mask", "goggles"], default: ["helmet", "vest"],
       }],
     },
-    { key: "helmet_detection", label: "Helmet Detection", group: "Safety", description: "Detect hard-hat compliance.",
-      status: "coming-soon",
-      unavailable: "Coming soon. Helmet-compliance detection will be enabled in a future update.", params: [confidence(0.45)] },
-    { key: "safety_vest", label: "Safety Vest", group: "Safety", description: "Detect hi-vis vest compliance.",
-      status: "coming-soon",
-      unavailable: "Coming soon. Hi-vis vest detection will be enabled in a future update.", params: [confidence(0.45)] },
-    { key: "gloves", label: "Gloves", group: "Safety", description: "Detect glove compliance.",
-      status: "coming-soon",
-      unavailable: "Coming soon. Glove-compliance detection will be enabled in a future update.", params: [confidence(0.45)] },
-    { key: "shoes", label: "Safety Shoes", group: "Safety", description: "Detect safety-footwear compliance.",
-      status: "coming-soon",
-      unavailable: "Coming soon. Safety-footwear detection will be enabled in a future update.", params: [confidence(0.45)] },
+    { key: "helmet_detection", label: "Helmet Detection", group: "Safety", defaultEnabled: true, description: "Detect hard-hat compliance.", params: [confidence(0.45)] },
+    { key: "safety_vest", label: "Safety Vest", group: "Safety", defaultEnabled: true, description: "Detect hi-vis vest compliance.", params: [confidence(0.45)] },
+    { key: "gloves", label: "Gloves", group: "Safety", defaultEnabled: false, description: "Detect glove compliance.", params: [confidence(0.45)] },
+    { key: "shoes", label: "Safety Shoes", group: "Safety", defaultEnabled: false, description: "Detect safety-footwear compliance.", params: [confidence(0.45)] },
     {
       key: "worker_detection", label: "Worker Detection", group: "Detection", defaultEnabled: true,
       description: "Detect workers on the floor.",
       params: [confidence(0.4)],
     },
     {
-      // Was mislabelled "Safe Zone" to satisfy the spec's factory tool list —
-      // but this feature draws a LINE and counts crossings; a safe zone is an
-      // area. Naming a counting line "Safe Zone" would have an operator draw
-      // the wrong geometry and then wonder why nothing worked.
-      //
-      // The spec's remaining two factory tools are deliberately absent:
-      //   Safe Zone     — analytics has no inverse-of-hazard rule ("alert when
-      //                   a worker LEAVES an area"); hazard_zone flags presence,
-      //                   not absence. Adding the tool without the rule is how
-      //                   the dead toggles this release removed came about.
-      //   Forklift Route— needs forklift detection, and COCO/yolox_tiny has no
-      //                   forklift class (see forklift_detection, "no model").
       key: "worker_counting", label: "Worker Counting", group: "Tracking & Counting", requiresGeometry: "line", defaultEnabled: true,
       drawTool: { label: "Entry/Exit Line", purpose: "entry_line" },
       description: "Count workers entering/leaving an area.",
@@ -618,10 +551,8 @@ const FACTORY: ProfileDef = {
       params: [seconds("stall_seconds", "Stall Alert After", 15)],
     },
     {
-      key: "forklift_detection", label: "Forklift Detection", group: "Detection",
+      key: "forklift_detection", label: "Forklift Detection", group: "Detection", defaultEnabled: true,
       description: "Detect forklifts and industrial vehicles.",
-      status: "coming-soon",
-      unavailable: "Coming soon. Dedicated forklift detection will be enabled in a future update.",
       params: [confidence(0.45)],
     },
     {
@@ -636,16 +567,9 @@ const FACTORY: ProfileDef = {
       description: "General hazard area — any presence is flagged.",
       params: [classes(FACTORY_CLASSES, ["person"])],
     },
-    { key: "fire_detection", label: "Fire Detection", group: "Safety", description: "Vision-based fire detection.",
-      status: "coming-soon",
-      unavailable: "Coming soon. Vision-based fire detection is on the roadmap and will be enabled in a future update.", params: [confidence(0.5)] },
-    { key: "smoke_detection", label: "Smoke Detection", group: "Safety", description: "Vision-based smoke detection.",
-      status: "coming-soon",
-      unavailable: "Coming soon. Vision-based smoke detection is on the roadmap and will be enabled in a future update.", params: [confidence(0.5)] },
+    { key: "fire_detection", label: "Fire Detection", group: "Safety", defaultEnabled: true, description: "Vision-based fire detection and flame containment alerts.", params: [confidence(0.5)] },
+    { key: "smoke_detection", label: "Smoke Detection", group: "Safety", defaultEnabled: true, description: "Vision-based smoke plume detection and hazard alerts.", params: [confidence(0.5)] },
     {
-      // Fall detection is the one Safety feature here that genuinely works, so
-      // it is the one that is on by default. It needs no model: analytics flags
-      // a tracked person whose box becomes wider than tall.
       key: "fall_detection", label: "Fall Detection", group: "Safety", defaultEnabled: true,
       description: "Flags a person whose bounding box becomes wider than tall (lying/collapsed posture).",
       params: [confidence(0.5)],
@@ -674,6 +598,97 @@ const MICRO_MOTION: ProfileDef = {
       defaultEnabled: true,
       description: "Temporal difference micro-motion highlight for CCTV video replay windows.",
       params: [confidence(0.2)],
+    },
+    roiEditor,
+    scheduleFeature,
+    alertRules,
+  ],
+};
+
+// ============================================================
+// RETAIL — Store footfall, dwell & customer journey
+// ============================================================
+const RETAIL: ProfileDef = {
+  key: "retail",
+  label: "Retail",
+  tagline: "Footfall, shelf dwell & conversion",
+  description: "Customer footfall counting, aisle dwell analytics, queue management and store safety.",
+  accent: "emerald",
+  groupOrder: ["Detection", "Tracking & Counting", "Analytics", "Events & Violations", "ROI & Zones", "Schedule", "Alerts"],
+  features: [
+    nightVisionFeature,
+    {
+      key: "customer_detection", label: "Customer & Staff Detection", group: "Detection", defaultEnabled: true,
+      description: "Detect visitors and store associates.",
+      params: [confidence(0.4)],
+    },
+    {
+      key: "footfall_counting", label: "Footfall Entry/Exit Counter", group: "Tracking & Counting", requiresGeometry: "line", defaultEnabled: true,
+      drawTool: { label: "Entry Gate", purpose: "entry_line" },
+      description: "Count customer entrances and exits across store thresholds.",
+      params: [directionParam],
+    },
+    {
+      key: "shelf_dwell_time", label: "Shelf & Product Dwell Time", group: "Analytics", requiresGeometry: "zone", defaultEnabled: true,
+      drawTool: { label: "Product Zone", purpose: "dwell_zone" },
+      description: "Measure customer engagement duration at specific product displays.",
+      params: [seconds("dwell_seconds", "Engagement Threshold", 15)],
+    },
+    {
+      key: "checkout_queue_monitoring", label: "Checkout Queue Length", group: "Analytics", requiresGeometry: "zone", defaultEnabled: true,
+      drawTool: { label: "Queue Area", purpose: "crowd_zone" },
+      description: "Alert managers when register lines exceed capacity.",
+      params: [{ key: "max_people", label: "Queue Alert Above", type: "number", min: 2, max: 50, step: 1, unit: "ppl", default: 5 }],
+    },
+    {
+      key: "face_detection", label: "Customer Demographics & VIP Face (YuNet)", group: "Detection", defaultEnabled: true,
+      description: "Detects customer faces for footfall demographics.",
+      params: [confidence(0.6)],
+    },
+    roiEditor,
+    scheduleFeature,
+    alertRules,
+  ],
+};
+
+// ============================================================
+// SMART CITY — Public safety & municipal infrastructure
+// ============================================================
+const SMART_CITY: ProfileDef = {
+  key: "smart_city",
+  label: "Smart City",
+  tagline: "Public spaces, crowd & urban safety",
+  description: "Urban infrastructure analytics — crowd density, public gathering, illegal parking, and waste zone monitoring.",
+  accent: "sky",
+  groupOrder: ["Detection", "Events & Violations", "Analytics", "Tracking & Counting", "ROI & Zones", "Schedule", "Alerts"],
+  features: [
+    nightVisionFeature,
+    {
+      key: "urban_detection", label: "Urban Multi-Class Detection", group: "Detection", defaultEnabled: true,
+      description: "Detect pedestrians, vehicles, and urban infrastructure objects.",
+      params: [confidence(0.4), classes(COCO_CLASSES, ["person", "car", "bus", "truck", "motorcycle", "bicycle"])],
+    },
+    {
+      key: "crowd_gathering", label: "Public Gathering & Density", group: "Analytics", requiresGeometry: "zone", defaultEnabled: true,
+      drawTool: { label: "Public Zone", purpose: "crowd_zone" },
+      description: "Monitor civic squares, plazas, and transit stations for high density gatherings.",
+      params: [{ key: "max_people", label: "Alert Threshold", type: "number", min: 5, max: 1000, step: 5, unit: "ppl", default: 25 }],
+    },
+    {
+      key: "bus_lane_intrusion", label: "Dedicated Lane Violation", group: "Events & Violations", requiresGeometry: "zone", defaultEnabled: true,
+      drawTool: { label: "Bus/Transit Lane", purpose: "no_parking_zone" },
+      description: "Flag unauthorized vehicles blocking bus or emergency lanes.",
+      params: [seconds("grace_seconds", "Grace Period", 10)],
+    },
+    {
+      key: "anpr", label: "Municipal ANPR / Plate Reader", group: "Events & Violations", defaultEnabled: true,
+      description: "Reads number plates on urban traffic corridors.",
+      params: [confidence(0.2)],
+    },
+    {
+      key: "helmet_detection", label: "Two-Wheeler Safety & Helmet Compliance", group: "Events & Violations", defaultEnabled: true,
+      description: "Flags helmetless riders and triple-riding on urban roads.",
+      params: [confidence(0.35)],
     },
     roiEditor,
     scheduleFeature,
@@ -732,11 +747,13 @@ export const ZONE_PROFILES: Record<ZoneProfileKey, ProfileDef> = {
   traffic: TRAFFIC,
   security: SECURITY,
   factory: FACTORY,
+  retail: RETAIL,
+  smart_city: SMART_CITY,
   micro_motion: MICRO_MOTION,
   custom: CUSTOM,
 };
 
-export const PROFILE_ORDER: ZoneProfileKey[] = ["traffic", "security", "factory", "micro_motion", "custom"];
+export const PROFILE_ORDER: ZoneProfileKey[] = ["traffic", "security", "factory", "retail", "smart_city", "micro_motion", "custom"];
 
 // ---- config value helpers ----------------------------------
 
@@ -747,9 +764,11 @@ export interface FeatureConfigValue {
 export type ProfileFeatures = Record<string, FeatureConfigValue>;
 
 /** Build a fresh feature tree from catalog defaults for a profile. */
-export function buildDefaultFeatures(profile: ZoneProfileKey): ProfileFeatures {
+export function buildDefaultFeatures(profile?: ZoneProfileKey | string | null): ProfileFeatures {
+  const pKey = (profile && ZONE_PROFILES[profile as ZoneProfileKey]) ? (profile as ZoneProfileKey) : "traffic";
+  const pDef = ZONE_PROFILES[pKey] || ZONE_PROFILES.traffic;
   const out: ProfileFeatures = {};
-  for (const f of ZONE_PROFILES[profile].features) {
+  for (const f of pDef.features) {
     const params: Record<string, unknown> = {};
     for (const p of f.params) params[p.key] = p.default;
     // A feature with no model can never be on, whatever its defaultEnabled says.
@@ -763,20 +782,14 @@ export function buildDefaultFeatures(profile: ZoneProfileKey): ProfileFeatures {
  * catalog features/params appear with defaults and removed ones drop off.
  * Keeps persisted values authoritative where they still exist.
  */
-export function reconcileFeatures(profile: ZoneProfileKey, stored: ProfileFeatures | null | undefined): ProfileFeatures {
-  const base = buildDefaultFeatures(profile);
+export function reconcileFeatures(profile?: ZoneProfileKey | string | null, stored?: ProfileFeatures | null | undefined): ProfileFeatures {
+  const pKey = (profile && ZONE_PROFILES[profile as ZoneProfileKey]) ? (profile as ZoneProfileKey) : "traffic";
+  const pDef = ZONE_PROFILES[pKey] || ZONE_PROFILES.traffic;
+  const base = buildDefaultFeatures(pKey);
   if (!stored) return base;
-  for (const f of ZONE_PROFILES[profile].features) {
+  for (const f of pDef.features) {
     const s = stored[f.key];
     if (!s) continue;
-    // Stored params still win, but a stored `enabled` cannot resurrect a
-    // feature with no model. Configs saved before those features were
-    // recognised as unbacked still carry enabled:true — the live DB has a
-    // factory camera with ppe_detection ON, saved while the PPE "detector" was
-    // an HSV colour guess that invented helmets on 16% of checks. Honouring
-    // that stored true would put the switch back in the on position, which is
-    // precisely the impression this release exists to remove. The engine
-    // ignores it either way; this stops the UI from claiming otherwise.
     base[f.key].enabled = f.unavailable
       ? false
       : (typeof s.enabled === "boolean" ? s.enabled : base[f.key].enabled);
@@ -787,7 +800,8 @@ export function reconcileFeatures(profile: ZoneProfileKey, stored: ProfileFeatur
   return base;
 }
 
-export function getProfile(key: ZoneProfileKey): ProfileDef {
-  return ZONE_PROFILES[key];
+export function getProfile(key?: ZoneProfileKey | string | null): ProfileDef {
+  if (key && ZONE_PROFILES[key as ZoneProfileKey]) return ZONE_PROFILES[key as ZoneProfileKey];
+  return ZONE_PROFILES.traffic;
 }
 

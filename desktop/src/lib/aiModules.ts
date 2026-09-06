@@ -12,35 +12,44 @@
 // model (e.g. a Haar/YuNet face pass). None ship today.
 
 /** Mirrors server/app/analytics.py _object_category() — keep in sync. */
-export type ModuleKey = "person" | "vehicle" | "item" | "animal" | "face";
+export type ModuleKey = "person" | "vehicle" | "item" | "animal" | "face" | "plate" | "helmet" | "night_vision" | "micro_motion";
 
 export interface AiModule {
   key: ModuleKey;
   label: string;
   /** Exactly the COCO_CLASS_MAP names (backend.py:31) in this category, or
-   *  "face", which comes from the separate YuNet pass (server/app/ai/face.py). */
+   *  "face", "number_plate", "helmet", etc. which come from dedicated model passes. */
   classes: string[];
   /** True when the module has its own model, so switching it off genuinely
-   *  skips inference. Everything else shares yolox's single forward pass and
-   *  is filter-only — the distinction is surfaced in the UI tooltip rather
-   *  than pretending all toggles are equal. */
+   *  skips inference. */
   ownModel?: boolean;
 }
 
 export const AI_MODULES: AiModule[] = [
-  { key: "person", label: "Person Detection", classes: ["person"] },
-  { key: "vehicle", label: "Vehicle Detection", classes: ["bicycle", "car", "motorcycle", "bus", "truck"] },
-  { key: "animal", label: "Animals & Pets", classes: ["dog", "cat", "cow", "horse", "sheep", "animal"] },
-  { key: "item", label: "Unattended Items", classes: ["backpack", "umbrella", "handbag", "suitcase"] },
-  // Enabled per-camera in the zone-profile editor (face_detection), which is
-  // what actually gates the engine-side pass; this entry only controls whether
-  // the boxes are drawn.
-  { key: "face", label: "Face Detection", classes: ["face"], ownModel: true },
+  { key: "person", label: "Person & Worker Detection", classes: ["person", "worker"] },
+  { key: "vehicle", label: "Vehicle Classification", classes: ["car", "truck", "bus", "motorcycle", "bicycle", "van"] },
+  { key: "face", label: "Face Detection (YuNet)", classes: ["face"], ownModel: true },
+  { key: "plate", label: "ANPR / License Plate OCR", classes: ["number_plate", "plate"], ownModel: true },
+  { key: "helmet", label: "Helmet & Rider Safety (RT-DETR)", classes: ["helmet", "no_helmet", "triple_riding"], ownModel: true },
+  { key: "animal", label: "Animals & Livestock", classes: ["dog", "cat", "cow", "horse", "sheep", "bird", "animal"] },
+  { key: "item", label: "Unattended Bags & Assets", classes: ["backpack", "umbrella", "handbag", "suitcase", "bottle", "laptop", "cell phone"] },
+  { key: "night_vision", label: "Zero-DCE Low-Light AI", classes: ["night_vision"], ownModel: true },
+  { key: "micro_motion", label: "Micro-Motion HUD", classes: ["micro_motion"], ownModel: true },
 ];
 
 export type ModuleState = Record<ModuleKey, boolean>;
 
-export const DEFAULT_MODULES: ModuleState = { person: true, vehicle: true, animal: true, item: true, face: true };
+export const DEFAULT_MODULES: ModuleState = {
+  person: true,
+  vehicle: true,
+  face: true,
+  plate: true,
+  helmet: true,
+  animal: true,
+  item: true,
+  night_vision: true,
+  micro_motion: true,
+};
 
 const KEY = (cameraId: string) => `camai.modules.${cameraId}`;
 

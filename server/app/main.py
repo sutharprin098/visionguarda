@@ -9,7 +9,7 @@ import numpy as np
 from collections import deque
 from dataclasses import asdict
 from pathlib import PurePosixPath
-from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect, HTTPException, Depends, Header, UploadFile, File
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect, HTTPException, Depends, Header, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, FileResponse, Response
 from fastapi.staticfiles import StaticFiles
@@ -750,15 +750,20 @@ def set_confidence(payload: ConfidencePayload):
 
 # --- Custom Image Upload Target Matcher APIs ---
 from app.ai.target_matcher import target_matcher
+target_matcher.init_storage(str(UPLOADS_DIR / "targets"))
 
 @app.post("/api/target/upload")
 @app.post("/api/targets/enroll")
 async def upload_target_image(
+    request: Request,
     file: UploadFile = File(...),
-    name: str = "Custom Target",
-    threshold: float = 0.55
+    name: Optional[str] = Form(None),
+    threshold: Optional[float] = Form(None)
 ):
     try:
+        target_name = name or request.query_params.get("name") or "Custom Target"
+        target_threshold = threshold if threshold is not None else float(request.query_params.get("threshold", 0.70))
+
         contents = await file.read()
         nparr = np.frombuffer(contents, np.uint8)
         img_bgr = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
@@ -767,10 +772,10 @@ async def upload_target_image(
 
         target_dir = str(UPLOADS_DIR / "targets")
         item = target_matcher.add_target(
-            name=name,
+            name=target_name,
             img_bgr=img_bgr,
             save_dir=target_dir,
-            threshold=threshold
+            threshold=target_threshold
         )
         if item is None:
             raise HTTPException(status_code=500, detail="Failed to process and enroll target embedding.")

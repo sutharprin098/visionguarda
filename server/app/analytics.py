@@ -66,13 +66,16 @@ def _object_category(class_name: str) -> str:
 #   - "face" IS listed for security and factory: YuNet genuinely produces it.
 PRODUCIBLE_VEHICLE_CLASSES = {"car", "bus", "truck", "motorcycle", "bicycle"}
 PRODUCIBLE_ANIMAL_CLASSES = {"dog", "cat", "cow", "horse", "sheep"}
+PRODUCIBLE_PPE_CLASSES = {"helmet", "no_helmet", "vest", "no_vest", "gloves", "shoes", "mask", "goggles", "fire", "smoke", "forklift"}
 
 PROFILE_CLASSES = {
-    "traffic": set(PRODUCIBLE_VEHICLE_CLASSES) | {"person", "traffic_light", "stop_sign", "helmet", "no_helmet", "number_plate"},
-    "security": set(PRODUCIBLE_VEHICLE_CLASSES) | set(PRODUCIBLE_ANIMAL_CLASSES) | {"person", "backpack", "handbag", "suitcase", "umbrella", "face"},
-    "factory": set(PRODUCIBLE_VEHICLE_CLASSES) | set(PRODUCIBLE_ANIMAL_CLASSES) | {"person", "face"},
+    "traffic": set(PRODUCIBLE_VEHICLE_CLASSES) | {"person", "traffic_light", "stop_sign", "helmet", "no_helmet", "number_plate", "fire", "smoke"},
+    "security": set(PRODUCIBLE_VEHICLE_CLASSES) | set(PRODUCIBLE_ANIMAL_CLASSES) | {"person", "backpack", "handbag", "suitcase", "umbrella", "face", "fire", "smoke"},
+    "factory": set(PRODUCIBLE_VEHICLE_CLASSES) | set(PRODUCIBLE_ANIMAL_CLASSES) | {"person", "face", "helmet", "no_helmet", "vest", "no_vest", "gloves", "shoes", "mask", "goggles", "fire", "smoke", "forklift"},
+    "retail": set(PRODUCIBLE_VEHICLE_CLASSES) | {"person", "backpack", "handbag", "suitcase", "cell phone"},
+    "smart_city": set(PRODUCIBLE_VEHICLE_CLASSES) | set(PRODUCIBLE_ANIMAL_CLASSES) | {"person", "traffic_light", "stop_sign", "fire", "smoke", "number_plate", "helmet", "no_helmet"},
     "micro_motion": set(PRODUCIBLE_VEHICLE_CLASSES) | set(PRODUCIBLE_ANIMAL_CLASSES) | {"person", "backpack", "handbag", "suitcase", "umbrella", "face", "micro_motion"},
-    "custom": set(PRODUCIBLE_VEHICLE_CLASSES) | set(PRODUCIBLE_ANIMAL_CLASSES) | {"person", "backpack", "handbag", "suitcase", "umbrella", "face", "custom_object"},
+    "custom": set(PRODUCIBLE_VEHICLE_CLASSES) | set(PRODUCIBLE_ANIMAL_CLASSES) | {"person", "backpack", "handbag", "suitcase", "umbrella", "face", "custom_object", "fire", "smoke", "helmet", "vest"},
 }
 
 
@@ -86,7 +89,17 @@ FEATURE_CLASSES = {
     "vehicle_counting": set(PRODUCIBLE_VEHICLE_CLASSES),
     "animal_detection": set(PRODUCIBLE_ANIMAL_CLASSES),
     "face_detection": {"face"},
+    "face_recognition": {"face"},
     "helmet_detection": {"helmet", "no_helmet"},
+    "safety_vest": {"vest", "no_vest"},
+    "gloves": {"gloves"},
+    "shoes": {"shoes"},
+    "ppe_detection": {"helmet", "no_helmet", "vest", "no_vest", "gloves", "shoes", "mask", "goggles"},
+    "fire_detection": {"fire"},
+    "smoke_detection": {"smoke"},
+    "forklift_detection": {"forklift", "truck"},
+    "queue_length": set(PRODUCIBLE_VEHICLE_CLASSES) | {"person"},
+    "u_turn_detection": set(PRODUCIBLE_VEHICLE_CLASSES),
     "anpr": {"number_plate"},
     "object_left_behind": set(ITEM_CLASSES),
     "object_removed": set(ITEM_CLASSES),

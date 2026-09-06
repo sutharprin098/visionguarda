@@ -30,6 +30,8 @@ import {
   Bell,
   Upload,
   ArrowLeft,
+  ShoppingBag,
+  Building2,
 } from "lucide-react";
 import clsx from "clsx";
 import type { SyncBundle } from "../lib/sync";
@@ -122,6 +124,8 @@ const PROFILE_ICON: Record<ZoneProfileKey, typeof Car> = {
   traffic: Car,
   security: Shield,
   factory: Factory,
+  retail: ShoppingBag,
+  smart_city: Building2,
   micro_motion: Eye,
   custom: Boxes,
 };
@@ -131,8 +135,32 @@ const ACCENT: Record<string, { text: string; bg: string; border: string; ring: s
   sky: { text: "text-sky-400", bg: "bg-sky-500/15", border: "border-sky-500/60", ring: "ring-sky-500/40" },
   rose: { text: "text-rose-400", bg: "bg-rose-500/15", border: "border-rose-500/60", ring: "ring-rose-500/40" },
   amber: { text: "text-amber-400", bg: "bg-amber-500/15", border: "border-amber-500/60", ring: "ring-amber-500/40" },
+  emerald: { text: "text-emerald-400", bg: "bg-emerald-500/15", border: "border-emerald-500/60", ring: "ring-emerald-500/40" },
   violet: { text: "text-violet-400", bg: "bg-violet-500/15", border: "border-violet-500/60", ring: "ring-violet-500/40" },
 };
+
+function getProfileAccent(profileKey?: ZoneProfileKey | string | null) {
+  if (profileKey && ZONE_PROFILES[profileKey as ZoneProfileKey]) {
+    const hue = ZONE_PROFILES[profileKey as ZoneProfileKey].accent;
+    if (ACCENT[hue]) return ACCENT[hue];
+  }
+  return ACCENT.sky;
+}
+
+function getProfileAccentHex(profileKey?: ZoneProfileKey | string | null) {
+  if (profileKey && ZONE_PROFILES[profileKey as ZoneProfileKey]) {
+    const hue = ZONE_PROFILES[profileKey as ZoneProfileKey].accent;
+    const map: Record<string, string> = {
+      sky: "#38bdf8",
+      rose: "#fb7185",
+      amber: "#fbbf24",
+      emerald: "#10b981",
+      violet: "#a78bfa",
+    };
+    if (map[hue]) return map[hue];
+  }
+  return "#38bdf8";
+}
 
 export default function AdminStudio({
   orgId: initialOrgId,
@@ -773,8 +801,8 @@ export default function AdminStudio({
     canvas.height = rect.height;
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-    const accent = activeProfile ? ACCENT[ZONE_PROFILES[activeProfile].accent] : ACCENT.sky;
-    const hex = accent === ACCENT.sky ? "#38bdf8" : accent === ACCENT.rose ? "#fb7185" : accent === ACCENT.amber ? "#fbbf24" : "#a78bfa";
+    const accent = getProfileAccent(activeProfile);
+    const hex = getProfileAccentHex(activeProfile);
 
     // in-progress geometry
     if (activePoints.length > 0) {
@@ -1166,7 +1194,7 @@ export default function AdminStudio({
     const effectiveOrgId = orgId || bundle?.organization?.id || "org-local";
     const type: Drawing["type"] = drawMode === "line" ? "line" : drawMode === "rectangle" ? "rectangle" : drawMode === "circle" ? "circle" : "polygon";
     const binding = drawBinding ?? { featureKey: null, featureLabel: "Zone", purpose: "custom_zone" };
-    const accentHex = activeProfile ? { sky: "#38bdf8", rose: "#fb7185", amber: "#fbbf24", violet: "#a78bfa" }[ZONE_PROFILES[activeProfile].accent] : "#10b981";
+    const accentHex = getProfileAccentHex(activeProfile);
 
     const newDrawing: Drawing = {
       id: `draw_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
@@ -1785,8 +1813,8 @@ export default function AdminStudio({
   }
 
   // ---- grouped feature rendering ---------------------------
-  const profileDef = activeProfile ? ZONE_PROFILES[activeProfile] : null;
-  const accent = profileDef ? ACCENT[profileDef.accent] : ACCENT.sky;
+  const profileDef = (activeProfile && ZONE_PROFILES[activeProfile]) ? ZONE_PROFILES[activeProfile] : null;
+  const accent = getProfileAccent(activeProfile);
 
   function groupsForProfile(): FeatureGroup[] {
     if (!profileDef) return [];
@@ -1916,9 +1944,10 @@ export default function AdminStudio({
             <span className="text-[10px] uppercase font-bold tracking-wider text-zinc-500 mr-1">AI Mode</span>
             {PROFILE_ORDER.map((key) => {
               const def = ZONE_PROFILES[key];
-              const Icon = PROFILE_ICON[key];
+              if (!def) return null;
+              const Icon = PROFILE_ICON[key] || Boxes;
               const on = activeProfile === key;
-              const a = ACCENT[def.accent];
+              const a = getProfileAccent(key);
               return (
                 <button key={key} onClick={() => selectProfile(key)} disabled={!selectedCam}
                   className={clsx("flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium border transition",
