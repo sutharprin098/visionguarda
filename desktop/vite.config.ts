@@ -58,6 +58,7 @@ export default defineConfig({
           if (!id.includes("node_modules")) return;
           if (id.includes("@supabase")) return "supabase";
           if (id.includes("react") || id.includes("scheduler")) return "react";
+          if (id.includes("three")) return "three";
           return "vendor";
         },
       },

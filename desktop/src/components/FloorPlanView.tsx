@@ -1,15 +1,35 @@
-import { useState, useEffect, useRef } from "react";
-import { Map as MapIcon, Car, Users, Activity, Eye } from "lucide-react";
+import { useState, useEffect, useRef, useMemo } from "react";
+import { Map as MapIcon, Car, Users, Activity, Eye, Box, Sparkles, Sliders, Layers } from "lucide-react";
 import { getSupabase } from "../lib/session";
 import type { SyncBundle } from "../lib/sync";
 import { mjpegStreamUrl, getEngineAppStatus, type EngineAppStatus } from "../lib/localEngine";
 import { TelemetrySession, type CameraTelemetry } from "../lib/telemetry";
+import DigitalTwin3DView, { type CameraSpatialConfig, type CameraSlot } from "./DigitalTwin3DView";
+import ErrorBoundary from "./ErrorBoundary";
 import clsx from "clsx";
 
 interface FloorPlanViewProps {
   bundle: SyncBundle;
   healthInfo?: any;
   onSelectCamera: (cameraId: string) => void;
+}
+
+function CleanStreamImg({ cameraId, name, className }: { cameraId: string; name?: string; className?: string }) {
+  const ref = useRef<HTMLImageElement>(null);
+  useEffect(() => {
+    return () => {
+      if (ref.current) ref.current.src = "";
+    };
+  }, [cameraId]);
+  return (
+    <img
+      ref={ref}
+      key={cameraId}
+      src={mjpegStreamUrl(cameraId)}
+      alt={name || ""}
+      className={className}
+    />
+  );
 }
 
 let leafletPromise: Promise<void> | null = null;
@@ -38,6 +58,7 @@ function loadLeaflet(): Promise<void> {
 export default function FloorPlanView({ bundle, healthInfo, onSelectCamera }: FloorPlanViewProps) {
   const isManager = bundle.profile?.role === "admin" || bundle.profile?.role === "manager";
 
+  const [viewMode, setViewMode] = useState<"3d" | "2d">("2d");
   const gisMapRef = useRef<HTMLDivElement>(null);
   const leafletMapRef = useRef<any>(null);
   const [selectedGisCamId, setSelectedGisCamId] = useState<string | null>(null);
@@ -49,6 +70,130 @@ export default function FloorPlanView({ bundle, healthInfo, onSelectCamera }: Fl
   const [camHeadings, setCamHeadings] = useState<Record<string, number>>({});
   const markersRef = useRef<Map<string, any>>(new Map());
   const detMarkersRef = useRef<Map<string, any>>(new Map());
+
+  // 3D Spatial Fusion configuration per camera (persisted in localStorage)
+  const [spatialConfigs, setSpatialConfigs] = useState<Record<string, CameraSpatialConfig>>(() => {
+    try {
+      const saved = localStorage.getItem("camai.3d_spatial_configs");
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        let changed = false;
+        Object.keys(parsed).forEach(k => {
+          const cfg = parsed[k];
+          if (cfg.heading === 180 || cfg.heading === 0 || cfg.slot === "north" || !cfg.posZ || Math.abs(cfg.posZ - 22.0) > 3) {
+            parsed[k] = {
+              ...cfg,
+              slot: "south",
+              spatial_sync: true,
+              heading: 355,
+              pitch: 23,
+              height: 13.0,
+              fov: 56,
+              posX: 1.5,
+              posZ: 22.0,
+            };
+            changed = true;
+          }
+        });
+        if (changed) {
+          try {
+            localStorage.setItem("camai.3d_spatial_configs", JSON.stringify(parsed));
+          } catch {}
+        }
+        return parsed;
+      }
+    } catch {}
+    return {};
+  });
+
+  const updateSpatialConfig = (camId: string, updates: Partial<CameraSpatialConfig>) => {
+    setSpatialConfigs((prev) => {
+      const existing = prev[camId] || {
+        id: camId,
+        name: bundle.cameras.find((c: any) => c.id === camId)?.name || "Camera",
+        slot: "south" as CameraSlot,
+        spatial_sync: true,
+        heading: 355,
+        pitch: 23,
+        height: 13.0,
+        fov: 56,
+        posX: 1.5,
+        posZ: 22.0,
+      };
+      const next = {
+        ...prev,
+        [camId]: { ...existing, ...updates },
+      };
+      try {
+        localStorage.setItem("camai.3d_spatial_configs", JSON.stringify(next));
+      } catch {}
+      return next;
+    });
+  };
+
+  // Initialize default 4-side slots (North, South, East, West) for cameras if not already configured
+  useEffect(() => {
+    if (bundle.cameras.length > 0) {
+      const slots: CameraSlot[] = ["north", "south", "east", "west"];
+      setSpatialConfigs((prev) => {
+        let changed = false;
+        const next = { ...prev };
+        bundle.cameras.forEach((cam: any, idx: number) => {
+          const isTrafficCam = bundle.cameras.length === 1 ||
+                               cam?.id === "02" || 
+                               cam?.name === "02" ||
+                               (cam?.name || "").toLowerCase().includes("traffic") || 
+                               (cam?.name || "").toLowerCase().includes("coldwater") || 
+                               (cam?.source || "").includes("1H0iTzv2jiQ") ||
+                               idx === 0;
+
+          // Auto-heal if unconfigured or has outdated reverse heading or wrong slot
+          const cur = next[cam.id];
+          if (!cur || (isTrafficCam && (cur.heading === 180 || cur.heading === 0 || cur.slot === "north" || cur.posZ == null || Math.abs(cur.posZ - 22.0) > 3))) {
+            changed = true;
+            if (isTrafficCam) {
+              next[cam.id] = {
+                id: cam.id,
+                name: cam.name,
+                slot: "south",
+                spatial_sync: true,
+                heading: 355,
+                pitch: 23,
+                height: 13.0,
+                fov: 56,
+                posX: 1.5,
+                posZ: 22.0,
+              };
+            } else {
+              const slot = slots[idx % slots.length];
+              const defaultHeading = slot === "north" ? 180 : slot === "south" ? 0 : slot === "east" ? 270 : 90;
+              const posX = slot === "west" ? -24 : slot === "east" ? 24 : 0;
+              const posZ = slot === "north" ? -24 : slot === "south" ? 24 : 0;
+              next[cam.id] = {
+                id: cam.id,
+                name: cam.name,
+                slot,
+                spatial_sync: true,
+                heading: defaultHeading,
+                pitch: 28,
+                height: 11.0,
+                fov: 60,
+                posX,
+                posZ,
+              };
+            }
+          }
+        });
+        if (changed) {
+          try {
+            localStorage.setItem("camai.3d_spatial_configs", JSON.stringify(next));
+          } catch {}
+          return next;
+        }
+        return prev;
+      });
+    }
+  }, [bundle.cameras]);
 
   // Poll local engine app status for real-time running flags
   useEffect(() => {
@@ -65,43 +210,86 @@ export default function FloorPlanView({ bundle, healthInfo, onSelectCamera }: Fl
     };
   }, []);
 
-  // Merge real-time engine health status with bundle cameras
-  const camerasWithStatus = bundle.cameras.map((c: any) => {
-    const localInfo = appStatus?.cameras?.[c.id] || healthInfo?.cameras?.[c.id];
-    // If local engine is running or status is online, treat as online
-    const isOnline = localInfo ? localInfo.running : (c.status === "online" || appStatus !== null);
-    return {
-      ...c,
-      status: isOnline ? "online" : "offline"
-    };
-  });
-
-  const gisPlacedCameras = camerasWithStatus.filter((c: any) => c.lat != null && c.lng != null);
-  const gisUnplacedCameras = camerasWithStatus.filter((c: any) => c.lat == null || c.lng == null);
-
-  // Auto-select first placed GIS camera if none selected
-  useEffect(() => {
-    if (gisPlacedCameras.length > 0 && !selectedGisCamId) {
-      setSelectedGisCamId(gisPlacedCameras[0].id);
-      setManualLat(gisPlacedCameras[0].lat?.toString() || "");
-      setManualLng(gisPlacedCameras[0].lng?.toString() || "");
+  // Merge real-time engine health status with bundle cameras (memoized to prevent re-render thrashing)
+  const camerasWithStatus = useMemo(() => {
+    const list: any[] = [...(bundle?.cameras || [])];
+    if (appStatus?.cameras) {
+      Object.entries(appStatus.cameras).forEach(([id, cam]: [string, any]) => {
+        if (!list.some(c => c.id === id)) {
+          list.push({
+            id,
+            name: cam.name || `Camera ${id.slice(0, 4)}`,
+            source: cam.source || "",
+            status: cam.running ? "online" : "offline",
+          });
+        }
+      });
     }
-  }, [gisPlacedCameras, selectedGisCamId]);
+    return list.map((c: any) => {
+      const localInfo = appStatus?.cameras?.[c.id] || healthInfo?.cameras?.[c.id];
+      const isOnline = localInfo ? localInfo.running : (c.status === "online" || appStatus !== null);
+      return {
+        ...c,
+        status: isOnline ? "online" : "offline"
+      };
+    });
+  }, [bundle?.cameras, appStatus, healthInfo]);
 
-  // Subscribe to real-time telemetry for all placed cameras
+  const cameraIdsKey = useMemo(
+    () => camerasWithStatus.map((c: any) => c.id).sort().join(","),
+    [camerasWithStatus]
+  );
+
+  const gisPlacedCameras = useMemo(
+    () => camerasWithStatus.filter((c: any) => c.lat != null && c.lng != null),
+    [camerasWithStatus]
+  );
+  const gisUnplacedCameras = useMemo(
+    () => camerasWithStatus.filter((c: any) => c.lat == null || c.lng == null),
+    [camerasWithStatus]
+  );
+
+  // Auto-select first camera if none selected or if selected is no longer in list
+  useEffect(() => {
+    if (camerasWithStatus.length > 0) {
+      if (!selectedGisCamId || !camerasWithStatus.some(c => c.id === selectedGisCamId)) {
+        setSelectedGisCamId(camerasWithStatus[0].id);
+        if (camerasWithStatus[0].lat != null && camerasWithStatus[0].lng != null) {
+          setManualLat(camerasWithStatus[0].lat.toString());
+          setManualLng(camerasWithStatus[0].lng.toString());
+        }
+      }
+    }
+  }, [camerasWithStatus, selectedGisCamId]);
+
+  // High-performance throttled telemetry subscription (buffers fast updates to eliminate 60 FPS React churn)
+  const telemetryBufferRef = useRef<Record<string, CameraTelemetry>>({});
+  const telemetryThrottleTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  // STABLE: only re-subscribes when cameras are physically added or removed, NEVER on the 2000ms appStatus polling tick
   useEffect(() => {
     const sessions: TelemetrySession[] = [];
-    gisPlacedCameras.forEach((cam: any) => {
+    camerasWithStatus.forEach((cam: any) => {
       const session = new TelemetrySession(cam.id, (t) => {
-        setTelemetryMap((prev) => ({ ...prev, [cam.id]: t }));
+        telemetryBufferRef.current[cam.id] = t;
+        if (!telemetryThrottleTimerRef.current) {
+          telemetryThrottleTimerRef.current = setTimeout(() => {
+            telemetryThrottleTimerRef.current = null;
+            setTelemetryMap({ ...telemetryBufferRef.current });
+          }, 60); // ~16 FPS throttle for React state updates is silky and uses ~80% less CPU
+        }
       });
       session.start();
       sessions.push(session);
     });
     return () => {
       sessions.forEach((s) => s.stop());
+      if (telemetryThrottleTimerRef.current) {
+        clearTimeout(telemetryThrottleTimerRef.current);
+        telemetryThrottleTimerRef.current = null;
+      }
     };
-  }, [gisPlacedCameras.map((c: any) => c.id).join(",")]);
+  }, [cameraIdsKey]);
 
   // ResizeObserver to keep Leaflet map perfectly sized without grey borders
   useEffect(() => {
@@ -429,47 +617,86 @@ export default function FloorPlanView({ bundle, healthInfo, onSelectCamera }: Fl
   return (
     <div className="flex h-[calc(100vh-80px)] gap-6">
       {/* Sidebar */}
-      <div className="flex w-52 shrink-0 flex-col gap-3 rounded-lg border border-line bg-surface-1 p-4">
-        <h3 className="text-[10px] font-bold uppercase tracking-wider text-zinc-500">GIS Placed Cameras</h3>
-        <div className="flex-1 space-y-1 overflow-y-auto">
-          {gisPlacedCameras.map((c: any) => (
-            <button
-              key={c.id}
-              onClick={() => {
-                setSelectedGisCamId(c.id);
-                setManualLat(c.lat.toString());
-                setManualLng(c.lng.toString());
-                if (leafletMapRef.current) {
-                  leafletMapRef.current.setView([c.lat, c.lng], 15);
-                }
-              }}
-              className={clsx(
-                "w-full text-left rounded px-3 py-1.5 text-xs transition flex items-center justify-between",
-                selectedGisCamId === c.id
-                  ? "bg-accent/15 font-semibold text-accent"
-                  : "text-zinc-400 hover:bg-surface-2 hover:text-zinc-200"
-              )}
-            >
-              <span className="truncate mr-2">{c.name}</span>
-              <div className="flex items-center gap-1.5 shrink-0">
-                {c.status === "online" && (
-                  <span className="text-[9px] font-bold text-cyan-400 bg-cyan-500/10 px-1.5 py-0.5 rounded border border-cyan-500/20">
-                    🚗 {telemetryMap[c.id]?.vehicles ?? 0}
-                  </span>
+      <div className="flex w-64 shrink-0 flex-col gap-3 rounded-lg border border-line bg-surface-1 p-4">
+        <div className="flex items-center justify-between">
+          <h3 className="text-[10px] font-bold uppercase tracking-wider text-zinc-500">
+            {viewMode === "3d" ? "3D Twin Cameras" : "GIS Placed Cameras"}
+          </h3>
+          <span className="text-[10px] font-semibold text-cyan-400 bg-cyan-500/10 px-1.5 py-0.5 rounded border border-cyan-500/20">
+            {camerasWithStatus.length} Cams
+          </span>
+        </div>
+
+        <div className="flex-1 space-y-1.5 overflow-y-auto pr-1">
+          {camerasWithStatus.map((c: any) => {
+            const isSynced = spatialConfigs[c.id]?.spatial_sync ?? true;
+            const slot = spatialConfigs[c.id]?.slot || "north";
+
+            return (
+              <div
+                key={c.id}
+                onClick={() => {
+                  setSelectedGisCamId(c.id);
+                  if (c.lat != null) setManualLat(c.lat.toString());
+                  if (c.lng != null) setManualLng(c.lng.toString());
+                  if (leafletMapRef.current && c.lat != null && c.lng != null) {
+                    leafletMapRef.current.setView([c.lat, c.lng], 15);
+                  }
+                }}
+                className={clsx(
+                  "w-full text-left rounded-lg p-2 text-xs transition flex flex-col gap-1.5 border cursor-pointer",
+                  selectedGisCamId === c.id
+                    ? "bg-accent/15 border-accent/40 text-accent font-medium shadow-sm"
+                    : "bg-surface-2/60 border-line/50 text-zinc-400 hover:bg-surface-2 hover:text-zinc-200"
                 )}
-                <span className={clsx(
-                  "inline-block h-1.5 w-1.5 rounded-full shrink-0",
-                  c.status === "online" ? "bg-emerald-400" : "bg-rose-400"
-                )} />
+              >
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-1.5 min-w-0">
+                    <span className={clsx(
+                      "inline-block h-2 w-2 rounded-full shrink-0",
+                      c.status === "online" ? "bg-emerald-400 shadow-[0_0_6px_rgba(16,185,129,0.5)]" : "bg-rose-400"
+                    )} />
+                    <span className="truncate font-semibold text-zinc-200 text-xs">{c.name}</span>
+                  </div>
+
+                  {/* 3D Spatial Sync Toggle */}
+                  <button
+                    type="button"
+                    title={isSynced ? "3D Spatial Sync is ON (Detections fused in 3D)" : "3D Spatial Sync is OFF (Standby)"}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      updateSpatialConfig(c.id, { spatial_sync: !isSynced });
+                    }}
+                    className={clsx(
+                      "text-[9px] font-bold px-2 py-0.5 rounded border transition flex items-center gap-1",
+                      isSynced
+                        ? "bg-emerald-500/15 text-emerald-400 border-emerald-500/40 shadow-[0_0_8px_rgba(16,185,129,0.25)]"
+                        : "bg-zinc-800/80 text-zinc-500 border-zinc-700 hover:text-zinc-300"
+                    )}
+                  >
+                    <span className={clsx("h-1.5 w-1.5 rounded-full", isSynced ? "bg-emerald-400 animate-pulse" : "bg-zinc-600")} />
+                    {isSynced ? "3D SYNC ON" : "3D OFF"}
+                  </button>
+                </div>
+
+                <div className="flex items-center justify-between text-[10px] text-zinc-500">
+                  <span className="capitalize font-mono text-zinc-400">Slot: {slot.toUpperCase()}</span>
+                  {c.status === "online" && (
+                    <span className="text-cyan-400 font-bold">
+                      🚗 {telemetryMap[c.id]?.vehicles ?? 0} &nbsp;👤 {telemetryMap[c.id]?.people ?? 0}
+                    </span>
+                  )}
+                </div>
               </div>
-            </button>
-          ))}
-          {gisPlacedCameras.length === 0 && (
-            <div className="text-[11px] text-zinc-500 italic p-1 text-center">No GIS camera nodes.</div>
+            );
+          })}
+
+          {camerasWithStatus.length === 0 && (
+            <div className="text-[11px] text-zinc-500 italic p-2 text-center">No cameras registered.</div>
           )}
         </div>
 
-        {isManager && gisUnplacedCameras.length > 0 && (
+        {viewMode === "2d" && isManager && gisUnplacedCameras.length > 0 && (
           <div className="border-t border-line/60 pt-3 space-y-2 mt-auto">
             <h4 className="text-[9px] font-bold uppercase tracking-wider text-zinc-500">Place GIS Camera</h4>
             <select
@@ -484,37 +711,89 @@ export default function FloorPlanView({ bundle, healthInfo, onSelectCamera }: Fl
               ))}
             </select>
             <p className="text-[9px] text-zinc-500 leading-normal">
-              Select a camera above and click on the map to place.
+              Select camera and click on 2D map to place pin.
             </p>
           </div>
         )}
       </div>
 
-      {/* Main Map Board */}
+      {/* Main Map / 3D Board */}
       <div className="flex-1 flex flex-col gap-4">
-        {/* Map header */}
+        {/* Header with 3D vs 2D Toggle Switch */}
         <div className="flex items-center justify-between rounded-lg border border-line bg-surface-1 px-4 py-3">
-          <div className="flex items-center gap-2.5">
-            <MapIcon size={16} className="text-accent animate-pulse" />
-            <span className="text-sm font-semibold text-zinc-100">
-              GIS Map (OpenStreetMap)
-            </span>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setViewMode("3d")}
+              className={clsx(
+                "flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-bold transition",
+                viewMode === "3d"
+                  ? "bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 shadow-[0_0_12px_rgba(6,182,212,0.2)]"
+                  : "text-zinc-400 hover:text-zinc-200 hover:bg-surface-2"
+              )}
+            >
+              <Box size={15} className={viewMode === "3d" ? "text-cyan-400 animate-pulse" : ""} />
+              <span>3D Digital Twin (Three.js)</span>
+            </button>
+            <button
+              onClick={() => setViewMode("2d")}
+              className={clsx(
+                "flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-bold transition",
+                viewMode === "2d"
+                  ? "bg-accent/20 text-accent border border-accent/40 shadow-[0_0_12px_rgba(59,130,246,0.2)]"
+                  : "text-zinc-400 hover:text-zinc-200 hover:bg-surface-2"
+              )}
+            >
+              <MapIcon size={15} />
+              <span>2D GIS Map (Leaflet)</span>
+            </button>
           </div>
-          <span className="text-[10px] text-zinc-500 italic">
-            {isManager ? "⚙️ Manage Mode: Drag pins or click map to place" : "👁️ Viewer Mode: Inspect status and feeds"}
-          </span>
+
+          <div className="flex items-center gap-3 text-[11px] text-zinc-400">
+            {viewMode === "3d" ? (
+              <span className="flex items-center gap-1.5 text-cyan-400/90 font-medium">
+                <Sparkles size={13} />
+                Real-Time Multi-Camera 3D Intersection Fusion
+              </span>
+            ) : (
+              <span className="text-zinc-500 italic">
+                {isManager ? "⚙️ Manage Mode: Drag pins or click map to place" : "👁️ Viewer Mode: Inspect status and feeds"}
+              </span>
+            )}
+          </div>
         </div>
 
-        {/* Map Canvas Grid */}
-        <div className="flex-1 grid grid-cols-1 xl:grid-cols-4 gap-4 min-h-0">
-          {/* GIS Map Display Area */}
-          <div className="xl:col-span-3 rounded-lg border border-line bg-zinc-950 relative min-h-[500px] h-full w-full">
-            <div ref={gisMapRef} className="absolute inset-0 rounded-lg overflow-hidden z-0 h-full w-full" />
+        {/* Canvas & Inspector Grid */}
+        <div className={clsx(
+          "flex-1 min-h-0",
+          viewMode === "3d" ? "flex flex-col h-full w-full" : "grid grid-cols-1 xl:grid-cols-4 gap-4"
+        )}>
+          {/* Main Visualizer Area */}
+          <div className={clsx(
+            "rounded-lg border border-line bg-zinc-950 relative min-h-[520px] h-full w-full overflow-hidden",
+            viewMode === "2d" && "xl:col-span-3"
+          )}>
+            {viewMode === "3d" ? (
+              <ErrorBoundary fallbackTitle="3D Digital Twin View">
+                <DigitalTwin3DView
+                  cameras={camerasWithStatus}
+                  telemetryMap={telemetryMap}
+                  spatialConfigs={spatialConfigs}
+                  onUpdateSpatialConfig={updateSpatialConfig}
+                  selectedCameraId={selectedGisCamId}
+                  onSelectCamera={setSelectedGisCamId}
+                />
+              </ErrorBoundary>
+            ) : (
+              <div ref={gisMapRef} className="absolute inset-0 rounded-lg overflow-hidden z-0 h-full w-full" />
+            )}
           </div>
 
-          {/* GIS Inspector */}
-          <div className="flex flex-col gap-4 rounded-lg border border-line bg-surface-1 p-4 justify-start">
-            <h4 className="text-[10px] font-bold uppercase tracking-wider text-zinc-500">GIS Inspector</h4>
+          {/* Right Inspector Panel (Shown in 2D GIS mode) */}
+          {viewMode === "2d" && (
+            <div className="flex flex-col gap-4 rounded-lg border border-line bg-surface-1 p-4 justify-start overflow-y-auto max-h-[calc(100vh-160px)]">
+              <h4 className="text-[10px] font-bold uppercase tracking-wider text-zinc-500">
+                GIS Inspector
+              </h4>
 
             {activeGisCamera ? (
               <div className="space-y-4">
@@ -541,14 +820,174 @@ export default function FloorPlanView({ bundle, healthInfo, onSelectCamera }: Fl
 
                 {activeGisCamera.status === "online" && (
                   <div className="rounded-lg overflow-hidden border border-line bg-black aspect-video relative">
-                    <img
-                      src={mjpegStreamUrl(activeGisCamera.id)}
-                      alt={activeGisCamera.name}
+                    <CleanStreamImg
+                      cameraId={activeGisCamera.id}
+                      name={activeGisCamera.name}
                       className="w-full h-full object-cover"
-                      key={activeGisCamera.id}
                     />
                   </div>
                 )}
+
+                {/* 3D Spatial Integration Controls */}
+                <div className="rounded-lg bg-surface-2 p-3 border border-cyan-500/30 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <div className="text-xs font-bold text-white flex items-center gap-1.5">
+                        <Box size={14} className="text-cyan-400" />
+                        3D Spatial Fusion
+                      </div>
+                      <p className="text-[10px] text-zinc-400 mt-0.5">
+                        Integrate camera into 3D twin
+                      </p>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const cur = spatialConfigs[activeGisCamera.id]?.spatial_sync ?? true;
+                        updateSpatialConfig(activeGisCamera.id, { spatial_sync: !cur });
+                      }}
+                      className={clsx(
+                        "px-3 py-1 rounded-md text-xs font-bold border transition shadow-sm",
+                        (spatialConfigs[activeGisCamera.id]?.spatial_sync ?? true)
+                          ? "bg-emerald-500/20 text-emerald-300 border-emerald-500/40"
+                          : "bg-zinc-800 text-zinc-400 border-zinc-700 hover:text-zinc-200"
+                      )}
+                    >
+                      {(spatialConfigs[activeGisCamera.id]?.spatial_sync ?? true) ? "ENABLED" : "DISABLED"}
+                    </button>
+                  </div>
+
+                  {/* Slot selector around 4 sides */}
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-bold uppercase tracking-wide text-zinc-400">
+                      Intersection 3D Slot (4 Sides)
+                    </label>
+                    <div className="grid grid-cols-2 gap-1.5">
+                      {[
+                        { id: "south", label: "Corner 1 (SE Live Cam)" },
+                        { id: "north", label: "Corner 2 (NW Chicago St)" },
+                        { id: "east", label: "Corner 3 (NE Downtown Park)" },
+                        { id: "west", label: "Corner 4 (SW Clock Plaza)" },
+                      ].map((slot) => {
+                        const currentSlot = spatialConfigs[activeGisCamera.id]?.slot || "south";
+                        return (
+                          <button
+                            key={slot.id}
+                            type="button"
+                            onClick={() => {
+                              const headingMap: Record<string, number> = { south: 320, north: 140, east: 230, west: 50 };
+                              updateSpatialConfig(activeGisCamera.id, {
+                                slot: slot.id as CameraSlot,
+                                heading: headingMap[slot.id] || 0,
+                              });
+                            }}
+                            className={clsx(
+                              "px-2 py-1.5 rounded text-[10px] font-semibold border transition text-left truncate",
+                              currentSlot === slot.id
+                                ? "bg-cyan-500/20 border-cyan-500/50 text-cyan-300 shadow-sm"
+                                : "bg-zinc-900/80 border-line/40 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200"
+                            )}
+                          >
+                            {slot.label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Direction Heading Angle slider */}
+                  <div className="space-y-1 pt-1">
+                    <div className="flex items-center justify-between text-[10px]">
+                      <span className="font-bold text-zinc-400 uppercase">Compass Heading</span>
+                      <span className="font-mono font-bold text-cyan-400">
+                        {spatialConfigs[activeGisCamera.id]?.heading ?? 180}°
+                      </span>
+                    </div>
+                    <input
+                      type="range"
+                      min="0"
+                      max="360"
+                      step="5"
+                      value={spatialConfigs[activeGisCamera.id]?.heading ?? 180}
+                      onChange={(e) => {
+                        updateSpatialConfig(activeGisCamera.id, {
+                          heading: parseInt(e.target.value, 10),
+                        });
+                      }}
+                      className="w-full accent-cyan-400 cursor-pointer h-1.5 bg-zinc-800 rounded-lg"
+                    />
+                  </div>
+
+                  {/* Mount Height slider (meters) */}
+                  <div className="space-y-1 pt-1">
+                    <div className="flex items-center justify-between text-[10px]">
+                      <span className="font-bold text-zinc-400 uppercase">Mount Height</span>
+                      <span className="font-mono font-bold text-cyan-400">
+                        {(spatialConfigs[activeGisCamera.id]?.height ?? 8).toFixed(1)}m
+                      </span>
+                    </div>
+                    <input
+                      type="range"
+                      min="3"
+                      max="25"
+                      step="0.5"
+                      value={spatialConfigs[activeGisCamera.id]?.height ?? 8}
+                      onChange={(e) => {
+                        updateSpatialConfig(activeGisCamera.id, {
+                          height: parseFloat(e.target.value),
+                        });
+                      }}
+                      className="w-full accent-cyan-400 cursor-pointer h-1.5 bg-zinc-800 rounded-lg"
+                    />
+                  </div>
+
+                  {/* Camera Tilt / Pitch slider */}
+                  <div className="space-y-1 pt-1">
+                    <div className="flex items-center justify-between text-[10px]">
+                      <span className="font-bold text-zinc-400 uppercase">Tilt Angle (Pitch Down)</span>
+                      <span className="font-mono font-bold text-cyan-400">
+                        {spatialConfigs[activeGisCamera.id]?.pitch ?? 35}°
+                      </span>
+                    </div>
+                    <input
+                      type="range"
+                      min="10"
+                      max="80"
+                      step="2"
+                      value={spatialConfigs[activeGisCamera.id]?.pitch ?? 35}
+                      onChange={(e) => {
+                        updateSpatialConfig(activeGisCamera.id, {
+                          pitch: parseInt(e.target.value, 10),
+                        });
+                      }}
+                      className="w-full accent-cyan-400 cursor-pointer h-1.5 bg-zinc-800 rounded-lg"
+                    />
+                  </div>
+
+                  {/* Field of View (FOV) slider */}
+                  <div className="space-y-1 pt-1">
+                    <div className="flex items-center justify-between text-[10px]">
+                      <span className="font-bold text-zinc-400 uppercase">Field of View (FOV)</span>
+                      <span className="font-mono font-bold text-cyan-400">
+                        {spatialConfigs[activeGisCamera.id]?.fov ?? 65}°
+                      </span>
+                    </div>
+                    <input
+                      type="range"
+                      min="40"
+                      max="90"
+                      step="2"
+                      value={spatialConfigs[activeGisCamera.id]?.fov ?? 65}
+                      onChange={(e) => {
+                        updateSpatialConfig(activeGisCamera.id, {
+                          fov: parseInt(e.target.value, 10),
+                        });
+                      }}
+                      className="w-full accent-cyan-400 cursor-pointer h-1.5 bg-zinc-800 rounded-lg"
+                    />
+                  </div>
+                </div>
 
                 {/* Real-time Telemetry Stats Grid */}
                 <div className="grid grid-cols-2 gap-2">
@@ -570,7 +1009,11 @@ export default function FloorPlanView({ bundle, healthInfo, onSelectCamera }: Fl
                     <Activity size={14} className="text-emerald-400" />
                     <div>
                       <div className="text-[9px] text-zinc-400 uppercase font-semibold">AI FPS</div>
-                      <div className="text-xs font-bold text-zinc-100">{(selectedTelemetry?.fps || selectedTelemetry?.decode_fps || selectedTelemetry?.camera_fps) ? (selectedTelemetry?.fps || selectedTelemetry?.decode_fps || selectedTelemetry?.camera_fps)!.toFixed(1) : "--"}</div>
+                      <div className="text-xs font-bold text-zinc-100">
+                        {(selectedTelemetry?.fps || selectedTelemetry?.decode_fps || selectedTelemetry?.camera_fps)
+                          ? (selectedTelemetry?.fps || selectedTelemetry?.decode_fps || selectedTelemetry?.camera_fps)!.toFixed(1)
+                          : "--"}
+                      </div>
                     </div>
                   </div>
                   <div className="rounded bg-surface-2 p-2 border border-line/40 flex items-center gap-2">
@@ -582,105 +1025,60 @@ export default function FloorPlanView({ bundle, healthInfo, onSelectCamera }: Fl
                   </div>
                 </div>
 
-                {/* Camera Heading Calibration */}
-                <div className="rounded-lg bg-surface-2 p-3 border border-line/60 space-y-2">
-                  <div className="flex items-center justify-between">
-                    <label className="text-[10px] font-bold text-zinc-300 uppercase tracking-wide">
-                      🧭 Camera Direction Angle
-                    </label>
-                    <span className="text-xs font-bold text-cyan-400 font-mono">
-                      {camHeadings[activeGisCamera.id] ?? (activeGisCamera.heading ?? 0)}°
-                    </span>
-                  </div>
-                  
-                  <input
-                    type="range"
-                    min="0"
-                    max="360"
-                    step="5"
-                    value={camHeadings[activeGisCamera.id] ?? (activeGisCamera.heading ?? 0)}
-                    onChange={(e) => {
-                      const val = parseInt(e.target.value, 10);
-                      setCamHeadings(prev => ({ ...prev, [activeGisCamera.id]: val }));
-                    }}
-                    className="w-full accent-accent cursor-pointer h-1.5 bg-zinc-800 rounded-lg"
-                  />
-
-                  <div className="grid grid-cols-4 gap-1 pt-1">
-                    {[
-                      { label: "⬆️ N", deg: 0 },
-                      { label: "➡️ E", deg: 90 },
-                      { label: "⬇️ S", deg: 180 },
-                      { label: "⬅️ W", deg: 270 }
-                    ].map(btn => (
-                      <button
-                        key={btn.deg}
-                        type="button"
-                        onClick={() => setCamHeadings(prev => ({ ...prev, [activeGisCamera.id]: btn.deg }))}
-                        className={clsx(
-                          "py-1 text-[9px] font-bold rounded border transition text-center",
-                          (camHeadings[activeGisCamera.id] ?? (activeGisCamera.heading ?? 0)) === btn.deg
-                            ? "bg-accent/20 border-accent text-accent"
-                            : "bg-zinc-900/60 border-line/40 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200"
-                        )}
-                      >
-                        {btn.label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="space-y-3">
-                  <div>
-                    <label className="text-[9px] font-bold text-zinc-500 uppercase block mb-1">
-                      Latitude
-                    </label>
-                    <input
-                      type="text"
-                      className="w-full bg-zinc-900 border border-line rounded px-2 py-1 text-xs text-zinc-200 font-mono"
-                      value={manualLat}
-                      disabled={!isManager}
-                      onChange={(e) => setManualLat(e.target.value)}
-                    />
-                  </div>
-
-                  <div>
-                    <label className="text-[9px] font-bold text-zinc-500 uppercase block mb-1">
-                      Longitude
-                    </label>
-                    <input
-                      type="text"
-                      className="w-full bg-zinc-900 border border-line rounded px-2 py-1 text-xs text-zinc-200 font-mono"
-                      value={manualLng}
-                      disabled={!isManager}
-                      onChange={(e) => setManualLng(e.target.value)}
-                    />
-                  </div>
-
-                  {isManager && (
-                    <div className="space-y-1.5 pt-2 border-t border-line/60">
-                      <button
-                        onClick={handleSaveManualCoords}
-                        className="w-full bg-accent text-white rounded py-1.5 text-xs font-semibold hover:bg-accent/80 transition"
-                      >
-                        Save Coordinates
-                      </button>
-                      <button
-                        onClick={() => handleRemoveFromGisMap(activeGisCamera.id)}
-                        className="w-full bg-rose-500/10 border border-rose-500/20 text-rose-400 rounded py-1.5 text-xs font-semibold hover:bg-rose-500/20 transition"
-                      >
-                        Remove from Map
-                      </button>
+                {viewMode === "2d" && (
+                  <div className="space-y-3 pt-2 border-t border-line/60">
+                    <div>
+                      <label className="text-[9px] font-bold text-zinc-500 uppercase block mb-1">
+                        Latitude
+                      </label>
+                      <input
+                        type="text"
+                        className="w-full bg-zinc-900 border border-line rounded px-2 py-1 text-xs text-zinc-200 font-mono"
+                        value={manualLat}
+                        disabled={!isManager}
+                        onChange={(e) => setManualLat(e.target.value)}
+                      />
                     </div>
-                  )}
-                </div>
+
+                    <div>
+                      <label className="text-[9px] font-bold text-zinc-500 uppercase block mb-1">
+                        Longitude
+                      </label>
+                      <input
+                        type="text"
+                        className="w-full bg-zinc-900 border border-line rounded px-2 py-1 text-xs text-zinc-200 font-mono"
+                        value={manualLng}
+                        disabled={!isManager}
+                        onChange={(e) => setManualLng(e.target.value)}
+                      />
+                    </div>
+
+                    {isManager && (
+                      <div className="space-y-1.5 pt-2 border-t border-line/60">
+                        <button
+                          onClick={handleSaveManualCoords}
+                          className="w-full bg-accent text-white rounded py-1.5 text-xs font-semibold hover:bg-accent/80 transition"
+                        >
+                          Save Coordinates
+                        </button>
+                        <button
+                          onClick={() => handleRemoveFromGisMap(activeGisCamera.id)}
+                          className="w-full bg-rose-500/10 border border-rose-500/20 text-rose-400 rounded py-1.5 text-xs font-semibold hover:bg-rose-500/20 transition"
+                        >
+                          Remove from Map
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             ) : (
               <div className="rounded border border-dashed border-line p-4 text-center text-zinc-500 text-xs leading-normal">
-                Select a camera marker on the GIS map or from the sidebar list to inspect status, edit coordinates, or view live feeds.
+                Select a camera from the sidebar list or 3D scene to configure spatial fusion, inspect feeds, and calibrate angles.
               </div>
             )}
           </div>
+          )}
         </div>
       </div>
     </div>

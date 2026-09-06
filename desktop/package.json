@@ -20,7 +20,9 @@
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.45.0",
-    "systeminformation": "^5.22.11"
+    "@types/three": "^0.185.4",
+    "systeminformation": "^5.22.11",
+    "three": "^0.185.1"
   },
   "devDependencies": {
     "@types/react": "^18.3.3",

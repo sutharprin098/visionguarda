@@ -56,7 +56,7 @@ def detect(
     endpoint_url: str,
     api_key: str = "",
     jpeg_quality: int = 70,
-    timeout_s: float = 0.40,
+    timeout_s: float = 1.5,
     camera_id: str = "default",
     target_size: int = 640,
 ) -> List[Dict[str, Any]]:
@@ -104,7 +104,7 @@ def detect(
     last_exc = None
 
     for target_url in urls_to_try:
-        cur_timeout = 0.5 if (len(urls_to_try) > 1 and target_url == url) else timeout_s
+        cur_timeout = timeout_s
         try:
             req = urllib.request.Request(
                 target_url,

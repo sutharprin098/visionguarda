@@ -29,8 +29,10 @@ import {
   EyeOff,
   Bell,
   Upload,
+  ArrowLeft,
 } from "lucide-react";
 import clsx from "clsx";
+import type { SyncBundle } from "../lib/sync";
 import { getSupabase } from "../lib/session";
 import { useAlertState } from "../components/alerts/AlertProvider";
 import { fnErrorMessage } from "../lib/fnError";
@@ -89,6 +91,7 @@ interface Drawing {
 
 interface Rule {
   id: string;
+  org_id?: string;
   name: string;
   camera_id?: string;
   trigger_type: string;
@@ -133,10 +136,12 @@ const ACCENT: Record<string, { text: string; bg: string; border: string; ring: s
 
 export default function AdminStudio({
   orgId: initialOrgId,
+  bundle,
   onDeactivated,
   onOpenAlerts,
 }: {
   orgId?: string | null;
+  bundle?: SyncBundle | null;
   onDeactivated: () => void;
   /** Bell click — jumps to Workspace's Alerts tab. Undefined would just hide
    *  the bell rather than render one that does nothing. */
@@ -156,15 +161,17 @@ export default function AdminStudio({
   const [drawings, setDrawings] = useState<Drawing[]>([]);
   const [rules, setRules] = useState<Rule[]>([]);
   const [versions, setVersions] = useState<ConfigVersion[]>([]);
-  const [orgId, setOrgId] = useState<string | null>(initialOrgId ?? null);
+  const [orgId, setOrgId] = useState<string | null>(initialOrgId || bundle?.organization?.id || "org-local");
 
   useEffect(() => {
     if (initialOrgId) {
       setOrgId(initialOrgId);
+    } else if (bundle?.organization?.id) {
+      setOrgId(bundle.organization.id);
     }
-  }, [initialOrgId]);
+  }, [initialOrgId, bundle?.organization?.id]);
 
-  const [activeProfile, setActiveProfile] = useState<ZoneProfileKey | null>(null);
+  const [activeProfile, setActiveProfile] = useState<ZoneProfileKey | null>("traffic");
   const [features, setFeatures] = useState<ProfileFeatures>({});
   const [configId, setConfigId] = useState<string | null>(null);
   const [savingConfig, setSavingConfig] = useState(false);
@@ -324,7 +331,7 @@ export default function AdminStudio({
 
   const [publishComment, setPublishComment] = useState("");
   const [publishing, setPublishing] = useState(false);
-  const [engineOnline, setEngineOnline] = useState<boolean | null>(null);
+  const [engineOnline, setEngineOnline] = useState<boolean>(true);
   // The MJPEG <img> failing is a distinct state from the engine being down: the
   // engine can be healthy while this particular camera has no decoded frames.
   const [streamFailed, setStreamFailed] = useState(false);
@@ -359,44 +366,106 @@ export default function AdminStudio({
     let channel: any = null;
 
     async function loadCameras() {
-      const sb = await getSupabase();
-      const { data: cams, error: camErr } = await sb.from("cameras").select("*");
-      if (!active) return;
-      if (camErr) {
-        console.error("[AdminStudio] cameras load failed", camErr);
-        setCamsLoad({ loading: false, error: camErr.message || "Could not load cameras." });
-      } else {
-        setCamsLoad({ loading: false, error: null });
+      let cams: Camera[] = [];
+
+      // 1. First check bundle cameras
+      if (bundle?.cameras && bundle.cameras.length > 0) {
+        cams = bundle.cameras.map((c) => ({
+          id: c.id,
+          name: c.name,
+          source_type: c.source_type,
+          status: c.status || "online",
+          zone_profile: (c.zone_profile as ZoneProfileKey) || null,
+          zones: c.zones,
+          lines: c.lines,
+        }));
       }
-      if (cams) {
+
+      // 2. Fetch from local engine directly: http://127.0.0.1:8000/api/cameras
+      try {
+        const engineRes = await fetch("http://127.0.0.1:8000/api/cameras", { signal: AbortSignal.timeout(3000) });
+        if (engineRes.ok) {
+          const engineCams = await engineRes.json();
+          if (Array.isArray(engineCams) && engineCams.length > 0) {
+            const map = new Map<string, Camera>();
+            cams.forEach((c) => map.set(c.id, c));
+            engineCams.forEach((ec: any) => {
+              const existing = map.get(ec.id);
+              map.set(ec.id, {
+                id: ec.id,
+                name: ec.name || existing?.name || `Camera ${ec.id.slice(0, 4)}`,
+                source_type: ec.type || ec.source_type || "rtsp",
+                status: ec.is_active ? "online" : "offline",
+                zone_profile: (ec.zone_profile as ZoneProfileKey) || existing?.zone_profile || null,
+                zones: ec.zones || existing?.zones || "[]",
+                lines: ec.lines || existing?.lines || "[]",
+              });
+            });
+            cams = Array.from(map.values());
+          }
+        }
+      } catch (e) {
+        console.warn("[AdminStudio] Could not fetch local engine cameras:", e);
+      }
+
+      // 3. Try Supabase query safely
+      try {
+        const sb = await getSupabase();
+        const { data: cloudCams } = await sb.from("cameras").select("*");
+        if (cloudCams && cloudCams.length > 0) {
+          const map = new Map<string, Camera>();
+          cams.forEach((c) => map.set(c.id, c));
+          cloudCams.forEach((cc: any) => {
+            map.set(cc.id, {
+              id: cc.id,
+              name: cc.name,
+              source_type: cc.source_type,
+              status: cc.status || "online",
+              zone_profile: cc.zone_profile || null,
+              zones: cc.zones,
+              lines: cc.lines,
+            });
+          });
+          cams = Array.from(map.values());
+        }
+      } catch (e) {
+        console.warn("[AdminStudio] Supabase camera query skipped/failed:", e);
+      }
+
+      if (!active) return;
+      setCamsLoad({ loading: false, error: null });
+
+      if (cams.length > 0) {
         setCameras(cams);
         setSelectedCam((prev) => {
           if (prev && cams.some((c) => c.id === prev.id)) {
             const fetched = cams.find((c) => c.id === prev.id) || prev;
             const savedProf = typeof localStorage !== "undefined" ? localStorage.getItem(`cam_profile_${prev.id}`) : null;
-            const activeProf = savedProf || prev.zone_profile;
-            return activeProf ? { ...fetched, zone_profile: activeProf } : fetched;
+            const activeProf = (savedProf as ZoneProfileKey) || prev.zone_profile || "traffic";
+            return { ...fetched, zone_profile: activeProf };
           }
-          if (cams.length > 0) {
-            const firstCam = cams[0];
-            const savedProf = typeof localStorage !== "undefined" ? (localStorage.getItem(`cam_profile_${firstCam.id}`) as ZoneProfileKey | null) : null;
-            return savedProf ? { ...firstCam, zone_profile: savedProf } : firstCam;
-          }
-          return null;
+          const activeCam = cams.find((c) => c.status === "online") || cams[0];
+          const savedProf = typeof localStorage !== "undefined" ? (localStorage.getItem(`cam_profile_${activeCam.id}`) as ZoneProfileKey | null) : null;
+          const activeProf = savedProf || activeCam.zone_profile || "traffic";
+          return { ...activeCam, zone_profile: activeProf };
         });
       }
     }
 
     async function loadConfigVersions() {
-      const sb = await getSupabase();
-      const { data: vers } = await sb.from("config_versions").select("*").order("version", { ascending: false });
-      if (!active) return;
-      if (vers) setVersions(vers);
+      try {
+        const sb = await getSupabase();
+        const { data: vers } = await sb.from("config_versions").select("*").order("version", { ascending: false });
+        if (!active) return;
+        if (vers) setVersions(vers);
+      } catch {
+        /* Supabase offline */
+      }
     }
 
     async function initializeStudio() {
-      const sb = await getSupabase();
       try {
+        const sb = await getSupabase();
         const { data: auth } = await sb.auth.getUser();
         if (active && auth?.user) {
           const { data: profile, error: profErr } = await sb
@@ -406,7 +475,7 @@ export default function AdminStudio({
           }
         }
       } catch (e) {
-        console.error("[AdminStudio] Failed to query auth session", e);
+        console.warn("[AdminStudio] Auth query skipped:", e);
       }
 
       await Promise.all([loadCameras(), loadConfigVersions()]);
@@ -414,43 +483,45 @@ export default function AdminStudio({
 
     initializeStudio();
 
-    // Subscribe to real-time additions/edits of cameras & configs
-    getSupabase().then((sb) => {
-      if (!active) return;
-      channel = sb.channel("admin-studio-sync")
-        .on("postgres_changes", { event: "*", schema: "public", table: "cameras" }, (payload: any) => {
-          if (payload.eventType === "UPDATE" && payload.new) {
-            const currentCam = camerasRef.current.find(c => c.id === payload.new.id);
-            if (currentCam) {
-              const keysToCompare = ["name", "source_type", "zone_profile", "zones", "lines"] as const;
-              const onlyStatusChanged = keysToCompare.every(key => {
-                return JSON.stringify(payload.new[key]) === JSON.stringify(currentCam[key]);
-              });
-              if (onlyStatusChanged) {
-                setCameras(prev => prev.map(c => c.id === payload.new.id ? { ...c, status: payload.new.status } : c));
-                setSelectedCam(prev => prev && prev.id === payload.new.id ? { ...prev, status: payload.new.status } : prev);
-                return;
+    // Subscribe to real-time additions/edits of cameras & configs if Supabase is active
+    try {
+      getSupabase().then((sb) => {
+        if (!active) return;
+        channel = sb.channel("admin-studio-sync")
+          .on("postgres_changes", { event: "*", schema: "public", table: "cameras" }, (payload: any) => {
+            if (payload.eventType === "UPDATE" && payload.new) {
+              const currentCam = camerasRef.current.find((c) => c.id === payload.new.id);
+              if (currentCam) {
+                const keysToCompare = ["name", "source_type", "zone_profile", "zones", "lines"] as const;
+                const onlyStatusChanged = keysToCompare.every((key) => {
+                  return JSON.stringify(payload.new[key]) === JSON.stringify(currentCam[key]);
+                });
+                if (onlyStatusChanged) {
+                  setCameras((prev) => prev.map((c) => (c.id === payload.new.id ? { ...c, status: payload.new.status } : c)));
+                  setSelectedCam((prev) => (prev && prev.id === payload.new.id ? { ...prev, status: payload.new.status } : prev));
+                  return;
+                }
               }
             }
-          }
-          loadCameras();
-        })
-        .on("postgres_changes", { event: "*", schema: "public", table: "config_versions" }, () => {
-          loadConfigVersions();
-        })
-        .subscribe();
-    });
+            loadCameras();
+          })
+          .on("postgres_changes", { event: "*", schema: "public", table: "config_versions" }, () => {
+            loadConfigVersions();
+          })
+          .subscribe();
+      }).catch(() => {});
+    } catch {}
 
     isEngineOnline().then((online) => active && setEngineOnline(online));
     const interval = setInterval(() => {
       isEngineOnline().then((online) => active && setEngineOnline(online));
-    }, 10_000);
+    }, 8_000);
 
     return () => {
       active = false;
       clearInterval(interval);
       if (channel) {
-        getSupabase().then((sb) => sb.removeChannel(channel));
+        getSupabase().then((sb) => sb.removeChannel(channel)).catch(() => {});
       }
     };
   }, []);
@@ -475,30 +546,44 @@ export default function AdminStudio({
 
   // ---- per-camera load: drawings, rules, profile config ----
   const loadProfileConfig = useCallback(async (cam: Camera, profileKey: ZoneProfileKey) => {
-    const sb = await getSupabase();
-    const { data: cfg } = await sb
-      .from("zone_profile_configs")
-      .select("*")
-      .eq("camera_id", cam.id)
-      .eq("profile", profileKey)
-      .is("deleted_at", null)
-      .maybeSingle();
-
-    if (cfg) {
-      setConfigId(cfg.id);
-      setFeatures(reconcileFeatures(profileKey, cfg.features));
-    } else {
-      // Create a fresh draft config from catalog defaults.
-      const defaults = buildDefaultFeatures(profileKey);
-      const { data: created } = await sb
+    const effectiveOrgId = orgId || bundle?.organization?.id || "org-local";
+    try {
+      const sb = await getSupabase();
+      const { data: cfg } = await sb
         .from("zone_profile_configs")
-        .insert([{ org_id: orgId, camera_id: cam.id, profile: profileKey, features: defaults, is_draft: true }])
-        .select()
-        .single();
-      setConfigId(created?.id ?? null);
+        .select("*")
+        .eq("camera_id", cam.id)
+        .eq("profile", profileKey)
+        .is("deleted_at", null)
+        .maybeSingle();
+
+      if (cfg) {
+        setConfigId(cfg.id);
+        setFeatures(reconcileFeatures(profileKey, cfg.features));
+        return;
+      } else {
+        // Create a fresh draft config from catalog defaults.
+        const defaults = buildDefaultFeatures(profileKey);
+        try {
+          const { data: created } = await sb
+            .from("zone_profile_configs")
+            .insert([{ org_id: effectiveOrgId, camera_id: cam.id, profile: profileKey, features: defaults, is_draft: true }])
+            .select()
+            .single();
+          setConfigId(created?.id ?? null);
+        } catch {
+          setConfigId(null);
+        }
+        setFeatures(defaults);
+        return;
+      }
+    } catch (err) {
+      console.warn("[AdminStudio] loadProfileConfig fallback to catalog defaults:", err);
+      const defaults = buildDefaultFeatures(profileKey);
       setFeatures(defaults);
+      setConfigId(null);
     }
-  }, [orgId]);
+  }, [orgId, bundle?.organization?.id]);
 
   // A previous camera's dead stream must not poison the next one's viewport.
   useEffect(() => { setStreamFailed(false); }, [selectedCam?.id]);
@@ -507,41 +592,68 @@ export default function AdminStudio({
     if (!selectedCam) return;
     const cam = selectedCam;
     async function loadCamData() {
-      const sb = await getSupabase();
-      const { data: draws } = await sb.from("analytics_drawings").select("*").eq("camera_id", cam.id).is("deleted_at", null);
-      setDrawings(draws ?? []);
-      // Undo must never reach across a camera switch into another camera's
-      // shapes — that would "restore" geometry onto a camera it never belonged
-      // to. Each camera's saved set is its own history root.
-      seedHistory(draws ?? []);
+      let draws: Drawing[] = [];
+      let ruleList: Rule[] = [];
+
+      // 1. If camera has saved zones string, parse into drawings!
+      if (cam.zones) {
+        try {
+          const parsed = typeof cam.zones === "string" ? JSON.parse(cam.zones) : cam.zones;
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            draws = parsed.map((p: any) => ({
+              id: p.id || `draw_${Math.random().toString(36).slice(2, 8)}`,
+              org_id: orgId || "",
+              camera_id: cam.id,
+              name: p.name || "Zone",
+              type: p.shapeType || p.type || "polygon",
+              purpose: p.zoneType || p.purpose || "custom_zone",
+              profile: p.profile || cam.zone_profile || "custom",
+              feature_key: p.feature_key || null,
+              points: p.points || [],
+              properties: p.properties || {},
+              is_draft: false,
+            }));
+          }
+        } catch { /* ignore */ }
+      }
+
+      // 2. Also try Supabase safely
+      try {
+        const sb = await getSupabase();
+        const { data: cloudDraws } = await sb.from("analytics_drawings").select("*").eq("camera_id", cam.id).is("deleted_at", null);
+        if (cloudDraws && cloudDraws.length > 0) {
+          draws = cloudDraws;
+        }
+        const { data: cloudRules } = await sb.from("rule_engine_rules").select("*").eq("camera_id", cam.id).is("deleted_at", null);
+        if (cloudRules && cloudRules.length > 0) {
+          ruleList = cloudRules;
+        }
+      } catch (err) {
+        console.warn("[AdminStudio] Supabase drawings skipped:", err);
+      }
+
+      setDrawings(draws);
+      seedHistory(draws);
       setEditingDrawingId(null);
-      const { data: ruleList } = await sb.from("rule_engine_rules").select("*").eq("camera_id", cam.id).is("deleted_at", null);
-      setRules(ruleList ?? []);
+      setRules(ruleList);
 
       const savedProf = typeof localStorage !== "undefined" ? (localStorage.getItem(`cam_profile_${cam.id}`) as ZoneProfileKey | null) : null;
-      const prof = savedProf || (cam.zone_profile as ZoneProfileKey) || "micro_motion";
+      const prof = savedProf || (cam.zone_profile as ZoneProfileKey) || "traffic";
       setActiveProfile(prof);
       if (prof) {
         await loadProfileConfig(cam, prof);
         const defaults = buildDefaultFeatures(prof);
         syncEngineDirectly(defaults, prof);
+      } else {
+        setFeatures({});
+        setConfigId(null);
       }
-      else { setFeatures({}); setConfigId(null); }
     }
     loadCamData();
     setActivePoints([]);
     setDrawMode("view");
     setDrawBinding(null);
     setEditingDrawingId(null);
-    // Key on the camera's stable ID, NOT the selectedCam object. The admin-studio
-    // realtime channel calls loadData() on every `cameras` row change, and the
-    // desktop reports camera health into cameras.status every 10s — so the
-    // selectedCam OBJECT reference churns every ~10s even though the SAME camera
-    // is still selected. Keying on the object re-ran this effect on that churn
-    // and called setActivePoints([]) mid-draw, so a polygon you were placing
-    // vanished before you could save it. The ID only changes on a real camera
-    // switch, which is the only time the draft should actually be discarded.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedCam?.id]);
 
   // Instant engine sync (0ms delay for live real-time preview)
@@ -584,8 +696,13 @@ export default function AdminStudio({
       }
     } catch {}
 
-    const sb = await getSupabase();
-    await sb.from("cameras").update({ zone_profile: profileKey }).eq("id", selectedCam.id);
+    try {
+      const sb = await getSupabase();
+      await sb.from("cameras").update({ zone_profile: profileKey }).eq("id", selectedCam.id);
+    } catch (e) {
+      console.warn("[AdminStudio] Profile update Supabase skipped:", e);
+    }
+
     setCameras((prev) => prev.map((c) => (c.id === selectedCam.id ? { ...c, zone_profile: profileKey } : c)));
     setSelectedCam((prev) => (prev ? { ...prev, zone_profile: profileKey } : prev));
     await loadProfileConfig(selectedCam, profileKey);
@@ -599,6 +716,7 @@ export default function AdminStudio({
     (next: ProfileFeatures) => {
       if (saveTimer.current) clearTimeout(saveTimer.current);
       setSavingConfig(true);
+      const effectiveOrgId = orgId || bundle?.organization?.id || "org-local";
       saveTimer.current = setTimeout(async () => {
         try {
           const sb = await getSupabase();
@@ -608,7 +726,7 @@ export default function AdminStudio({
             const { data } = await sb
               .from("zone_profile_configs")
               .upsert(
-                { org_id: orgId, camera_id: selectedCam.id, profile: activeProfile, features: next, is_draft: true },
+                { org_id: effectiveOrgId, camera_id: selectedCam.id, profile: activeProfile, features: next, is_draft: true },
                 { onConflict: "camera_id,profile" },
               )
               .select()
@@ -625,7 +743,7 @@ export default function AdminStudio({
         }
       }, 600);
     },
-    [configId, selectedCam, activeProfile, orgId, syncEngineDirectly],
+    [configId, selectedCam, activeProfile, orgId, bundle?.organization?.id, syncEngineDirectly],
   );
 
   function updateFeature(featureKey: string, updater: (v: ProfileFeatures[string]) => ProfileFeatures[string]) {
@@ -867,21 +985,43 @@ export default function AdminStudio({
    *  does not exist yet. */
   const duplicate = useCallback(async (id: string) => {
     const src = drawings.find((d) => d.id === id);
-    if (!src || !selectedCam || !orgId) return;
+    if (!src || !selectedCam) return;
+    const effectiveOrgId = orgId || bundle?.organization?.id || "org-local";
     const ghost = duplicateShape(src as EditableShape, "pending");
-    const sb = await getSupabase();
-    const { data, error } = await sb.from("analytics_drawings").insert([{
-      org_id: orgId, camera_id: selectedCam.id, name: ghost.name, type: src.type,
-      purpose: src.purpose, profile: src.profile, feature_key: src.feature_key,
-      points: ghost.points, properties: ghost.properties, is_draft: true,
-    }]).select();
-    if (error || !data?.[0]) { console.error("[AdminStudio] duplicate failed:", error); return; }
-    const created = data[0] as Drawing;
-    historyRef.current?.push([...drawings, created]);
-    setDrawings((prev) => [...prev, created]);
-    setEditingDrawingId(created.id);
+    let created: Drawing | null = null;
+    try {
+      const sb = await getSupabase();
+      const { data, error } = await sb.from("analytics_drawings").insert([{
+        org_id: effectiveOrgId, camera_id: selectedCam.id, name: ghost.name, type: src.type,
+        purpose: src.purpose, profile: src.profile, feature_key: src.feature_key,
+        points: ghost.points, properties: ghost.properties, is_draft: true,
+      }]).select();
+      if (!error && data?.[0]) {
+        created = data[0] as Drawing;
+      }
+    } catch {
+      /* offline fallback */
+    }
+    const finalCreated: Drawing = created || {
+      id: `draw_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+      org_id: effectiveOrgId,
+      camera_id: selectedCam.id,
+      name: ghost.name,
+      type: src.type,
+      purpose: src.purpose,
+      profile: src.profile,
+      feature_key: src.feature_key,
+      points: ghost.points,
+      properties: ghost.properties ?? {},
+      is_draft: true,
+    };
+    const nextList: Drawing[] = [...drawings, finalCreated];
+    historyRef.current?.push(nextList);
+    setDrawings(nextList);
+    setEditingDrawingId(finalCreated.id);
     setHistoryTick((t) => t + 1);
-  }, [drawings, selectedCam, orgId]);
+    syncEngineDirectly(features, activeProfile || undefined);
+  }, [drawings, selectedCam, orgId, bundle?.organization?.id, features, activeProfile, syncEngineDirectly]);
 
   // ---- editor: pointer interaction --------------------------------------
 
@@ -1022,14 +1162,15 @@ export default function AdminStudio({
   };
 
   const saveDrawing = async (pts: number[][]) => {
-    if (!selectedCam || !orgId) return;
-    const sb = await getSupabase();
+    if (!selectedCam) return;
+    const effectiveOrgId = orgId || bundle?.organization?.id || "org-local";
     const type: Drawing["type"] = drawMode === "line" ? "line" : drawMode === "rectangle" ? "rectangle" : drawMode === "circle" ? "circle" : "polygon";
     const binding = drawBinding ?? { featureKey: null, featureLabel: "Zone", purpose: "custom_zone" };
     const accentHex = activeProfile ? { sky: "#38bdf8", rose: "#fb7185", amber: "#fbbf24", violet: "#a78bfa" }[ZONE_PROFILES[activeProfile].accent] : "#10b981";
 
-    const newDrawing = {
-      org_id: orgId,
+    const newDrawing: Drawing = {
+      id: `draw_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+      org_id: effectiveOrgId,
       camera_id: selectedCam.id,
       name: `${binding.featureLabel} ${drawings.filter((d) => d.feature_key === binding.featureKey).length + 1}`,
       type,
@@ -1041,25 +1182,36 @@ export default function AdminStudio({
       is_draft: true,
     };
 
+    let savedDrawing = newDrawing;
     try {
-      const { data, error } = await sb.from("analytics_drawings").insert([newDrawing]).select();
-      if (error) throw error;
-      if (data) {
-        // Record the creation so Ctrl+Z removes a shape just drawn. Pushed
-        // directly rather than via commit(): the row already exists (the id is
-        // DB-generated), so there is nothing further to persist and re-running
-        // the diff would just re-write it.
-        const created = data[0] as Drawing;
-        setDrawings((prev) => {
-          const nextSet = [...prev, created];
-          historyRef.current?.push(nextSet);
-          return nextSet;
-        });
-        setHistoryTick((t) => t + 1);
+      const sb = await getSupabase();
+      const { data, error } = await sb.from("analytics_drawings").insert([{
+        org_id: effectiveOrgId,
+        camera_id: selectedCam.id,
+        name: newDrawing.name,
+        type: newDrawing.type,
+        purpose: newDrawing.purpose,
+        profile: newDrawing.profile,
+        feature_key: newDrawing.feature_key,
+        points: newDrawing.points,
+        properties: newDrawing.properties,
+        is_draft: true,
+      }]).select();
+      if (!error && data?.[0]) {
+        savedDrawing = data[0] as Drawing;
       }
     } catch (e) {
-      console.error("Failed to insert drawing:", e);
+      console.warn("[AdminStudio] Supabase drawing insert skipped/offline:", e);
     }
+
+    setDrawings((prev) => {
+      const nextSet = [...prev, savedDrawing];
+      historyRef.current?.push(nextSet);
+      return nextSet;
+    });
+    setHistoryTick((t) => t + 1);
+    syncEngineDirectly(features, activeProfile || undefined);
+
     setActivePoints([]);
     setDrawMode("view");
     setDrawBinding(null);
@@ -1073,10 +1225,11 @@ export default function AdminStudio({
   // ---- alert rules -----------------------------------------
   const handleAddRule = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedCam || !orgId || !ruleName.trim() || !ruleSourceId) return;
-    const sb = await getSupabase();
-    const newRule = {
-      org_id: orgId,
+    if (!selectedCam || !ruleName.trim() || !ruleSourceId) return;
+    const effectiveOrgId = orgId || bundle?.organization?.id || "org-local";
+    const newRule: Rule = {
+      id: `rule_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+      org_id: effectiveOrgId,
       camera_id: selectedCam.id,
       name: ruleName,
       trigger_type: ruleTrigger,
@@ -1086,37 +1239,66 @@ export default function AdminStudio({
       is_draft: true,
       is_enabled: true,
     };
+
     try {
-      const { data, error } = await sb.from("rule_engine_rules").insert([newRule]).select();
-      if (error) throw error;
-      if (data) { setRules((prev) => [...prev, data[0] as Rule]); setRuleName(""); setRuleSourceId(""); }
-    } catch (e) { console.error(e); }
+      const sb = await getSupabase();
+      const { data, error } = await sb.from("rule_engine_rules").insert([{
+        org_id: effectiveOrgId,
+        camera_id: selectedCam.id,
+        name: ruleName,
+        trigger_type: ruleTrigger,
+        trigger_source_id: ruleSourceId,
+        conditions: { profile: activeProfile },
+        actions: [ruleAction],
+        is_draft: true,
+        is_enabled: true,
+      }]).select();
+      if (!error && data?.[0]) {
+        newRule.id = data[0].id;
+      }
+    } catch (e) {
+      console.warn("[AdminStudio] Supabase rule save fallback:", e);
+    }
+    setRules((prev) => [...prev, newRule]);
+    setRuleName("");
+    setRuleSourceId("");
+    syncEngineDirectly(features, activeProfile || undefined);
   };
 
   const deleteRule = async (id: string) => {
-    const sb = await getSupabase();
     try {
+      const sb = await getSupabase();
       await sb.from("rule_engine_rules").update({ deleted_at: new Date().toISOString() }).eq("id", id);
-      setRules((prev) => prev.filter((r) => r.id !== id));
-    } catch (e) { console.error(e); }
+    } catch (e) {
+      console.warn("[AdminStudio] deleteRule Supabase skipped:", e);
+    }
+    setRules((prev) => prev.filter((r) => r.id !== id));
+    syncEngineDirectly(features, activeProfile || undefined);
   };
 
   // ---- publish / rollback ----------------------------------
   const publishConfig = async () => {
-    if (!orgId) { alert("Publishing failed: your organization is still loading. Retry in a moment."); return; }
+    const effectiveOrgId = orgId || bundle?.organization?.id || "org-local";
     setPublishing(true);
     try {
-      const sb = await getSupabase();
       if (selectedCam && activeProfile) {
-        await sb.from("cameras").update({ zone_profile: activeProfile }).eq("id", selectedCam.id);
         syncEngineDirectly(features, activeProfile);
+        try {
+          const sb = await getSupabase();
+          await sb.from("cameras").update({ zone_profile: activeProfile }).eq("id", selectedCam.id);
+        } catch { /* offline safe */ }
       }
-      const { error } = await sb.functions.invoke("publish-config", {
-        body: { org_id: orgId, comment: publishComment || "Configuration update" },
-      });
-      if (error) console.warn("Cloud publish sync warning:", error);
-      const { data: vers } = await sb.from("config_versions").select("*").order("version", { ascending: false });
-      if (vers) setVersions(vers);
+      try {
+        const sb = await getSupabase();
+        const { error } = await sb.functions.invoke("publish-config", {
+          body: { org_id: effectiveOrgId, comment: publishComment || "Configuration update" },
+        });
+        if (error) console.warn("Cloud publish sync warning:", error);
+        const { data: vers } = await sb.from("config_versions").select("*").order("version", { ascending: false });
+        if (vers) setVersions(vers);
+      } catch (cloudErr) {
+        console.warn("[AdminStudio] Cloud publish skipped (offline):", cloudErr);
+      }
       setDrawings((prev) => prev.map((d) => ({ ...d, is_draft: false })));
       setRules((prev) => prev.map((r) => ({ ...r, is_draft: false })));
       setPublishComment("");
@@ -1128,11 +1310,11 @@ export default function AdminStudio({
 
   const rollbackConfig = async (version: number) => {
     if (!confirm(`Roll back to version ${version}? This overwrites current drafts.`)) return;
-    if (!orgId) { alert("Rollback failed: your organization is still loading. Retry in a moment."); return; }
+    const effectiveOrgId = orgId || bundle?.organization?.id || "org-local";
     setPublishing(true);
     try {
       const sb = await getSupabase();
-      const { error } = await sb.functions.invoke("rollback-config", { body: { org_id: orgId, version } });
+      const { error } = await sb.functions.invoke("rollback-config", { body: { org_id: effectiveOrgId, version } });
       if (error) throw error;
       const { data: vers } = await sb.from("config_versions").select("*").order("version", { ascending: false });
       if (vers) setVersions(vers);
@@ -1649,6 +1831,14 @@ export default function AdminStudio({
               </button>
             )}
           </div>
+          <div className="px-3 py-2.5 border-b border-line bg-surface-2/20">
+            <button
+              onClick={onDeactivated}
+              className="flex w-full items-center justify-center gap-2 rounded-md bg-surface-2 px-3 py-1.5 text-xs font-semibold text-zinc-200 border border-line hover:bg-surface-3 hover:text-white transition shadow-sm"
+            >
+              <ArrowLeft size={14} /> Back to Workspace
+            </button>
+          </div>
           <div className="px-3 py-3">
             <div className="flex justify-between items-center text-[10px] uppercase font-bold tracking-wider text-zinc-500 mb-2">
               <span>Cameras</span>
@@ -1806,15 +1996,9 @@ export default function AdminStudio({
         {/* Viewport */}
         <div className="flex-1 relative bg-surface-0 flex items-center justify-center p-4">
           {selectedCam ? (
-            !activeProfile ? (
-              <div className="text-center max-w-sm">
-                <Boxes size={40} className="mx-auto text-zinc-600 mb-3" />
-                <div className="text-sm font-semibold text-zinc-300 mb-1">Choose an AI Mode</div>
-                <p className="text-xs text-zinc-500">Pick Traffic, Security, Factory or Custom above to load its AI features for <b>{selectedCam.name}</b>. This is saved to the camera and applied automatically.</p>
-              </div>
-            ) : (
-              <div className="relative aspect-video max-h-full max-w-full rounded border border-line overflow-hidden shadow-2xl bg-zinc-950">
-                {engineOnline ? (
+            <div className="relative aspect-video max-h-full max-w-full w-full rounded-xl border border-line overflow-hidden shadow-2xl bg-zinc-950 flex items-center justify-center">
+              {engineOnline !== false ? (
+                <>
                   <img
                     key={selectedCam.id}
                     ref={videoRef}
@@ -1832,30 +2016,41 @@ export default function AdminStudio({
                             target.src = `${base}?_t=${Date.now()}`;
                           } catch { /* ignore */ }
                         }
-                      }, 1000);
+                      }, 1200);
                     }}
                   />
-                ) : (
-                  <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-zinc-900/90 px-6 text-center text-zinc-500">
-                    <Video size={36} />
-                    <span className="text-xs">Local AI engine offline — drawing still works on the grid</span>
-                  </div>
-                )}
-                <canvas
-                  ref={canvasRef}
-                  onClick={handleCanvasClick}
-                  onMouseDown={handlePointerDown}
-                  onMouseMove={handlePointerMove}
-                  onMouseUp={handlePointerUp}
-                  // Releasing outside the canvas must still end the drag, or the
-                  // shape keeps following the cursor after the button is up.
-                  onMouseLeave={handlePointerUp}
-                  className={clsx("absolute inset-0 w-full h-full z-10",
-                    drawMode !== "view" ? "cursor-crosshair" : editingDrawingId ? "cursor-move" : "cursor-default")} />
-              </div>
-            )
+                  {streamFailed && (
+                    <div className="absolute top-3 left-3 z-20 flex items-center gap-2 px-3 py-1.5 rounded-lg bg-black/80 backdrop-blur-md text-xs font-mono text-amber-400 border border-amber-400/30 shadow-lg">
+                      <span className="h-2 w-2 rounded-full bg-amber-400 animate-ping" />
+                      Connecting Live Stream...
+                    </div>
+                  )}
+                </>
+              ) : (
+                <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-zinc-900/90 px-6 text-center text-zinc-500">
+                  <Video size={36} />
+                  <span className="text-xs">Local AI engine offline — drawing still works on the canvas</span>
+                </div>
+              )}
+              <canvas
+                ref={canvasRef}
+                onClick={handleCanvasClick}
+                onMouseDown={handlePointerDown}
+                onMouseMove={handlePointerMove}
+                onMouseUp={handlePointerUp}
+                onMouseLeave={handlePointerUp}
+                className={clsx("absolute inset-0 w-full h-full z-10",
+                  drawMode !== "view" ? "cursor-crosshair" : editingDrawingId ? "cursor-move" : "cursor-default")}
+              />
+            </div>
           ) : (
-            <div className="text-xs text-zinc-500">Select a camera to configure.</div>
+            <div className="flex flex-col items-center justify-center p-8 text-center space-y-3 bg-surface-1 rounded-xl border border-line max-w-sm shadow-lg">
+              <Video size={32} className="text-zinc-500 mx-auto" />
+              <div className="text-sm font-semibold text-zinc-200">No Camera Selected</div>
+              <p className="text-xs text-zinc-400">
+                Select a camera from the left sidebar to start drawing zones and configuring AI analytics.
+              </p>
+            </div>
           )}
         </div>
       </main>

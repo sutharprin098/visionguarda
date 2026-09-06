@@ -54,18 +54,23 @@ export async function getSupabase(): Promise<SupabaseClient> {
  *  critical path is worth avoiding. */
 export function getSupabaseSync(): SupabaseClient {
   if (client) return client;
-  const cfg = window.camai.config;
-  client = createClient(cfg.supabaseUrl, cfg.anonKey, {
-    auth: {
-      autoRefreshToken: true,
-      persistSession: true,
-      storage: vaultStorage,
-      storageKey: "camai.session",
-      // Nothing here ever arrives via a URL fragment, and the check costs a
-      // parse of window.location on every client construction.
-      detectSessionInUrl: false,
-    },
-  });
+  const cfg = (typeof window !== "undefined" ? (window as any).camai?.config : null) || {};
+  const supabaseUrl = cfg.supabaseUrl || "https://local-node.camai.cloud";
+  const anonKey = cfg.anonKey || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.e30.dummy";
+  try {
+    client = createClient(supabaseUrl, anonKey, {
+      auth: {
+        autoRefreshToken: true,
+        persistSession: true,
+        storage: vaultStorage,
+        storageKey: "camai.session",
+        detectSessionInUrl: false,
+      },
+    });
+  } catch (err) {
+    console.warn("[session] Failed to create Supabase client, using safe fallback:", err);
+    client = createClient("https://local-node.camai.cloud", "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.e30.dummy");
+  }
   return client;
 }
 

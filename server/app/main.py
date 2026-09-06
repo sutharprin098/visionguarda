@@ -9,9 +9,9 @@ import numpy as np
 from collections import deque
 from dataclasses import asdict
 from pathlib import PurePosixPath
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Depends, Header, UploadFile, File
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect, HTTPException, Depends, Header, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse, FileResponse
+from fastapi.responses import StreamingResponse, FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from typing import List, Dict, Optional
@@ -202,8 +202,7 @@ async def on_startup():
 
     async def _start_cameras_bg():
         try:
-            print("[FastAPI] 2-second initialization buffer: Verifying operating mode (local vs cloud)...", flush=True)
-            await asyncio.sleep(2.0)
+            print("[FastAPI] Initializing operating mode and camera pipelines immediately...", flush=True)
             await runtime_governor.initialize(manager)
             print(f"[FastAPI] Runtime Governor ready. Mode: '{config.INFERENCE_MODE}', State: '{runtime_governor.state}'", flush=True)
         except Exception as e:
@@ -639,6 +638,16 @@ def get_cloud_mode():
             res["cloud_cameras_total"] = 0
 
     return res
+
+
+@app.get("/api/cameras/{camera_id}/telemetry")
+def get_camera_telemetry(camera_id: str):
+    thread = manager.camera_threads.get(camera_id)
+    if not thread and manager.camera_threads:
+        thread = next((t for t in manager.camera_threads.values() if t.running), list(manager.camera_threads.values())[0])
+    if not thread:
+        return JSONResponse({"status": "error", "message": f"Camera '{camera_id}' not found or inactive"}, status_code=404)
+    return getattr(thread, "latest_telemetry", {}) or {}
 
 
 @app.get("/api/cameras/{camera_id}/telemetry-debug")
@@ -1244,7 +1253,7 @@ def _generate_mjpeg_standby_frame(camera_name: str, frame_count: int) -> bytes:
 @app.get("/api/cameras/{camera_id}/stream")
 @app.get("/stream/{camera_id}")
 @app.get("/engine-proxy/stream/{camera_id}")
-async def get_mjpeg_stream(camera_id: str):
+async def get_mjpeg_stream(camera_id: str, request: Request = None):
     def resolve_active_thread(cid: str):
         t = manager.camera_threads.get(cid)
         if t:
@@ -1266,6 +1275,8 @@ async def get_mjpeg_stream(camera_id: str):
         last_seq = -1
         try:
             while True:
+                if request is not None and await request.is_disconnected():
+                    break
                 try:
                     active_thread = resolve_active_thread(camera_id)
                     if active_thread and active_thread not in attached_threads:
@@ -1282,8 +1293,12 @@ async def get_mjpeg_stream(camera_id: str):
                         jpeg_bytes = getattr(active_thread, "current_jpeg_bytes", None)
                         if seq != last_seq and jpeg_bytes is not None and len(jpeg_bytes) > 0:
                             last_seq = seq
-                            yield (b'--frame\r\n'
-                                   b'Content-Type: image/jpeg\r\n\r\n' + jpeg_bytes + b'\r\n')
+                            yield (
+                                b'--frame\r\n'
+                                b'Content-Type: image/jpeg\r\n'
+                                b'Content-Length: ' + str(len(jpeg_bytes)).encode('ascii') + b'\r\n\r\n'
+                                + jpeg_bytes + b'\r\n'
+                            )
                             await asyncio.sleep(0.001)
                         else:
                             await asyncio.sleep(0.005)
@@ -1291,8 +1306,12 @@ async def get_mjpeg_stream(camera_id: str):
                         frame_counter += 1
                         fallback = _generate_mjpeg_standby_frame(cam_name, frame_counter)
                         if fallback:
-                            yield (b'--frame\r\n'
-                                   b'Content-Type: image/jpeg\r\n\r\n' + fallback + b'\r\n')
+                            yield (
+                                b'--frame\r\n'
+                                b'Content-Type: image/jpeg\r\n'
+                                b'Content-Length: ' + str(len(fallback)).encode('ascii') + b'\r\n\r\n'
+                                + fallback + b'\r\n'
+                            )
                         await asyncio.sleep(0.04)
                 except (asyncio.CancelledError, GeneratorExit):
                     break
@@ -1300,8 +1319,12 @@ async def get_mjpeg_stream(camera_id: str):
                     frame_counter += 1
                     fallback = _generate_mjpeg_standby_frame(cam_name, frame_counter)
                     if fallback:
-                        yield (b'--frame\r\n'
-                               b'Content-Type: image/jpeg\r\n\r\n' + fallback + b'\r\n')
+                        yield (
+                            b'--frame\r\n'
+                            b'Content-Type: image/jpeg\r\n'
+                            b'Content-Length: ' + str(len(fallback)).encode('ascii') + b'\r\n\r\n'
+                            + fallback + b'\r\n'
+                        )
                     await asyncio.sleep(0.05)
         finally:
             for t in attached_threads:
@@ -1320,6 +1343,35 @@ async def get_mjpeg_stream(camera_id: str):
             "Cache-Control": "no-cache, no-store, must-revalidate",
             "Pragma": "no-cache",
             "Expires": "0"
+        }
+    )
+
+@app.get("/api/cameras/{camera_id}/snapshot")
+@app.get("/api/cameras/{camera_id}/frame")
+async def get_camera_snapshot(camera_id: str):
+    def resolve_active_thread(cid: str):
+        t = manager.camera_threads.get(cid)
+        if t:
+            return t
+        for t_id, t_obj in manager.camera_threads.items():
+            cam_info = getattr(t_obj, "config", {}) or {}
+            if isinstance(cam_info, dict) and (cam_info.get("name") == cid or cam_info.get("id") == cid):
+                return t_obj
+        if manager.camera_threads:
+            return next((t for t in manager.camera_threads.values() if getattr(t, "running", False)), list(manager.camera_threads.values())[0])
+        return None
+
+    thread = resolve_active_thread(camera_id)
+    jpeg_bytes = getattr(thread, "current_jpeg_bytes", None) if thread else None
+    if not jpeg_bytes:
+        cam_name = getattr(thread, "config", {}).get("name", camera_id) if thread and isinstance(getattr(thread, "config", None), dict) else camera_id
+        jpeg_bytes = _generate_mjpeg_standby_frame(cam_name, 1)
+    return Response(
+        content=jpeg_bytes,
+        media_type="image/jpeg",
+        headers={
+            "Cache-Control": "no-cache, no-store, must-revalidate",
+            "Access-Control-Allow-Origin": "*",
         }
     )
 

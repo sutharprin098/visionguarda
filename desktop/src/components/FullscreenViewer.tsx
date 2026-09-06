@@ -231,6 +231,15 @@ export default function FullscreenViewer({
     return () => window.removeEventListener("keydown", onKey);
   }, [onExit, step]);
 
+  // Explicitly free the Chromium MJPEG HTTP connection on unmount
+  useEffect(() => {
+    return () => {
+      if (imgRef.current) {
+        imgRef.current.src = "";
+      }
+    };
+  }, []);
+
   // Auto-hide the controls so a wall display isn't permanently branded with a
   // toolbar; any mouse movement brings them back.
   useEffect(() => {

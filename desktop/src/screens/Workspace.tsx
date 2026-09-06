@@ -1,6 +1,7 @@
 import { useEffect, useState, useRef, useCallback, memo } from "react";
-import { Video, Bell, Settings2, LogOut, Wifi, WifiOff, Sliders, Activity, AlertTriangle, RotateCw, Maximize2, Minimize2, Lock, Send, Check, Loader2, MessageCircle, ChevronDown, ChevronRight, Copy, Map, Cloud, Cpu, Globe } from "lucide-react";
-import FloorPlanView from "../components/FloorPlanView";
+import { Video, Bell, Settings2, LogOut, Wifi, WifiOff, Sliders, Activity, AlertTriangle, RotateCw, Maximize2, Minimize2, Lock, Send, Check, Loader2, MessageCircle, ChevronDown, ChevronRight, Copy, Film, Cloud, Cpu, Globe, Layers, Box } from "lucide-react";
+import RecordingsPlaybackView from "../components/RecordingsPlaybackView";
+import ErrorBoundary from "../components/ErrorBoundary";
 import clsx from "clsx";
 import { startRealtimeSync, DeactivatedError, SyncBundle } from "../lib/sync";
 import { syncAiModelToLocalEngine, syncAiConfidenceToLocalEngine, syncAiInferenceModeToLocalEngine, mjpegStreamUrl, resetLocalEngineState } from "../lib/localEngine";
@@ -66,7 +67,7 @@ export default function Workspace({
    *  Alerts tab. A nonce for the same reason as openLiveCam. */
   openAlertsSignal?: { nonce: number } | null;
 }) {
-  const [tab, setTab] = useState<"cameras" | "maps" | "alerts" | "settings" | "engine">("cameras");
+  const [tab, setTab] = useState<"cameras" | "recordings" | "alerts" | "settings" | "engine">("cameras");
   // Which camera is showing full-window, or null. Lifted to Workspace (not the
   // tile) because the viewer has to cover the sidebar and the tab bar, and
   // because switching camera while fullscreen has to keep the SAME viewer
@@ -336,9 +337,10 @@ export default function Workspace({
   const allowedTabs = bundle
     ? ([
         (hasPermission("cameras.manage") || hasPermission("cameras.assign")) && "cameras",
+        "recordings",
         hasPermission("alerts.view") && "alerts",
         "engine",
-      ].filter(Boolean) as ("cameras" | "maps" | "alerts" | "settings" | "engine")[])
+      ].filter(Boolean) as ("cameras" | "recordings" | "alerts" | "settings" | "engine")[])
     : [];
 
   // Auto-switch to first available authorized tab if active tab is unauthorized
@@ -372,6 +374,7 @@ export default function Workspace({
   // Filter navigation items based on active permissions
   const navItems = ([
     { id: "cameras", label: `Cameras (${bundle.cameras.length})`, icon: Video },
+    { id: "recordings", label: "Playback & NVR", icon: Film },
     { id: "alerts", label: `Alerts (${bundle.notifications.length})`, icon: Bell },
     { id: "engine", label: "Engine Health", icon: Activity },
   ] as const).filter((item) => allowedTabs.includes(item.id));
@@ -504,6 +507,11 @@ export default function Workspace({
             orgInferenceMode={orgInferenceMode}
           />
         </div>
+        {tab === "recordings" && (
+          <ErrorBoundary fallbackTitle="NVR Playback & Recording Studio">
+            <RecordingsPlaybackView cameras={bundle.cameras} />
+          </ErrorBoundary>
+        )}
         {tab === "alerts" && (
           <AlertsTab orgId={bundle.organization?.id ?? null} hasPermission={hasPermission} active={true} />
         )}
@@ -1009,6 +1017,22 @@ const CameraTile = memo(function CameraTile({ camera: c, site, engineOnline, onF
     else captureRef.current = imgCors ? imgRef.current : null;
   });
 
+  // Explicitly free the Chromium MJPEG HTTP connection on unmount or when paused
+  // to avoid hitting Chromium's 6 concurrent connections per host limit.
+  useEffect(() => {
+    return () => {
+      if (imgRef.current) {
+        imgRef.current.src = "";
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    if (paused && imgRef.current) {
+      imgRef.current.src = "";
+    }
+  }, [paused]);
+
   const ingestAlert = useAlertIngest();
 
   useEffect(() => {
@@ -1198,28 +1222,22 @@ const CameraTile = memo(function CameraTile({ camera: c, site, engineOnline, onF
           />
         ) : showStream ? (
           <img
-            key={c.id}
+            key={`${c.id}_${streamAttempt}_${imgCors ? "cors" : "plain"}`}
             ref={imgRef}
             crossOrigin={imgCors ? "anonymous" : undefined}
             src={mjpegStreamUrl(c.id)}
             alt={c.name}
             className={mediaClass}
             onLoad={() => { corsProvenRef.current = imgCors; }}
-            onError={(e) => {
+            onError={() => {
               if (imgCors && !corsProvenRef.current) {
-                console.warn(`[Alerts] stream for ${c.id} refused CORS — snapshots disabled for this tile`);
+                console.warn(`[Alerts] stream for ${c.id} refused CORS — falling back to plain stream`);
                 setImgCors(false);
+                return;
               }
-              const target = e.currentTarget;
               setTimeout(() => {
-                if (target && target.src) {
-                  try {
-                    const url = new URL(target.src);
-                    url.searchParams.set("_t", String(Date.now()));
-                    target.src = url.toString();
-                  } catch { /* ignore */ }
-                }
-              }, 1500);
+                setStreamAttempt((a) => a + 1);
+              }, 2000);
             }}
           />
         ) : isScreenShareCam ? (

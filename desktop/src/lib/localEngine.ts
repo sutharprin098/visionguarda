@@ -845,3 +845,46 @@ export async function syncAiConfidenceToLocalEngine(dbConfidence: unknown): Prom
     // engine went away mid-sync — next tick retries
   }
 }
+
+export interface RecordingItem {
+  id: string;
+  camera_id: string;
+  camera_name?: string | null;
+  start_time: string;
+  end_time?: string | null;
+  recording_type: "continuous" | "event";
+  file_path: string;
+}
+
+/**
+ * Toggle continuous recording on or off for a specific camera on the local engine.
+ */
+export async function toggleCameraRecording(cameraId: string, enabled: boolean): Promise<boolean> {
+  try {
+    const res = await fetch(`${ENGINE_BASE}/api/cameras/${cameraId}/recording`, {
+      method: "POST",
+      headers: await controlHeaders(),
+      body: JSON.stringify({ enabled }),
+      signal: AbortSignal.timeout(4000),
+    });
+    return res.ok;
+  } catch (err) {
+    console.error(`[localEngine] Failed to toggle recording for ${cameraId}:`, err);
+    return false;
+  }
+}
+
+/**
+ * Fetch all historical recordings stored in SQLite and on disk.
+ */
+export async function fetchAllRecordings(): Promise<RecordingItem[]> {
+  try {
+    const res = await fetch(`${ENGINE_BASE}/api/recordings`, { signal: AbortSignal.timeout(5000) });
+    if (!res.ok) return [];
+    return await res.json();
+  } catch (err) {
+    console.error("[localEngine] Failed to fetch recordings:", err);
+    return [];
+  }
+}
+

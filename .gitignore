@@ -73,5 +73,6 @@ overview_site/
 mobile/release/
 mobile/dist/
 mobile/dist-electron/
-
-
+*.sqlite
+*.db
+scratch/

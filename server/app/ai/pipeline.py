@@ -943,7 +943,7 @@ class ByteTracker:
             })
         return out
 
-COAST_RENDER_SECONDS = 0.45
+COAST_RENDER_SECONDS = 2.0
 
 
 def resolve_emitted_detections(tracker, tracks_raw, detections, masks,
@@ -2655,10 +2655,14 @@ class PipelineCoordinator:
             if self.backend is not None:
                 self._ai_loop_iteration_local(data)
             else:
-                # Forward frame with empty detections — tracking coasts via Kalman
+                # Forward frame with recent detections so tracking coasts smoothly across jitter
+                with self._overlay_lock:
+                    cached_dets = list(getattr(self, "_latest_raw_dets", []))
+                age = time.time() - getattr(self, "_last_infer_ts", 0.0)
+                coasted_dets = cached_dets if (cached_dets and age < 2.0) else []
                 self._ai_slot.put({
                     **data,
-                    "detections":     [],
+                    "detections":     coasted_dets,
                     "masks_polygons": [],
                     "motion":         False,
                     "micro_motion_stats": self._motion_stats,
@@ -2669,9 +2673,23 @@ class PipelineCoordinator:
                 })
 
         except Exception as exc:
-            # Unexpected error (parsing, encoding) — log and continue
             self._stage_errors["ai"] += 1
             print(f"[AI-{self.camera_id}] Cloud inference unexpected error: {exc}", flush=True)
+            with self._overlay_lock:
+                cached_dets = list(getattr(self, "_latest_raw_dets", []))
+            age = time.time() - getattr(self, "_last_infer_ts", 0.0)
+            coasted_dets = cached_dets if (cached_dets and age < 2.0) else []
+            self._ai_slot.put({
+                **data,
+                "detections":     coasted_dets,
+                "masks_polygons": [],
+                "motion":         False,
+                "micro_motion_stats": self._motion_stats,
+                "orig_h":         orig_h,
+                "orig_w":         orig_w,
+                "conf_thresh":    0.3,
+                "t_pre": 0.0, "t_inf": 0.0, "t_post": 0.0, "ai_lat": 0.0,
+            })
 
     # ------------------------------------------------------------------
     # Module 3-LOCAL: Original YOLO local inference path (unchanged)
@@ -2813,7 +2831,7 @@ class PipelineCoordinator:
                 masks_polygons = tile_res.masks
                 t_pre, t_post  = tile_res.t_pre, tile_res.t_post
                 t_inf          = tile_res.t_inf
-                print(f"[RAW_LOCAL_DETS] Camera={self.camera_id} Count={len(detections)} Dets={detections}", flush=True)
+
 
                 if roi and detections:
                     rx1, ry1, _, _ = roi
@@ -2824,8 +2842,7 @@ class PipelineCoordinator:
                             d["bbox"]["y1"] += ry1
                             d["bbox"]["y2"] += ry1
 
-                if detections:
-                    print(f"[LOCAL_YOLO_RAW] Camera={self.camera_id} raw_dets={len(detections)} dets={detections[:3]}", flush=True)
+
                 # Adaptive-resolution tuning below must see the cost of ONE
                 # full-frame pass, not the cycle total: fed the total it would
                 # read every tile pass as "inference got slower" and ratchet

@@ -42,8 +42,11 @@ UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
 MODELS_DIR.mkdir(parents=True, exist_ok=True)
 
 # YOLO Settings
-YOLO_MODEL = "yolox_tiny"
-CONFIDENCE_THRESHOLD = 0.3
+YOLO_MODEL = os.getenv("CAMAI_YOLO_MODEL", "yolox_tiny").strip()
+try:
+    CONFIDENCE_THRESHOLD = float(os.getenv("CAMAI_CONFIDENCE_THRESHOLD", "0.25"))
+except ValueError:
+    CONFIDENCE_THRESHOLD = 0.25
 IOU_THRESHOLD = 0.5
 INFERENCE_SIZE = 320  # Fast inference size
 

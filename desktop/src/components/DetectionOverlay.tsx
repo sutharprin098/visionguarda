@@ -138,6 +138,7 @@ function labelFor(det: TelemetryDetection): string {
 export default function DetectionOverlay({ detections, mediaRef, fit = "cover" }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const rectRef = useRef<{ width: number; height: number } | null>(null);
+  const activeTracksRef = useRef<Map<string, { det: TelemetryDetection; lastSeen: number }>>(new Map());
 
   const draw = useCallback(() => {
     const canvas = canvasRef.current;
@@ -178,7 +179,28 @@ export default function DetectionOverlay({ detections, mediaRef, fit = "cover" }
     const ox = (rect.width - dw) / 2;
     const oy = (rect.height - dh) / 2;
 
+    const now = Date.now();
+    const trackMap = activeTracksRef.current;
+
+    // Update track cache with current detections
     for (const det of detections) {
+      if (det.confidence != null && det.confidence < 0.15) continue;
+      const key = det.track_id != null
+        ? `trk_${det.track_id}`
+        : `${det.class}_${det.bbox.x1.toFixed(2)}_${det.bbox.y1.toFixed(2)}`;
+      trackMap.set(key, { det, lastSeen: now });
+    }
+
+    // Clean up tracks not seen for over 1.2s to bridge cloud inference jitter
+    for (const [key, item] of trackMap.entries()) {
+      if (now - item.lastSeen > 1200) {
+        trackMap.delete(key);
+      }
+    }
+
+    const renderDets = Array.from(trackMap.values()).map((v) => v.det);
+
+    for (const det of renderDets) {
       if (det.confidence != null && det.confidence < 0.15) continue;
       const x1 = ox + det.bbox.x1 * dw;
       const y1 = oy + det.bbox.y1 * dh;
