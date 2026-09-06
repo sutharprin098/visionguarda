@@ -64,45 +64,41 @@ if (Test-Path $exe) {
     # fetched/exported on demand via export_models.py. No .pt is copied: the
     # engine never loads PyTorch checkpoints, so shipping one would bloat the
     # installer with a file nothing reads.
-    Write-Host "==> Copying default model files into dist\camai-engine..."
-    $modelBase = "yolox_tiny"
-    foreach ($item in @("$modelBase.onnx", "${modelBase}_openvino_model")) {
-        $src = Join-Path $PSScriptRoot $item
-        if (-not (Test-Path $src)) {
-            Write-Error "Missing model artifact '$item'. Run: python export_models.py $modelBase"
-            exit 1
+    Write-Host "==> Copying all AI models into dist\camai-engine..."
+    # 1. YOLOX models (Tiny, S, M) + OpenVINO IR models
+    foreach ($modelBase in @("yolox_tiny", "yolox_s", "yolox_m")) {
+        foreach ($item in @("$modelBase.onnx", "${modelBase}_openvino_model")) {
+            $src = Join-Path $PSScriptRoot $item
+            if (Test-Path $src) {
+                Copy-Item -Recurse -Force $src (Join-Path $PSScriptRoot "dist\camai-engine\")
+                Write-Host "==> Bundled $item"
+            }
         }
-        Copy-Item -Recurse -Force $src (Join-Path $PSScriptRoot "dist\camai-engine\")
     }
 
-    # YuNet face detector (MIT — see fetch_face_models.py). Only ~230 KB, and
-    # nothing loads it unless a camera enables face_detection, so it costs the
-    # installer almost nothing and costs runtime exactly zero when unused.
-    # Not fatal if absent: the engine logs why face detection can't run rather
-    # than failing the whole build.
-    $faceModel = Join-Path $PSScriptRoot "models_face\face_detection_yunet_2023mar.onnx"
-    if (Test-Path $faceModel) {
-        Copy-Item -Force $faceModel (Join-Path $PSScriptRoot "dist\camai-engine\")
-        Write-Host "==> Bundled YuNet face detector (MIT)"
-    } else {
-        Write-Warning "face_detection_yunet_2023mar.onnx missing - face detection will be unavailable in this build. Run: python fetch_face_models.py"
+    # 2. Face, SFace, LPD, CRNN models (models_face directory)
+    $faceDir = Join-Path $PSScriptRoot "models_face"
+    if (Test-Path $faceDir) {
+        $destFaceDir = Join-Path $PSScriptRoot "dist\camai-engine\models_face"
+        if (-not (Test-Path $destFaceDir)) { New-Item -ItemType Directory -Path $destFaceDir -Force | Out-Null }
+        Copy-Item -Recurse -Force "$faceDir\*" $destFaceDir
+        # Also copy directly next to exe for legacy candidate paths
+        Copy-Item -Recurse -Force "$faceDir\*.onnx" (Join-Path $PSScriptRoot "dist\camai-engine\")
+        Write-Host "==> Bundled models_face (YuNet, SFace, LPD, CRNN)"
     }
 
-    # Helmet (RT-DETR/YOLOv8) + ANPR (plate detector + CRNN OCR) models. Whole
-    # folders so the model, its classes.txt/charset.txt sidecars, and any
-    # OpenVINO IR travel together. app/ai/helmet.py + plate.py resolve them from
-    # a 'helmet'/'plate' folder next to the exe (see their _candidate_dirs). Not
-    # fatal if absent: those features log why they can't run and the rest of the
-    # engine ships fine. Install them first with prepare_helmet_model.py /
-    # prepare_plate_model.py so this build carries them.
-    foreach ($feat in @("helmet", "plate")) {
-        $src = Join-Path $PSScriptRoot "models\$feat"
-        if (Test-Path $src) {
-            Copy-Item -Recurse -Force $src (Join-Path $PSScriptRoot "dist\camai-engine\")
-            Write-Host "==> Bundled $feat models"
-        } else {
-            Write-Warning "models\$feat missing - $feat detection will be unavailable in this build. Install it with prepare_${feat}_model.py"
+    # 3. Helmet, Plate, VisDrone models (models directory)
+    $modelsDir = Join-Path $PSScriptRoot "models"
+    if (Test-Path $modelsDir) {
+        $destModelsDir = Join-Path $PSScriptRoot "dist\camai-engine\models"
+        if (-not (Test-Path $destModelsDir)) { New-Item -ItemType Directory -Path $destModelsDir -Force | Out-Null }
+        Copy-Item -Recurse -Force "$modelsDir\*" $destModelsDir
+        Copy-Item -Recurse -Force "$modelsDir\helmet" (Join-Path $PSScriptRoot "dist\camai-engine\")
+        Copy-Item -Recurse -Force "$modelsDir\plate" (Join-Path $PSScriptRoot "dist\camai-engine\")
+        if (Test-Path "$modelsDir\yolov8_visdrone.onnx") {
+            Copy-Item -Force "$modelsDir\yolov8_visdrone.onnx" (Join-Path $PSScriptRoot "dist\camai-engine\")
         }
+        Write-Host "==> Bundled models (Helmet, Plate OCR, VisDrone)"
     }
 
     # desktop/package.json's extraResources ships engine/camai-engine.zip, NOT

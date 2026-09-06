@@ -14,7 +14,12 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { getSupabase } from "./session";
 
-const ENGINE_BASE = "http://127.0.0.1:8000";
+export const ENGINE_BASE = "http://127.0.0.1:8000";
+
+export function getEngineBase(): string {
+  return ENGINE_BASE;
+}
+
 let registered = new Set<string>();
 
 // Proves to the engine that a configuration write came from this app rather
