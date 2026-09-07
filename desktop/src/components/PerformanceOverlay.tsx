@@ -2,28 +2,9 @@ import { memo, useEffect, useRef, useState } from "react";
 import type { CameraTelemetry, TelemetryStatus } from "../lib/telemetry";
 
 /**
- * Live per-camera performance HUD.
- *
- * Exists because every performance question about this pipeline used to be
- * unanswerable from the app: "FPS dropped to 1-2" and "detection randomly
- * stops" were the same sentence whether the cause was the camera, the decoder,
- * inference, or the WebSocket, and the only way to tell them apart was to read
- * engine logs. Every number here is measured by the engine (see pipeline.py
- * _telemetry_loop_iteration) rather than inferred on this side, so the HUD
- * reports the pipeline's own view of itself.
- *
- * RENDERING CONTRACT — this component must never become the thing it measures:
- *
- *  - It subscribes to nothing. The parent owns the telemetry socket and passes
- *    the latest payload down.
- *  - It repaints on an animation frame at a fixed 4Hz, NOT on every telemetry
- *    message. Telemetry arrives at AI FPS; re-rendering a 20-row DOM tree that
- *    often would put React work on the main thread in direct competition with
- *    the canvas that draws the detection boxes. The newest payload is held in
- *    a ref and sampled, so nothing queues up and a slow renderer simply reads
- *    a fresher number next tick.
- *  - It is memo()'d on a status/visibility pair, so the parent re-rendering for
- *    unrelated reasons does not drag it along.
+ * Live per-camera performance diagnostics overlay.
+ * Renders engine metrics (capture, decode, inference, tracking, telemetry FPS)
+ * throttled at 4Hz to minimize main thread DOM overhead.
  */
 
 type Props = {

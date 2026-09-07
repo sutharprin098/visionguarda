@@ -2,21 +2,8 @@ import { useCallback, useEffect, useRef } from "react";
 import type { TelemetryDetection } from "../lib/telemetry";
 
 /**
- * Draws the engine's detections over a <video> or <img> showing the same frame.
- *
- * The engine's /ws + /telemetry payloads are NORMALISED 0..1 (pipeline.py
- * divides by orig_w/orig_h), so bbox values are fractions of the source frame,
- * never pixels — drawing them straight into a source-sized canvas would put
- * every box in a ~1px speck in the top-left corner.
- *
- * ONE BOX PER OBJECT. That invariant is the engine's
- * (pipeline.resolve_emitted_detections emits exactly one detection per tracked
- * object); this file simply draws what arrives, once, and must not invent a
- * second pass over the same data.
- *
- * Segmentation masks are deliberately not drawn: the YOLO11-seg -> YOLOX swap
- * dropped segmentation (migration 0034), and the engine now always sends empty
- * mask arrays.
+ * Renders normalized bounding box detections over video/image streams
+ * with DPI scaling and aspect-fit coordinate mapping.
  */
 interface Props {
   detections: TelemetryDetection[];

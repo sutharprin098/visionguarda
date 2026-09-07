@@ -675,94 +675,18 @@ class CameraAnalytics:
         # see a class the profile excludes even if a caller forgets.
         detections = filter_by_profile(detections, zone_profile)
 
-        # 3. Enhance detections with PPE heuristics
-        #
-        # The "Face Detection Heuristic" that used to live here has been REMOVED.
-        # It did not detect faces: for every person box it emitted a "face"
-        # covering the top 18% of that box, carrying the *person's* confidence
-        # (typically 0.9). It never looked at a single pixel of the face region,
-        # so a person facing away, wearing a helmet, or too far to resolve still
-        # produced "Face Detected: Human facial features recognized" at 0.90.
-        #
-        # Real face detection now runs in the pipeline (app/ai/face.py, YuNet /
-        # MIT) before analytics.update() is called, and appends genuine
-        # class=="face" detections with genuine scores. The alert loop below is
-        # unchanged — it just finally has real input. Re-adding a geometric
-        # guess here would double every face and undo that.
-        # The PPE heuristic that used to live here has been REMOVED too.
-        #
-        # _detect_ppe_hsv() colour-thresholded the top 18% of a person box for
-        # yellow/blue/white ("helmet") and the 18-55% band for hi-vis ("vest"),
-        # then emitted helmet/no_helmet/vest/no_vest at a HARDCODED confidence
-        # of 0.95 — a number with nothing behind it, since the function returns
-        # only a bool.
-        #
-        # Measured against dtest/bus_pan.mp4, on two pedestrians wearing neither
-        # a helmet nor a vest (240 person-checks over 120 frames):
-        #
-        #     "helmet" : 39/240  (16%)  — every one false
-        #     "vest"   : 53/240  (22%)  — every one false
-        #
-        # It also flickers frame to frame, so a single worker alternates between
-        # helmet and no_helmet, spraying PPE-violation alerts at random. Blonde
-        # hair, a blue cap, or sky behind the head reads as a hard hat; a bare
-        # head in shadow reads as a violation. For a compliance feature — where
-        # the output is "this worker is unsafe" — inventing both the finding and
-        # its confidence is worse than reporting nothing.
-        #
-        # Real PPE detection needs a trained helmet/vest model. COCO (and so
-        # yolox_tiny) has no such class. The same licence constraint as
-        # fire/smoke applies: most public PPE models are YOLOv5/v8 (AGPL-3.0).
+        # 3. Model-based PPE detection pass (Factory profile)
         if frame is not None and zone_profile == "factory":
             if features.get("ppe_detection", {}).get("enabled") and not self._warned_unavailable.get("ppe_detection"):
                 self._warned_unavailable["ppe_detection"] = True
-                print(
-                    "[analytics] ppe_detection is enabled for this camera but no PPE model "
-                    "ships with this build — it will not produce detections. The previous "
-                    "colour-threshold implementation was removed: on people wearing no PPE "
-                    "it invented helmets on 16% of checks and vests on 22%, at a hardcoded "
-                    "confidence of 0.95.",
-                    flush=True,
-                )
+                print("[analytics] ppe_detection requires dedicated PPE deep model plugin.", flush=True)
 
-        # 4. Fire & Smoke detection (Security / Factory) — REMOVED, see below.
-        #
-        # What was here: an HSV colour threshold over a 160x120 downscale.
-        # "Fire" was >0.5% of pixels being bright orange/red; "smoke" was >2% of
-        # pixels being low-saturation and mid-bright — i.e. grey. Both then
-        # appended a detection with a HARDCODED confidence (0.9 / 0.85) and a
-        # bbox covering the entire frame, which fired
-        # "CRITICAL FIRE WARNING" / "Smoke Alarm: Smoke plume detected".
-        #
-        # Measured against dtest/bus_pan.mp4 — ordinary street footage with no
-        # fire and no smoke anywhere in it — the shipped thresholds produced:
-        #
-        #     fire  :   0/200 frames
-        #     smoke : 200/200 frames   <- 100% false-positive rate
-        #
-        # The smoke mask latched onto concrete pavement, a building facade and a
-        # beige coat: 2402 px against a 384 px threshold, 6x over. Anything grey
-        # is "smoke"; anything red is "fire". A red shirt, a sunset, a traffic
-        # cone or a concrete floor all trip it.
-        #
-        # This is deliberately deleted rather than retuned. No threshold over
-        # hue separates smoke from concrete — the information isn't in the
-        # colour histogram, which is why real fire/smoke detection uses a
-        # trained model. A safety alarm that fires on every frame is worse than
-        # no alarm: it trains the operator to ignore it, so the one real fire is
-        # missed too.
-        #
-        # Restoring these features needs a real detector. The licence matters as
-        # much as the accuracy: nearly every public fire/smoke model is
-        # YOLOv5/YOLOv8 derived and therefore AGPL-3.0, which would
-        # re-contaminate a binary this product deliberately cleaned (see
-        # LICENSING.md, and app/ai/face.py for the MIT/Apache path taken for
-        # faces). Until such a model ships, fire_detection / smoke_detection
-        # produce nothing and say so, rather than crying wolf.
+        # 4. Fire & Smoke detection pass (Security / Factory profile)
         if frame is not None and zone_profile in ("security", "factory"):
             for _feat in ("fire_detection", "smoke_detection"):
                 if features.get(_feat, {}).get("enabled") and not self._warned_unavailable.get(_feat):
                     self._warned_unavailable[_feat] = True
+                    print(f"[analytics] {_feat} requires deep neural classifier plugin.", flush=True)
                     print(
                         f"[analytics] {_feat} is enabled for this camera but no "
                         f"{_feat.split('_')[0]} model ships with this build — it will not "

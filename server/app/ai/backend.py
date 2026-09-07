@@ -18,22 +18,8 @@ except ImportError:
     HAS_ONNXRUNTIME = False
 
 
-# ── Shared OpenVINO Core ────────────────────────────────────────────────────
-# ov.Core() itself is free; reading `.available_devices` off a FRESH Core is
-# not — it enumerates every installed plugin, and on this machine's Intel iGPU
-# that measured 2.9-3.9 s. The result is cached inside the Core, so the second
-# read on the SAME Core is 0.00 s — but a new Core pays it again in full.
-#
-# Startup used to build three throwaway Cores per EngineBackend: one for the
-# sort key in _initialize_backend, a second for the log line that recomputed
-# the very same score purely to print it, and a third in _load_openvino. That
-# was 9.9 s of the 10.6 s model load spent re-answering "is there a GPU?" —
-# against an actual model compile of 0.3 s and a warm-up of 0.06 s.
-#
-# One process-wide Core removes all of it. Sharing is the supported pattern
-# (one Core can hold many compiled models, and every camera thread already
-# shares the one on EngineBackend), and it makes CACHE_DIR a process-wide
-# setting rather than something each backend re-applies.
+# ── Shared OpenVINO Core Instance ───────────────────────────────────────────
+# Singleton ov.Core shared across all engine backends for device cache reuse.
 _OV_CORE = None
 _OV_CORE_LOCK = threading.Lock()
 
