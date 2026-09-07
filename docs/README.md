@@ -17,4 +17,4 @@
 
 Start with [Architecture](ARCHITECTURE.md) if you're new to the codebase, or [Installation](INSTALLATION.md) if you just want it running.
 
-Root-level [`../README.md`](../README.md) has the project summary and quick start; [`../LICENSE.md`](../LICENSE.md) has the legal terms.
+Root-level [`../README.md`](../README.md) has the project summary and quick start; [`../LICENSE`](../LICENSE) has the legal terms.

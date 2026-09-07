@@ -1,24 +1,25 @@
-# 🚀 CamAI AWS Cloud AI Inference Engine — Deployment & Architecture Guide
+# AWS Cloud Inference Node — Deployment Guide
 
-This document provides a comprehensive operational overview, architecture blueprint, security setup, deployment workflow, and latency benchmarks for the **CamAI AWS Cloud AI Inference Infrastructure**.
-
----
-
-## 📑 Table of Contents
-1. [System Architecture](#1-system-architecture)
-2. [AWS EC2 Instance Specification](#2-aws-ec2-instance-specification)
-3. [AWS Security Group Configuration](#3-aws-security-group-configuration)
-4. [Deployment & Startup Instructions](#4-deployment--startup-instructions)
-5. [Automated Systemd Service Setup](#5-automated-systemd-service-setup)
-6. [API Specification & Endpoints](#6-api-specification--endpoints)
-7. [Performance & Latency Benchmarks](#7-performance--latency-benchmarks)
-8. [Resiliency & Failure Cool-Off Mechanism](#8-resiliency--failure-cool-off-mechanism)
+Operational reference for the CamAI cloud inference endpoint hosted on AWS EC2. Covers instance setup, security groups, systemd configuration, API contract, and measured latency.
 
 ---
 
-## 1. System Architecture
+## Table of Contents
 
-The **CamAI Hybrid Inference Pipeline** operates in a multi-tier client-cloud configuration:
+1. [Architecture](#1-architecture)
+2. [EC2 Instance Specification](#2-ec2-instance-specification)
+3. [Security Group Configuration](#3-security-group-configuration)
+4. [Deployment](#4-deployment)
+5. [Systemd Service Setup](#5-systemd-service-setup)
+6. [API Endpoints](#6-api-endpoints)
+7. [Latency Benchmarks](#7-latency-benchmarks)
+8. [Operations Log](#8-operations-log)
+
+---
+
+## 1. Architecture
+
+The hybrid inference pipeline offloads detection to a remote EC2 node when cloud mode is active:
 
 ```
 ┌─────────────────────────────────────────────────────────┐
@@ -33,217 +34,169 @@ The **CamAI Hybrid Inference Pipeline** operates in a multi-tier client-cloud co
 │              AWS EC2 Cloud AI Node (Port 8000)          │
 │  - Microservice: server/run_cloud_node.py               │
 │  - Engine: OpenVINO CPU/GPU Inference                   │
-│  - Target Resolution: 320px (Optimized for Speed)       │
+│  - Target Resolution: 320px                             │
 └─────────────────────────────────────────────────────────┘
 ```
 
-When **Cloud Mode** is active, video frames are compressed to JPEG (Quality: 75), resized to 320px target size, and transmitted to the remote AWS EC2 instance. The cloud node returns normalized detection bounding boxes and class predictions in under **140ms total roundtrip**.
+Frames are JPEG-compressed (quality 75), resized to 320px, and transmitted to the EC2 node. The node returns normalized bounding boxes and class predictions. Measured roundtrip is ~130ms.
 
 ---
 
-## 2. AWS EC2 Instance Specification
+## 2. EC2 Instance Specification
 
-| Parameter | AWS Configuration Detail |
+| Parameter | Value |
 |---|---|
-| **Region** | `ap-south-1` (Asia Pacific - Mumbai) |
-| **Instance ID** | `i-0efc8fbbe4931c880` |
-| **Instance Name** | `CamAI-Cloud-Node` |
-| **Instance Type** | `c6i.xlarge` |
-| **Operating System** | Ubuntu 26.04 LTS (x86_64) |
-| **Public IPv4 Address** | `13.203.71.14` |
-| **Public IPv4 DNS** | `ec2-13-203-71-14.ap-south-1.compute.amazonaws.com` |
-| **Availability Zone** | `ap-south-1c` |
+| Region | `ap-south-1` (Mumbai) |
+| Instance ID | `i-0efc8fbbe4931c880` |
+| Instance Type | `c6i.xlarge` |
+| OS | Ubuntu 26.04 LTS (x86_64) |
+| Public IPv4 | `13.203.71.14` |
+| Availability Zone | `ap-south-1c` |
 
 ---
 
-## 3. AWS Security Group Configuration
+## 3. Security Group Configuration
 
-- **Security Group ID**: `sg-03820599645fc97b1`
-- **Security Group Name**: `launch-wizard-1`
+Security Group: `sg-03820599645fc97b1` (`launch-wizard-1`)
 
-### Required Inbound Rules Table
+### Inbound Rules
 
-| Rule Type | Protocol | Port Range | Source | Description / Purpose |
-|---|---|---|---|---|
-| **SSH** | TCP | `22` | `0.0.0.0/0` | Enables AWS Console EC2 Instance Connect & SSH Terminal Access |
-| **Custom TCP** | TCP | `8000` | `0.0.0.0/0` | Enables CamAI Desktop Client access to Cloud AI Inference API |
-
----
-
-## 4. Deployment & Startup Instructions
-
-### Manual Startup via SSH Terminal
-
-1. **Connect to EC2 Instance**:
-   Use AWS EC2 Instance Connect or standard SSH:
-   ```bash
-   ssh -i /path/to/key.pem ubuntu@13.203.71.14
-   ```
-
-2. **Navigate & Update Code**:
-   ```bash
-   cd ~/camAI
-   git pull origin main
-   ```
-
-3. **Kill Any Stale Processes on Port 8000**:
-   ```bash
-   sudo fuser -k 8000/tcp
-   ```
-
-4. **Launch Cloud Node Microservice**:
-   ```bash
-   python3 server/run_cloud_node.py --port 8000 --host 0.0.0.0
-   ```
-
----
-
-## 5. Automated Systemd Service Setup
-
-To ensure the AWS Cloud Server automatically starts on system boot and restarts if crashed:
-
-1. Create a service file on the EC2 server:
-   ```bash
-   sudo nano /etc/systemd/system/camai-cloud.service
-   ```
-
-2. Add the following configuration:
-   ```ini
-   [Unit]
-   Description=CamAI Cloud AI Inference Node
-   After=network.target
-
-   [Service]
-   Type=simple
-   User=ubuntu
-   WorkingDirectory=/home/ubuntu/camAI
-   ExecStart=/usr/bin/python3 /home/ubuntu/camAI/server/run_cloud_node.py --port 8000 --host 0.0.0.0
-   Restart=always
-   RestartSec=3
-
-   [Install]
-   WantedBy=multi-user.target
-   ```
-
-3. Enable and start the service:
-   ```bash
-   sudo systemctl daemon-reload
-   sudo systemctl enable camai-cloud
-   sudo systemctl start camai-cloud
-   ```
-
-4. Check service status:
-   ```bash
-   sudo systemctl status camai-cloud
-   ```
-
----
-
-## 6. API Specification & Endpoints
-
-### 1. Health Check Endpoint
-- **URL**: `GET http://13.203.71.14:8000/health`
-- **Response**:
-  ```json
-  {
-    "status": "ok",
-    "service": "CamAI Cloud AI Node",
-    "backend_ready": true,
-    "timestamp": 1787911932.95
-  }
-  ```
-
-### 2. Inference Endpoint
-- **URL**: `POST http://13.203.71.14:8000/api/detect`
-- **Headers**: `Content-Type: application/json`
-- **Payload**:
-  ```json
-  {
-    "image_b64": "<base64_encoded_jpeg_string>",
-    "target_size": 320
-  }
-  ```
-- **Response**:
-  ```json
-  {
-    "status": "success",
-    "latency_ms": 24.5,
-    "count": 1,
-    "detections": [
-      {
-        "class": "person",
-        "confidence": 0.9124,
-        "bbox": { "x1": 120, "y1": 45, "x2": 340, "y2": 620 }
-      }
-    ]
-  }
-  ```
-
----
-
-## 7. Performance & Latency Benchmarks
-
-Validated end-to-end telemetry measurements recorded during live stress test:
-
-| Test Metric | Measured Value | Benchmark Target | Status |
+| Protocol | Port | Source | Purpose |
 |---|---|---|---|
-| **Pure Cloud AI Inference Latency** | **24.5 ms** | < 50.0 ms | 🟢 PASSED |
-| **Total Roundtrip Latency (Network + AI)** | **132.3 ms** | < 250.0 ms | 🟢 PASSED |
-| **HTTP Response Code** | **200 OK** | 200 OK | 🟢 PASSED |
-| **Target Frame Resolution** | **320 px** | 320 px | 🟢 OPTIMIZED |
+| TCP | 22 | `0.0.0.0/0` | SSH / EC2 Instance Connect |
+| TCP | 8000 | `0.0.0.0/0` | Cloud inference API |
 
 ---
 
-- **Result**: Zero video freezing or per-frame connection stalls, maintaining continuous 30+ FPS video streams.
+## 4. Deployment
+
+### Manual startup via SSH
+
+```bash
+ssh -i /path/to/key.pem ubuntu@13.203.71.14
+cd ~/camAI
+git pull origin main
+sudo fuser -k 8000/tcp
+python3 server/run_cloud_node.py --port 8000 --host 0.0.0.0
+```
 
 ---
 
-## 9. 🚀 24/7 Always-ON Deployment & Maintenance Log
+## 5. Systemd Service Setup
 
-### 📝 Operations Audit Record
+For automatic startup on boot and crash recovery:
 
-| Attribute | Details |
+```bash
+sudo nano /etc/systemd/system/camai-cloud.service
+```
+
+```ini
+[Unit]
+Description=CamAI Cloud AI Inference Node
+After=network.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/camAI
+ExecStart=/usr/bin/python3 /home/ubuntu/camAI/server/run_cloud_node.py --port 8000 --host 0.0.0.0
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
+```
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable camai-cloud
+sudo systemctl start camai-cloud
+sudo systemctl status camai-cloud
+```
+
+---
+
+## 6. API Endpoints
+
+### Health check
+
+```
+GET http://13.203.71.14:8000/health
+```
+
+```json
+{
+  "status": "ok",
+  "service": "CamAI Cloud AI Node",
+  "backend_ready": true,
+  "timestamp": 1787911932.95
+}
+```
+
+### Inference
+
+```
+POST http://13.203.71.14:8000/api/detect
+Content-Type: application/json
+```
+
+Request:
+
+```json
+{
+  "image_b64": "<base64_encoded_jpeg>",
+  "target_size": 320
+}
+```
+
+Response:
+
+```json
+{
+  "status": "success",
+  "latency_ms": 24.5,
+  "count": 1,
+  "detections": [
+    {
+      "class": "person",
+      "confidence": 0.9124,
+      "bbox": { "x1": 120, "y1": 45, "x2": 340, "y2": 620 }
+    }
+  ]
+}
+```
+
+---
+
+## 7. Latency Benchmarks
+
+Measured during live stress test:
+
+| Metric | Measured | Target |
+|---|---|---|
+| Cloud inference latency | 24.5 ms | < 50 ms |
+| Total roundtrip (network + inference) | 132.3 ms | < 250 ms |
+| Frame resolution | 320 px | 320 px |
+
+---
+
+## 8. Operations Log
+
+### 2026-08-29 — Systemd deployment
+
+| Attribute | Value |
 |---|---|
-| **Timestamp (UTC)** | `2026-08-29 07:44:08 UTC` |
-| **Timestamp (IST)** | `2026-08-29 13:14:08 IST` |
-| **Target AWS Instance** | `CamAI-Cloud-Node` (`c6i.xlarge`) |
-| **Public IPv4 Address** | `13.203.71.14` |
-| **Private IPv4 Address** | `172.31.25.38` |
-| **Operating System** | Ubuntu 26.04 LTS (GNU/Linux 7.0.0-1006-aws x86_64) |
-| **Service Unit File** | `/etc/systemd/system/camai-cloud.service` |
-| **Auto-Restart Policy** | `Restart=always`, `RestartSec=3` |
-| **AI Inference Backend** | OpenVINO CPU Engine (`yolox_tiny`) |
-| **Git Synchronization** | Commit `b6ba8e9` (`origin/main`) |
+| Timestamp (UTC) | 2026-08-29 07:44:08 |
+| Instance | `CamAI-Cloud-Node` (`c6i.xlarge`) |
+| Public IP | `13.203.71.14` |
+| OS | Ubuntu 26.04 LTS |
+| Backend | OpenVINO CPU (`yolox_tiny`) |
+| Git commit | `b6ba8e9` (`origin/main`) |
 
----
+**Changes made:**
 
-### ❓ What Was Done
-1. **Repository Synchronization**: Connected to the AWS EC2 node and executed `git pull origin main` to pull the latest v1.0.7 pipeline updates, target matcher modules, and cloud node service fixes.
-2. **Systemd Daemon Creation**: Created and configured `/etc/systemd/system/camai-cloud.service` to run `/usr/bin/python3 /home/ubuntu/camAI/server/run_cloud_node.py --port 8000 --host 0.0.0.0`.
-3. **Automated Boot & Recovery**: Enabled the systemd unit (`sudo systemctl enable camai-cloud`) and started the service (`sudo systemctl start camai-cloud`).
+1. Pulled latest v1.0.7 pipeline updates and cloud node fixes.
+2. Created `/etc/systemd/system/camai-cloud.service` with `Restart=always` / `RestartSec=3`.
+3. Enabled and started the service.
 
----
-
-### 💡 Why It Was Done
-1. **Eliminate Unintentional Downtime**: Previously, running the server manually via terminal caused the process to stop whenever the terminal session disconnected or the EC2 instance rebooted.
-2. **24/7 Continuous Availability**: Setting `Restart=always` ensures that if the Python process crashes or runs out of memory, Linux `systemd` automatically restarts the microservice within **3 seconds**.
-3. **Seamless Client Workspace Streams**: Resolves zero-detection issues on the desktop client (`Workspace.tsx`) by maintaining an active HTTP endpoint for `AWS Cloud GPU` inference requests.
-
----
-
-### 🔍 Live Verification & Health Benchmark
-
-- **Endpoint**: `GET http://13.203.71.14:8000/health`
-- **HTTP Status**: `200 OK`
-- **Response Payload**:
-  ```json
-  {
-    "status": "ok",
-    "service": "CamAI Cloud AI Node",
-    "backend_ready": true,
-    "timestamp": 1787989494.5573735
-  }
-  ```
-
----
-*Document updated & verified for CamAI VisionGuarda Infrastructure Team.*
+**Rationale:** Running the server manually via terminal caused the process to stop on session disconnect or instance reboot. Systemd auto-restarts within 3 seconds on crash.

@@ -1,4 +1,4 @@
-"""Comprehensive End-to-End AI Model Verification & Benchmark Suite for CamAI.
+"""End-to-end model verification and benchmark suite.
 
 Tests and benchmarks:
 1. Primary Object Detectors (YOLOX-Tiny, YOLOX-S, YOLOX-M)
