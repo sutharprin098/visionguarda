@@ -188,7 +188,7 @@ def _draw_normalized_overlay_boxes(frame, client_dets):
         return frame
     h, w = frame.shape[:2]
     for det in client_dets:
-        if det.get("tracking_status") == "coasting" or float(det.get("confidence", 0.0)) < 0.20:
+        if float(det.get("confidence", 0.0)) < 0.08:
             continue
         b = det.get("bbox")
         if not b:
@@ -3206,6 +3206,46 @@ class PipelineCoordinator:
                         "y2": round(float(bbox["y2"]) / orig_h, 4),
                     }
                 })
+
+            # Anti-flicker hysteresis memory holds recent detections for up to 2.5s
+            now_ts = time.time()
+            if not hasattr(self, "_detection_persistence_cache"):
+                self._detection_persistence_cache = {}
+
+            current_tids = set()
+            for cd in client_dets:
+                tid = cd.get("track_id") or f"{cd['class']}_{cd['bbox']['x1']:.2f}_{cd['bbox']['y1']:.2f}"
+                cd["track_id"] = tid
+                self._detection_persistence_cache[tid] = {"det": cd, "ts": now_ts}
+                current_tids.add(tid)
+
+            coasted_dets = list(client_dets)
+            expired_tids = []
+            for tid, cached in self._detection_persistence_cache.items():
+                if tid not in current_tids:
+                    if now_ts - cached["ts"] <= 2.5:
+                        coasted_det = dict(cached["det"])
+                        coasted_det["tracking_status"] = "coasting"
+                        coasted_dets.append(coasted_det)
+                    else:
+                        expired_tids.append(tid)
+
+            for tid in expired_tids:
+                self._detection_persistence_cache.pop(tid, None)
+
+            if coasted_dets:
+                self._last_nonempty_client_dets = list(coasted_dets)
+                self._last_nonempty_dets_ts = now_ts
+            elif hasattr(self, "_last_nonempty_client_dets") and (now_ts - getattr(self, "_last_nonempty_dets_ts", 0) <= 2.5):
+                coasted_dets = list(self._last_nonempty_client_dets)
+
+            client_dets = coasted_dets
+
+            # Recalculate object category counts from smoothed client_dets
+            people_count = sum(1 for cd in client_dets if _object_category(cd.get("class", "")) == "person")
+            vehicles_count = sum(1 for cd in client_dets if _object_category(cd.get("class", "")) == "vehicle")
+            items_count = sum(1 for cd in client_dets if _object_category(cd.get("class", "")) == "item")
+            other_count = sum(1 for cd in client_dets if _object_category(cd.get("class", "")) in ("infrastructure", "other"))
 
             data["client_dets"] = client_dets
             data["people_count"] = people_count

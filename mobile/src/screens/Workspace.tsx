@@ -1266,6 +1266,7 @@ const CameraTile = memo(function CameraTile({ camera: c, site, engineOnline, onF
   const [shareStatus, setShareStatus] = useState<ShareStatus>("idle");
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
   const [detections, setDetections] = useState<TelemetryDetection[]>([]);
+  const [detectionRefreshKey, setDetectionRefreshKey] = useState(0);
   const [telemetry, setTelemetry] = useState<CameraTelemetry | null>(null);
 
   const isRecording = Boolean(telemetry?.recording);
@@ -1289,6 +1290,7 @@ const CameraTile = memo(function CameraTile({ camera: c, site, engineOnline, onF
   // comparison runs inside the socket callback, which closes over the state
   // value from the render it was created in.
   const detectionsRef = useRef<TelemetryDetection[]>([]);
+  const lastDetectionRefreshRef = useRef(0);
   const lastFpsCommitRef = useRef(0);
   const telemetrySessionRef = useRef<TelemetrySession | null>(null);
   // Stable getters: the HUD polls these on its own tick, so they must not
@@ -1434,9 +1436,15 @@ const CameraTile = memo(function CameraTile({ camera: c, site, engineOnline, onF
       // this tile and repainted the canvas at telemetry rate even for a camera
       // sending nothing but empty arrays — see detectionsRenderEqual.
       const nextDets = Array.isArray(t?.detections) ? t.detections : [];
+      const now = Date.now();
       if (!detectionsRenderEqual(detectionsRef.current, nextDets)) {
         detectionsRef.current = nextDets;
         setDetections(nextDets);
+      } else if (nextDets.length > 0 && now - lastDetectionRefreshRef.current >= 700) {
+        // Keep a visually unchanged track alive without restoring a 10-15 FPS
+        // React render loop for every camera tile.
+        lastDetectionRefreshRef.current = now;
+        setDetectionRefreshKey((key) => key + 1);
       }
 
       // Telemetry arrives at AI FPS (~10-15Hz per camera). Committing every
@@ -1457,7 +1465,6 @@ const CameraTile = memo(function CameraTile({ camera: c, site, engineOnline, onF
       // instead of forcing one of its own.
       const prev = telemetryRef.current;
       telemetryRef.current = t;
-      const now = Date.now();
       const fpsDue = now - lastFpsCommitRef.current >= FPS_COMMIT_INTERVAL_MS;
       const changed =
         prev == null ||
@@ -1670,7 +1677,7 @@ const CameraTile = memo(function CameraTile({ camera: c, site, engineOnline, onF
             before it knew its own size. An empty detection list now simply
             draws an empty (cleared) canvas, which is both cheaper and stable. */}
         {showingMedia && !ytEmbedUrl && (
-          <DetectionOverlay detections={shownDetections} mediaRef={mediaRef} fit={fit} />
+          <DetectionOverlay detections={shownDetections} refreshKey={detectionRefreshKey} mediaRef={mediaRef} fit={fit} />
         )}
 
         {/* Performance HUD. Rendered only on request (Ctrl+P while hovering the

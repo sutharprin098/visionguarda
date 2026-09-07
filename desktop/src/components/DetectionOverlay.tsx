@@ -7,6 +7,8 @@ import type { TelemetryDetection } from "../lib/telemetry";
  */
 interface Props {
   detections: TelemetryDetection[];
+  /** Advances periodically while an unchanged detection is still being received. */
+  refreshKey?: number;
   /** The <video>/<img> the boxes sit on top of — used for its intrinsic size. */
   mediaRef: React.RefObject<HTMLVideoElement | HTMLImageElement>;
   /** Must match the media element's object-fit, or boxes drift once the source
@@ -14,6 +16,11 @@ interface Props {
    *  card). */
   fit?: "cover" | "contain";
 }
+
+// AI telemetry is deliberately de-duplicated before it reaches React. Keep a
+// box alive through that optimization and short delivery gaps, but never leave
+// a genuinely lost object on screen for long.
+const TRACK_HOLD_MS = 1600;
 
 function sourceSize(el: HTMLVideoElement | HTMLImageElement | null): { w: number; h: number } | null {
   if (!el) return null;
@@ -172,29 +179,73 @@ interface ActiveTrackRecord {
   lastSeen: number;
 }
 
-export default function DetectionOverlay({ detections, mediaRef, fit = "cover" }: Props) {
+export default function DetectionOverlay({ detections, refreshKey = 0, mediaRef, fit = "cover" }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const rectRef = useRef<{ width: number; height: number } | null>(null);
   const tracksMapRef = useRef<Map<string, ActiveTrackRecord>>(new Map());
 
-  // Ingest detections into active tracks map with 280ms anti-flicker holding
+  // Ingest detections into active tracks map with spatial matching and EMA bbox smoothing
   useEffect(() => {
     const now = Date.now();
     const rawList = Array.isArray(detections) ? detections : [];
     
-    // Clean up expired tracks (> 280ms)
+    if (rawList.length === 0) {
+      tracksMapRef.current.clear();
+      return;
+    }
+
+    // Clean up tracks that have not received a telemetry keepalive.
     tracksMapRef.current.forEach((val, key) => {
-      if (now - val.lastSeen > 280) {
+      if (now - val.lastSeen > TRACK_HOLD_MS) {
         tracksMapRef.current.delete(key);
       }
     });
 
     for (const d of rawList) {
       if (!d || !d.bbox) continue;
-      const key = d.track_id != null ? `id_${d.track_id}` : `c_${d.class}_${(d.bbox.x1).toFixed(2)}_${(d.bbox.y1).toFixed(2)}`;
-      tracksMapRef.current.set(key, { det: d, lastSeen: now });
+
+      let matchedKey: string | null = null;
+      if (d.track_id != null) {
+        matchedKey = `id_${d.track_id}`;
+      } else {
+        const cx = (d.bbox.x1 + d.bbox.x2) / 2;
+        const cy = (d.bbox.y1 + d.bbox.y2) / 2;
+        let minDist = 0.15;
+        tracksMapRef.current.forEach((val, k) => {
+          if (val.det.class === d.class && !k.startsWith("id_")) {
+            const ocx = (val.det.bbox.x1 + val.det.bbox.x2) / 2;
+            const ocy = (val.det.bbox.y1 + val.det.bbox.y2) / 2;
+            const dist = Math.hypot(cx - ocx, cy - ocy);
+            if (dist < minDist) {
+              minDist = dist;
+              matchedKey = k;
+            }
+          }
+        });
+        if (!matchedKey) {
+          matchedKey = `u_${d.class}_${Math.random().toString(36).slice(2, 7)}`;
+        }
+      }
+
+      const existing = tracksMapRef.current.get(matchedKey);
+      const nextDet: TelemetryDetection = {
+        ...d,
+        bbox: { ...d.bbox },
+      };
+      if (existing && existing.det && existing.det.bbox) {
+        const ob = existing.det.bbox;
+        const nb = nextDet.bbox;
+        nextDet.bbox = {
+          x1: 0.75 * nb.x1 + 0.25 * ob.x1,
+          y1: 0.75 * nb.y1 + 0.25 * ob.y1,
+          x2: 0.75 * nb.x2 + 0.25 * ob.x2,
+          y2: 0.75 * nb.y2 + 0.25 * ob.y2,
+        };
+      }
+
+      tracksMapRef.current.set(matchedKey, { det: nextDet, lastSeen: now });
     }
-  }, [detections]);
+  }, [detections, refreshKey]);
 
   const draw = useCallback(() => {
     const canvas = canvasRef.current;
@@ -235,7 +286,7 @@ export default function DetectionOverlay({ detections, mediaRef, fit = "cover" }
     const now = Date.now();
     const activeList: TelemetryDetection[] = [];
     tracksMapRef.current.forEach((val, key) => {
-      if (now - val.lastSeen <= 280) {
+      if (now - val.lastSeen <= TRACK_HOLD_MS) {
         activeList.push(val.det);
       } else {
         tracksMapRef.current.delete(key);
@@ -312,12 +363,12 @@ export default function DetectionOverlay({ detections, mediaRef, fit = "cover" }
       const now = Date.now();
       let hasExpired = false;
       tracksMapRef.current.forEach((val) => {
-        if (now - val.lastSeen > 280) hasExpired = true;
+        if (now - val.lastSeen > TRACK_HOLD_MS) hasExpired = true;
       });
       if (hasExpired) {
         scheduleDraw();
       }
-    }, 100);
+    }, 250);
     return () => clearInterval(timer);
   }, [scheduleDraw]);
 
