@@ -21,13 +21,22 @@ import {
   Layers,
   RefreshCw,
   Sparkles,
+  ZoomIn,
+  ZoomOut,
+  Sliders,
+  Check,
+  X,
 } from "lucide-react";
 import {
   fetchAllRecordings,
   toggleCameraRecording,
   getEngineAppStatus,
+  fetchRecordingSettings,
+  updateRecordingSettings,
+  RecordingSettings,
   RecordingItem,
 } from "../lib/localEngine";
+import clsx from "clsx";
 
 interface CameraItem {
   id: string;
@@ -79,19 +88,95 @@ export default function RecordingsPlaybackView({ cameras }: RecordingsPlaybackVi
   const [cameraRecStatus, setCameraRecStatus] = useState<Record<string, boolean>>({});
   const [togglingRec, setTogglingRec] = useState<string | null>(null);
 
+  // Digital Zoom & Pan state
+  const [zoomLevel, setZoomLevel] = useState<number>(1.0);
+  const [pan, setPan] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+  const [isDragging, setIsDragging] = useState(false);
+  const dragStartRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
+
+  // Recording Configuration modal state
+  const [configOpen, setConfigOpen] = useState(false);
+  const [recSettings, setRecSettings] = useState<RecordingSettings>({ segment_minutes: 10, record_with_detections: true });
+  const [savingConfig, setSavingConfig] = useState(false);
+
   // Video element and container refs
   const videoRef = useRef<HTMLVideoElement>(null);
   const playerContainerRef = useRef<HTMLDivElement>(null);
   const timelineBarRef = useRef<HTMLDivElement>(null);
 
+  // Reset zoom on clip change
+  useEffect(() => {
+    setZoomLevel(1.0);
+    setPan({ x: 0, y: 0 });
+  }, [currentClip?.id]);
+
+  const handleZoomIn = () => {
+    setZoomLevel((z) => Math.min(4.0, Number((z + 0.5).toFixed(1))));
+  };
+
+  const handleZoomOut = () => {
+    setZoomLevel((z) => {
+      const next = Math.max(1.0, Number((z - 0.5).toFixed(1)));
+      if (next === 1.0) setPan({ x: 0, y: 0 });
+      return next;
+    });
+  };
+
+  const handleResetZoom = () => {
+    setZoomLevel(1.0);
+    setPan({ x: 0, y: 0 });
+  };
+
+  const handleMouseDown = (e: React.MouseEvent) => {
+    if (zoomLevel <= 1.0) return;
+    setIsDragging(true);
+    dragStartRef.current = { x: e.clientX - pan.x, y: e.clientY - pan.y };
+  };
+
+  const handleMouseMove = (e: React.MouseEvent) => {
+    if (!isDragging || zoomLevel <= 1.0) return;
+    const maxPan = (zoomLevel - 1.0) * 350;
+    const newX = Math.max(-maxPan, Math.min(maxPan, e.clientX - dragStartRef.current.x));
+    const newY = Math.max(-maxPan, Math.min(maxPan, e.clientY - dragStartRef.current.y));
+    setPan({ x: newX, y: newY });
+  };
+
+  const handleMouseUp = () => setIsDragging(false);
+
+  const handleWheel = (e: React.WheelEvent) => {
+    if (!currentClip) return;
+    e.preventDefault();
+    if (e.deltaY < 0) {
+      handleZoomIn();
+    } else {
+      handleZoomOut();
+    }
+  };
+
+  const handleSaveConfig = async () => {
+    setSavingConfig(true);
+    try {
+      const ok = await updateRecordingSettings(recSettings);
+      if (ok) {
+        setConfigOpen(false);
+      }
+    } finally {
+      setSavingConfig(false);
+    }
+  };
+
   // --- Fetch Recordings & Status ---
   const loadData = useCallback(async () => {
     try {
-      const [recs, status] = await Promise.all([
+      const [recs, status, settings] = await Promise.all([
         fetchAllRecordings(),
         getEngineAppStatus(),
+        fetchRecordingSettings(),
       ]);
       setRecordings(recs || []);
+      if (settings) {
+        setRecSettings(settings);
+      }
 
       if (status?.cameras) {
         const map: Record<string, boolean> = {};
@@ -553,6 +638,16 @@ export default function RecordingsPlaybackView({ cameras }: RecordingsPlaybackVi
               All Dates
             </button>
 
+            {/* Recording Config Button */}
+            <button
+              onClick={() => setConfigOpen(true)}
+              title="Recording Settings (Segment Duration & Detection Burn-in)"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-surface-2 text-zinc-300 hover:text-white hover:bg-surface-3 border border-line transition text-xs font-medium"
+            >
+              <Sliders size={13} className="text-accent" />
+              <span>Config ({recSettings.segment_minutes}m)</span>
+            </button>
+
             {/* Refresh Button */}
             <button
               onClick={loadData}
@@ -572,18 +667,51 @@ export default function RecordingsPlaybackView({ cameras }: RecordingsPlaybackVi
           {/* Video Player Display Container */}
           <div
             ref={playerContainerRef}
-            className="relative w-full aspect-video bg-black rounded-xl overflow-hidden border border-line shadow-2xl flex flex-col justify-center items-center group"
+            onMouseDown={handleMouseDown}
+            onMouseMove={handleMouseMove}
+            onMouseUp={handleMouseUp}
+            onMouseLeave={handleMouseUp}
+            onWheel={handleWheel}
+            className={`relative w-full aspect-video bg-black rounded-xl overflow-hidden border border-line shadow-2xl flex flex-col justify-center items-center group select-none ${
+              zoomLevel > 1 ? (isDragging ? "cursor-grabbing" : "cursor-grab") : ""
+            }`}
           >
+            {/* Zoom Indicator Badge & Quick Reset */}
+            {zoomLevel > 1 && (
+              <div className="absolute top-3 inset-x-0 mx-auto w-fit z-20 flex items-center gap-2 px-3 py-1 rounded-full bg-accent text-black font-semibold text-xs shadow-lg backdrop-blur-md">
+                <ZoomIn size={14} />
+                <span>{(zoomLevel * 100).toFixed(0)}% Zoom</span>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleResetZoom();
+                  }}
+                  className="ml-1 px-1.5 py-0.5 bg-black/20 hover:bg-black/30 rounded text-[10px] uppercase font-bold"
+                >
+                  Reset
+                </button>
+              </div>
+            )}
+
             {currentClip ? (
-              <video
-                ref={videoRef}
-                key={currentClip.id}
-                src={`http://127.0.0.1:8000${currentClip.file_path}`}
-                className="w-full h-full object-contain"
-                playsInline
-                autoPlay
-                onClick={togglePlay}
-              />
+              <div
+                className="w-full h-full flex items-center justify-center overflow-hidden"
+                style={{
+                  transform: `scale(${zoomLevel}) translate(${pan.x / zoomLevel}px, ${pan.y / zoomLevel}px)`,
+                  transformOrigin: "center center",
+                  transition: isDragging ? "none" : "transform 0.1s ease-out",
+                }}
+              >
+                <video
+                  ref={videoRef}
+                  key={currentClip.id}
+                  src={`http://127.0.0.1:8000${currentClip.file_path}`}
+                  className="w-full h-full object-contain pointer-events-auto"
+                  playsInline
+                  autoPlay
+                  onClick={togglePlay}
+                />
+              </div>
             ) : (
               /* High-tech standby canvas view when no specific file is playing */
               <div className="flex flex-col items-center justify-center p-8 text-center space-y-3">
@@ -731,6 +859,33 @@ export default function RecordingsPlaybackView({ cameras }: RecordingsPlaybackVi
                         onChange={handleVolumeChange}
                         className="w-16 h-1 bg-zinc-700 rounded-lg appearance-none cursor-pointer accent-accent"
                       />
+                    </div>
+
+                    {/* Digital Zoom In/Out Controls */}
+                    <div className="flex items-center gap-1 bg-black/40 px-2 py-0.5 rounded border border-white/10 text-xs">
+                      <button
+                        onClick={handleZoomOut}
+                        disabled={zoomLevel <= 1}
+                        className="text-zinc-400 hover:text-white disabled:opacity-30 disabled:hover:text-zinc-400 transition p-0.5"
+                        title="Zoom Out (or scroll down)"
+                      >
+                        <ZoomOut size={15} />
+                      </button>
+                      <button
+                        onClick={handleResetZoom}
+                        className="text-[10px] font-mono text-zinc-300 hover:text-accent min-w-[32px] text-center"
+                        title="Click to reset zoom"
+                      >
+                        {zoomLevel.toFixed(1)}x
+                      </button>
+                      <button
+                        onClick={handleZoomIn}
+                        disabled={zoomLevel >= 4}
+                        className="text-zinc-400 hover:text-white disabled:opacity-30 disabled:hover:text-zinc-400 transition p-0.5"
+                        title="Zoom In (or scroll up)"
+                      >
+                        <ZoomIn size={15} />
+                      </button>
                     </div>
 
                     {/* Snapshot Frame button */}
@@ -1072,6 +1227,113 @@ export default function RecordingsPlaybackView({ cameras }: RecordingsPlaybackVi
           </div>
         </aside>
       </div>
+
+      {/* Recording Settings Modal */}
+      {configOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
+          <div className="bg-surface-1 border border-line rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-5 animate-in fade-in zoom-in duration-150">
+            <div className="flex items-center justify-between border-b border-line pb-3">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 rounded-lg bg-accent/15 text-accent">
+                  <Sliders size={18} />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-white">Recording Settings</h3>
+                  <p className="text-[11px] text-zinc-400">Manage NVR segment duration & AI overlays</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setConfigOpen(false)}
+                className="p-1 rounded-md text-zinc-400 hover:text-white hover:bg-surface-2 transition"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              {/* Segment Duration Selection */}
+              <div>
+                <label className="block text-xs font-semibold text-zinc-300 mb-2">
+                  Recording Segment Duration
+                </label>
+                <div className="grid grid-cols-5 gap-2">
+                  {[5, 10, 15, 30, 60].map((mins) => (
+                    <button
+                      key={mins}
+                      type="button"
+                      onClick={() =>
+                        setRecSettings((prev) => ({ ...prev, segment_minutes: mins }))
+                      }
+                      className={clsx(
+                        "py-2 px-2 rounded-lg text-xs font-mono font-medium border text-center transition",
+                        recSettings.segment_minutes === mins
+                          ? "bg-accent text-black border-accent font-bold shadow-md shadow-accent/20"
+                          : "bg-surface-2 text-zinc-300 border-line hover:border-zinc-500"
+                      )}
+                    >
+                      {mins}m
+                    </button>
+                  ))}
+                </div>
+                <p className="text-[10px] text-zinc-500 mt-1.5">
+                  Videos are automatically split into MP4 segments of this length for instant playback and archiving.
+                </p>
+              </div>
+
+              {/* AI Detections in Video Toggle */}
+              <div className="p-3.5 rounded-xl bg-surface-2 border border-line flex items-start gap-3">
+                <input
+                  type="checkbox"
+                  id="burnInDetsModal"
+                  checked={recSettings.record_with_detections}
+                  onChange={(e) =>
+                    setRecSettings((prev) => ({
+                      ...prev,
+                      record_with_detections: e.target.checked,
+                    }))
+                  }
+                  className="mt-1 h-4 w-4 rounded border-zinc-700 bg-surface-3 text-accent focus:ring-accent cursor-pointer accent-accent"
+                />
+                <label htmlFor="burnInDetsModal" className="flex-1 cursor-pointer">
+                  <div className="text-xs font-semibold text-zinc-200">
+                    Burn AI Detections into Recordings
+                  </div>
+                  <div className="text-[11px] text-zinc-400 mt-0.5 leading-relaxed">
+                    Overlays real-time AI bounding boxes, object classification names, tracking IDs, and vehicle speed directly into the recorded MP4 file.
+                  </div>
+                </label>
+              </div>
+            </div>
+
+            {/* Modal Actions */}
+            <div className="flex items-center justify-end gap-2.5 pt-2 border-t border-line">
+              <button
+                type="button"
+                onClick={() => setConfigOpen(false)}
+                className="px-4 py-2 rounded-lg text-xs text-zinc-400 hover:text-white hover:bg-surface-2 transition font-medium"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveConfig}
+                disabled={savingConfig}
+                className="flex items-center gap-1.5 px-4 py-2 rounded-lg bg-accent text-black font-semibold text-xs hover:bg-accent/90 transition shadow-md disabled:opacity-50"
+              >
+                {savingConfig ? (
+                  <>
+                    <RefreshCw size={12} className="animate-spin" /> Saving...
+                  </>
+                ) : (
+                  <>
+                    <Check size={14} /> Save Configuration
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

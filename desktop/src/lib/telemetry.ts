@@ -47,8 +47,9 @@ export interface CameraTelemetry {
   device?: string;
   backend?: string;
   status?: string;
+  recording?: boolean;
 
-  // ── Performance overlay fields (see pipeline.py _telemetry_loop_iteration) ──
+  // Performance overlay fields (see pipeline.py _telemetry_loop_iteration)
   /** Rate the capture thread is pulling frames off the source, before any AI.
    *  Diverging from `fps` is the clearest signal that the AI stage — not the
    *  camera — is the constraint. */

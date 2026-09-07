@@ -893,3 +893,41 @@ export async function fetchAllRecordings(): Promise<RecordingItem[]> {
   }
 }
 
+export interface RecordingSettings {
+  segment_minutes: number;
+  record_with_detections: boolean;
+}
+
+/**
+ * Fetch global recording configuration (segment duration and detection burn-in flag).
+ */
+export async function fetchRecordingSettings(): Promise<RecordingSettings> {
+  try {
+    const res = await fetch(`${ENGINE_BASE}/api/recording/settings`, { signal: AbortSignal.timeout(4000) });
+    if (!res.ok) return { segment_minutes: 10, record_with_detections: true };
+    return await res.json();
+  } catch (err) {
+    console.error("[localEngine] Failed to fetch recording settings:", err);
+    return { segment_minutes: 10, record_with_detections: true };
+  }
+}
+
+/**
+ * Update global recording configuration on the local engine.
+ */
+export async function updateRecordingSettings(settings: RecordingSettings): Promise<boolean> {
+  try {
+    const res = await fetch(`${ENGINE_BASE}/api/recording/settings`, {
+      method: "POST",
+      headers: await controlHeaders(),
+      body: JSON.stringify(settings),
+      signal: AbortSignal.timeout(4000),
+    });
+    return res.ok;
+  } catch (err) {
+    console.error("[localEngine] Failed to update recording settings:", err);
+    return false;
+  }
+}
+
+

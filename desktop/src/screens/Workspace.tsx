@@ -4,7 +4,7 @@ import RecordingsPlaybackView from "../components/RecordingsPlaybackView";
 import ErrorBoundary from "../components/ErrorBoundary";
 import clsx from "clsx";
 import { startRealtimeSync, DeactivatedError, SyncBundle } from "../lib/sync";
-import { syncAiModelToLocalEngine, syncAiConfidenceToLocalEngine, syncAiInferenceModeToLocalEngine, mjpegStreamUrl, resetLocalEngineState } from "../lib/localEngine";
+import { syncAiModelToLocalEngine, syncAiConfidenceToLocalEngine, syncAiInferenceModeToLocalEngine, mjpegStreamUrl, resetLocalEngineState, toggleCameraRecording } from "../lib/localEngine";
 import { MediaShareSession, ShareStatus } from "../lib/mediaShare";
 import { TelemetrySession, TelemetryDetection, CameraTelemetry, TelemetryStatus, detectionsRenderEqual, telemetryHub } from "../lib/telemetry";
 import type { ZoneProfileKey } from "../lib/zoneProfiles";
@@ -920,6 +920,20 @@ const CameraTile = memo(function CameraTile({ camera: c, site, engineOnline, onF
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
   const [detections, setDetections] = useState<TelemetryDetection[]>([]);
   const [telemetry, setTelemetry] = useState<CameraTelemetry | null>(null);
+
+  const isRecording = Boolean(telemetry?.recording);
+  const [togglingRec, setTogglingRec] = useState(false);
+
+  const handleToggleRecording = useCallback(async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (togglingRec) return;
+    setTogglingRec(true);
+    try {
+      await toggleCameraRecording(c.id, !isRecording);
+    } finally {
+      setTogglingRec(false);
+    }
+  }, [c.id, isRecording, togglingRec]);
   // Newest payload, always current, never triggers a render. The gate in the
   // telemetry callback below decides which of these are worth committing to
   // state; this ref is what makes discarding the rest safe.
@@ -1407,6 +1421,26 @@ const CameraTile = memo(function CameraTile({ camera: c, site, engineOnline, onF
       <div className="flex items-center justify-between px-3 py-2 bg-surface-1">
         <span className="text-sm text-zinc-200">{c.name}</span>
         <div className="flex items-center gap-2">
+          {/* Dedicated Recording On/Off button */}
+          <button
+            onClick={handleToggleRecording}
+            disabled={togglingRec}
+            title={isRecording ? "Stop Continuous Recording" : "Start Continuous Recording"}
+            className={clsx(
+              "flex items-center gap-1.5 px-2 py-0.5 rounded text-[10px] font-semibold transition shadow-sm",
+              isRecording
+                ? "bg-red-500/20 text-red-400 border border-red-500/30 hover:bg-red-500/30"
+                : "bg-surface-2 text-zinc-400 border border-line hover:text-zinc-200 hover:bg-surface-3"
+            )}
+          >
+            <span
+              className={clsx(
+                "w-2 h-2 rounded-full",
+                isRecording ? "bg-red-500 animate-pulse" : "bg-zinc-500"
+              )}
+            />
+            <span>{isRecording ? "REC" : "REC"}</span>
+          </button>
           {sharingType !== null && (
             <button
               onClick={stopSharing}
