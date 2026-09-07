@@ -8,7 +8,6 @@ import RealtimeAlertSection from "../../components/landing/RealtimeAlertSection"
 import CameraNetworkSection from "../../components/landing/CameraNetworkSection";
 import AIFeaturesGrid from "../../components/landing/AIFeaturesGrid";
 import LiveDashboardSection from "../../components/landing/LiveDashboardSection";
-import AccuracyReportSection from "../../components/landing/AccuracyReportSection";
 import TrustSection from "../../components/landing/TrustSection";
 
 export default function Home() {
@@ -35,7 +34,6 @@ export default function Home() {
         <CameraNetworkSection />
         <AIFeaturesGrid />
         <LiveDashboardSection />
-        <AccuracyReportSection />
         <TrustSection />
       </main>
     </div>
