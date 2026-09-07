@@ -240,18 +240,12 @@ class CameraManager:
         return True, "dynamic-shape device"
 
     def run_background_benchmark(self):
-        # Wait before benchmarking to avoid GPU contention during pipeline warm-up.
-        # OpenVINO model compilation takes ~76s per model — without this delay, all 3
-        # benchmark models compile simultaneously with the live pipeline, causing
-        # 600-1700ms inference latency on the main stream.
+        # Delay benchmark to prevent GPU contention during pipeline warm-up
         time.sleep(180)
 
         should_run, reason = self._benchmark_is_safe_here()
         if not should_run:
             print(f"[CameraManager] Background model benchmarking {reason}", flush=True)
-            # Leave an explicit terminal state. "running" forever would be a lie
-            # to /api/status, and indistinguishable from a benchmark thread that
-            # died — which is precisely the symptom this whole change is about.
             self.benchmark_results["status"] = "skipped"
             self.benchmark_results["reason"] = reason
             self.benchmark_results["selected"] = self.selected_model_name
@@ -451,6 +445,13 @@ class CameraManager:
         else:
             thread.recorder.stop_continuous()
         return True
+
+    def update_recording_settings(self, segment_minutes: int, record_with_detections: bool):
+        """Update recording segment duration and detection burn-in across all active camera recorders."""
+        limit_seconds = max(60, int(segment_minutes * 60))
+        for thread in self.camera_threads.values():
+            if hasattr(thread, "recorder") and thread.recorder:
+                thread.recorder.update_recording_config(limit_seconds, record_with_detections)
 
     def stop_all(self):
         for cam_id in list(self.camera_threads.keys()):

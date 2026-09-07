@@ -83,6 +83,51 @@ class _H264Writer:
         self._opened = False
 
 
+_BOX_COLORS = {
+    "person": (240, 160, 0),
+    "car": (244, 220, 66),
+    "motorcycle": (244, 194, 66),
+    "truck": (200, 66, 200),
+    "bus": (66, 244, 244),
+    "no_helmet": (0, 0, 255),
+    "helmet": (66, 244, 66),
+    "number_plate": (66, 140, 244)
+}
+
+
+def _draw_recording_boxes(frame, detections):
+    """Draw bounding boxes and class labels onto the recorded frame."""
+    if not detections:
+        return frame
+    annotated = frame.copy()
+    h, w = annotated.shape[:2]
+    for det in detections:
+        b = det.get("bbox")
+        if not b:
+            continue
+        x1 = max(0, min(w - 1, int(b.get("x1", 0))))
+        y1 = max(0, min(h - 1, int(b.get("y1", 0))))
+        x2 = max(0, min(w - 1, int(b.get("x2", 0))))
+        y2 = max(0, min(h - 1, int(b.get("y2", 0))))
+        if x2 - x1 < 2 or y2 - y1 < 2:
+            continue
+        cls = det.get("class", "object")
+        color = _BOX_COLORS.get(cls, (0, 220, 220))
+        cv2.rectangle(annotated, (x1, y1), (x2, y2), color, 2)
+        label = cls.replace("_", " ")
+        tid = det.get("track_id")
+        if tid is not None:
+            label += f" #{tid}"
+        speed = det.get("speed_kmh")
+        if speed is not None and speed > 0.5:
+            label += f" {int(round(speed))}km/h"
+        (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.42, 1)
+        ty1 = max(0, y1 - th - 6)
+        cv2.rectangle(annotated, (x1, ty1), (x1 + tw + 6, ty1 + th + 6), color, -1)
+        cv2.putText(annotated, label, (x1 + 3, ty1 + th + 2), cv2.FONT_HERSHEY_SIMPLEX, 0.42, (0, 0, 0), 1, cv2.LINE_AA)
+    return annotated
+
+
 class CCTVRecorder:
     def __init__(self, camera_id: str, fps: int = RECORDING_FPS):
         self.camera_id = camera_id
@@ -97,17 +142,18 @@ class CCTVRecorder:
         self.continuous_writer = None
         self.continuous_rec_id = None
         self.continuous_start_time = 0
-        self.continuous_segment_limit = 600  # 10 mins
-        # "Continuous recording is switched on", as distinct from "an encoder
-        # is currently running". The encoder is launched lazily on the first
-        # frame that actually arrives (see _handle_continuous_write), because
-        # spawning it at arm time meant every camera that never produces a
-        # frame — an unreachable RTSP host, a virtual camera nobody has picked
-        # a source for — still held a live ffmpeg process and an open, empty
-        # .mp4 for the lifetime of the engine.
+
+        # Load dynamic recording configuration (segment minutes & AI overlay flag)
+        try:
+            from app.storage import get_recording_settings
+            cfg = get_recording_settings()
+            self.continuous_segment_limit = max(60, int(cfg.get("segment_minutes", 10) * 60))
+            self.record_with_detections = bool(cfg.get("record_with_detections", True))
+        except Exception:
+            self.continuous_segment_limit = 600
+            self.record_with_detections = True
+
         self.continuous_armed = False
-        # Guards the restart path against a permanently failing encoder
-        # spinning up a new ffmpeg on every single frame.
         self._continuous_retry_after = 0.0
         
         # Event recording states (only accessed inside recorder thread)
@@ -117,54 +163,22 @@ class CCTVRecorder:
         self.post_event_counter = 0
         self.post_event_limit = fps * 5  # 5 seconds post-event recording
 
-        # Producer-side rate gate. push_frame() is called from the decode loop
-        # once per DECODED frame (source cadence — 30fps on a typical camera),
-        # but every writer is opened with `-framerate RECORDING_FPS`. Feeding
-        # 30 frames/s into an encoder told it is receiving 10 did two bad
-        # things: it tripled the libx264 work per camera, and it produced
-        # recordings that play back at 3x real speed with timestamps that no
-        # longer correspond to the incident being reviewed. Gate to the
-        # recording cadence here, at the producer, so the surplus frames are
-        # never resized, never queued and never encoded.
         self._frame_interval = (1.0 / float(fps)) if fps and fps > 0 else 0.0
         self._next_frame_due = 0.0
 
-        # Queue and background thread setup.
-        #
-        # This holds ALREADY-DOWNSCALED frames (see push_frame) and is bounded
-        # at a couple of seconds of recording cadence rather than 1000 raw
-        # frames. The old bound was a latent out-of-memory: frames were queued
-        # at full capture resolution and only resized by the consumer, so a
-        # stalled encoder (ffmpeg's stdin pipe blocks once its buffer fills)
-        # backed the queue up to 1000 x 1624x906x3 ≈ 4.4 GB for a single
-        # camera. Downscaled and bounded, the same worst case is ~17 MB.
         self.queue = queue.Queue(maxsize=max(8, int(fps * 2)))
         self.running = True
         self.thread = threading.Thread(target=self._write_loop, name=f"RecLoop-{camera_id}")
         self.thread.daemon = True
         self.thread.start()
 
-    def push_frame(self, frame):
-        """Push the latest frame into the recording queue.
+    def update_recording_config(self, segment_limit_seconds: int, record_with_detections: bool):
+        """Dynamically update recording segment duration limit and AI detection burn-in flag."""
+        self.continuous_segment_limit = max(60, int(segment_limit_seconds))
+        self.record_with_detections = bool(record_with_detections)
 
-        Two things happen here that used to happen later, or not at all:
-
-        1. The frame is dropped unless the recording cadence is due. See
-           _frame_interval — the decode loop calls this at source fps, which is
-           typically 3x the fps every writer is actually opened with.
-
-        2. The frame is downscaled to the recording size on THIS thread before
-           being queued, instead of by the consumer after queueing. The resize
-           has to happen either way, and doing it before the bound means the
-           queue costs ~0.9 MB/frame instead of the full capture resolution.
-           It also removes the aliasing hazard the old comment here reasoned
-           around: cv2.resize allocates a new array, so the recorder no longer
-           holds a reference to a buffer the pipeline may reuse.
-
-        Net effect is strictly less work than before: one resize per RECORDED
-        frame on the decode thread, versus one resize per DECODED frame on the
-        recorder thread.
-        """
+    def push_frame(self, frame, detections=None):
+        """Downscale and enqueue frame respecting target recording cadence, optionally burning in detections."""
         if frame is None or not self.running:
             return
 
@@ -172,16 +186,17 @@ class CCTVRecorder:
             now = time.monotonic()
             if now < self._next_frame_due:
                 return
-            # Re-base off `now` rather than advancing by a fixed interval: if
-            # the recorder was stalled or the camera reconnected, accumulating
-            # the interval would leave a backlog of "owed" frames that get
-            # encoded back to back the moment it recovers.
+            # Re-base deadline to avoid burst encoding after stalls
             self._next_frame_due = now + self._frame_interval
 
         try:
-            rec_frame = cv2.resize(frame, self.frame_size)
+            if self.record_with_detections and detections:
+                frame_to_record = _draw_recording_boxes(frame, detections)
+            else:
+                frame_to_record = frame
+            rec_frame = cv2.resize(frame_to_record, self.frame_size)
         except Exception as e:
-            print(f"[Recorder] Failed to downscale frame for recording: {e}", flush=True)
+            print(f"[Recorder] Failed to prepare frame for recording: {e}", flush=True)
             return
 
         try:

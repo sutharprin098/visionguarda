@@ -188,19 +188,17 @@ def init_db():
             )
         """)
 
-        # No default/placeholder cameras are seeded here. The desktop app is
-        # the sole source of truth for which cameras exist — it registers
-        # (POST /api/cameras) exactly what the cloud assigns to this device
-        # (see desktop/src/lib/localEngine.ts syncCamerasToLocalEngine) and
-        # nothing else. Seeding fake rows ("cam_default"/"live_webcam"/
-        # "live_screenshare") here used to make this table diverge from the
-        # cloud's camera list on every fresh install — the engine would
-        # report 3+ "active" cameras nothing in the UI ever referenced,
-        # while the one real cloud-assigned camera raced its own
-        # registration. One-time migration below removes any of these rows
-        # left over from that seeding on existing installs.
+        # Purge legacy default camera seeds
         for legacy_id in ("cam_default", "live_webcam", "live_screenshare"):
             conn.execute("DELETE FROM cameras WHERE id = ?", (legacy_id,))
+
+        # System configuration settings
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS system_settings (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            )
+        """)
         conn.commit()
 
 # --- Database APIs ---
@@ -411,3 +409,21 @@ def get_speed_dashboard_stats(camera_id: str = None):
             "by_vehicle_type": {row["vehicle_type"]: {"count": row["count"], "max_speed": round(row["max_spd"], 1), "avg_speed": round(row["avg_spd"], 1)} for row in by_type_rows if row["vehicle_type"]},
             "by_lane": {row["lane"] or "Default": {"count": row["count"], "max_speed": round(row["max_spd"], 1), "avg_speed": round(row["avg_spd"], 1)} for row in by_lane_rows if row["lane"]}
         }
+
+
+def get_recording_settings() -> dict:
+    """Retrieve recording configuration (segment minutes and detection burn-in flag)."""
+    with get_db() as conn:
+        row_seg = conn.execute("SELECT value FROM system_settings WHERE key = 'recording_segment_minutes'").fetchone()
+        row_det = conn.execute("SELECT value FROM system_settings WHERE key = 'recording_with_detections'").fetchone()
+        seg = int(row_seg["value"]) if row_seg else 10
+        det = (row_det["value"].lower() in ("true", "1")) if row_det else True
+        return {"segment_minutes": seg, "record_with_detections": det}
+
+
+def save_recording_settings(segment_minutes: int, record_with_detections: bool):
+    """Persist recording configuration settings."""
+    with get_db() as conn:
+        conn.execute("INSERT OR REPLACE INTO system_settings (key, value) VALUES ('recording_segment_minutes', ?)", (str(int(segment_minutes)),))
+        conn.execute("INSERT OR REPLACE INTO system_settings (key, value) VALUES ('recording_with_detections', ?)", ("true" if record_with_detections else "false",))
+        conn.commit()

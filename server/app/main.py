@@ -22,7 +22,7 @@ from app.config import HOST, PORT, RECORDINGS_DIR, UPLOADS_DIR, MODELS_DIR, API_
 from app.storage import (
     init_db, get_all_cameras, get_camera, save_camera, delete_camera,
     get_recent_alerts, clear_all_alerts, get_history, clear_all_history,
-    get_all_recordings
+    get_all_recordings, get_recording_settings, save_recording_settings
 )
 from app.camera_manager import manager
 from app.ai.pipeline import get_detection_confidence, set_detection_confidence
@@ -275,22 +275,7 @@ ws_manager = ConnectionManager()
 WS_IDLE_TIMEOUT_SECS = 120.0
 
 def _ws_origin_allowed(websocket: WebSocket) -> bool:
-    """Same allowlist the HTTP CORS middleware enforces, applied by hand.
-
-    WebSockets are NOT covered by CORS: a browser will happily open
-    ws://127.0.0.1:8000/ws from any page, no preflight, no Origin check unless
-    the server does it itself. Without this, every site the operator visits
-    could (a) subscribe to a camera and receive its live telemetry — detections,
-    tracks, plate reads — and (b) send `screen_frame`, which decodes
-    caller-supplied base64 into a real frame and pushes it into the running
-    camera thread, i.e. inject arbitrary imagery into someone's analytics and
-    recordings. That is CWE-1385 (cross-site WebSocket hijacking).
-
-    A non-browser client (the desktop's own Node/Electron main process, curl,
-    a test harness) sends no Origin at all; that stays allowed, exactly as
-    before, because it was never the attacker path — a local process can talk
-    to loopback regardless.
-    """
+    """Validate WebSocket Origin header against configured CORS allowlist (CWE-1385)."""
     origin = websocket.headers.get("origin")
     if origin is None:
         return True
@@ -450,6 +435,10 @@ class CameraDisplayPayload(BaseModel):
 class CameraRecordingPayload(BaseModel):
     enabled: bool
 
+class RecordingSettingsPayload(BaseModel):
+    segment_minutes: int = 10
+    record_with_detections: bool = True
+
 class CameraTestPayload(BaseModel):
     """Everything app.camera_test.run_test accepts. Either a full `url` or the
     host/port/path parts — the portal sends parts, an operator pasting a URL
@@ -484,12 +473,7 @@ def get_system_status():
             "latency": thread.latest_telemetry.get("latency", 0),
             "counters": thread.latest_telemetry.get("counters", {"in": 0, "out": 0}),
             "health_status": thread._health_status,
-            # source_error_text() covers every failure class (auth, network,
-            # USB-unplugged, unpicked screenshare, generic offline), not just
-            # a failed stream-URL resolution — this used to read only
-            # `_resolve_error`, so a camera offline for any other reason
-            # reported no reason at all here even though the WS telemetry
-            # payload (built from the same method) already had one.
+            # Comprehensive error reason across stream and capture failure classes
             "health_reason": thread.source_error_text() if hasattr(thread, "source_error_text") else None,
             "resolution": thread._last_resolution,
             "recording": thread.recorder.continuous_writer is not None,
@@ -1395,6 +1379,22 @@ def clear_history_records():
 @app.get("/api/recordings")
 def fetch_recordings():
     return get_all_recordings()
+
+@app.get("/api/recording/settings")
+def fetch_recording_settings():
+    return get_recording_settings()
+
+@app.post("/api/recording/settings", dependencies=control)
+def update_recording_settings(payload: RecordingSettingsPayload):
+    save_recording_settings(payload.segment_minutes, payload.record_with_detections)
+    manager.update_recording_settings(payload.segment_minutes, payload.record_with_detections)
+    return {
+        "success": True,
+        "settings": {
+            "segment_minutes": payload.segment_minutes,
+            "record_with_detections": payload.record_with_detections
+        }
+    }
 
 # Temporary debug endpoint for tracking down the pipeline memory-growth
 # investigation — counts live Python objects by type, most common first.

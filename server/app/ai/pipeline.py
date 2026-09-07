@@ -106,10 +106,7 @@ def get_detection_confidence() -> float:
 
 
 def _vehicle_classes_compatible(a: str, b: str) -> bool:
-    """True if a and b are both vehicle-family classes (car/bus/truck/
-    motorcycle/bicycle) -- used to let track-continuation matching survive
-    a detector's frame-to-frame class flip between visually similar vehicle
-    subtypes, without ever conflating a vehicle with a person or item."""
+    """Return True if both classes belong to the vehicle category family."""
     return a in VEHICLE_CLASSES and b in VEHICLE_CLASSES
 
 
@@ -778,44 +775,12 @@ class ByteTracker:
         return out
 
     def predict_only(self, dt=None):
-        """Advance motion for a frame the DETECTOR DID NOT RUN ON.
-
-        The pipeline deliberately skips inference on some frames (motion gating
-        and the every-Nth-frame interval — see PipelineCoordinator._ai_loop_
-        iteration). Those frames used to call update([]) instead, which is a
-        different and false statement: update([]) means "the detector ran and
-        found nothing". Two things followed from it.
-
-        First, every track's time_since_update was incremented on a frame that
-        carried no evidence, so tracks aged toward death, drifted into the
-        `occluded` association branch, and re-associated worse when the next
-        real detection arrived — the id churn that looks like tracks "randomly
-        stopping".
-
-        Second, and visibly: update() returns only tracks with
-        time_since_update == 0, so a skipped frame returned an EMPTY list, and
-        emission is tracker-authoritative (see resolve_emitted_detections). The
-        overlay was therefore cleared on every skipped frame and repainted on
-        every inferred one. At the default interval of 2 that is a box
-        disappearing every other frame — the "detection boxes flicker" and
-        "detection works on some frames" reports are the same bug seen from two
-        angles, and both are this.
-
-        So: roll the Kalman filters forward by real elapsed time (identical to
-        what update() does first) and report where each confirmed track now is.
-        No miss is recorded, no track is aged out, no association is attempted.
-        The result is a smoothly interpolated box on skipped frames, which is
-        exactly what "skip inference on every frame while tracker predicts
-        intermediate frames" is supposed to mean.
-        """
+        """Advance Kalman state for confirmed tracks without detector updates on skipped frames."""
         now_ts = time.time()
         if dt is None:
             dt = REF_DT if self._last_update_ts is None else (now_ts - self._last_update_ts)
         dt = float(min(MAX_DT, max(MIN_DT, dt)))
-        # NOTE: _last_update_ts is deliberately NOT advanced here. It marks the
-        # last time the tracker saw evidence, and secs_since_update() ages
-        # tracks against the clock below; moving it on an evidence-free frame
-        # would make a long run of skipped frames read as "recently updated".
+        # Do not advance _last_update_ts; tracks age against real detector evidence
         self._clock += dt
 
         for t in self.tracks:
@@ -2255,8 +2220,10 @@ class PipelineCoordinator:
                                 self.jpeg_sequence_id = (self.jpeg_sequence_id + 1) & 0x7FFFFFFF
                             self.jpeg_ready_event.set()
 
-                # Recording (non-blocking async queue)
-                self.recorder.push_frame(frame)
+                # Recording (non-blocking async queue, with latest AI detections)
+                with self._overlay_lock:
+                    rec_dets = list(getattr(self, "_latest_overlay_dets", [])) if (time.time() - getattr(self, "_latest_overlay_ts", 0.0) < 0.8) else None
+                self.recorder.push_frame(frame, rec_dets)
 
                 self._heartbeat["dec"] = time.time()
 
@@ -2314,12 +2281,7 @@ class PipelineCoordinator:
                 traceback.print_exc()
                 self._heartbeat["ai"] = time.time()
 
-        # Camera threads are recreated (new thread, new thread-id) whenever a
-        # camera is restarted — e.g. editing its zones/lines re-triggers
-        # start_camera_thread(). Without this, the backend's per-thread
-        # InferRequest cache would keep one abandoned entry (and its device
-        # buffers) alive per restart for as long as the shared model stays
-        # loaded.
+        # Release thread-local infer request and hardware buffers on thread exit
         backend = self.backend
         if backend is not None:
             backend.release_thread_request()
@@ -2632,12 +2594,7 @@ class PipelineCoordinator:
                     # `inf_frame` may be a zone-derived ROI crop of the camera
                     # frame; plausible-size judgements belong to the real frame.
                     geometry_shape=(orig_h, orig_w),
-                    # This stage's deadline. Extra tile passes may only use the
-                    # slack the mandatory full-frame pass leaves inside it —
-                    # without this the engine spends its own fixed 180ms
-                    # allowance no matter how fast we are trying to run, which
-                    # measured 141.6ms/cycle against a 66ms period (7.1 fps on
-                    # hardware good for 28.8). See AdaptiveTileEngine.infer.
+                    # Cycle time budget constraint for adaptive tiling passes
                     cycle_budget_ms=max(getattr(config, "TILING_LATENCY_BUDGET_MS", 80.0), 1000.0 / max(1.0, self.target_fps)),
                 )
                 detections     = tile_res.detections
@@ -2962,20 +2919,7 @@ class PipelineCoordinator:
 
             # ANPR pass: plate detector (+ CRNN OCR) on vehicle crops
             # Appends class=="number_plate" boxes (with plate_text when OCR read
-            # one) into `detections` before analytics, which associates a read
-            # plate to the vehicle track it sits on and logs a deduped
-            # number_plate event. A frame with no vehicle costs zero; a missing
-            # model disables ANPR only.
-            #
-            # This pass is now ASYNCHRONOUS (app/ai/plate_worker.py). It used to
-            # run inline, which made it the heaviest thing in the loop — a plate
-            # detector plus OCR on every vehicle crop, every pass — and forced a
-            # once-per-second throttle just to keep tracking alive. Now the loop
-            # SUBMITS a frame and immediately overlays whatever the worker has
-            # already published, so ANPR cost cannot affect FPS: a slow pass
-            # lowers ANPR cadence and nothing else. The submit is still rate-
-            # limited to ANPR_INTERVAL_S because a plate does not change between
-            # frames, and the worker's queue drops stale frames anyway.
+            # Submit frame to asynchronous ANPR worker; decouples OCR latency from main loop FPS
             t_anpr0 = time.perf_counter()
             if self._wants_anpr():
                 worker = getattr(self, "_anpr_worker", None)
