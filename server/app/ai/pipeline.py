@@ -29,29 +29,12 @@ from app.analytics import (
 from app.config import RECORDINGS_DIR, HELMET_INTERVAL_S, ANPR_INTERVAL_S, TARGET_FPS, MJPEG_MAX_FPS
 from app.gpu_monitor import get_gpu_stats
 
-# ── Hungarian assignment, imported off the startup path ─────────────────────
-# ByteTracker._hungarian_match needs scipy's linear_sum_assignment, and that ONE
-# function costs ~1.6 s to import: `scipy.optimize`'s package __init__ drags in
-# scipy.linalg, scipy.sparse and scipy.sparse.csgraph behind it. Importing a
-# submodule directly does not help — the parent __init__ runs either way (both
-# paths measured within 0.2 s of each other).
-#
-# That 1.6 s used to sit on the critical path between process launch and the
-# engine answering HTTP at all, delaying every camera behind it. It is now
-# prefetched on a background thread while the rest of startup (fastapi, the
-# database, route construction, the model compile) proceeds, and resolved on
-# first use if the prefetch has not landed yet.
-#
-# It must NOT silently degrade: the tracking stage feeds Module 5, so if this
-# raises every iteration the telemetry slot is never filled and /api/status
-# reports all-zero fps/detections even while inference is finding objects —
-# the root cause of a past "nothing is detected" report where the model was
-# running fine. So _get_lsa() raises rather than returning a stub.
+# ── Hungarian assignment (Lazy Scipy Import) ─────────────────────────────────
 _linear_sum_assignment = None
 
 
 def _get_lsa():
-    """scipy's linear_sum_assignment, imported at most once."""
+    """Lazy-load scipy's linear_sum_assignment on demand."""
     global _linear_sum_assignment
     if _linear_sum_assignment is None:
         from scipy.optimize import linear_sum_assignment as _f
@@ -1392,30 +1375,12 @@ class PipelineCoordinator:
         self._stage_errors = {"cap": 0, "dec": 0, "ai": 0, "trk": 0, "tel": 0, "ws": 0}
         self.restart_callback = None  # set by CameraManager; called if watchdog gives up on this instance
 
-        # ── Adaptive inference resolution ────────────────────────────────────
-        # GPU used to start at 960 on the theory that "GPU" implies headroom
-        # to spare — measured wrong on real hardware: a clean (uncontended),
-        # real-video benchmark on this machine's GPU backend showed imgsz=960
-        # costs 179ms for pre+inference+postprocess ALONE (already over the
-        # goal's 150ms end-to-end budget before capture/tracking/render are
-        # even added), while imgsz=640 costs 87.8ms with comparable detection
-        # recall (5 vs 6 vehicles on the same test frame) — i.e. the 960
-        # starting point was violating the latency target by default and
-        # relying on the rolling-window step-down (10 samples, ~4s at typical
-        # fps) to claw it back. Starting at the already-proven-safe value
-        # closes that gap immediately instead of eating it as startup lag on
-        # every camera start/restart; the adaptive logic above/below this
-        # value still applies (can step down to min_imgsz if this hardware is
-        # still slow, or up toward max_imgsz if it's faster than expected).
+        # ── Adaptive inference resolution configuration ──────────────────────
         backend_model = self.backend
         device = getattr(backend_model, "backend_device", "CPU").upper()
         static_imgsz = getattr(backend_model, "static_imgsz", None)
         if static_imgsz is not None:
-            # iGPU: the backend is compiled for exactly ONE input shape. Pin
-            # every imgsz to it and disable the adaptive step logic below —
-            # stepping to another size would only trigger the per-shape recompile
-            # storm the static shape exists to prevent, and the resize would be
-            # silently overridden by the backend anyway.
+            # Pinned static shape for fixed hardware backends (OpenVINO iGPU)
             self.current_imgsz = static_imgsz
             self.max_imgsz     = static_imgsz
             self.min_imgsz     = static_imgsz

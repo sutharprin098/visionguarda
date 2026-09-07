@@ -1121,20 +1121,7 @@ const CameraTile = memo(function CameraTile({ camera: c, site, engineOnline, onF
   // display (see lib/mediaShare.ts for the reconnect/re-acquire logic).
   useEffect(() => () => { sessionRef.current?.stop(); sessionRef.current = null; }, []);
 
-  // ---- Fullscreen ----
-  // The tile no longer fullscreens itself. It used to call
-  // tileRef.requestFullscreen().catch(() => {}) — an API that can reject for
-  // reasons the page cannot inspect, with the rejection swallowed, so a refusal
-  // and a success were indistinguishable and the button "did nothing" with no
-  // error anywhere. It also could not satisfy "switch camera while fullscreen",
-  // because the fullscreen element was one specific tile.
-  //
-  // Opening the viewer is now a state change in Workspace, which cannot be
-  // refused. See components/FullscreenViewer.tsx.
-  //
-  // F11 is claimed only while this tile is hovered, so with a grid of tiles the
-  // key resolves to the one under the cursor rather than firing on all of them.
-  // (ESC/F11 to EXIT are owned by the viewer itself.)
+  // Fullscreen & Tile Hotkeys
   useEffect(() => {
     if (!isHovered || !showingMedia) return;
     const onKey = (e: KeyboardEvent) => {
@@ -1142,10 +1129,6 @@ const CameraTile = memo(function CameraTile({ camera: c, site, engineOnline, onF
         e.preventDefault();
         goFullscreen();
       }
-      // Ctrl+P toggles the performance HUD for the hovered tile. Per-tile
-      // rather than global: on a multi-camera grid the useful question is
-      // almost always "why is THIS one slow", and showing every HUD at once
-      // costs render budget on tiles nobody is investigating.
       if ((e.ctrlKey || e.metaKey) && (e.key === "p" || e.key === "P")) {
         e.preventDefault();
         setShowPerf((v) => !v);

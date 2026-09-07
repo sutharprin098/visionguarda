@@ -1,82 +1,21 @@
-// Subscribes to the local AI engine's per-camera telemetry over /ws.
-//
-// The engine has always produced detections (server/app/ai/pipeline.py builds
-// `client_dets` every AI cycle and main.py pushes them to subscribers), but the
-// desktop renderer never consumed them — the word "detections" did not appear
-// anywhere under desktop/src. Workspace showed the raw MJPEG <img> (or the
-// local <video> while sharing) with nothing drawn on top, which is why a live
-// stream with zero boxes looked like "AI inference is not working" when
-// inference was in fact fine. The overlay stack existed only in the legacy
-// client/ web app (client/src/contexts/TelemetryContext.tsx et al).
-//
-// Same 127.0.0.1 / heartbeat / backoff reasoning as lib/mediaShare.ts — see the
-// long note there about localhost resolving to ::1 and stalling every reconnect.
+// Per-camera telemetry subscription and normalized coordinate protocol over WebSocket (/ws).
 
 export type TelemetryStatus = "idle" | "connecting" | "live" | "reconnecting";
 
-/** bbox values are NORMALISED to the source frame (0..1), not pixels.
- *  pipeline.py:1364 divides by orig_w/orig_h before sending. Drawing them as
- *  pixels yields a 1px box in the top-left corner — i.e. invisible. */
+/** Normalized bounding box (0..1) relative to original source frame */
 export interface TelemetryDetection {
   class: string;
   confidence: number;
   track_id?: number | null;
   tracking_status?: string;
-  /** km/h, or null when no honest number exists.
-   *
-   *  Automatic: the engine derives metres-per-pixel from the object's own pixel
-   *  height against a real-world prior (analytics.CLASS_HEIGHT_M — a car is
-   *  ~1.5m tall), so speed works on a bare camera with nothing drawn. A two-line
-   *  gate, when configured, overrides it with a true measurement.
-   *
-   *  ALWAYS check speed_calibrated before treating this as fact. An estimate is
-   *  ~+/-20-30%: the height prior is a class average, and a vehicle driving
-   *  straight at the camera reads low because it covers little pixel distance.
-   *  The engine will not raise a speeding alert from an estimate, and neither
-   *  should any UI present one as a measurement. */
   speed?: number | null;
-  /**
-   * MISLEADINGLY NAMED — do not use this as "is this a real measurement".
-   *
-   * pipeline.py sets it `_speed_status in ("calibrated", "estimated")`, so it is
-   * true for the size-prior ESTIMATE as well as for a gate measurement. It
-   * really means "a speed number exists". An earlier version of the alert
-   * engine trusted the name and would have promoted estimates to violations.
-   *
-   * The only test for a measured speed is `speed_status === "calibrated"`.
-   */
   speed_calibrated?: boolean;
-  /** Where the number came from:
-   *   - "calibrated"  — measured by a two-line gate; act on it
-   *   - "estimated"   — auto-derived from object size; indicative only
-   *   - "unavailable" — no size prior for this class, or the box is clipped by
-   *                     the frame edge so its height would mislead the scale
-   *   - "disabled"    — the camera's Speed Estimation toggle is off */
   speed_status?: "calibrated" | "estimated" | "unavailable" | "disabled";
   direction?: string;
-  /** Seconds this track has been in frame (analytics sets it from first_seen). */
   dwell_time?: number;
-
-  // ---- NOT EMITTED BY THE SHIPPED ENGINE -----------------------------------
-  // pipeline.py builds client_dets key by key (see "Build normalized
-  // client_dets") and none of the three below is among them, so they are always
-  // undefined at runtime. They are kept declared, and kept here rather than
-  // inline above, because deleting them would silently change the meaning of
-  // existing readers instead of making them visible:
-  //
-  //   DetectionOverlay.tsx reads `overspeed` and `speed_limit` today. The
-  //   badge keyed on `overspeed` can therefore never render, and the red
-  //   colouring falls through to a HARDCODED 50 km/h compared against a speed
-  //   that is usually an estimate. That is a live-view issue, outside the alert
-  //   surface, and is flagged rather than changed here.
-  //
-  // Speeding as an EVENT does work — analytics.py raises it into `alert_counts`
-  // as "speed_limit", which is what the alert engine consumes.
   track_label?: string;
   speed_limit?: number;
   overspeed?: boolean;
-  /** OCR-read plate number, on number_plate detections only. null when the
-   *  plate was localised but not read (no OCR model, or OCR failed). */
   plate_text?: string | null;
   custom_match?: boolean;
   label?: string;
