@@ -4,9 +4,7 @@ import numpy as np
 
 from app import config
 
-# Classes treated as "items" for abandoned-object detection — anything that
-# isn't a person or vehicle and can plausibly be left behind. Must stay in
-# sync with the classes enabled in app/ai/backend.py's COCO_CLASS_MAP.
+# Classes tracked for abandoned-object alerts (sync with backend.COCO_CLASS_MAP).
 ITEM_CLASSES = {"backpack", "handbag", "suitcase", "umbrella"}
 VEHICLE_CLASSES = {
     "car", "bus", "truck", "motorcycle", "bicycle", "van",
@@ -18,9 +16,7 @@ PARKING_OCCUPANCY_SCORE_THRESHOLD = 24.0
 
 
 def _object_category(class_name: str) -> str:
-    """person | vehicle | item | infrastructure | other — used everywhere a detection needs to be
-    bucketed for counting/alerting so item-class detections (added for
-    abandoned-object detection) don't silently get miscounted as vehicles."""
+    """Map detection class to category bucket (person, vehicle, item, infrastructure, other)."""
     if class_name in ITEM_CLASSES or class_name == "micro_motion":
         return "item"
     if class_name in VEHICLE_CLASSES:
@@ -32,38 +28,10 @@ def _object_category(class_name: str) -> str:
     return "other"
 
 
-# --- Zone Profiles ---------------------------------------------------------
-#
-# What a profile actually IS, mechanically: the set of classes the camera
-# reports. This is what makes "Traffic mode" more than a UI switch — a traffic
-# camera stops reporting handbags, a security camera stops reporting buses, and
-# the operator's overlay, counts and alerts all narrow accordingly.
-#
-# What it is NOT: an inference saving. yolox_tiny emits every class in
-# COCO_CLASS_MAP in a single forward pass, so excluding "bus" costs the same as
-# including it. The one module with its own model — and therefore a real
-# on/off cost — is face detection (app/ai/face.py, ~35ms when on, 0 when off).
-#
-# Every class named here must be producible by something, or the profile
-# advertises a capability that silently never appears:
-#   - "fire"/"smoke" are NOT listed: the colour-threshold code that invented
-#     them was removed (it read concrete as smoke on 100% of frames). No
-#     producer exists until a real model ships.
-#   - "vest"/"no_vest" are NOT listed: the HSV heuristic that invented them
-#     (22% false-positive) was removed and no real vest model ships yet.
-#   - "helmet"/"no_helmet" ARE listed for traffic now: unlike the removed HSV
-#     guess, a real trained producer exists — app/ai/helmet.py runs a YOLOv8
-#     helmet model on rider crops and appends genuine detections before this
-#     method sees them, exactly as face.py does for "face". If that model file
-#     is absent the module emits nothing (and logs why), so the class simply
-#     doesn't appear rather than being faked — the profile still only ever
-#     advertises a capability something can actually produce.
-#   - "number_plate" IS listed for traffic: app/ai/plate.py runs a real plate
-#     detector on vehicle crops (with OCR in plate_ocr.py). Same rule — absent
-#     the model it emits nothing and logs why, never a faked plate.
-#   - "dog"/"cat"/"bear"/"gloves"/"shoes" are NOT listed: never in
-#     COCO_CLASS_MAP, so the detector cannot emit them.
-#   - "face" IS listed for security and factory: YuNet genuinely produces it.
+# Zone profile class sets — controls which detection classes a camera reports.
+# Profile acts as a post-inference filter (YOLOX emits all COCO classes in one pass).
+# Only classes with a real model producer are listed; removed classes (fire/smoke
+# colour-threshold, vest HSV) are excluded until backed by a trained model.
 PRODUCIBLE_VEHICLE_CLASSES = {"car", "bus", "truck", "motorcycle", "bicycle"}
 PRODUCIBLE_ANIMAL_CLASSES = {"dog", "cat", "cow", "horse", "sheep"}
 PRODUCIBLE_PPE_CLASSES = {"helmet", "no_helmet", "vest", "no_vest", "gloves", "shoes", "mask", "goggles", "fire", "smoke", "forklift"}
@@ -224,18 +192,7 @@ def get_point_line_side(P, A, B):
 
 
 def segment_crossing_fraction(p1, p2, a, b):
-    """Fraction t in [0,1] along segment p1->p2 where it crosses infinite
-    line a-b, or None if the segment doesn't cross it.
-
-    Used to interpolate the real-world instant a track crossed a speed-gate
-    line, rather than crediting the crossing to whatever timestamp the
-    tracking cycle happened to land on. At highway speeds a vehicle can move
-    a large fraction of the frame between two tracking cycles, so the frame
-    boundary can be a poor stand-in for "when it actually crossed" — this
-    interpolation keeps two-line speed-gate measurements accurate at both
-    low and high tracking frame rates instead of degrading as tracking FPS
-    drops relative to vehicle speed.
-    """
+    """Return parametric fraction t in [0, 1] where segment p1->p2 intersects line a-b, or None."""
     if not check_line_intersection(p1, p2, a, b):
         return None
     x1, y1 = p1; x2, y2 = p2
@@ -388,24 +345,8 @@ def _parking_visual_score(frame, poly_pts) -> float:
     return float(100.0 * (0.45 * grad_frac + 0.35 * spread + 0.20 * deviant_frac))
 
 
-# ---------------------------------------------------------------------------
-# Automatic scale reference
-# ---------------------------------------------------------------------------
-#
-# Typical real-world HEIGHT of each class, in metres. This is the scale
-# reference that makes speed work with no lines to draw: if a car is 60px tall
-# on screen and cars are ~1.5m tall, then ~0.025 m/px at that car's depth.
-#
-# HEIGHT, not width, on purpose. A car's bounding box width is ~1.8m seen head
-# on but ~4.5m seen side on — the same object, a 2.5x different prior, and the
-# detector cannot tell us which way it is facing. Height barely changes with
-# viewing angle, so it is the only dimension usable without knowing orientation.
-#
-# These are approximations of real objects, NOT tuning constants: a car really is
-# about this tall, and if the number is wrong the fix is a better measurement of
-# cars. That is the whole difference from the invented SPEED_SCALE=100.0 this
-# replaces, which corresponded to nothing physical and changed meaning whenever
-# the camera moved.
+# Real-world class height (m) scale reference for monocular speed estimation.
+# Vertical dimension is used because aspect ratio is invariant to vehicle yaw.
 CLASS_HEIGHT_M = {
     "person": 1.70,
     "bicycle": 1.20,   # bike + rider
@@ -463,13 +404,9 @@ def transform_point_homography(H, px, py):
     return float(dst_pt[0] / dst_pt[2]), float(dst_pt[1] / dst_pt[2])
 
 
-# A box touching the frame edge is CLIPPED: the object continues outside the
-# image, so its on-screen height is smaller than the object really is. That
-# inflates metres-per-pixel and therefore the speed — the classic way this
-# technique produces 200km/h ghosts as a vehicle enters or leaves frame. Such
-# boxes are excluded from scale estimation (the track keeps its last good scale).
+# Edge margin to reject truncated bounding boxes from scale estimation
 _EDGE_MARGIN_PX = 3
-# Below this the height quantisation error alone is several percent per pixel.
+# Minimum bbox height (px) to bound pixel-quantization scale error
 _MIN_SCALE_HEIGHT_PX = 24.0
 
 
@@ -536,40 +473,23 @@ class CameraAnalytics:
         self.track_speeds = {}    # track_id -> speed (km/h), Kalman-smoothed
         self.track_last_pts = {}  # track_id -> (timestamp, (cx, cy))  [normalised]
         self.speed_filters = {}   # track_id -> _SpeedKalman1D
-        # --- Automatic scale estimation ------------------------------------
-        # track_id -> metres-per-pixel at that object's depth, EMA-smoothed.
-        self.track_mpp = {}
-        # track_id -> (timestamp, (cx_px, cy_px)) in ABSOLUTE PIXELS. Speed has
-        # to be measured in pixel space: normalised space is anisotropic, so a
-        # diagonal displacement there is not proportional to real distance.
-        self.track_last_px = {}
-        self.SPEED_HARD_CAP = 200.0  # sanity bound only, not a per-class heuristic
+        self.track_mpp = {}       # track_id -> m/px EMA depth estimate
+        self.track_last_px = {}   # track_id -> (ts, (cx_px, cy_px))
+        self.SPEED_HARD_CAP = 200.0
 
-        # --- Enterprise Homography Speed Detection Engine ---
+        # Homography speed estimation
         self.homography_H = None
         self.homography_src_pts = None
         self.homography_dst_pts = None
-        self.track_last_world_m = {}  # track_id -> (timestamp, (X_m, Y_m))
+        self.track_last_world_m = {}  # track_id -> (ts, (X_m, Y_m))
 
-        # track_id -> ts this id last appeared in detections. The tracker
-        # (ByteTracker in app/ai/pipeline.py) keeps a track's ID alive across
-        # brief/long occlusion via Kalman coasting + a lost-track re-id
-        # gallery, but only EMITS a track_id in detections on frames it's
-        # actually matched. Without this grace window, a single occluded
-        # frame would wipe this track's history/zone-dwell/EMA state here,
-        # so a re-identified same-ID track would restart from scratch —
-        # defeating the whole point of the tracker preserving the ID.
+        # Grace window to preserve track metadata across occlusions
         self.track_last_seen = {}
         self.REID_GRACE_SECONDS = 60.0
 
-        # --- Calibrated speed gates (two-line, known real-world distance) ---
-        # {track_id: (line_id, t_crossed)} — set when a track crosses one
-        # half of a declared speed-gate line pair; cleared once the paired
-        # line is crossed (speed computed) or overwritten by a fresh gate.
+        # Speed gate state: {track_id: (line_id, t_crossed)}
         self.speed_gate_pending = {}
-        # {track_id: {"speed_kmh": float, "ts": float}} — last calibrated
-        # reading for a track. A gate crossing is a one-shot event, not a
-        # continuous measurement, so it's kept visible for a short TTL.
+        # Last calibrated reading: {track_id: {"speed_kmh": float, "ts": float}}
         self.track_calibrated_speed = {}
         self.CALIBRATED_SPEED_TTL = 8.0
 
@@ -590,10 +510,7 @@ class CameraAnalytics:
         # Alert timestamps to prevent spam: {alert_key: last_trigger_time}
         self.alert_cooldowns = {}
 
-        # Features an operator has switched on that this build cannot actually
-        # deliver (no model ships for them). Warned once per camera rather than
-        # per frame — the point is that the gap is visible in the log, not that
-        # it floods it.
+        # Warn once per camera if an active feature lacks model support
         self._warned_unavailable = {}
         self.cooldown_period = 3.0
         
@@ -686,15 +603,7 @@ class CameraAnalytics:
             for _feat in ("fire_detection", "smoke_detection"):
                 if features.get(_feat, {}).get("enabled") and not self._warned_unavailable.get(_feat):
                     self._warned_unavailable[_feat] = True
-                    print(f"[analytics] {_feat} requires deep neural classifier plugin.", flush=True)
-                    print(
-                        f"[analytics] {_feat} is enabled for this camera but no "
-                        f"{_feat.split('_')[0]} model ships with this build — it will not "
-                        f"produce detections. The previous colour-threshold implementation "
-                        f"was removed: it false-alarmed on 100% of frames of ordinary "
-                        f"footage (concrete read as smoke).",
-                        flush=True,
-                    )
+                    print(f"[analytics] {_feat} enabled but classifier model not bundled; skipping.", flush=True)
 
         # Save schedule state for later gating of standard alerts
         self._schedule_active = schedule_active
@@ -780,12 +689,7 @@ class CameraAnalytics:
             active_track_ids.add(track_id)
             self.track_classes[track_id] = class_name
             
-            # bbox arrives already Kalman-filtered by the tracker (see
-            # PipelineCoordinator._tracking_loop_iteration) — no further
-            # smoothing here. An EMA pass used to run on this box too; two
-            # independent smoothers in series is what produced a box that
-            # visibly trailed behind fast-moving objects instead of staying
-            # locked to them.
+            # bbox is already Kalman-filtered by the tracker; no additional smoothing.
             bbox = det["bbox"]
 
             # Centroid
@@ -794,32 +698,13 @@ class CameraAnalytics:
             bottom_x = cx
             bottom_y = bbox["y2"] / frame_h  # bottom edge collision point
             
-            # ── Automatic speed estimation — no lines to draw ────────────────
-            #
-            # Real km/h needs a real scale reference. Rather than asking the
-            # operator to draw a calibration gate, the OBJECT ITSELF is the
-            # reference: a car is ~1.5m tall, so its pixel height tells us
-            # metres-per-pixel at its depth (see CLASS_HEIGHT_M). Displacement in
-            # pixels x metres-per-pixel / seconds = m/s. Real units, derived from
-            # a real measured quantity, self-calibrating per camera.
-            #
-            # This REPLACES a fabricated value: speed used to be
-            #   (normalised_displacement / dt) * 100.0 / (cy + 0.2)
-            # where 100.0 was invented and (cy+0.2) stood in for perspective. It
-            # could not be km/h and changed meaning if you re-mounted the camera.
-            #
-            # Honest about accuracy: this is an ESTIMATE, roughly +/-20-30%. The
-            # height prior is a class average (a hatchback and an SUV are both
-            # "car"), and it assumes motion roughly parallel to the image plane —
-            # a vehicle driving straight at the camera covers little pixel
-            # distance for a lot of real distance, so it reads low. Good enough
-            # to see that traffic is doing ~50 vs ~90. NOT good enough to fine
-            # anyone, which is why speed_calibrated stays False and the
-            # speed-limit alerts below still require a real two-line gate.
+            # Automatic speed estimation: object's known physical height (CLASS_HEIGHT_M)
+            # gives metres-per-pixel at its depth. Accuracy ~±20-30% (class-average height,
+            # assumes lateral motion). Not calibrated enough for enforcement; speed_calibrated=False.
             # Permanent vehicle track label
             det["track_label"] = f"{class_name.replace('_', ' ').title()} #{track_id:02d}"
 
-            # ── Homography Perspective Transformation & Automatic Speed Estimation ──
+            # Homography Perspective Transformation & Automatic Speed Estimation
             x1p, y1p = float(bbox["x1"]), float(bbox["y1"])
             x2p, y2p = float(bbox["x2"]), float(bbox["y2"])
             cx_px, cy_px = (x1p + x2p) / 2.0, (y1p + y2p) / 2.0
@@ -830,12 +715,7 @@ class CameraAnalytics:
                 self.track_mpp[track_id] = (
                     mpp_raw if prev_mpp is None else 0.7 * prev_mpp + 0.3 * mpp_raw
                 )
-            # The 0.025 default is a smoothing fallback for a class that DOES
-            # have a real size prior (CLASS_HEIGHT_M) when this frame's own
-            # geometry check failed (bbox at the edge, too small). A class
-            # with no prior at all (traffic_light, stop_sign...) must never
-            # get a speed number from a generic guess — mpp stays None and
-            # the fallback estimate below is skipped for it entirely.
+            # Default mpp prior fallback for recognized vehicle classes
             mpp = self.track_mpp.get(track_id) or (0.025 if class_name in CLASS_HEIGHT_M else None)
 
             speed_kmh = self.track_speeds.get(track_id)
@@ -860,14 +740,7 @@ class CameraAnalytics:
                             speed_source = "homography"
                     self.track_last_world_m[track_id] = (now, world_pt)
 
-            # 2. Fallback to Height Scale MPP Estimation if Homography not configured
-            #
-            # This is an ESTIMATE (see the accuracy note above), never a
-            # calibrated measurement, regardless of how many consecutive
-            # frames refine it — speed_calibrated must stay False here so the
-            # speed-limit alert gates below keep requiring a real two-line
-            # gate. Skipped entirely for a class with no size prior (mpp is
-            # None), rather than falling back to a generic guess.
+            # Fallback height-scale speed estimation (uncalibrated)
             if not speed_calibrated and mpp is not None:
                 last_px = self.track_last_px.get(track_id)
                 if last_px is not None:
@@ -1056,19 +929,10 @@ class CameraAnalytics:
                 })
                 self.alert_cooldowns[alert_key] = now
 
-        # --- Helmet / triple-riding violations (traffic) -------------------
-        # helmet.py appends genuine class=="no_helmet"/"helmet" boxes (on rider
-        # crops) before this method runs — same contract as face.py. Those boxes
-        # carry NO track_id, so alerting on them directly would fire once PER
-        # FRAME per bare head: a snapshot + 20s clip + DB row every ~33ms. We
-        # instead associate each violation to the tracked MOTORCYCLE it sits on
-        # and dedup by that stable track id (exactly how the zone/abandoned
-        # alerts above dedup via alert_cooldowns), so one rider = one event.
+        # Helmet & multi-rider detection — associate rider violation to vehicle track
         no_helmet_dets = [d for d in detections if d.get("class") == "no_helmet"]
         if no_helmet_dets:
-            # confidence gate: a low-confidence "motorcycle" call (e.g. a car
-            # the detector wasn't sure about) must not anchor a real alert —
-            # see VEHICLE_ACTION_MIN_CONFIDENCE in config.py.
+            # Filter motorcycles by minimum confidence threshold
             motos = [d for d in detections
                      if d.get("class") == "motorcycle" and d.get("track_id") is not None
                      and d.get("confidence", 0.0) >= config.VEHICLE_ACTION_MIN_CONFIDENCE]
@@ -1078,16 +942,7 @@ class CameraAnalytics:
                 return (b["x1"] + b["x2"]) / 2.0
 
             def _has_valid_rider(mb):
-                """Same rider window as app/ai/helmet.py's _rider_crops(): a
-                real PERSON (not just the no_helmet head box itself) must sit
-                on this specific motorcycle. Without this, a dense curbside
-                row of parked bikes still let _assoc_moto pick whichever
-                PARKED bike happened to be geometrically closest to a head
-                detected on a genuinely different, real rider nearby — the
-                per-head window alone can't tell two adjacent bikes apart in
-                a tight cluster, but "does THIS bike have its own rider" can.
-                Confirmed live 2026-08-02: 2/15 evidence crops still showed a
-                riderless parked bike after the by-head-only fix."""
+                """Validate that the motorcycle candidate has an overlapping rider person."""
                 pad = (mb["x2"] - mb["x1"]) * 0.25
                 moto_h = mb["y2"] - mb["y1"]
                 for p in persons:
@@ -1103,27 +958,7 @@ class CameraAnalytics:
                 return False
 
             def _assoc_moto(box):
-                """The tracked motorcycle a rider-region box belongs to: its
-                horizontal centre falls within the bike's x-span (padded) and it
-                sits at/above the bike, within about one bike-height of it, AND
-                that specific motorcycle has its own valid rider (_has_valid_rider)
-                — not just proximity to the head box. Returns the closest such
-                motorcycle det.
-
-                The vertical side used to only reject boxes BELOW the bike
-                (box centre > mb["y2"]), with no upper bound — so a head
-                anywhere above a motorcycle, no matter how far (a pedestrian
-                standing yards away but horizontally within the 25% pad),
-                would associate to it. That produced both false-positive
-                helmet_violation alerts on people who were never on the bike,
-                and evidence crops (rider_bbox = this motorcycle's box) showing
-                an unrelated bike instead of the actual rider — confirmed via
-                a live spot-check run 2026-08-02. Bounding the vertical window
-                fixed the isolated case, but in a dense parked-bike row the
-                window of several adjacent bikes overlaps, so the "closest
-                bike" was still sometimes a parked one — the _has_valid_rider
-                check added 2026-08-02 rejects any candidate bike that doesn't
-                itself have a person actually on it."""
+                """Find the closest valid tracked motorcycle overlapping with the rider bbox."""
                 bx = _cx(box["bbox"])
                 by2 = box["bbox"]["y2"]
                 best, best_dx = None, None
@@ -1148,17 +983,7 @@ class CameraAnalytics:
                     continue  # a bare head with no bike under it is not a rider
                 tid = moto["track_id"]
                 alert_key = f"helmet_violation_{tid}"
-                # Fires once per rider, not once per config.HELMET_COOLDOWN
-                # seconds. A rider who sits in frame for two minutes (traffic
-                # signal, parked at a stall) used to re-trigger every
-                # HELMET_COOLDOWN (15s default) - four-plus Telegram messages
-                # for one still-in-frame rider who never left. alert_key is
-                # cleared the moment this track_id is actually pruned as gone
-                # (see the dead_tracks sweep below, which deletes every
-                # "*_{tid}"-suffixed cooldown key), so a genuinely NEW pass by
-                # a different rider - or the same rider leaving and coming
-                # back - still gets its own fresh alert. Only "the same
-                # continuous sighting" is deduplicated to one.
+                # Dedup per continuous track sighting; cleared upon track pruning
                 if alert_key not in self.alert_cooldowns:
                     riders = sum(
                         1 for p in persons
@@ -1184,14 +1009,7 @@ class CameraAnalytics:
                     })
                     self.alert_cooldowns[alert_key] = now
 
-        # --- ANPR: log a read plate to the vehicle it sits on --------------
-        # plate.py appends class=="number_plate" boxes (on vehicle crops) with a
-        # plate_text filled by OCR (or None if unread). Like the helmet block,
-        # the boxes carry no track_id, so we associate a READ plate to the
-        # tracked vehicle whose box contains it and log once per vehicle within
-        # a cooldown — a plate log, not a per-frame spam. Localised-but-unread
-        # plates (plate_text is None) still render as boxes but raise no event:
-        # a plate log with no number is not worth an event or a clip.
+        # ANPR: associate recognized license plates with enclosing tracked vehicle
         plate_dets = [d for d in detections
                       if d.get("class") == "number_plate" and d.get("plate_text")]
         if plate_dets:
@@ -1693,17 +1511,7 @@ class CameraAnalytics:
                 "total_count": self.line_counters[l_id]["in_count"] + self.line_counters[l_id]["out_count"]
             }
 
-        # --- Apply calibrated (real-world) speed over the auto estimate --------
-        # A two-line gate is a MEASUREMENT, not an estimate: the track crossed
-        # two lines a known ground distance apart, so speed = metres / seconds.
-        # It beats the object-height estimate whenever one exists, because it
-        # needs no assumption about how tall the vehicle is or which way it is
-        # travelling. Drawing a gate is now an accuracy upgrade rather than the
-        # price of seeing any speed at all.
-        #
-        # A gate crossing is a one-shot event, so the reading stays visible for
-        # CALIBRATED_SPEED_TTL seconds after being measured instead of only
-        # flashing for the single frame it was computed on.
+        # Apply two-line gate speed measurement if available within TTL
         for det in detections:
             track_id = det.get("track_id")
             if track_id is None:
@@ -1978,23 +1786,7 @@ class CameraAnalytics:
                             cls_name = self.track_classes.get(tid, "person")
                             if cls_name == "person":
                                 alert_key = f"factory_hazard_{z_id}_{tid}"
-                                # This says "entered" - it should fire once per
-                                # worker per continuous time inside the zone,
-                                # not every 15s they remain there. A worker
-                                # standing in a hazard zone for two minutes
-                                # used to raise 8 separate "entered" alerts for
-                                # an entry that happened once. The key clears
-                                # once this track_id is pruned as gone for good
-                                # (see the dead_tracks sweep below), so a worker
-                                # who genuinely leaves and a different one who
-                                # enters later both still alert normally. A
-                                # worker who exits this zone but stays tracked
-                                # elsewhere in frame and re-enters later will
-                                # not re-alert until their track fully expires -
-                                # narrower than the general zone alerts below
-                                # (which re-arm on exit), accepted here since
-                                # the reported problem was the opposite failure
-                                # (repeat spam for one continuous visit).
+                                # Fire once per continuous track visit; reset on track expiry
                                 if alert_key not in self.alert_cooldowns:
                                     alerts.append({
                                         "type": "human_entry",

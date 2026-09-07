@@ -18,7 +18,7 @@ except ImportError:
     HAS_ONNXRUNTIME = False
 
 
-# ── Shared OpenVINO Core Instance ───────────────────────────────────────────
+# Shared OpenVINO Core Instance
 # Singleton ov.Core shared across all engine backends for device cache reuse.
 _OV_CORE = None
 _OV_CORE_LOCK = threading.Lock()
@@ -181,9 +181,7 @@ _MODEL_MIN_BYTES = {".pt": 1_000_000, ".onnx": 1_000_000, ".xml": 2_000, ".bin":
 
 
 def _model_file_problem(path):
-    """Return a human-readable reason string if `path` is missing or looks
-    corrupted/truncated, else None. Used to turn silent load failures into
-    clear, actionable diagnostics in the (frozen) engine log."""
+    """Validate model file path existence and minimum size integrity."""
     if not path or not os.path.exists(path):
         return f"file not found: {path}"
     try:
@@ -429,11 +427,7 @@ class EngineBackend:
             if _problem:
                 print(f"[AI Backend] [WARN] Possibly corrupted model for {_bt}: {_problem}", flush=True)
 
-        # Stable sort: ties (e.g. two CPU-only options) keep preferred_backends order.
-        # Score each backend type ONCE and reuse it for both the sort and the log
-        # line below — the log used to re-call _backend_score per candidate, which
-        # on OpenVINO meant a second full device enumeration purely to print a
-        # number the sort had already computed.
+        # Sort candidates by backend acceleration score
         _scores = {bt: self._backend_score(bt) for bt, _ in candidates}
         candidates.sort(key=lambda c: _scores[c[0]], reverse=True)
         print(f"[AI Backend] Candidate order (best acceleration first): "
@@ -480,7 +474,7 @@ class EngineBackend:
         target_device = "CPU" if force_cpu else ("GPU" if "GPU" in devices else "CPU")
         model = self.ov_core.read_model(model_path)
 
-        # ── Intel GPU: pin ONE static input shape ────────────────────────────
+        # Intel GPU: pin ONE static input shape
         # An Intel GPU (iGPU or Arc) recompiles kernels for every distinct input
         # shape it sees, each compile costing many seconds and emitting IGC
         # "CISA" errors on some shapes. Left dynamic, the engine's adaptive imgsz
@@ -515,19 +509,7 @@ class EngineBackend:
                       f"using model shape (static={self.static_imgsz}).", flush=True)
 
 
-        # Persist compiled kernels to disk. Without this, GPU in particular
-        # re-runs shape-specific kernel JIT compilation (documented
-        # elsewhere in this file as taking up to several minutes on first
-        # run) on every single process start — including every watchdog-
-        # triggered pipeline restart. A cached compile turns that into a
-        # fast disk load, which matters for "automatic recovery" and
-        # startup latency in production, not just local iteration speed.
-        # Write the compile cache to a GUARANTEED-writable per-user data dir,
-        # NOT next to the model. In the shipped EXE the model lives inside the
-        # app's install/resources folder, which a standard user often can't
-        # write to (and which must stay clean — a stray cache dir there also
-        # breaks --clean rebuilds). HISTORY_DIR resolves to %APPDATA%/CamAI
-        # (see app.config), always writable. Falls back to a temp dir if even
+        # Persist compiled model kernel cache in writable app data directory
         # that can't be created, and finally to disabling the cache rather than
         # failing model load over a cache-dir problem.
         cache_dir = None

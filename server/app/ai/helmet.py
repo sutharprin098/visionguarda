@@ -367,27 +367,7 @@ class HelmetDetector:
 
     # -- rider association (unchanged) ------------------------------------
     def _rider_crops(self, frame, motorcycle_boxes, person_boxes) -> List[Tuple[int, int, int, int]]:
-        """One crop per motorcycle that has a genuine rider on it — NEVER a
-        crop of the bare motorcycle alone.
-
-        Previously this unioned in ANY person box merely horizontally
-        overlapping the motorcycle's x-span (no vertical constraint at all),
-        and — critically — a motorcycle with ZERO matching persons still fell
-        through to `bw, bh = ux2-ux1, uy2-uy1` using just its own box, which
-        is > 0, so the "no valid rider" case was never actually rejected: a
-        crop of the bare motorcycle was cropped and handed to the helmet
-        model every time. That model, asked to find a head/helmet in a photo
-        of only a motorcycle, would occasionally hallucinate one on the bike
-        body — a parked motorcycle reported as helmet/no_helmet with no rider
-        in the frame at all. Confirmed live 2026-08-02.
-
-        Fix: a person only counts as a rider if their confidence clears
-        HELMET_RIDER_MIN_PERSON_CONFIDENCE, their horizontal centre falls
-        within the motorcycle's x-span (padded), and they sit at/above the
-        bike within about one bike-height of it — the same association
-        window used for helmet_violation alerts in analytics.py's
-        _assoc_moto(). A motorcycle with no such person is skipped entirely:
-        no crop, no model call, no chance of a hallucinated result."""
+        """Generate rider region crops for motorcycles with valid overlapping persons."""
         fh, fw = frame.shape[:2]
         crops: List[Tuple[int, int, int, int]] = []
         min_person_conf = config.HELMET_RIDER_MIN_PERSON_CONFIDENCE

@@ -106,13 +106,7 @@ _prewarmed: set = set()
 
 
 def prewarm_shapes(backend, sizes=None) -> None:
-    """Compile kernels for every ladder size on a background thread.
-
-    Without this the first tile that picks an uncompiled size pays multiple
-    seconds INSIDE the AI loop, which the watchdog cannot distinguish from a
-    hung stage. Runs once per (backend, size) per process; the OpenVINO disk
-    cache makes it near-free on every later start.
-    """
+    """Asynchronously compile OpenVINO kernels for ladder dimensions to avoid runtime JIT latency."""
     sizes = sizes or _SHAPE_LADDER_FINE
 
     def _work():
@@ -557,13 +551,7 @@ def _seam_compatible(a, b) -> bool:
 
 
 def _class_compatible(a: str, b: str) -> bool:
-    """Same class, or two vehicle-family classes.
-
-    The detector flips a vehicle between car/truck/bus across passes at
-    different scales (the same flip the tracker already tolerates frame to
-    frame). Without this, one van seen at two scales fuses into two boxes — the
-    exact duplicate-overlay failure this pipeline has hit twice before.
-    """
+    """Return True if classes are identical or share a vehicle taxonomy family."""
     return a == b or (a in VEHICLE_CLASSES and b in VEHICLE_CLASSES)
 
 
@@ -848,21 +836,7 @@ class AdaptiveTileEngine:
         if not s.enabled or budget_tiles <= 0 or s.max_grid <= 1:
             return 1
 
-        # Nothing measured yet, or nothing found for a while: sweep at full
-        # density to DISCOVER small objects. Without this the engine is blind to
-        # its own reason for existing — a scene containing only tiny objects
-        # yields no detections at 1x, so "objects are large" is never disproved.
-        # Discovery must NOT be conditional on the camera being idle. The grid
-        # decision is bistable: tiling finds small objects, which lowers the
-        # measured median size, which keeps the grid fine, which keeps finding
-        # them — and equally, a camera that starts at grid 1 sees only large
-        # objects, so the median stays high and it never engages. The periodic
-        # sweep is the only thing that breaks the second state, and gating it on
-        # `n_tracks == 0` meant a camera with anything in frame could never run
-        # one. That is precisely a busy scene, i.e. the case that matters.
-        # Measured effect of the bug: identical settings on identical video
-        # yielded 5.71, 5.29 and 4.49 detections/frame across runs depending on
-        # whether the loop happened to catch.
+        # Periodic full-density sweep to discover small objects and prevent scale-state lockup
         due = (now - self._last_discovery) >= s.discovery_interval_s
         if self._median_area_frac is None or due:
             self._last_discovery = now

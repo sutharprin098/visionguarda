@@ -122,15 +122,7 @@ class FaceDetector:
 
     @staticmethod
     def _nms(dets: List[Dict[str, Any]], iou_thresh: float = 0.4) -> List[Dict[str, Any]]:
-        """Cross-crop NMS.
-
-        YuNet already NMSes within one crop, but person boxes overlap — two
-        people walking side by side produce crops that both contain the same
-        face, so it gets detected once per crop. Measured on the proof frame:
-        two people yielded three faces, the last two being the same face at
-        0.80 and 0.67. Without this the operator sees phantom extra faces and
-        any face count is inflated.
-        """
+        """Suppress duplicate face detections across overlapping person crops."""
         if len(dets) < 2:
             return dets
         order = sorted(dets, key=lambda d: d["confidence"], reverse=True)

@@ -79,7 +79,7 @@ class CameraManager:
         """
         from app import config
 
-        # ── Cloud mode: local model must NOT be loaded ───────────────────────
+        # Cloud mode: local model must NOT be loaded
         if getattr(config, "INFERENCE_MODE", "local").strip().lower() == "cloud":
             print("[CameraManager] CLOUD mode active — local model load skipped (0% local GPU).",
                   flush=True)

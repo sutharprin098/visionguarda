@@ -334,10 +334,7 @@ class PlateDetector:
         if arr.ndim != 2:
             self.last_error = f"unexpected plate model output shape {np.asarray(out).shape}"
             return []
-        # A YOLOv8 detect export is [4+nc, N] (channels-first, N~8400 anchors);
-        # some exports transpose to [N, 4+nc]. Put the many anchors on the rows
-        # so each row is one candidate — without this the decoder read 5 rows of
-        # 8400 values and produced garbage boxes with confidences in the hundreds.
+        # Normalize tensor to [N, 4+nc] anchor rows
         if 5 <= arr.shape[0] < arr.shape[1]:
             arr = arr.T
         cols = arr.shape[1]

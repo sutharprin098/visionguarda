@@ -65,7 +65,7 @@ def detect(
 
     frame_h, frame_w = frame.shape[:2]
 
-    # ── 1. Downscale frame to target_size for ultra-fast payload transmission ──
+    # Downscale to target_size for transfer
     if max(frame_h, frame_w) > target_size:
         scale = target_size / float(max(frame_h, frame_w))
         new_w, new_h = max(1, int(frame_w * scale)), max(1, int(frame_h * scale))
@@ -73,20 +73,20 @@ def detect(
     else:
         encode_frame = frame
 
-    # ── 2. Encode frame to JPEG bytes ─────────────────────────────────────────
+    # JPEG encode
     ok, buf = cv2.imencode(".jpg", encode_frame, [cv2.IMWRITE_JPEG_QUALITY, jpeg_quality])
     if not ok:
         raise CloudOfflineError("Frame JPEG encoding failed")
     jpeg_bytes: bytes = buf.tobytes()
 
-    # ── 3. Build HTTP request ──────────────────────────────────────────────────
+    # Build request payload
     import base64
     b64 = base64.b64encode(jpeg_bytes).decode("ascii")
     body = json.dumps({"image_b64": b64, "target_size": target_size}).encode("utf-8")
 
     url = endpoint_url.rstrip("/") + "/api/detect"
 
-    # ── 3. Send Request (with fast automatic fallback & failure cool-off) ──────
+    # Try primary endpoint, then local fallback (with cool-off)
     now = time.time()
     candidate_urls = [url]
     if "127.0.0.1:8099" not in url and "localhost:8099" not in url:
@@ -141,7 +141,7 @@ def detect(
     if status < 200 or status >= 300:
         raise CloudOfflineError(f"Cloud endpoint returned HTTP {status} ({url})")
 
-    # ── 4. Parse JSON Response ────────────────────────────────────────────────
+    # Parse response
     try:
         payload = json.loads(raw)
     except Exception as exc:

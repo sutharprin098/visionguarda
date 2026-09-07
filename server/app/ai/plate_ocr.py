@@ -270,8 +270,7 @@ def split_rows(bgr: np.ndarray) -> Optional[Tuple[np.ndarray, np.ndarray]]:
     if hi - lo < 2:
         return None
     cut = lo + int(np.argmin(proj[lo:hi]))
-    # A real inter-row gap is much emptier than the rows around it. Without this
-    # check every single-row plate would be sliced through its characters.
+    # Reject cuts lacking a distinct horizontal projection valley (single-row plates)
     band = float(np.mean(proj)) or 1.0
     if proj[cut] > band * 0.45:
         return None
@@ -543,16 +542,7 @@ class PlateOCR:
     # -- public read --------------------------------------------------------
     def read_detailed(self, plate_bgr: np.ndarray,
                       debug_sink: Optional[Dict[str, np.ndarray]] = None) -> OCRResult:
-        """Read one plate crop. Never raises.
-
-        Tries preprocessing variants in order and keeps the best-scoring read,
-        stopping early once a variant produces a grammar-valid read above
-        `ANPR_OCR_EARLY_EXIT_CONF` — the common case, and the reason the
-        ensemble is affordable inside the real-time loop.
-
-        `debug_sink`, when given, collects the intermediate images so the caller
-        can persist them without this function knowing anything about the disk.
-        """
+        """Run OCR variants on a plate crop, returning the highest-confidence decoded read."""
         t_start = time.time()
         if plate_bgr is None or plate_bgr.size == 0:
             return OCRResult(reason=FAIL_EMPTY_CROP)

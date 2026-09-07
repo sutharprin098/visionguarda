@@ -366,7 +366,7 @@ export class MediaShareSession {
       if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
       const video = this.video;
 
-      // ── Backpressure: never queue a frame the socket cannot drain ─────────
+      // Backpressure: never queue a frame the socket cannot drain
       // ws.send() buffers without bound. When the engine is busy (a slow
       // inference cycle, another camera saturating the loop) the encoded
       // frames pile up in bufferedAmount instead of going anywhere — the

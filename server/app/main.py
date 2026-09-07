@@ -162,13 +162,7 @@ async def on_startup():
     print("[FastAPI] Initializing SQLite database...")
     init_db()
 
-    # Configure thread-safe callback to push telemetry in real-time.
-    # This is the ONLY telemetry distribution path — it fires once per AI
-    # cycle per camera and only reaches clients subscribed to that camera_id.
-    # (A second fixed-10Hz broadcast-to-everyone loop used to run alongside
-    # this and was removed: it duplicated every push, ignored subscriptions,
-    # and pushed full detections/masks/heatmap for every camera to every
-    # client regardless of whether they were viewing it.)
+    # Per-camera telemetry push — fires once per AI cycle, only to subscribed WS clients.
     loop = asyncio.get_running_loop()
     def send_telemetry(telemetry_data):
         for camera_id, data in telemetry_data.items():
@@ -187,17 +181,8 @@ async def on_startup():
     # Initialize active subscriptions set on manager
     manager.active_subscriptions = set()
 
-    # manager.start_cameras() synchronously compiles the YOLO backend
-    # (OpenVINO/ONNX model compilation), which is CPU-bound and can take
-    # anywhere from tens of seconds to several minutes on first run.
-    # Running it directly inside this coroutine would block the single
-    # asyncio event loop for that entire duration, during which Uvicorn
-    # cannot finish its startup/serve transition — every API route,
-    # the WebSocket endpoint, and the Vite dev proxy sitting in front of
-    # them all see connection refused/timeouts until it's done. Run it in
-    # a worker thread instead so the server starts accepting requests
-    # immediately; /api/status already reports modelLoaded=false and an
-    # empty camera list while this is still in progress.
+    # Model compilation is CPU-bound and can block for minutes on first run.
+    # Run in a background task so Uvicorn starts accepting requests immediately.
     print("[FastAPI] Launching camera threads in background...")
 
     async def _start_cameras_bg():

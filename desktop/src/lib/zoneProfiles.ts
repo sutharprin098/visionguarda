@@ -1,4 +1,4 @@
-// ============================================================
+
 // Zone Profiles — enterprise feature catalog (source of truth)
 // ------------------------------------------------------------
 // The Zone Management UI no longer exposes a flat list of zone
@@ -9,7 +9,6 @@
 // their editable parameters. The chosen values persist to
 // public.zone_profile_configs.features as:
 //   { "<feature_key>": { "enabled": bool, "params": { ... } } }
-// ============================================================
 
 export type ZoneProfileKey = "traffic" | "security" | "factory" | "retail" | "smart_city" | "micro_motion" | "custom";
 
@@ -248,9 +247,8 @@ const nightVisionFeature: FeatureDef = {
   ],
 };
 
-// ============================================================
 // TRAFFIC
-// ============================================================
+
 const TRAFFIC: ProfileDef = {
   key: "traffic",
   label: "Traffic",
@@ -385,9 +383,8 @@ const TRAFFIC: ProfileDef = {
   ],
 };
 
-// ============================================================
 // SECURITY
-// ============================================================
+
 const SECURITY: ProfileDef = {
   key: "security",
   label: "Security",
@@ -503,9 +500,8 @@ const SECURITY: ProfileDef = {
   ],
 };
 
-// ============================================================
 // FACTORY
-// ============================================================
+
 const FACTORY: ProfileDef = {
   key: "factory",
   label: "Factory",
@@ -579,9 +575,8 @@ const FACTORY: ProfileDef = {
   ],
 };
 
-// ============================================================
 // MICRO MOTION — High sensitivity CCTV screen motion HUD
-// ============================================================
+
 const MICRO_MOTION: ProfileDef = {
   key: "micro_motion",
   label: "Micro Motion",
@@ -605,9 +600,8 @@ const MICRO_MOTION: ProfileDef = {
   ],
 };
 
-// ============================================================
 // RETAIL — Store footfall, dwell & customer journey
-// ============================================================
+
 const RETAIL: ProfileDef = {
   key: "retail",
   label: "Retail",
@@ -651,9 +645,8 @@ const RETAIL: ProfileDef = {
   ],
 };
 
-// ============================================================
 // SMART CITY — Public safety & municipal infrastructure
-// ============================================================
+
 const SMART_CITY: ProfileDef = {
   key: "smart_city",
   label: "Smart City",
@@ -696,9 +689,8 @@ const SMART_CITY: ProfileDef = {
   ],
 };
 
-// ============================================================
 // CUSTOM — free-form building blocks, unlimited zones
-// ============================================================
+
 const CUSTOM: ProfileDef = {
   key: "custom",
   label: "Custom",
