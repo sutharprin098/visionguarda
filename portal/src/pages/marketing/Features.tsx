@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { ArrowRight, HardHat, ScanText, Gauge, Users, ScanFace, Boxes, Cpu, ShieldCheck, Video } from "lucide-react";
+import { ArrowRight, HardHat, ScanText, Gauge, Users, ScanFace, Boxes, Cpu, ShieldCheck, Video, Disc, Layers, ZoomIn } from "lucide-react";
 import VideoDetections from "../../components/landing/VideoDetections";
 import { useReveal } from "../../lib/useReveal";
 
@@ -126,6 +126,9 @@ function FeatureVideoSwitcher() {
 }
 
 const CAPS = [
+  { icon: Disc, tag: "24/7 NVR", title: "Continuous NVR Recording", body: "Cyclic multi-threaded MP4 writer with 5-60m segment rotation, SQLite index catalog, and automatic FIFO disk quota cleanup." },
+  { icon: Layers, tag: "EVIDENCE", title: "AI Telemetry Burn-In", body: "Hardware-accelerated OpenCV frame stamping burns YOLO bounding boxes, class labels, track IDs, and speed radar directly into standard MP4s." },
+  { icon: ZoomIn, tag: "STUDIO", title: "4X Digital Zoom & Pan", body: "Fluid 1.0x to 4.0x digital zoom and directional pan inspection across live streams and historical 24-hour timeline recordings." },
   { icon: HardHat, tag: "TRAFFIC", title: "Helmet Compliance", body: "Flags riders without helmets in real time — the backbone of the traffic pilot." },
   { icon: ScanText, tag: "ANPR", title: "Plate Recognition", body: "Number-plate detection + CRNN decode, tuned with an MIT India-plate detector." },
   { icon: Gauge, tag: "MOTION", title: "Speed Estimation", body: "Per-track km/h from object-scale geometry, logged against each vehicle." },

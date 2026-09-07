@@ -3,13 +3,15 @@ import { motion } from "framer-motion";
 import {
   Smartphone, ShieldCheck, Bell, Wifi, Cpu, Zap, Download,
   CheckCircle2, Lock, Radio, ExternalLink, QrCode, ArrowRight,
-  MessageSquare, Sparkles, Eye, ShieldAlert, Cloud, Play, RefreshCw
+  MessageSquare, Sparkles, Eye, ShieldAlert, Cloud, Play, RefreshCw,
+  Disc, ZoomIn, Clock
 } from "lucide-react";
 
 export default function MobileAppShowcaseSection() {
-  const [activeTab, setActiveTab] = useState<"live" | "alerts" | "sync">("live");
+  const [activeTab, setActiveTab] = useState<"live" | "recordings" | "alerts" | "sync">("live");
   const [alertPulse, setAlertPulse] = useState(true);
   const [activeStream, setActiveStream] = useState<"/videos/junction.mp4" | "/videos/humans.mp4" | "/videos/speed.mp4">("/videos/junction.mp4");
+  const [mobileRecEnabled, setMobileRecEnabled] = useState(true);
 
   useEffect(() => {
     const timer = setInterval(() => {
@@ -169,14 +171,23 @@ export default function MobileAppShowcaseSection() {
                 </div>
 
                 {/* Tab Switcher inside phone */}
-                <div className="px-3 py-2 bg-slate-900/50 border-b border-slate-800/60 grid grid-cols-3 gap-1 text-[9.5px] font-bold text-slate-400">
+                <div className="px-2 py-2 bg-slate-900/50 border-b border-slate-800/60 grid grid-cols-4 gap-1 text-[8.5px] font-bold text-slate-400">
                   <button
                     onClick={() => setActiveTab("live")}
                     className={`py-1.5 rounded-lg transition text-center ${
                       activeTab === "live" ? "bg-sky-500/20 text-sky-400 border border-sky-500/30 font-extrabold" : "hover:text-white"
                     }`}
                   >
-                    Live View
+                    Live
+                  </button>
+                  <button
+                    onClick={() => setActiveTab("recordings")}
+                    className={`py-1.5 rounded-lg transition text-center flex items-center justify-center gap-1 ${
+                      activeTab === "recordings" ? "bg-rose-500/20 text-rose-400 border border-rose-500/30 font-extrabold" : "hover:text-white"
+                    }`}
+                  >
+                    <span className="w-1.5 h-1.5 rounded-full bg-rose-500 animate-pulse" />
+                    NVR
                   </button>
                   <button
                     onClick={() => setActiveTab("alerts")}
@@ -192,7 +203,7 @@ export default function MobileAppShowcaseSection() {
                       activeTab === "sync" ? "bg-sky-500/20 text-sky-400 border border-sky-500/30 font-extrabold" : "hover:text-white"
                     }`}
                   >
-                    License Sync
+                    Sync
                   </button>
                 </div>
 
@@ -292,6 +303,86 @@ export default function MobileAppShowcaseSection() {
                         </div>
                       </motion.div>
                     </>
+                  )}
+
+                  {activeTab === "recordings" && (
+                    <div className="space-y-2.5">
+                      {/* Video Player Mock with 2.0x Zoom and REC indicator */}
+                      <div className="relative rounded-xl border border-slate-800 bg-slate-900 overflow-hidden">
+                        <div className="relative h-36 bg-slate-950 overflow-hidden">
+                          <video
+                            src={activeStream}
+                            autoPlay
+                            loop
+                            muted
+                            playsInline
+                            className="w-full h-full object-cover scale-125 origin-center opacity-85"
+                          />
+                          {/* 2.0x Zoom Badge */}
+                          <div className="absolute top-2 left-2 flex items-center gap-1 bg-slate-950/80 px-2 py-0.5 rounded text-[8px] font-mono text-sky-400 backdrop-blur-md border border-sky-500/30">
+                            <ZoomIn size={10} />
+                            <span>2.0x PINCH-ZOOM</span>
+                          </div>
+
+                          {/* Per-camera REC toggle badge */}
+                          <button
+                            onClick={() => setMobileRecEnabled((p) => !p)}
+                            className="absolute top-2 right-2 flex items-center gap-1 bg-slate-950/80 px-2 py-0.5 rounded text-[8px] font-mono text-rose-400 backdrop-blur-md border border-rose-500/30 font-bold"
+                          >
+                            <span className={`w-1.5 h-1.5 rounded-full ${mobileRecEnabled ? "bg-rose-500 animate-pulse" : "bg-slate-500"}`} />
+                            <span>{mobileRecEnabled ? "REC: ON" : "REC: OFF"}</span>
+                          </button>
+
+                          <div className="absolute bottom-2 left-2 bg-slate-950/80 px-2 py-0.5 rounded text-[8px] font-mono text-emerald-400">
+                            SEEK: 14:22:15
+                          </div>
+                        </div>
+
+                        {/* Mobile Mini Timeline */}
+                        <div className="p-2 bg-slate-900 border-t border-slate-800">
+                          <div className="flex justify-between text-[7.5px] font-mono text-slate-400 mb-1">
+                            <span>00:00</span>
+                            <span className="text-sky-400 font-bold">14:22 (SEEK)</span>
+                            <span>23:59</span>
+                          </div>
+                          <div className="relative h-3 bg-slate-950 rounded-full overflow-hidden border border-slate-800">
+                            <div className="absolute inset-y-0 left-[10%] right-[15%] bg-sky-500/40 rounded-full" />
+                            <div className="absolute top-0 bottom-0 left-[60%] w-1 bg-white shadow-xs" />
+                            <div className="absolute top-0 bottom-0 left-[38%] w-1 bg-amber-400" />
+                            <div className="absolute top-0 bottom-0 left-[75%] w-1 bg-rose-500" />
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Saved Segment Clips List */}
+                      <div className="space-y-1.5 text-[9.5px] font-mono">
+                        <div className="p-2 rounded-xl bg-slate-900/90 border border-slate-800 flex items-center justify-between">
+                          <div>
+                            <div className="text-white font-bold flex items-center gap-1">
+                              <Disc size={10} className="text-sky-400" />
+                              <span>REC_141500_CAM01.mp4</span>
+                            </div>
+                            <span className="text-slate-400 text-[8px]">15:00 min · 284 MB · AI Burn-in</span>
+                          </div>
+                          <span className="px-1.5 py-0.5 rounded bg-sky-500/20 text-sky-300 text-[8px] font-bold">
+                            PLAY
+                          </span>
+                        </div>
+
+                        <div className="p-2 rounded-xl bg-slate-900/90 border border-slate-800 flex items-center justify-between">
+                          <div>
+                            <div className="text-slate-300 font-bold flex items-center gap-1">
+                              <Disc size={10} className="text-slate-500" />
+                              <span>REC_140000_CAM01.mp4</span>
+                            </div>
+                            <span className="text-slate-400 text-[8px]">15:00 min · 281 MB · AI Burn-in</span>
+                          </div>
+                          <span className="px-1.5 py-0.5 rounded bg-slate-800 text-slate-400 text-[8px]">
+                            SAVED
+                          </span>
+                        </div>
+                      </div>
+                    </div>
                   )}
 
                   {activeTab === "alerts" && (
@@ -413,6 +504,22 @@ export default function MobileAppShowcaseSection() {
                     </h3>
                     <p className="mt-1 text-xs text-slate-600 leading-relaxed font-medium">
                       Secure activation bound to your unique device fingerprint. Simple key entry with direct link to portal management at <code className="text-sky-600 font-bold">camai.princesite.in</code>.
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="p-4 sm:p-5 rounded-2xl border border-sky-200/80 bg-white/95 backdrop-blur-md hover:border-rose-400 transition-all shadow-xs group">
+                <div className="flex items-start gap-3.5">
+                  <div className="p-2.5 rounded-xl bg-rose-100 text-rose-600 group-hover:scale-110 transition-transform border border-rose-200 shrink-0">
+                    <Disc size={20} />
+                  </div>
+                  <div>
+                    <h3 className="text-sm sm:text-base font-extrabold text-slate-900 group-hover:text-rose-600 transition-colors">
+                      Mobile NVR Playback &amp; 4X Pinch-Zoom
+                    </h3>
+                    <p className="mt-1 text-xs text-slate-600 leading-relaxed font-medium">
+                      Full desktop parity in your pocket. Fluidly scrub 24-hour recorded timelines, toggle background recording per-camera, and pinch-to-zoom up to 4x to inspect security events on the go.
                     </p>
                   </div>
                 </div>

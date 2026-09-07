@@ -39,10 +39,14 @@ export default function HeroSection() {
               <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-sky-600" />
             </span>
             <span className="flex items-center gap-1.5">
-              <Cloud size={13} className="text-sky-600" /> CLOUD &amp; HYBRID AI INFERENCE MATRIX
+              <Cloud size={13} className="text-sky-600" /> CLOUD &amp; HYBRID AI MATRIX
             </span>
             <span className="text-slate-300">•</span>
-            <span className="text-sky-600 font-extrabold">DESKTOP v1.0.9 &amp; MOBILE v1.0.1</span>
+            <span className="text-rose-600 font-extrabold flex items-center gap-1">
+              <span className="w-1.5 h-1.5 rounded-full bg-rose-500 animate-pulse" /> 24/7 NVR RECORDING &amp; 4X ZOOM STUDIO
+            </span>
+            <span className="text-slate-300">•</span>
+            <span className="text-sky-600 font-extrabold">DESKTOP &amp; MOBILE APK</span>
           </div>
         </motion.div>
 
@@ -67,7 +71,7 @@ export default function HeroSection() {
             transition={{ duration: 0.7, delay: 0.2 }}
             className="mx-auto mt-6 max-w-2xl text-xs sm:text-base leading-relaxed text-slate-600 font-medium"
           >
-            Connect any RTSP, USB, or ONVIF camera in seconds. Sub-12ms AI object detection, intrusion vectoring, speed radar telemetry, and 24/7 mobile background alerts.
+            Connect any RTSP, USB, or ONVIF camera in seconds. Sub-12ms AI object detection, 24/7 continuous NVR recording, AI detection burn-in export, 4X digital zoom studio, and instant mobile alerts.
           </motion.p>
 
           {/* CTA Buttons - Primary Downloads */}
@@ -112,13 +116,19 @@ export default function HeroSection() {
             className="mt-8 flex flex-wrap items-center justify-center gap-6 text-[11.5px] font-semibold text-slate-600"
           >
             <span className="flex items-center gap-1.5">
+              <CheckCircle2 size={15} className="text-sky-600" /> 24/7 NVR CONTINUOUS RECORDING
+            </span>
+            <span className="flex items-center gap-1.5">
+              <CheckCircle2 size={15} className="text-sky-600" /> AI DETECTION BURN-IN
+            </span>
+            <span className="flex items-center gap-1.5">
+              <CheckCircle2 size={15} className="text-sky-600" /> 4X DIGITAL ZOOM STUDIO
+            </span>
+            <span className="flex items-center gap-1.5">
               <CheckCircle2 size={15} className="text-sky-600" /> RTSP / ONVIF NATIVE
             </span>
             <span className="flex items-center gap-1.5">
               <CheckCircle2 size={15} className="text-sky-600" /> NVIDIA CUDA &amp; TENSORRT
-            </span>
-            <span className="flex items-center gap-1.5">
-              <CheckCircle2 size={15} className="text-sky-600" /> 100% LOCAL DATA SOVEREIGNTY
             </span>
           </motion.div>
         </div>

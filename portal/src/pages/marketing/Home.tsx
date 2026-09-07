@@ -3,6 +3,7 @@ import { motion, useScroll, useSpring } from "framer-motion";
 import { useSmoothScroll } from "../../lib/useSmoothScroll";
 import HeroSection from "../../components/landing/HeroSection";
 import MobileAppShowcaseSection from "../../components/landing/MobileAppShowcaseSection";
+import ContinuousNVRSection from "../../components/landing/ContinuousNVRSection";
 import RealtimeAlertSection from "../../components/landing/RealtimeAlertSection";
 import CameraNetworkSection from "../../components/landing/CameraNetworkSection";
 import AIFeaturesGrid from "../../components/landing/AIFeaturesGrid";
@@ -29,6 +30,7 @@ export default function Home() {
       <main className="relative z-10 bg-sky-50/50">
         <HeroSection />
         <MobileAppShowcaseSection />
+        <ContinuousNVRSection />
         <RealtimeAlertSection />
         <CameraNetworkSection />
         <AIFeaturesGrid />
