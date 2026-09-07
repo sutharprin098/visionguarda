@@ -27,20 +27,23 @@ const REPO_BLOB_BASE = `${REPO_URL}/blob/main/`;
 const DEFAULT_FALLBACK_RELEASES: GithubRelease[] = [
   {
     tag_name: "v1.0.9",
-    name: "CamAI Desktop v1.0.9 (Windows Release)",
+    name: "CamAI Desktop v1.0.9 & Mobile v1.0.9 (Enterprise Release)",
     version: "v1.0.9",
     prerelease: false,
-    published_at: "2026-09-03T01:25:00Z",
+    published_at: "2026-09-07T18:00:00Z",
     asset_id: 110,
     asset_name: "CamAI-Desktop-Setup-1.0.9.exe",
-    size_bytes: 356707397,
+    size_bytes: 423642359,
     content_type: "application/octet-stream",
     download_url: `/downloads/CamAI-Desktop-Setup-1.0.9.exe`,
-    checksum_sha256: "27b124bb7c21cced5d0dbc33ab23144bbeeb9beccaaee6b545a273611d6bb281",
+    checksum_sha256: "4a5f2dc25f80f3f92e8aa2c0d315fb4a61ee53b07b96ca9678c41e8554f1d601",
     release_notes: `
-### 🚀 CamAI Desktop v1.0.9 & Mobile v1.0.9 Unified Release
-- **CamAI Desktop v1.0.9**: Synchronized MJPEG frame burn-in overlay, aggressive RTSP socket backlog flushing, and sub-50ms hardware frame decoding.
-- **Signed Android APK v1.0.9**: High-performance mobile client with 0-lag video-bounding-box synchronization and 24/7 background AI notification alerts.
+### 🚀 CamAI Desktop v1.0.9 & Mobile v1.0.9 Unified NVR Release
+- **24/7 Continuous NVR Recording Engine**: Background segmented MP4 writing (5-60m configurable segments), zero dropped frames, SQLite metadata cataloging, and automatic FIFO disk quota cleanup.
+- **AI Detection Burn-In Export**: Hardware-accelerated OpenCV frame stamping burns YOLO bounding boxes, class confidences, tracking IDs, speed radar (km/h), and UTC watermarks directly into standard MP4 frames.
+- **4X Digital Zoom & Pan Studio**: Smooth 1.0x to 4.0x digital zoom and directional pan inspection across live streams and 24-hour timeline scrubbing.
+- **Per-Camera REC Toggle & Mobile Parity**: Dedicated recording toggle button on each camera tile, synchronized between Desktop workstation and Android APK v1.0.9.
+- **Signed Android APK v1.0.9**: High-performance mobile client with pinch-to-zoom studio, 24-hour timeline seek, and 24/7 background AI notification alerts.
     `,
   },
   {
@@ -729,7 +732,7 @@ export default function DownloadsPage() {
                 CamAI Mobile Security Hub
               </h2>
               <p className="mt-2 text-xs sm:text-sm text-slate-300 leading-relaxed">
-                Mobile security hub for Android smartphones. Direct live RTSP stream playback, real-time background alert push notifications, unified Google SSO authentication, and zero package conflict installation.
+                Mobile security hub for Android smartphones. Direct live RTSP stream playback, 24/7 background NVR playback studio, 4X pinch-zoom inspection, real-time push notifications, and single Google SSO authentication.
               </p>
             </div>
 
