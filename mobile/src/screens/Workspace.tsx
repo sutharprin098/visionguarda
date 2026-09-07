@@ -1,8 +1,8 @@
 import { useEffect, useState, useRef, useCallback, useMemo, memo } from "react";
-import { Video, Bell, Settings2, LogOut, Wifi, WifiOff, Sliders, Activity, AlertTriangle, RotateCw, Maximize2, Minimize2, Lock, Send, Check, Loader2, MessageCircle, ChevronDown, ChevronRight, Copy, Cloud, Cpu, Globe, Plus, MoreVertical } from "lucide-react";
+import { Video, Film, Bell, Settings2, LogOut, Wifi, WifiOff, Sliders, Activity, AlertTriangle, RotateCw, Maximize2, Minimize2, Lock, Send, Check, Loader2, MessageCircle, ChevronDown, ChevronRight, Copy, Cloud, Cpu, Globe, Plus, MoreVertical } from "lucide-react";
 import clsx from "clsx";
 import { startRealtimeSync, DeactivatedError, SyncBundle } from "../lib/sync";
-import { syncAiModelToLocalEngine, syncAiConfidenceToLocalEngine, syncAiInferenceModeToLocalEngine, mjpegStreamUrl, resetLocalEngineState, getEngineBase, getDecryptedCameraSource } from "../lib/localEngine";
+import { syncAiModelToLocalEngine, syncAiConfidenceToLocalEngine, syncAiInferenceModeToLocalEngine, mjpegStreamUrl, resetLocalEngineState, getEngineBase, getDecryptedCameraSource, toggleCameraRecording } from "../lib/localEngine";
 import { MediaShareSession, ShareStatus } from "../lib/mediaShare";
 import { TelemetrySession, TelemetryDetection, CameraTelemetry, TelemetryStatus, detectionsRenderEqual, telemetryHub } from "../lib/telemetry";
 import type { ZoneProfileKey } from "../lib/zoneProfiles";
@@ -13,6 +13,7 @@ import ProfileDashboard from "../components/ProfileDashboard";
 import SourcePicker from "../components/SourcePicker";
 import AddCameraModal from "../components/AddCameraModal";
 import SettingsMenuModal from "../components/SettingsMenuModal";
+import RecordingsPlaybackView from "../components/RecordingsPlaybackView";
 import FallbackTileLiveFeedShared from "../components/FallbackTileLiveFeed";
 import { lockReason } from "../lib/rbac";
 import { getSupabase } from "../lib/session";
@@ -67,7 +68,7 @@ export default function Workspace({
    *  Alerts tab. A nonce for the same reason as openLiveCam. */
   openAlertsSignal?: { nonce: number } | null;
 }) {
-  const [tab, setTab] = useState<"cameras" | "alerts">("cameras");
+  const [tab, setTab] = useState<"cameras" | "recordings" | "alerts">("cameras");
   // Which camera is showing full-window, or null. Lifted to Workspace (not the
   // tile) because the viewer has to cover the sidebar and the tab bar, and
   // because switching camera while fullscreen has to keep the SAME viewer
@@ -357,8 +358,9 @@ export default function Workspace({
   const allowedTabs = bundle
     ? ([
         (hasPermission("cameras.manage") || hasPermission("cameras.assign")) && "cameras",
+        "recordings",
         hasPermission("alerts.view") && "alerts",
-      ].filter(Boolean) as ("cameras" | "alerts")[])
+      ].filter(Boolean) as ("cameras" | "recordings" | "alerts")[])
     : [];
 
   useEffect(() => {
@@ -394,8 +396,9 @@ export default function Workspace({
 
   const navItems = ([
     { id: "cameras", label: `Cameras (${bundle.cameras?.length ?? 0})`, icon: Video },
+    { id: "recordings", label: "Recordings", icon: Film },
     { id: "alerts", label: `Alerts (${bundle.notifications?.length ?? 0})`, icon: Bell },
-  ] as const).filter((item) => allowedTabs.includes(item.id));
+  ] as const).filter((item) => allowedTabs.includes(item.id as any));
 
   return (
     // AlertProvider is mounted once in App.tsx, wrapping both this screen and
@@ -563,6 +566,9 @@ export default function Workspace({
             setIsAddModalOpen={setIsAddModalOpen}
           />
         </div>
+        {tab === "recordings" && (
+          <RecordingsPlaybackView cameras={bundle.cameras} />
+        )}
         {tab === "alerts" && (
           <AlertsTab orgId={bundle.organization?.id ?? null} hasPermission={hasPermission} active={true} />
         )}
@@ -579,6 +585,17 @@ export default function Workspace({
         >
           <Video size={18} />
           <span className="text-[10px]">Cameras</span>
+        </button>
+
+        <button
+          onClick={() => setTab("recordings")}
+          className={clsx(
+            "flex flex-col items-center gap-1 py-1 px-3 rounded-xl transition",
+            tab === "recordings" ? "text-accent bg-accent/10 font-bold" : "text-zinc-400 hover:text-zinc-200"
+          )}
+        >
+          <Film size={18} />
+          <span className="text-[10px]">Recordings</span>
         </button>
 
         {allowedTabs.includes("alerts") && (
@@ -1250,6 +1267,20 @@ const CameraTile = memo(function CameraTile({ camera: c, site, engineOnline, onF
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
   const [detections, setDetections] = useState<TelemetryDetection[]>([]);
   const [telemetry, setTelemetry] = useState<CameraTelemetry | null>(null);
+
+  const isRecording = Boolean(telemetry?.recording);
+  const [togglingRec, setTogglingRec] = useState(false);
+
+  const handleToggleRecording = useCallback(async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (togglingRec) return;
+    setTogglingRec(true);
+    try {
+      await toggleCameraRecording(c.id, !isRecording);
+    } finally {
+      setTogglingRec(false);
+    }
+  }, [c.id, isRecording, togglingRec]);
   // Newest payload, always current, never triggers a render. The gate in the
   // telemetry callback below decides which of these are worth committing to
   // state; this ref is what makes discarding the rest safe.
@@ -1786,6 +1817,27 @@ const CameraTile = memo(function CameraTile({ camera: c, site, engineOnline, onF
       <div className="flex items-center justify-between px-3 py-2 bg-surface-1">
         <span className="text-sm text-zinc-200">{c.name}</span>
         <div className="flex items-center gap-2">
+          {/* Per-Camera Recording On/Off button */}
+          <button
+            onClick={handleToggleRecording}
+            disabled={togglingRec}
+            title={isRecording ? "Stop Recording" : "Start Recording"}
+            className={clsx(
+              "flex items-center gap-1.5 px-2 py-0.5 rounded text-[10px] font-semibold transition shadow-sm",
+              isRecording
+                ? "bg-red-500/20 text-red-400 border border-red-500/30 hover:bg-red-500/30"
+                : "bg-surface-2 text-zinc-400 border border-line hover:text-zinc-200 hover:bg-surface-3"
+            )}
+          >
+            <span
+              className={clsx(
+                "w-2 h-2 rounded-full",
+                isRecording ? "bg-red-500 animate-pulse" : "bg-zinc-500"
+              )}
+            />
+            <span>{isRecording ? "REC" : "REC"}</span>
+          </button>
+
           {sharingType !== null && (
             <button
               onClick={stopSharing}

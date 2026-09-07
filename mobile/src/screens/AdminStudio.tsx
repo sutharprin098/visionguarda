@@ -31,12 +31,22 @@ import {
   Upload,
   ShoppingBag,
   Building2,
+  Sliders,
+  Check,
+  X,
 } from "lucide-react";
 import clsx from "clsx";
 import { getSupabase } from "../lib/session";
 import { useAlertState } from "../components/alerts/AlertProvider";
 import { fnErrorMessage } from "../lib/fnError";
-import { isEngineOnline, mjpegStreamUrl, controlHeaders } from "../lib/localEngine";
+import {
+  isEngineOnline,
+  mjpegStreamUrl,
+  controlHeaders,
+  fetchRecordingSettings,
+  updateRecordingSettings,
+  RecordingSettings,
+} from "../lib/localEngine";
 import TargetMatcherUI from "../components/TargetMatcherUI";
 import FallbackTileLiveFeed from "../components/FallbackTileLiveFeed";
 
@@ -202,6 +212,29 @@ export default function AdminStudio({
   const [drawBinding, setDrawBinding] = useState<DrawBinding | null>(null);
   const [activePoints, setActivePoints] = useState<number[][]>([]);
   const [editingDrawingId, setEditingDrawingId] = useState<string | null>(null);
+
+  // Recording & NVR Admin Settings State
+  const [recordingSettingsOpen, setRecordingSettingsOpen] = useState(false);
+  const [adminRecSettings, setAdminRecSettings] = useState<RecordingSettings>({ segment_minutes: 10, record_with_detections: true });
+  const [savingRecSettings, setSavingRecSettings] = useState(false);
+
+  useEffect(() => {
+    fetchRecordingSettings().then((s) => {
+      if (s) setAdminRecSettings(s);
+    });
+  }, []);
+
+  const handleSaveAdminRecSettings = async () => {
+    setSavingRecSettings(true);
+    try {
+      await updateRecordingSettings(adminRecSettings);
+      setRecordingSettingsOpen(false);
+    } catch (err) {
+      console.error("Failed to save recording settings:", err);
+    } finally {
+      setSavingRecSettings(false);
+    }
+  };
 
   // Custom Product Visual Registration State & Handlers
   const [customImages, setCustomImages] = useState<{ file: File; preview: string }[]>([]);
@@ -1809,6 +1842,14 @@ export default function AdminStudio({
             <button onClick={publishConfig} disabled={publishing} className="w-full btn-accent flex items-center justify-center gap-1.5 py-1.5 text-xs">
               <Send size={12} />{publishing ? "Publishing..." : "Publish Configs"}
             </button>
+            <button
+              type="button"
+              onClick={() => setRecordingSettingsOpen(true)}
+              className="w-full flex items-center justify-center gap-1.5 py-1.5 px-3 rounded text-xs bg-surface-2 hover:bg-surface-3 text-zinc-300 border border-line transition font-medium"
+            >
+              <Sliders size={12} className="text-accent" />
+              Recording Settings ({adminRecSettings.segment_minutes}m)
+            </button>
           </div>
           <button onClick={onDeactivated} className="w-full text-center text-xs text-zinc-500 hover:text-zinc-300 pt-1">Exit Studio</button>
         </div>
@@ -2001,6 +2042,111 @@ export default function AdminStudio({
           </div>
         )}
       </aside>
+
+      {/* Admin Recording Settings Modal */}
+      {recordingSettingsOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4">
+          <div className="bg-surface-1 border border-line rounded-2xl max-w-sm w-full p-5 shadow-2xl space-y-4 animate-in fade-in zoom-in duration-150">
+            <div className="flex items-center justify-between border-b border-line pb-3">
+              <div className="flex items-center gap-2">
+                <div className="p-2 rounded-lg bg-accent/15 text-accent">
+                  <Sliders size={18} />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-white">NVR & Recording Config</h3>
+                  <p className="text-[10px] text-zinc-400">Continuous clip duration & AI overlays</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setRecordingSettingsOpen(false)}
+                className="p-1 rounded-md text-zinc-400 hover:text-white"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="space-y-3.5">
+              {/* Segment Duration Selection */}
+              <div>
+                <label className="block text-xs font-semibold text-zinc-300 mb-2">
+                  Continuous Clip Duration
+                </label>
+                <div className="grid grid-cols-5 gap-1.5">
+                  {[5, 10, 15, 30, 60].map((mins) => (
+                    <button
+                      key={mins}
+                      type="button"
+                      onClick={() =>
+                        setAdminRecSettings((prev) => ({ ...prev, segment_minutes: mins }))
+                      }
+                      className={clsx(
+                        "py-2 rounded-lg text-xs font-mono font-medium border text-center transition",
+                        adminRecSettings.segment_minutes === mins
+                          ? "bg-accent text-black border-accent font-bold shadow-md shadow-accent/20"
+                          : "bg-surface-2 text-zinc-300 border-line hover:border-zinc-500"
+                      )}
+                    >
+                      {mins}m
+                    </button>
+                  ))}
+                </div>
+                <p className="text-[10px] text-zinc-500 mt-1.5">
+                  Camera streams are automatically split into MP4 files of this duration.
+                </p>
+              </div>
+
+              {/* AI Detections in Video Toggle */}
+              <div className="p-3 rounded-xl bg-surface-2 border border-line flex items-start gap-2.5">
+                <input
+                  type="checkbox"
+                  id="adminBurnInDetsMobile"
+                  checked={adminRecSettings.record_with_detections}
+                  onChange={(e) =>
+                    setAdminRecSettings((prev) => ({
+                      ...prev,
+                      record_with_detections: e.target.checked,
+                    }))
+                  }
+                  className="mt-1 h-4 w-4 rounded border-zinc-700 bg-surface-3 text-accent focus:ring-accent cursor-pointer accent-accent"
+                />
+                <label htmlFor="adminBurnInDetsMobile" className="flex-1 cursor-pointer">
+                  <div className="text-xs font-semibold text-zinc-200">
+                    Record with AI Detections & Overlay
+                  </div>
+                  <div className="text-[10px] text-zinc-400 mt-0.5 leading-relaxed">
+                    Burn real-time AI bounding boxes, classifications, track IDs, and speed km/h into video files.
+                  </div>
+                </label>
+              </div>
+            </div>
+
+            {/* Modal Actions */}
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-line">
+              <button
+                type="button"
+                onClick={() => setRecordingSettingsOpen(false)}
+                className="px-3 py-1.5 rounded-lg text-xs text-zinc-400 hover:text-white"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveAdminRecSettings}
+                disabled={savingRecSettings}
+                className="flex items-center gap-1 px-3.5 py-1.5 rounded-lg bg-accent text-black font-semibold text-xs hover:bg-accent/90 transition shadow-md disabled:opacity-50"
+              >
+                {savingRecSettings ? (
+                  "Saving..."
+                ) : (
+                  <>
+                    <Check size={13} /> Save Changes
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
