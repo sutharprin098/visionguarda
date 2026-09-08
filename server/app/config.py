@@ -208,6 +208,11 @@ TILING_LATENCY_BUDGET_MS = _env_float("CAMAI_TILING_LATENCY_BUDGET_MS", 16.0)
 
 # Performance & Target FPS
 TARGET_FPS = _env_float("CAMAI_TARGET_FPS", 60.0)
+# Per-frame console formatting and writes can become the slowest stage on a
+# desktop engine. Keep detailed object dumps opt-in and rate-limit them when an
+# operator is investigating a particular camera.
+PIPELINE_DIAGNOSTICS = _env_bool("CAMAI_PIPELINE_DIAGNOSTICS", False)
+PIPELINE_DIAGNOSTIC_INTERVAL_S = _env_float("CAMAI_PIPELINE_DIAGNOSTIC_INTERVAL_S", 5.0)
 TILING_WORKERS = _env_int("CAMAI_TILING_WORKERS", 2)
 TILING_MOTION_THRESHOLD = _env_float("CAMAI_TILING_MOTION_THRESHOLD", 0.0015)
 TILING_CACHE_TTL_S = _env_float("CAMAI_TILING_CACHE_TTL_S", 1.5)

@@ -656,6 +656,22 @@ def get_camera_telemetry_debug(camera_id: str):
     }
 
 
+@app.get("/api/cameras/{camera_id}/performance")
+def get_camera_performance(camera_id: str):
+    """Rolling, measured pipeline timings for performance troubleshooting."""
+    thread = manager.camera_threads.get(camera_id)
+    if not thread and manager.camera_threads:
+        thread = next((t for t in manager.camera_threads.values() if t.running), list(manager.camera_threads.values())[0])
+    if not thread:
+        return JSONResponse({"status": "error", "message": f"Camera '{camera_id}' not found or inactive"}, status_code=404)
+    return {
+        "status": "ok",
+        "camera_id": camera_id,
+        "running": thread.running,
+        "performance": thread.performance_snapshot(),
+    }
+
+
 
 @app.post("/api/cloud-mode")
 @app.post("/api/runtime/mode")

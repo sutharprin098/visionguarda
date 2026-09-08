@@ -105,6 +105,11 @@ def get_detection_confidence() -> float:
         return _detection_confidence
 
 
+def _diagnostic_enabled() -> bool:
+    """Read the runtime flag lazily so production hot paths stay silent."""
+    return bool(getattr(config, "PIPELINE_DIAGNOSTICS", False))
+
+
 def _vehicle_classes_compatible(a: str, b: str) -> bool:
     """Return True if both classes belong to the vehicle category family."""
     return a in VEHICLE_CLASSES and b in VEHICLE_CLASSES
@@ -643,7 +648,7 @@ class ByteTracker:
         gate_active = max(0.05, 0.2 / (gap ** 0.5))
 
         m_t, m_d, _, un_d = self._hungarian_match(active_tracks, high_dets,
-                                                  iou_gate=gate_active, w_iou=0.75, w_app=0.25)
+                                                  iou_gate=gate_active, w_iou=0.55, w_app=0.45)
         matched_track_objs = set()
         for ti, di in zip(m_t, m_d):
             trk, det = active_tracks[ti], high_dets[di]
@@ -654,8 +659,14 @@ class ByteTracker:
 
         # Stage 2: coasting tracks + stage-1 misses. Appearance-weighted, loose IoU gate.
         stage2_pool = occluded_tracks + rem_active
+        # A long detector gap can move a real object entirely beyond its old
+        # box. In that case appearance plus a bounded centre-distance gate is
+        # safer than minting a replacement ID because raw IoU is necessarily 0.
+        stage2_iou_gate = 0.0 if gap > 3.0 else max(0.01, 0.10 / (gap ** 0.5))
+        stage2_spatial_gate = min(0.25, 0.05 * (gap ** 0.5))
         m_t2, m_d2, un_t2, un_d2 = self._hungarian_match(
-            stage2_pool, rem_high, iou_gate=0.05, w_iou=0.4, w_app=0.6, app_gate=0.5
+            stage2_pool, rem_high, iou_gate=stage2_iou_gate, w_iou=0.3, w_app=0.7,
+            app_gate=0.5, spatial_gate=stage2_spatial_gate, frame_diag=frame_diag,
         )
         for ti, di in zip(m_t2, m_d2):
             trk, det = stage2_pool[ti], rem_high[di]
@@ -716,6 +727,8 @@ class ByteTracker:
                     continue
                 if not (tj.class_name == ti.class_name or _vehicle_classes_compatible(ti.class_name, tj.class_name)):
                     continue
+                if ti.time_since_update == 0 and tj.time_since_update == 0:
+                    continue  # two separate current detections are not duplicates
                 if min(ti.time_since_update, tj.time_since_update) > 1:
                     continue  # neither matched recently -- not a live duplicate conflict
                 bi = ti.get_bbox()
@@ -1072,6 +1085,41 @@ def _fps(ts_deque: deque, window: float = 5.0) -> float:
     return min(60.0, calc_fps)
 
 
+class _LatencyWindow:
+    """Bounded, thread-safe latency samples for an operator-facing percentile."""
+
+    def __init__(self, size: int = 120):
+        self._samples = deque(maxlen=size)
+        self._lock = threading.Lock()
+
+    def add(self, value: float) -> None:
+        try:
+            sample = float(value)
+        except (TypeError, ValueError):
+            return
+        if sample < 0:
+            return
+        with self._lock:
+            self._samples.append(sample)
+
+    def summary(self) -> dict:
+        with self._lock:
+            samples = sorted(self._samples)
+        if not samples:
+            return {"samples": 0, "average_ms": 0.0, "p50_ms": 0.0, "p95_ms": 0.0}
+
+        def percentile(percent: float) -> float:
+            index = min(len(samples) - 1, max(0, int(np.ceil(len(samples) * percent)) - 1))
+            return samples[index]
+
+        return {
+            "samples": len(samples),
+            "average_ms": round(sum(samples) / len(samples), 1),
+            "p50_ms": round(percentile(0.50), 1),
+            "p95_ms": round(percentile(0.95), 1),
+        }
+
+
 # ---------------------------------------------------------------------------
 # Real-time Enterprise Pipeline
 # ---------------------------------------------------------------------------
@@ -1225,6 +1273,13 @@ class PipelineCoordinator:
         self._ai_ts:  deque = deque(maxlen=1000)
         self._trk_ts: deque = deque(maxlen=1000)
         self._tel_ts: deque = deque(maxlen=1000)
+        self._latency_windows = {
+            stage: _LatencyWindow()
+            for stage in (
+                "capture", "decode", "ai_preproc", "ai_inference",
+                "ai_postproc", "tracking", "telemetry", "end_to_end",
+            )
+        }
 
         # Stage health: heartbeat timestamp + error count per stage
         # The watchdog loop uses this to detect a stage that has stopped
@@ -1242,6 +1297,7 @@ class PipelineCoordinator:
         now0 = time.time()
         self._heartbeat = {"cap": now0, "dec": now0, "ai": now0, "trk": now0, "tel": now0, "ws": now0}
         self._stage_errors = {"cap": 0, "dec": 0, "ai": 0, "trk": 0, "tel": 0, "ws": 0}
+        self._diagnostic_last: dict[str, float] = {}
         self.restart_callback = None  # set by CameraManager; called if watchdog gives up on this instance
 
         # Adaptive inference resolution configuration
@@ -1602,6 +1658,36 @@ class PipelineCoordinator:
         # than keeping a stopped camera's share reserved. Also drops this
         # camera's tile cache.
         self._tile_engine.close()
+
+    def _diagnostic(self, channel: str, message) -> None:
+        """Emit costly object-level logs only when an operator asks for them."""
+        if not _diagnostic_enabled():
+            return
+        now = time.monotonic()
+        interval = max(0.25, float(getattr(config, "PIPELINE_DIAGNOSTIC_INTERVAL_S", 5.0)))
+        if now - self._diagnostic_last.get(channel, 0.0) < interval:
+            return
+        self._diagnostic_last[channel] = now
+        print(message(), flush=True)
+
+    def performance_snapshot(self) -> dict:
+        """Return measured stage percentiles without adding work to the video path."""
+        telemetry = self.latest_telemetry or {}
+        return {
+            "backend": self.backend.backend_type if self.backend else "cloud",
+            "device": self.backend.backend_device if self.backend else "aws_cloud",
+            "fps": {
+                "camera": round(_fps(self._cap_ts), 1),
+                "decode": round(_fps(self._dec_ts), 1),
+                "inference": round(_fps(self._ai_ts), 1),
+                "tracking": round(_fps(self._trk_ts), 1),
+            },
+            "latency_ms": {stage: window.summary() for stage, window in self._latency_windows.items()},
+            "bottleneck": telemetry.get("bottleneck"),
+            "dropped_frames": telemetry.get("dropped_frames", {}),
+            "dropped_total": telemetry.get("dropped_total", 0),
+            "frame_age_ms": telemetry.get("frame_age_ms", 0.0),
+        }
 
     def update_config(self, zones_json: str, lines_json: str, rules_json: str = "[]", zone_profile: str = None, profile_features: str = "{}"):
         """Hot-swap this camera's profile. No restart: the next AI cycle reads
@@ -2824,8 +2910,13 @@ class PipelineCoordinator:
                 self.tracker, tracks_raw, detections, masks
             )
 
-            formatted_tracks = [f"{t['track_id']}:{t['class']}:{t['confidence']}:({int(t['bbox']['x1'])},{int(t['bbox']['y1'])},{int(t['bbox']['x2'])},{int(t['bbox']['y2'])})" for t in tracks_raw]
-            print(f"[CLOUD_DIAG] [TRACKED_OBJECTS] Camera={self.camera_id} Count={len(tracks_raw)} Tracks={formatted_tracks}", flush=True)
+            self._diagnostic("tracked", lambda: (
+                "[CLOUD_DIAG] [TRACKED_OBJECTS] Camera={} Count={} Tracks={}".format(
+                    self.camera_id,
+                    len(tracks_raw),
+                    [f"{t['track_id']}:{t['class']}:{t['confidence']}:({int(t['bbox']['x1'])},{int(t['bbox']['y1'])},{int(t['bbox']['x2'])},{int(t['bbox']['y2'])})" for t in tracks_raw],
+                )
+            ))
 
             # ── Face pass: a SECOND model, and the only module here whose
             # toggle actually saves inference time when off ────────────────
@@ -3054,8 +3145,14 @@ class PipelineCoordinator:
                         masks = [masks[i] for i in _keep]
                     detections = [detections[i] for i in _keep]
 
-            formatted_filtered = [f"{d.get('class')}:{d.get('confidence')}:({int(d.get('bbox',{}).get('x1',0))},{int(d.get('bbox',{}).get('y1',0))},{int(d.get('bbox',{}).get('x2',0))},{int(d.get('bbox',{}).get('y2',0))})" for d in detections]
-            print(f"[CLOUD_DIAG] [FILTERED_DETECTIONS] Camera={self.camera_id} Profile={self.zone_profile} Count={len(detections)} Dets={formatted_filtered}", flush=True)
+            self._diagnostic("filtered", lambda: (
+                "[CLOUD_DIAG] [FILTERED_DETECTIONS] Camera={} Profile={} Count={} Dets={}".format(
+                    self.camera_id,
+                    self.zone_profile,
+                    len(detections),
+                    [f"{d.get('class')}:{d.get('confidence')}:({int(d.get('bbox', {}).get('x1', 0))},{int(d.get('bbox', {}).get('y1', 0))},{int(d.get('bbox', {}).get('x2', 0))},{int(d.get('bbox', {}).get('y2', 0))})" for d in detections],
+                )
+            ))
 
             # Rule engine + analytics: MUST receive absolute pixel coords
             # bbox is already the tracker's smoothed position; analytics.update()
@@ -3253,8 +3350,13 @@ class PipelineCoordinator:
             data["items_count"] = items_count
             data["other_count"] = other_count
 
-            formatted_rendered = [f"{d.get('class')}:{d.get('confidence')}:{d.get('track_id')}:({d['bbox']['x1']},{d['bbox']['y1']},{d['bbox']['x2']},{d['bbox']['y2']})" for d in client_dets]
-            print(f"[CLOUD_DIAG] [RENDERED_OBJECTS] Camera={self.camera_id} Count={len(client_dets)} Emitted={formatted_rendered}", flush=True)
+            self._diagnostic("rendered", lambda: (
+                "[CLOUD_DIAG] [RENDERED_OBJECTS] Camera={} Count={} Emitted={}".format(
+                    self.camera_id,
+                    len(client_dets),
+                    [f"{d.get('class')}:{d.get('confidence')}:{d.get('track_id')}:({d['bbox']['x1']},{d['bbox']['y1']},{d['bbox']['x2']},{d['bbox']['y2']})" for d in client_dets],
+                )
+            ))
 
             # Persist history (rate-limited to 1 record per 10 s)
             now = time.time()
@@ -3426,6 +3528,9 @@ class PipelineCoordinator:
                 "tracking":      data.get("trk_lat", 0.0),
                 "telemetry":     tel_lat,
             }
+            for stage, latency in latencies.items():
+                self._latency_windows[stage].add(latency)
+            self._latency_windows["end_to_end"].add(total_latency)
             bottleneck = max(latencies, key=latencies.get)
 
             cpu = mem = 0.0
