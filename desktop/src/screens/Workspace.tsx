@@ -1052,7 +1052,12 @@ const CameraTile = memo(function CameraTile({ camera: c, site, engineOnline, onF
   const ingestAlert = useAlertIngest();
 
   useEffect(() => {
-    if (videoRef.current) videoRef.current.srcObject = localStream;
+    if (videoRef.current) {
+      videoRef.current.srcObject = localStream;
+      if (localStream) {
+        videoRef.current.play().catch((err) => console.warn("[Workspace] Video play error:", err));
+      }
+    }
   }, [localStream]);
 
   // Detections are pushed once per AI cycle to /ws subscribers. Only subscribe
@@ -1432,11 +1437,11 @@ const CameraTile = memo(function CameraTile({ camera: c, site, engineOnline, onF
           <button
             onClick={handleToggleRecording}
             disabled={togglingRec}
-            title={isRecording ? "Stop Continuous Recording" : "Start Continuous Recording"}
+            title={isRecording ? "Stop Recording" : "Start Recording"}
             className={clsx(
               "flex items-center gap-1.5 px-2 py-0.5 rounded text-[10px] font-semibold transition shadow-sm",
               isRecording
-                ? "bg-red-500/20 text-red-400 border border-red-500/30 hover:bg-red-500/30"
+                ? "bg-red-500/20 text-red-400 border border-red-500/40 hover:bg-red-500/30"
                 : "bg-surface-2 text-zinc-400 border border-line hover:text-zinc-200 hover:bg-surface-3"
             )}
           >
@@ -1446,7 +1451,7 @@ const CameraTile = memo(function CameraTile({ camera: c, site, engineOnline, onF
                 isRecording ? "bg-red-500 animate-pulse" : "bg-zinc-500"
               )}
             />
-            <span>{isRecording ? "REC" : "REC"}</span>
+            <span>{isRecording ? "Stop REC" : "Record"}</span>
           </button>
           {sharingType !== null && (
             <button

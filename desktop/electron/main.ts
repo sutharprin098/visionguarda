@@ -173,8 +173,9 @@ if (!gotTheLock) {
   // Suppress Chromium internal C++ log spam and prevent WGC capture session errors
   app.commandLine.appendSwitch("log-level", "3");
   app.commandLine.appendSwitch("disable-logging");
-  app.commandLine.appendSwitch("disable-features", "WindowsGraphicsCapture,MediaFoundationVideoCapture,WGCWindowCapturer,WGCDesktopCapturer");
+  app.commandLine.appendSwitch("disable-features", "WindowsGraphicsCapture,MediaFoundationVideoCapture,WGCWindowCapturer,WGCDesktopCapturer,WebRtcAllowWgcScreenCapturer,WebRtcAllowWgcWindowCapturer");
   app.commandLine.appendSwitch("enable-features", "GDIWindowCapture,DXGIWindowCapture");
+  app.commandLine.appendSwitch("js-flags", "--max-old-space-size=4096");
 
   if (process.env.CAMAI_REMOTE_DEBUG) app.commandLine.appendSwitch("remote-debugging-port", process.env.CAMAI_REMOTE_DEBUG);
 
@@ -597,6 +598,14 @@ if (!gotTheLock) {
     // already handles the send side.
     app.on("render-process-gone", (_evt, contents, details) => {
       console.error(`[main] render-process-gone: reason=${details.reason} exitCode=${details.exitCode}`);
+      if (details.reason !== "clean-exit" && win && !win.isDestroyed()) {
+        console.log("[main] Renderer process crashed, auto-reloading window in 500ms...");
+        setTimeout(() => {
+          if (win && !win.isDestroyed()) {
+            win.reload();
+          }
+        }, 500);
+      }
     });
     app.on("child-process-gone", (_evt, details) => {
       console.error(`[main] child-process-gone: type=${details.type} reason=${details.reason} exitCode=${details.exitCode}`);

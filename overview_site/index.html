@@ -423,6 +423,7 @@
   <nav class="nav-btn-group">
     <button class="nav-link-btn active" data-target="sec-executive" onclick="scrollToSection('sec-executive')">Executive</button>
     <button class="nav-link-btn" data-target="sec-revenue" onclick="scrollToSection('sec-revenue')">Revenue Model</button>
+    <button class="nav-link-btn" data-target="sec-accuracy" onclick="scrollToSection('sec-accuracy')">Accuracy &amp; 15-Day Test</button>
     <button class="nav-link-btn" data-target="sec-website" onclick="scrollToSection('sec-website')">Website (Portal)</button>
     <button class="nav-link-btn" data-target="sec-app" onclick="scrollToSection('sec-app')">Mobile App</button>
     <button class="nav-link-btn" data-target="sec-software" onclick="scrollToSection('sec-software')">Desktop Software</button>
@@ -628,7 +629,7 @@
       <div class="metric-card" style="border-left-color: #7c3aed;">
         <div class="card-label">OTA Installer &amp; Release Distribution Hub</div>
         <div class="card-sub" style="margin-top:6px;">
-          Serves production setup binaries (`CamAI-Desktop-Setup-1.0.9.exe` and `CamAI-Mobile-v1.0.9.apk`) with cryptographically verified SHA-256 checksums.
+          Serves production setup binaries (`CamAI-Desktop-Setup-1.0.7.exe` and `CamAI-Mobile-v1.0.2.apk`) with cryptographically verified SHA-256 checksums.
         </div>
       </div>
     </div>
@@ -1005,21 +1006,6 @@
           <td>Monitors unassociated luggage items stationary for &gt;15 seconds.</td>
           <td>Unattended object alarm, temporal bounding box overlay.</td>
         </tr>
-        <tr>
-          <td class="highlight" style="color:#e11d48;">⏺️ Continuous NVR Recording Engine</td>
-          <td>Multi-threaded circular ring-buffer recording RTSP feeds into 5–60 min MP4 segments with per-camera REC toggles, SQLite cataloging, and automatic FIFO disk quota cleanup.</td>
-          <td>Segmented high-definition MP4 archives, millisecond-indexed event database, uninterrupted 24/7 retention.</td>
-        </tr>
-        <tr>
-          <td class="highlight" style="color:#0284c7;">🏷️ AI Detection Burn-In Exporter</td>
-          <td>Hardware-accelerated OpenCV frame stamping burns YOLO bounding boxes, class confidences, tracking IDs, speed radar (km/h), and UTC watermarks directly into exported MP4 frames.</td>
-          <td>Court-admissible tamper-evident video clips, permanent forensic evidence files, direct download links.</td>
-        </tr>
-        <tr>
-          <td class="highlight" style="color:#16a34a;">🔍 4X Digital Zoom &amp; Timeline Studio</td>
-          <td>Interactive 24-hour timeline scrubber with color-coded incident flags, fluid 1.0x to 4.0x digital zoom, and directional pan across live feeds and historical clips on Desktop &amp; Mobile APK.</td>
-          <td>Instant sub-second timeline seek, high-magnification forensic inspection, frame-step review.</td>
-        </tr>
       </tbody>
     </table>
 
@@ -1265,14 +1251,14 @@
       </thead>
       <tbody>
         <tr>
-          <td class="highlight">AI Inference Server &amp; NVR Engine</td>
+          <td class="highlight">AI Inference Server</td>
           <td><code>/server</code></td>
-          <td>Dual-mode YOLOX/OpenCV detection, ByteTrack tracking, worker analytics, WebSocket telemetry broadcast, 24/7 continuous segmented NVR recording, AI telemetry burn-in, and SQLite metadata cataloging.</td>
+          <td>Frame capture, YOLOX detection, ByteTrack tracking, worker analytics, WebSocket telemetry broadcast.</td>
         </tr>
         <tr>
-          <td class="highlight">Desktop Workstation &amp; Playback Studio</td>
+          <td class="highlight">Desktop Workstation</td>
           <td><code>/desktop</code></td>
-          <td>Operator grid view, Leaflet GIS floorplan, incident center, 24-hour timeline scrubbing studio, 4X lossless digital zoom &amp; pan, per-camera REC toggle, and DPAPI licensing vault.</td>
+          <td>Operator grid view, Leaflet GIS floorplan, incident center, local hardware DPAPI licensing vault.</td>
         </tr>
         <tr>
           <td class="highlight">Cloud Backend</td>
@@ -1282,7 +1268,7 @@
         <tr>
           <td class="highlight">Web Management Portal</td>
           <td><code>/portal</code></td>
-          <td>SaaS dashboard for organization administration, camera provisioning, continuous NVR playback studio, user role management, downloads.</td>
+          <td>SaaS dashboard for organization administration, camera provisioning, user role management, downloads.</td>
         </tr>
       </tbody>
     </table>
@@ -1613,7 +1599,7 @@
       <img src="assets/downloads_screen.png" alt="CamAI Desktop Workstation Release Hub & Installer Download" />
       <div class="ui-screenshot-caption">
         <span class="ui-screenshot-tag">Figure 5</span>
-        <strong>Enterprise Command Suite — Desktop Release &amp; Offline Installer Hub:</strong> Workstation download manager providing direct Windows x64 v1.0.9 setup executable (<code>CamAI-Desktop-Setup-1.0.9.exe</code>, 423.6 MB), GitHub automated production releases pipeline, bundled offline/cloud engine toggles, and cryptographic SHA-256 checksum verification (<code>4a5f2dc25f...f1d601</code>).
+        <strong>Enterprise Command Suite — Desktop Release &amp; Offline Installer Hub:</strong> Workstation download manager providing direct Windows x64 v1.0.7 setup executable (<code>CamAI-Desktop-Setup-1.0.7.exe</code>, 356.7 MB), GitHub automated production releases pipeline, bundled offline/cloud engine toggles, and cryptographic SHA-256 checksum verification (<code>4dadbe61f...276427d3</code>).
       </div>
     </div>
 
@@ -2108,7 +2094,7 @@
     <div class="ui-screenshot-card" style="margin-top: 10px;">
       <img src="assets/downloads_screen.png" alt="CamAI Desktop Installer Release Hub" />
       <div class="ui-screenshot-caption">
-        <strong>13. Desktop Release Hub — Windows Setup Executable (CamAI-Desktop-Setup-1.0.9.exe) &amp; Checksum Verification</strong>
+        <strong>13. Desktop Release Hub — Windows Setup Executable (CamAI-Desktop-Setup-1.0.7.exe) &amp; Checksum Verification</strong>
       </div>
     </div>
 

@@ -26,24 +26,24 @@ const REPO_BLOB_BASE = `${REPO_URL}/blob/main/`;
 // actually published.
 const DEFAULT_FALLBACK_RELEASES: GithubRelease[] = [
   {
-    tag_name: "v1.0.9",
-    name: "CamAI Desktop v1.0.9 & Mobile v1.0.9 (Enterprise Release)",
-    version: "v1.0.9",
+    tag_name: "v1.1.0",
+    name: "CamAI Desktop v1.1.0 & Mobile v1.1.0 (Enterprise Release)",
+    version: "v1.1.0",
     prerelease: false,
     published_at: "2026-09-07T18:00:00Z",
     asset_id: 110,
-    asset_name: "CamAI-Desktop-Setup-1.0.9.exe",
+    asset_name: "CamAI-Desktop-Setup-1.1.0.exe",
     size_bytes: 423642359,
     content_type: "application/octet-stream",
-    download_url: `/downloads/CamAI-Desktop-Setup-1.0.9.exe`,
+    download_url: `/downloads/CamAI-Desktop-Setup-1.1.0.exe`,
     checksum_sha256: "4a5f2dc25f80f3f92e8aa2c0d315fb4a61ee53b07b96ca9678c41e8554f1d601",
     release_notes: `
-### 🚀 CamAI Desktop v1.0.9 & Mobile v1.0.9 Unified NVR Release
+### 🚀 CamAI Desktop v1.1.0 & Mobile v1.1.0 Unified NVR Release
 - **24/7 Continuous NVR Recording Engine**: Background segmented MP4 writing (5-60m configurable segments), zero dropped frames, SQLite metadata cataloging, and automatic FIFO disk quota cleanup.
 - **AI Detection Burn-In Export**: Hardware-accelerated OpenCV frame stamping burns YOLO bounding boxes, class confidences, tracking IDs, speed radar (km/h), and UTC watermarks directly into standard MP4 frames.
 - **4X Digital Zoom & Pan Studio**: Smooth 1.0x to 4.0x digital zoom and directional pan inspection across live streams and 24-hour timeline scrubbing.
-- **Per-Camera REC Toggle & Mobile Parity**: Dedicated recording toggle button on each camera tile, synchronized between Desktop workstation and Android APK v1.0.9.
-- **Signed Android APK v1.0.9**: High-performance mobile client with pinch-to-zoom studio, 24-hour timeline seek, and 24/7 background AI notification alerts.
+- **Per-Camera REC Toggle & Mobile Parity**: Dedicated recording toggle button on each camera tile, synchronized between Desktop workstation and Android APK v1.1.0.
+- **Signed Android APK v1.1.0**: High-performance mobile client with pinch-to-zoom studio, 24-hour timeline seek, and 24/7 background AI notification alerts.
     `,
   },
   {
@@ -190,16 +190,16 @@ const DEFAULT_FALLBACK_RELEASES: GithubRelease[] = [
     `,
   },
   {
-    tag_name: "v1.0.1",
-    name: "CamAI Desktop v1.0.1 (Windows Release)",
-    version: "v1.0.1",
+    tag_name: "v1.0.2",
+    name: "CamAI Desktop v1.0.2 (Windows Release)",
+    version: "v1.0.2",
     prerelease: false,
     published_at: "2026-08-03T14:36:05Z",
     asset_id: 102,
-    asset_name: "CamAI-Desktop-Setup-1.0.1.exe",
+    asset_name: "CamAI-Desktop-Setup-1.0.2.exe",
     size_bytes: 651000669,
     content_type: "application/octet-stream",
-    download_url: `${REPO_URL}/releases/download/v1.0.1/CamAI-Desktop-Setup-1.0.1.exe`,
+    download_url: `${REPO_URL}/releases/download/v1.0.2/CamAI-Desktop-Setup-1.0.2.exe`,
     checksum_sha256: "bb344a54311130f7e4ae27781d6cde34c31bae15d92a3a2ddc07af8ed335dad1",
     release_notes: `
 ### 🚀 Improvements
@@ -582,12 +582,12 @@ export default function DownloadsPage() {
       }
       const fallbackUrl = (r.download_url && r.download_url.startsWith("http"))
         ? r.download_url
-        : `${REPO_URL}/releases/download/${r.tag_name || "v1.0.9"}/${r.asset_name}`;
+        : `${REPO_URL}/releases/download/${r.tag_name || "v1.1.0"}/${r.asset_name}`;
       window.open(fallbackUrl, "_blank");
     } catch {
       const fallbackUrl = (r.download_url && r.download_url.startsWith("http"))
         ? r.download_url
-        : `${REPO_URL}/releases/download/${r.tag_name || "v1.0.9"}/${r.asset_name}`;
+        : `${REPO_URL}/releases/download/${r.tag_name || "v1.1.0"}/${r.asset_name}`;
       window.open(fallbackUrl, "_blank");
     } finally {
       setDownloadingId(null);
@@ -661,7 +661,7 @@ export default function DownloadsPage() {
           <div className="space-y-4 relative z-10">
             <div className="flex items-center justify-between gap-3">
               <span className="px-3 py-1 rounded-full bg-sky-500/20 border border-sky-500/30 text-sky-300 text-xs font-bold uppercase tracking-wider flex items-center gap-1.5">
-                <HardDrive size={13} strokeWidth={2.5} /> Desktop Release (v1.0.9)
+                <HardDrive size={13} strokeWidth={2.5} /> Desktop Release (v1.1.0)
               </span>
               <span className="text-xs font-mono font-bold text-emerald-400 bg-emerald-500/10 px-2.5 py-1 rounded-md border border-emerald-500/20">
                 Official Windows Build
@@ -720,7 +720,7 @@ export default function DownloadsPage() {
           <div className="space-y-4 relative z-10">
             <div className="flex items-center justify-between gap-3">
               <span className="px-3 py-1 rounded-full bg-indigo-500/20 border border-indigo-500/30 text-indigo-300 text-xs font-bold uppercase tracking-wider flex items-center gap-1.5">
-                <MonitorSmartphone size={13} strokeWidth={2.5} /> Mobile Release (v1.0.9)
+                <MonitorSmartphone size={13} strokeWidth={2.5} /> Mobile Release (v1.1.0)
               </span>
               <span className="text-xs font-mono font-bold text-sky-400 bg-sky-500/10 px-2.5 py-1 rounded-md border border-sky-500/20">
                 Production Signed APK
@@ -751,19 +751,19 @@ export default function DownloadsPage() {
               </div>
               <div className="rounded-xl border border-slate-800 bg-slate-900/80 p-3">
                 <span className="text-[10px] uppercase font-bold text-slate-400 block">Signature</span>
-                <span className="text-xs font-bold text-emerald-400 mt-0.5 block">Signed Keystore (v1.0.9)</span>
+                <span className="text-xs font-bold text-emerald-400 mt-0.5 block">Signed Keystore (v1.1.0)</span>
               </div>
             </div>
           </div>
 
           <div className="mt-8 pt-6 border-t border-slate-800 space-y-3 relative z-10">
             <a
-              href="/downloads/CamAI-Mobile-v1.0.9.apk"
-              download="CamAI-Mobile-v1.0.9.apk"
+              href="/downloads/CamAI-Mobile-v1.1.0.apk"
+              download="CamAI-Mobile-v1.1.0.apk"
               className="w-full py-4 px-6 rounded-2xl bg-gradient-to-r from-indigo-500 via-purple-600 to-sky-600 hover:from-indigo-400 hover:to-sky-500 text-white font-extrabold text-sm shadow-xl shadow-indigo-500/20 flex items-center justify-center gap-2.5 transition-all hover:scale-[1.01] active:scale-95"
             >
               <Download size={18} />
-              <span>DOWNLOAD ANDROID APK (v1.0.9)</span>
+              <span>DOWNLOAD ANDROID APK (v1.1.0)</span>
             </a>
             <div className="flex items-center justify-between text-[11px] text-slate-400 px-1">
               <span>Direct Public Link</span>

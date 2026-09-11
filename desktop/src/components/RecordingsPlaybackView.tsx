@@ -79,10 +79,6 @@ export default function RecordingsPlaybackView({ cameras }: RecordingsPlaybackVi
   const [isHoveringTimeline, setIsHoveringTimeline] = useState(false);
   const [hoveredTimelineSecond, setHoveredTimelineSecond] = useState<number | null>(null);
 
-  // Manual Time Input state
-  const [inputHour, setInputHour] = useState<string>("04");
-  const [inputMinute, setInputMinute] = useState<string>("10");
-  const [inputSec, setInputSec] = useState<string>("00");
 
   // Camera recording status map
   const [cameraRecStatus, setCameraRecStatus] = useState<Record<string, boolean>>({});
@@ -580,7 +576,7 @@ export default function RecordingsPlaybackView({ cameras }: RecordingsPlaybackVi
               </button>
             )}
 
-            {/* Date Selector */}
+            {/* Unified Date Selector & All Dates toggle */}
             <div className="flex items-center gap-2 bg-surface-2 px-3 py-1.5 rounded-lg border border-line">
               <Calendar size={14} className="text-zinc-400" />
               <input
@@ -594,49 +590,18 @@ export default function RecordingsPlaybackView({ cameras }: RecordingsPlaybackVi
                 }}
                 className="bg-transparent text-xs text-zinc-200 font-mono focus:outline-none cursor-pointer"
               />
-            </div>
-
-            {/* Quick Date Shortcuts */}
-            <button
-              onClick={() => {
-                setSelectedDate(new Date().toISOString().split("T")[0]);
-                setShowAllDates(false);
-              }}
-              className={`px-2.5 py-1 text-xs rounded-md font-medium transition ${
-                !showAllDates && selectedDate === new Date().toISOString().split("T")[0]
-                  ? "bg-accent text-black font-semibold"
-                  : "bg-surface-2 text-zinc-400 hover:text-zinc-200"
-              }`}
-            >
-              Today
-            </button>
-
-            {availableDates.length > 0 && availableDates[1] && (
               <button
-                onClick={() => {
-                  setSelectedDate(availableDates[1]);
-                  setShowAllDates(false);
-                }}
-                className={`px-2.5 py-1 text-xs rounded-md font-medium transition ${
-                  !showAllDates && selectedDate === availableDates[1]
+                onClick={() => setShowAllDates(!showAllDates)}
+                className={`ml-1 px-2 py-0.5 text-[11px] rounded transition font-medium ${
+                  showAllDates
                     ? "bg-accent text-black font-semibold"
-                    : "bg-surface-2 text-zinc-400 hover:text-zinc-200"
+                    : "text-zinc-400 hover:text-white"
                 }`}
+                title="Toggle showing all recorded dates"
               >
-                {availableDates[1]}
+                {showAllDates ? "Showing All" : "All"}
               </button>
-            )}
-
-            <button
-              onClick={() => setShowAllDates(!showAllDates)}
-              className={`px-2.5 py-1 text-xs rounded-md font-medium transition ${
-                showAllDates
-                  ? "bg-accent text-black font-semibold"
-                  : "bg-surface-2 text-zinc-400 hover:text-zinc-200"
-              }`}
-            >
-              All Dates
-            </button>
+            </div>
 
             {/* Recording Config Button */}
             <button
@@ -724,14 +689,6 @@ export default function RecordingsPlaybackView({ cameras }: RecordingsPlaybackVi
                 <p className="text-xs text-zinc-500 max-w-sm">
                   Click any segment on the 24-hour timeline bar below or select a clip from the archive list on the right.
                 </p>
-                {selectedCameraId !== "all" && !activeCamRecording && (
-                  <button
-                    onClick={() => handleToggleRecording(selectedCameraId)}
-                    className="mt-2 inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-accent text-black font-semibold text-xs shadow hover:bg-accent/90 transition"
-                  >
-                    <Disc size={14} /> Start Continuous Recording Now
-                  </button>
-                )}
               </div>
             )}
 
@@ -822,23 +779,19 @@ export default function RecordingsPlaybackView({ cameras }: RecordingsPlaybackVi
                       <RotateCw size={15} /> +10s
                     </button>
 
-                    {/* Speed Selector */}
-                    <div className="flex items-center gap-1 bg-black/40 px-2 py-0.5 rounded border border-white/10 text-xs">
+                    {/* Speed Selector (Single compact cycler button) */}
+                    <button
+                      onClick={() => {
+                        const speeds = [1, 1.5, 2, 4, 0.5];
+                        const nextIndex = (speeds.indexOf(playbackSpeed) + 1) % speeds.length;
+                        handleSpeedChange(speeds[nextIndex]);
+                      }}
+                      className="flex items-center gap-1 bg-black/40 px-2 py-0.5 rounded border border-white/10 text-xs text-zinc-200 hover:text-accent transition font-mono"
+                      title="Cycle speed: 1x, 1.5x, 2x, 4x, 0.5x"
+                    >
                       <FastForward size={12} className="text-zinc-400" />
-                      {[0.5, 1, 1.5, 2, 4].map((sp) => (
-                        <button
-                          key={sp}
-                          onClick={() => handleSpeedChange(sp)}
-                          className={`px-1.5 py-0.5 rounded text-[10px] font-mono transition ${
-                            playbackSpeed === sp
-                              ? "bg-accent text-black font-bold"
-                              : "text-zinc-400 hover:text-white"
-                          }`}
-                        >
-                          {sp}x
-                        </button>
-                      ))}
-                    </div>
+                      <span className="font-bold text-accent">{playbackSpeed}x</span>
+                    </button>
                   </div>
 
                   <div className="flex items-center gap-3">
@@ -861,32 +814,16 @@ export default function RecordingsPlaybackView({ cameras }: RecordingsPlaybackVi
                       />
                     </div>
 
-                    {/* Digital Zoom In/Out Controls */}
-                    <div className="flex items-center gap-1 bg-black/40 px-2 py-0.5 rounded border border-white/10 text-xs">
-                      <button
-                        onClick={handleZoomOut}
-                        disabled={zoomLevel <= 1}
-                        className="text-zinc-400 hover:text-white disabled:opacity-30 disabled:hover:text-zinc-400 transition p-0.5"
-                        title="Zoom Out (or scroll down)"
-                      >
-                        <ZoomOut size={15} />
-                      </button>
+                    {/* Digital Zoom Indicator & Reset when active */}
+                    {zoomLevel > 1 && (
                       <button
                         onClick={handleResetZoom}
-                        className="text-[10px] font-mono text-zinc-300 hover:text-accent min-w-[32px] text-center"
+                        className="px-2 py-0.5 rounded bg-accent text-black font-mono font-bold text-[10px] hover:bg-accent/80 transition"
                         title="Click to reset zoom"
                       >
-                        {zoomLevel.toFixed(1)}x
+                        {zoomLevel.toFixed(1)}x Reset
                       </button>
-                      <button
-                        onClick={handleZoomIn}
-                        disabled={zoomLevel >= 4}
-                        className="text-zinc-400 hover:text-white disabled:opacity-30 disabled:hover:text-zinc-400 transition p-0.5"
-                        title="Zoom In (or scroll up)"
-                      >
-                        <ZoomIn size={15} />
-                      </button>
-                    </div>
+                    )}
 
                     {/* Snapshot Frame button */}
                     <button
@@ -935,62 +872,8 @@ export default function RecordingsPlaybackView({ cameras }: RecordingsPlaybackVi
                 </span>
               </div>
 
-              {/* Precise Time Jump Inputs */}
-              <div className="flex items-center gap-2">
-                <span className="text-xs text-zinc-400">Jump To:</span>
-                <div className="flex items-center bg-surface-2 border border-line rounded px-2 py-1 gap-1 text-xs font-mono">
-                  <input
-                    type="number"
-                    min={0}
-                    max={23}
-                    value={inputHour}
-                    onChange={(e) => setInputHour(e.target.value.padStart(2, "0").slice(-2))}
-                    className="w-8 px-0.5 bg-transparent text-center focus:outline-none text-white font-bold [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                  />
-                  <span className="text-zinc-500">:</span>
-                  <input
-                    type="number"
-                    min={0}
-                    max={59}
-                    value={inputMinute}
-                    onChange={(e) => setInputMinute(e.target.value.padStart(2, "0").slice(-2))}
-                    className="w-8 px-0.5 bg-transparent text-center focus:outline-none text-white font-bold [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                  />
-                  <span className="text-zinc-500">:</span>
-                  <input
-                    type="number"
-                    min={0}
-                    max={59}
-                    value={inputSec}
-                    onChange={(e) => setInputSec(e.target.value.padStart(2, "0").slice(-2))}
-                    className="w-8 px-0.5 bg-transparent text-center focus:outline-none text-white font-bold [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                  />
-                </div>
-                <button
-                  onClick={() => {
-                    const h = parseInt(inputHour, 10) || 0;
-                    const m = parseInt(inputMinute, 10) || 0;
-                    const s = parseInt(inputSec, 10) || 0;
-                    jumpToSecond(h * 3600 + m * 60 + s);
-                  }}
-                  className="px-3 py-1 bg-surface-3 hover:bg-surface-2 text-xs font-semibold rounded border border-line transition text-white"
-                >
-                  Seek
-                </button>
-
-                {/* Quick Step Buttons */}
-                <button
-                  onClick={() => jumpToSecond(Math.max(0, timelineSecond - 60))}
-                  className="px-2 py-1 text-xs bg-surface-2 hover:bg-surface-3 rounded border border-line text-zinc-300"
-                >
-                  -1m
-                </button>
-                <button
-                  onClick={() => jumpToSecond(Math.min(86399, timelineSecond + 60))}
-                  className="px-2 py-1 text-xs bg-surface-2 hover:bg-surface-3 rounded border border-line text-zinc-300"
-                >
-                  +1m
-                </button>
+              <div className="flex items-center gap-2 text-xs text-zinc-400">
+                <span className="text-[11px] font-mono text-zinc-500">Click anywhere or drag playhead to navigate 24h archive</span>
               </div>
             </div>
 

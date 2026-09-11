@@ -1902,14 +1902,15 @@ class CameraAnalytics:
         # Decay heatmap slightly
         self.heatmap_grid *= 0.995
 
-        # Format track overlays for UI drawing (recent tail path)
+        # Format track overlays for UI drawing (recent tail path of active tracks only)
         track_overlays = []
         for tid, pts in self.track_history.items():
-            track_overlays.append({
-                "track_id": tid,
-                "class": self.track_classes.get(tid, "person"),
-                "points": pts
-            })
+            if tid in active_track_ids:
+                track_overlays.append({
+                    "track_id": tid,
+                    "class": self.track_classes.get(tid, "person"),
+                    "points": pts
+                })
 
         # Serialize heatmap grid
         heatmap_list = self.heatmap_grid.tolist()

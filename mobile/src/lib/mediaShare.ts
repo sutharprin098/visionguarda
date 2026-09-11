@@ -30,7 +30,7 @@ export interface ShareCallbacks {
 // fails the same way forever. This was very likely the actual root cause of
 // screen/webcam shares getting stuck "reconnecting" indefinitely.
 const WS_URL = "ws://127.0.0.1:8000/ws";
-const FRAME_INTERVAL_MS = 33;
+const FRAME_INTERVAL_MS = 100; // 10 FPS
 const HEARTBEAT_INTERVAL_MS = 5000;
 const HEARTBEAT_TIMEOUT_MS = 12000;
 // How long the socket may stay open with NO frame actually sent before the
@@ -39,9 +39,7 @@ const HEARTBEAT_TIMEOUT_MS = 12000;
 // see the note in startFrameLoop for what that cost.
 const SEND_STALL_TIMEOUT_MS = 25000;
 // Ceiling on un-drained WebSocket bytes before frames start being skipped.
-//
-// Sized to roughly two frames (128KB), ensuring fast throughput at 30 FPS.
-const MAX_WS_BUFFERED_BYTES = 128 * 1024;
+const MAX_WS_BUFFERED_BYTES = 64 * 1024;
 const STREAM_REACQUIRE_DELAY_MS = 1500;
 const RECONNECT_BACKOFF_MS = [500, 1000, 2000, 4000, 8000, 15000, 30000];
 
@@ -191,9 +189,9 @@ export class MediaShareSession {
 
       if (!this.canvas) {
         this.canvas = document.createElement("canvas");
-        this.canvas.width = 1280;
-        this.canvas.height = 720;
-        this.ctx = this.canvas.getContext("2d");
+        this.canvas.width = 960;
+        this.canvas.height = 540;
+        this.ctx = this.canvas.getContext("2d", { willReadFrequently: false });
       }
 
       if (this.status === "acquiring") {
@@ -381,8 +379,20 @@ export class MediaShareSession {
 
       if (video && video.readyState >= video.HAVE_CURRENT_DATA && this.ctx && this.canvas) {
         try {
-          this.ctx.drawImage(video, 0, 0, this.canvas.width, this.canvas.height);
-          const frame = this.canvas.toDataURL("image/jpeg", 0.85);
+          const MAX_W = 960;
+          const MAX_H = 540;
+          const vw = video.videoWidth || MAX_W;
+          const vh = video.videoHeight || MAX_H;
+          const scale = Math.min(MAX_W / vw, MAX_H / vh, 1.0);
+          const targetW = Math.max(16, Math.round(vw * scale));
+          const targetH = Math.max(16, Math.round(vh * scale));
+
+          if (this.canvas.width !== targetW || this.canvas.height !== targetH) {
+            this.canvas.width = targetW;
+            this.canvas.height = targetH;
+          }
+          this.ctx.drawImage(video, 0, 0, targetW, targetH);
+          const frame = this.canvas.toDataURL("image/jpeg", 0.65);
           this.ws.send(JSON.stringify({ type: "screen_frame", camera_id: this.cameraId, frame }));
           // Only a frame that actually reached the socket counts as progress.
           this.lastSendOkTs = Date.now();

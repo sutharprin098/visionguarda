@@ -14,11 +14,11 @@ export interface ShareCallbacks {
 }
 
 const WS_URL = "ws://127.0.0.1:8000/ws";
-const FRAME_INTERVAL_MS = 33;
+const FRAME_INTERVAL_MS = 100; // 10 FPS - balanced for real-time AI inference without heap/GPU exhaustion
 const HEARTBEAT_INTERVAL_MS = 5000;
 const HEARTBEAT_TIMEOUT_MS = 12000;
 const SEND_STALL_TIMEOUT_MS = 12000;
-const MAX_WS_BUFFERED_BYTES = 128 * 1024;
+const MAX_WS_BUFFERED_BYTES = 64 * 1024;
 const STREAM_REACQUIRE_DELAY_MS = 1500;
 
 // Bounded reconnect strategy
@@ -146,7 +146,13 @@ export class MediaShareSession {
     this.logDiag("info", `Acquiring stream (kind=${this.kind}, sourceId=${this.sourceId})`);
 
     try {
-      const constraints: MediaStreamConstraints = { video: { width: 960, height: 540, frameRate: 30 } };
+      const constraints: MediaStreamConstraints = {
+        video: {
+          width: { ideal: 1280, max: 1920 },
+          height: { ideal: 720, max: 1080 },
+          frameRate: { ideal: 15, max: 20 },
+        },
+      };
       let stream: MediaStream;
 
       if (this.kind === "screen") {
@@ -174,6 +180,7 @@ export class MediaShareSession {
       const track = stream.getVideoTracks()[0];
       if (track) {
         this.logDiag("info", `MediaStream track acquired (label=${track.label}, readyState=${track.readyState})`);
+        this.streamReacquireAttempts = 0;
 
         track.onended = () => {
           this.logDiag("warn", `MediaStream track ended (label=${track.label})`);
@@ -205,9 +212,9 @@ export class MediaShareSession {
 
       if (!this.canvas) {
         this.canvas = document.createElement("canvas");
-        this.canvas.width = 1280;
-        this.canvas.height = 720;
-        this.ctx = this.canvas.getContext("2d");
+        this.canvas.width = 960;
+        this.canvas.height = 540;
+        this.ctx = this.canvas.getContext("2d", { willReadFrequently: false });
       }
 
       if (this.status === "acquiring") {
@@ -260,16 +267,32 @@ export class MediaShareSession {
       this.stream = null;
     }
     this.cb.onStream?.(null);
-    if (this.video) this.video.srcObject = null;
+    if (this.video) {
+      this.video.srcObject = null;
+      try { this.video.pause(); } catch { /* ignore */ }
+    }
+    if (this.canvas) {
+      this.canvas.width = 0;
+      this.canvas.height = 0;
+    }
   }
+
+  private streamReacquireAttempts = 0;
 
   private scheduleStreamReacquire(): void {
     if (this.stopped || this.streamReacquireTimer) return;
-    this.logDiag("info", `Scheduling stream re-acquisition in ${STREAM_REACQUIRE_DELAY_MS}ms`);
+    if (this.streamReacquireAttempts >= 3) {
+      this.logDiag("error", "Stream re-acquisition failed 3 times. Halting retry.");
+      this.setStatus("error", "Capture stream ended and could not be recovered.");
+      return;
+    }
+    this.streamReacquireAttempts++;
+    const delay = Math.min(STREAM_REACQUIRE_DELAY_MS * this.streamReacquireAttempts, 5000);
+    this.logDiag("info", `Scheduling stream re-acquisition (attempt ${this.streamReacquireAttempts}/3) in ${delay}ms`);
     this.streamReacquireTimer = setTimeout(() => {
       this.streamReacquireTimer = null;
       if (!this.stopped) void this.acquireStream();
-    }, STREAM_REACQUIRE_DELAY_MS);
+    }, delay);
   }
 
   // ---- WebSocket Push & Bounded Reconnect ----
@@ -454,12 +477,20 @@ export class MediaShareSession {
 
         if (this.ctx && this.canvas) {
           try {
-            if (video.videoWidth > 0 && (this.canvas.width !== video.videoWidth || this.canvas.height !== video.videoHeight)) {
-              this.canvas.width = video.videoWidth;
-              this.canvas.height = video.videoHeight;
+            const MAX_W = 960;
+            const MAX_H = 540;
+            const vw = video.videoWidth || MAX_W;
+            const vh = video.videoHeight || MAX_H;
+            const scale = Math.min(MAX_W / vw, MAX_H / vh, 1.0);
+            const targetW = Math.max(16, Math.round(vw * scale));
+            const targetH = Math.max(16, Math.round(vh * scale));
+
+            if (this.canvas.width !== targetW || this.canvas.height !== targetH) {
+              this.canvas.width = targetW;
+              this.canvas.height = targetH;
             }
-            this.ctx.drawImage(video, 0, 0, this.canvas.width, this.canvas.height);
-            const frame = this.canvas.toDataURL("image/jpeg", 0.85);
+            this.ctx.drawImage(video, 0, 0, targetW, targetH);
+            const frame = this.canvas.toDataURL("image/jpeg", 0.65);
             this.ws.send(JSON.stringify({ type: "screen_frame", camera_id: this.cameraId, frame }));
             this.sentFrames++;
           } catch (err) {

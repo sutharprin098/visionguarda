@@ -382,19 +382,10 @@ async def websocket_endpoint(websocket: WebSocket):
                     if cam_id and frame_base64:
                         thread = manager.camera_threads.get(cam_id)
                         if thread is not None and hasattr(thread, "push_frame"):
-                            # Decode OFF the event loop.
-                            #
-                            # b64decode + cv2.imdecode of a 960x540 JPEG is
-                            # single-digit-to-tens of milliseconds of pure CPU,
-                            # and running it inline here spent that time on the
-                            # ONE asyncio loop that also serves every telemetry
-                            # push, every MJPEG stream and every REST call. With
-                            # a virtual camera pushing at 10fps that is a
-                            # recurring stall on the shared loop — felt by every
-                            # other camera in the app, not just this one, and
-                            # it scales with the number of virtual cameras.
-                            # to_thread moves it to the default executor so the
-                            # loop only does I/O, which is all it should do.
+                            # Fast drop backpressure: if pipeline thread already has an unconsumed frame waiting,
+                            # skip decoding this one so we don't pile up executor tasks or exhaust memory.
+                            if getattr(thread, "incoming_frame", None) is not None:
+                                continue
                             frame = await asyncio.to_thread(_decode_pushed_frame, frame_base64)
                             if frame is not None:
                                 thread.push_frame(frame)

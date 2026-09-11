@@ -825,7 +825,7 @@ class ByteTracker:
             })
         return out
 
-COAST_RENDER_SECONDS = 0.25
+COAST_RENDER_SECONDS = 0.15
 
 
 def resolve_emitted_detections(tracker, tracks_raw, detections, masks,
@@ -884,7 +884,7 @@ def resolve_emitted_detections(tracker, tracks_raw, detections, masks,
             # Check edge boundary: if coasting near frame edge, drop instantly (object has exited)
             b = trk.get("bbox", {})
             x1, y1, x2, y2 = b.get("x1", 50), b.get("y1", 50), b.get("x2", 50), b.get("y2", 50)
-            if x1 <= 15 or y1 <= 15 or x2 >= 1905 or y2 >= 1065:
+            if x1 <= 15 or y1 <= 15 or (x2 >= 945 and x2 <= 965) or (y2 >= 525 and y2 <= 545) or x2 >= 1905 or y2 >= 1065:
                 continue
 
             out_dets.append({
@@ -1890,7 +1890,9 @@ class PipelineCoordinator:
                 print(f"[DemoFrame Err] {e}", flush=True)
 
         w, h = 960, 540
-        frame = np.zeros((h, w, 3), dtype=np.uint8)
+        if not hasattr(self, "_synthetic_frame_buf") or self._synthetic_frame_buf is None:
+            self._synthetic_frame_buf = np.zeros((h, w, 3), dtype=np.uint8)
+        frame = self._synthetic_frame_buf
 
         if is_virtual and self.zone_profile == "micro_motion":
             # Low-light CCTV warehouse IR environment for virtual micro-motion demo
@@ -2132,7 +2134,7 @@ class PipelineCoordinator:
                     elif slack < -self._file_frame_interval:
                         next_frame_due = time.time()
 
-            except Exception as e:
+            except (Exception, MemoryError) as e:
                 # Never let a single bad frame/driver hiccup kill this thread —
                 # a dead capture thread means the video feed and every stage
                 # downstream of it freezes permanently while the process
@@ -3304,39 +3306,10 @@ class PipelineCoordinator:
                     }
                 })
 
-            # Anti-flicker hysteresis memory holds recent detections for up to 2.5s
-            now_ts = time.time()
-            if not hasattr(self, "_detection_persistence_cache"):
-                self._detection_persistence_cache = {}
-
-            current_tids = set()
+            # Ensure each client_det has a consistent track_id
             for cd in client_dets:
-                tid = cd.get("track_id") or f"{cd['class']}_{cd['bbox']['x1']:.2f}_{cd['bbox']['y1']:.2f}"
-                cd["track_id"] = tid
-                self._detection_persistence_cache[tid] = {"det": cd, "ts": now_ts}
-                current_tids.add(tid)
-
-            coasted_dets = list(client_dets)
-            expired_tids = []
-            for tid, cached in self._detection_persistence_cache.items():
-                if tid not in current_tids:
-                    if now_ts - cached["ts"] <= 2.5:
-                        coasted_det = dict(cached["det"])
-                        coasted_det["tracking_status"] = "coasting"
-                        coasted_dets.append(coasted_det)
-                    else:
-                        expired_tids.append(tid)
-
-            for tid in expired_tids:
-                self._detection_persistence_cache.pop(tid, None)
-
-            if coasted_dets:
-                self._last_nonempty_client_dets = list(coasted_dets)
-                self._last_nonempty_dets_ts = now_ts
-            elif hasattr(self, "_last_nonempty_client_dets") and (now_ts - getattr(self, "_last_nonempty_dets_ts", 0) <= 2.5):
-                coasted_dets = list(self._last_nonempty_client_dets)
-
-            client_dets = coasted_dets
+                if cd.get("track_id") is None:
+                    cd["track_id"] = f"{cd['class']}_{cd['bbox']['x1']:.2f}_{cd['bbox']['y1']:.2f}"
 
             # Recalculate object category counts from smoothed client_dets
             people_count = sum(1 for cd in client_dets if _object_category(cd.get("class", "")) == "person")

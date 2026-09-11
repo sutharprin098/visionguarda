@@ -17,10 +17,8 @@ interface Props {
   fit?: "cover" | "contain";
 }
 
-// AI telemetry is deliberately de-duplicated before it reaches React. Keep a
-// box alive through that optimization and short delivery gaps, but never leave
-// a genuinely lost object on screen for long.
-const TRACK_HOLD_MS = 1600;
+// Drop lost objects quickly so moving/exiting objects don't leave ghost boxes behind
+const TRACK_HOLD_MS = 600;
 
 function sourceSize(el: HTMLVideoElement | HTMLImageElement | null): { w: number; h: number } | null {
   if (!el) return null;
@@ -296,7 +294,7 @@ export default function DetectionOverlay({ detections, refreshKey = 0, mediaRef,
     const renderDets = dedupDetections(activeList);
 
     for (const det of renderDets) {
-      if (det.confidence != null && det.confidence < 0.15) continue;
+      if (det.confidence != null && det.confidence < 0.35) continue;
       const x1 = ox + det.bbox.x1 * dw;
       const y1 = oy + det.bbox.y1 * dh;
       const w = (det.bbox.x2 - det.bbox.x1) * dw;
@@ -368,7 +366,7 @@ export default function DetectionOverlay({ detections, refreshKey = 0, mediaRef,
       if (hasExpired) {
         scheduleDraw();
       }
-    }, 250);
+    }, 100);
     return () => clearInterval(timer);
   }, [scheduleDraw]);
 

@@ -64,6 +64,7 @@ def detect(
     t0 = time.perf_counter()
 
     frame_h, frame_w = frame.shape[:2]
+    new_w, new_h = frame_w, frame_h
 
     # Downscale to target_size for transfer
     if max(frame_h, frame_w) > target_size:
