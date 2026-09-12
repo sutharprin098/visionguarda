@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef, useCallback, useMemo, memo } from "react";
-import { Video, Film, Bell, Settings2, LogOut, Wifi, WifiOff, Sliders, Activity, AlertTriangle, RotateCw, Maximize2, Minimize2, Lock, Send, Check, Loader2, MessageCircle, ChevronDown, ChevronRight, Copy, Cloud, Cpu, Globe, Plus, MoreVertical } from "lucide-react";
+import { Video, Film, Bell, Settings2, LogOut, Wifi, WifiOff, Sliders, Activity, AlertTriangle, RotateCw, Maximize2, Minimize2, Lock, Send, Check, Loader2, MessageCircle, ChevronDown, ChevronRight, Copy, Cloud, Cpu, Globe, Plus, MoreVertical, Box, Layers } from "lucide-react";
 import clsx from "clsx";
 import { startRealtimeSync, DeactivatedError, SyncBundle } from "../lib/sync";
 import { syncAiModelToLocalEngine, syncAiConfidenceToLocalEngine, syncAiInferenceModeToLocalEngine, mjpegStreamUrl, resetLocalEngineState, getEngineBase, getDecryptedCameraSource, toggleCameraRecording } from "../lib/localEngine";
@@ -14,6 +14,9 @@ import SourcePicker from "../components/SourcePicker";
 import AddCameraModal from "../components/AddCameraModal";
 import SettingsMenuModal from "../components/SettingsMenuModal";
 import RecordingsPlaybackView from "../components/RecordingsPlaybackView";
+import FloorPlanView from "../components/FloorPlanView";
+import ErrorBoundary from "../components/ErrorBoundary";
+import NotificationPreferencesCard from "../components/NotificationPreferencesCard";
 import FallbackTileLiveFeedShared from "../components/FallbackTileLiveFeed";
 import { lockReason } from "../lib/rbac";
 import { getSupabase } from "../lib/session";
@@ -68,7 +71,7 @@ export default function Workspace({
    *  Alerts tab. A nonce for the same reason as openLiveCam. */
   openAlertsSignal?: { nonce: number } | null;
 }) {
-  const [tab, setTab] = useState<"cameras" | "recordings" | "alerts">("cameras");
+  const [tab, setTab] = useState<"cameras" | "recordings" | "maps" | "alerts" | "engine">("cameras");
   // Which camera is showing full-window, or null. Lifted to Workspace (not the
   // tile) because the viewer has to cover the sidebar and the tab bar, and
   // because switching camera while fullscreen has to keep the SAME viewer
@@ -359,8 +362,10 @@ export default function Workspace({
     ? ([
         (hasPermission("cameras.manage") || hasPermission("cameras.assign")) && "cameras",
         "recordings",
+        "maps",
         hasPermission("alerts.view") && "alerts",
-      ].filter(Boolean) as ("cameras" | "recordings" | "alerts")[])
+        "engine",
+      ].filter(Boolean) as ("cameras" | "recordings" | "maps" | "alerts" | "engine")[])
     : [];
 
   useEffect(() => {
@@ -396,8 +401,10 @@ export default function Workspace({
 
   const navItems = ([
     { id: "cameras", label: `Cameras (${bundle.cameras?.length ?? 0})`, icon: Video },
-    { id: "recordings", label: "Recordings", icon: Film },
+    { id: "recordings", label: "Playback & NVR", icon: Film },
+    { id: "maps", label: "3D Twin & Maps", icon: Box },
     { id: "alerts", label: `Alerts (${bundle.notifications?.length ?? 0})`, icon: Bell },
+    { id: "engine", label: "Engine Health", icon: Activity },
   ] as const).filter((item) => allowedTabs.includes(item.id as any));
 
   return (
@@ -567,47 +574,77 @@ export default function Workspace({
           />
         </div>
         {tab === "recordings" && (
-          <RecordingsPlaybackView cameras={bundle.cameras} />
+          <ErrorBoundary fallbackTitle="NVR Playback &amp; Recording Studio">
+            <RecordingsPlaybackView cameras={bundle.cameras} />
+          </ErrorBoundary>
+        )}
+        {tab === "maps" && (
+          <ErrorBoundary fallbackTitle="3D Digital Twin &amp; GIS Map">
+            <FloorPlanView
+              bundle={bundle}
+              healthInfo={healthInfo}
+              onSelectCamera={(id) => {
+                setTab("cameras");
+                setFullscreenCamId(id);
+              }}
+            />
+          </ErrorBoundary>
         )}
         {tab === "alerts" && (
           <AlertsTab orgId={bundle.organization?.id ?? null} hasPermission={hasPermission} active={true} />
         )}
+        {tab === "engine" && (
+          <ErrorBoundary fallbackTitle="Engine Health Panel">
+            <EngineHealthPanel orgInferenceMode={orgInferenceMode} cloudUrl={orgCloudUrl} />
+          </ErrorBoundary>
+        )}
       </main>
 
       {/* MOBILE BOTTOM NAVIGATION BAR (fixed at bottom for phones < md) */}
-      <div className="flex md:hidden fixed bottom-0 inset-x-0 z-40 bg-zinc-950/95 backdrop-blur-xl border-t border-zinc-800/90 py-2 px-2 pb-[max(0.75rem,env(safe-area-inset-bottom))] justify-around items-center shadow-2xl">
+      <div className="flex md:hidden fixed bottom-0 inset-x-0 z-40 bg-zinc-950/95 backdrop-blur-xl border-t border-zinc-800/90 py-2 px-1 pb-[max(0.75rem,env(safe-area-inset-bottom))] justify-around items-center shadow-2xl">
         <button
           onClick={() => setTab("cameras")}
           className={clsx(
-            "flex flex-col items-center gap-1 py-1 px-3 rounded-xl transition",
+            "flex flex-col items-center gap-1 py-1 px-2.5 rounded-xl transition",
             tab === "cameras" ? "text-accent bg-accent/10 font-bold" : "text-zinc-400 hover:text-zinc-200"
           )}
         >
           <Video size={18} />
-          <span className="text-[10px]">Cameras</span>
+          <span className="text-[9px]">Cameras</span>
         </button>
 
         <button
           onClick={() => setTab("recordings")}
           className={clsx(
-            "flex flex-col items-center gap-1 py-1 px-3 rounded-xl transition",
+            "flex flex-col items-center gap-1 py-1 px-2.5 rounded-xl transition",
             tab === "recordings" ? "text-accent bg-accent/10 font-bold" : "text-zinc-400 hover:text-zinc-200"
           )}
         >
           <Film size={18} />
-          <span className="text-[10px]">Recordings</span>
+          <span className="text-[9px]">Playback</span>
+        </button>
+
+        <button
+          onClick={() => setTab("maps")}
+          className={clsx(
+            "flex flex-col items-center gap-1 py-1 px-2.5 rounded-xl transition",
+            tab === "maps" ? "text-accent bg-accent/10 font-bold" : "text-zinc-400 hover:text-zinc-200"
+          )}
+        >
+          <Box size={18} />
+          <span className="text-[9px]">3D Twin</span>
         </button>
 
         {allowedTabs.includes("alerts") && (
           <button
             onClick={() => setTab("alerts")}
             className={clsx(
-              "flex flex-col items-center gap-1 py-1 px-3 rounded-xl transition relative",
+              "flex flex-col items-center gap-1 py-1 px-2.5 rounded-xl transition relative",
               tab === "alerts" ? "text-accent bg-accent/10 font-bold" : "text-zinc-400 hover:text-zinc-200"
             )}
           >
             <Bell size={18} />
-            <span className="text-[10px]">Alerts</span>
+            <span className="text-[9px]">Alerts</span>
             {unackedAlerts > 0 && (
               <span className="absolute top-1 right-2 flex h-2 w-2 rounded-full bg-danger animate-pulse" />
             )}
@@ -617,19 +654,19 @@ export default function Workspace({
         {hasPermission("cameras.manage") && onOpenAdminStudio && (
           <button
             onClick={onOpenAdminStudio}
-            className="flex flex-col items-center gap-1 py-1 px-3 rounded-xl text-sky-400 hover:text-sky-300 transition"
+            className="flex flex-col items-center gap-1 py-1 px-2.5 rounded-xl text-sky-400 hover:text-sky-300 transition"
           >
             <Sliders size={18} />
-            <span className="text-[10px]">Studio</span>
+            <span className="text-[9px]">Studio</span>
           </button>
         )}
 
         <button
           onClick={() => setIsSettingsOpen(true)}
-          className="flex flex-col items-center gap-1 py-1 px-3 rounded-xl text-zinc-400 hover:text-zinc-100 transition"
+          className="flex flex-col items-center gap-1 py-1 px-2.5 rounded-xl text-zinc-400 hover:text-zinc-100 transition"
         >
           <MoreVertical size={18} />
-          <span className="text-[10px]">Settings</span>
+          <span className="text-[9px]">More</span>
         </button>
       </div>
 
@@ -637,6 +674,10 @@ export default function Workspace({
         isOpen={isSettingsOpen}
         onClose={() => setIsSettingsOpen(false)}
         onSignOut={deactivate}
+        onOpenEngineHealth={() => {
+          setTab("engine");
+          setIsSettingsOpen(false);
+        }}
       />
 
       {/* Double Tap Back Button Exit Toast Notification */}
@@ -2261,6 +2302,9 @@ function AlertsTab({ orgId, hasPermission, active }: { orgId: string | null; has
           )}
         </div>
       </div>
+
+      {/* Notification Preferences — User controls which alert messages arrive */}
+      <NotificationPreferencesCard />
 
       {/* The Alerts page. This is the only place an alert is ever rendered —
           realtime, filterable, exportable — see AlertsPage.tsx. */}

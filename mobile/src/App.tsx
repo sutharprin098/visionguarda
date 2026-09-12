@@ -370,6 +370,7 @@ export default function App() {
           >
             <AdminStudio
               orgId={bundle?.organization?.id ?? null}
+              bundle={bundle}
               onDeactivated={() => {
                 if (appType === "admin") {
                   setPhase("needs-activation");

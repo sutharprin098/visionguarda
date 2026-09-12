@@ -34,8 +34,10 @@ import {
   Sliders,
   Check,
   X,
+  ArrowLeft,
 } from "lucide-react";
 import clsx from "clsx";
+import type { SyncBundle } from "../lib/sync";
 import { getSupabase } from "../lib/session";
 import { useAlertState } from "../components/alerts/AlertProvider";
 import { fnErrorMessage } from "../lib/fnError";
@@ -46,6 +48,7 @@ import {
   fetchRecordingSettings,
   updateRecordingSettings,
   RecordingSettings,
+  getEngineBase,
 } from "../lib/localEngine";
 import TargetMatcherUI from "../components/TargetMatcherUI";
 import FallbackTileLiveFeed from "../components/FallbackTileLiveFeed";
@@ -172,10 +175,12 @@ function getProfileAccentHex(profileKey?: ZoneProfileKey | string | null) {
 
 export default function AdminStudio({
   orgId: initialOrgId,
+  bundle,
   onDeactivated,
   onOpenAlerts,
 }: {
   orgId?: string | null;
+  bundle?: SyncBundle | null;
   onDeactivated: () => void;
   /** Bell click — jumps to Workspace's Alerts tab. Undefined would just hide
    *  the bell rather than render one that does nothing. */
@@ -195,13 +200,15 @@ export default function AdminStudio({
   const [drawings, setDrawings] = useState<Drawing[]>([]);
   const [rules, setRules] = useState<Rule[]>([]);
   const [versions, setVersions] = useState<ConfigVersion[]>([]);
-  const [orgId, setOrgId] = useState<string | null>(initialOrgId ?? null);
+  const [orgId, setOrgId] = useState<string | null>(initialOrgId || bundle?.organization?.id || "org-local");
 
   useEffect(() => {
     if (initialOrgId) {
       setOrgId(initialOrgId);
+    } else if (bundle?.organization?.id) {
+      setOrgId(bundle.organization.id);
     }
-  }, [initialOrgId]);
+  }, [initialOrgId, bundle?.organization?.id]);
 
   const [activeProfile, setActiveProfile] = useState<ZoneProfileKey | null>(null);
   const [features, setFeatures] = useState<ProfileFeatures>({});
@@ -422,39 +429,101 @@ export default function AdminStudio({
     let channel: any = null;
 
     async function loadCameras() {
-      const sb = await getSupabase();
-      const { data: cams, error: camErr } = await sb.from("cameras").select("*");
-      if (!active) return;
-      if (camErr) {
-        console.error("[AdminStudio] cameras load failed", camErr);
-        setCamsLoad({ loading: false, error: camErr.message || "Could not load cameras." });
-      } else {
-        setCamsLoad({ loading: false, error: null });
+      let cams: Camera[] = [];
+
+      // 1. First check bundle cameras
+      if (bundle?.cameras && bundle.cameras.length > 0) {
+        cams = bundle.cameras.map((c) => ({
+          id: c.id,
+          name: c.name,
+          source_type: c.source_type,
+          status: c.status || "online",
+          zone_profile: (c.zone_profile as ZoneProfileKey) || null,
+          zones: c.zones,
+          lines: c.lines,
+        }));
       }
-      if (cams) {
+
+      // 2. Fetch from engine directly
+      try {
+        const engineRes = await fetch(`${getEngineBase()}/api/cameras`, { signal: AbortSignal.timeout(3000) });
+        if (engineRes.ok) {
+          const engineCams = await engineRes.json();
+          if (Array.isArray(engineCams) && engineCams.length > 0) {
+            const map = new Map<string, Camera>();
+            cams.forEach((c) => map.set(c.id, c));
+            engineCams.forEach((ec: any) => {
+              const existing = map.get(ec.id);
+              map.set(ec.id, {
+                id: ec.id,
+                name: ec.name || existing?.name || `Camera ${ec.id.slice(0, 4)}`,
+                source_type: ec.type || ec.source_type || "rtsp",
+                status: ec.is_active ? "online" : "offline",
+                zone_profile: (ec.zone_profile as ZoneProfileKey) || existing?.zone_profile || null,
+                zones: ec.zones || existing?.zones || "[]",
+                lines: ec.lines || existing?.lines || "[]",
+              });
+            });
+            cams = Array.from(map.values());
+          }
+        }
+      } catch (e) {
+        console.warn("[AdminStudio] Could not fetch engine cameras:", e);
+      }
+
+      // 3. Try Supabase query safely
+      try {
+        const sb = await getSupabase();
+        const { data: cloudCams } = await sb.from("cameras").select("*");
+        if (cloudCams && cloudCams.length > 0) {
+          const map = new Map<string, Camera>();
+          cams.forEach((c) => map.set(c.id, c));
+          cloudCams.forEach((cc: any) => {
+            map.set(cc.id, {
+              id: cc.id,
+              name: cc.name,
+              source_type: cc.source_type,
+              status: cc.status || "online",
+              zone_profile: cc.zone_profile || null,
+              zones: cc.zones,
+              lines: cc.lines,
+            });
+          });
+          cams = Array.from(map.values());
+        }
+      } catch (e) {
+        console.warn("[AdminStudio] Supabase camera query skipped/failed:", e);
+      }
+
+      if (!active) return;
+      setCamsLoad({ loading: false, error: null });
+
+      if (cams.length > 0) {
         setCameras(cams);
         setSelectedCam((prev) => {
           if (prev && cams.some((c) => c.id === prev.id)) {
             const fetched = cams.find((c) => c.id === prev.id) || prev;
             const savedProf = typeof localStorage !== "undefined" ? localStorage.getItem(`cam_profile_${prev.id}`) : null;
-            const activeProf = savedProf || prev.zone_profile;
-            return activeProf ? { ...fetched, zone_profile: activeProf } : fetched;
+            const activeProf = (savedProf as ZoneProfileKey) || prev.zone_profile || "traffic";
+            return { ...fetched, zone_profile: activeProf };
           }
-          if (cams.length > 0) {
-            const firstCam = cams[0];
-            const savedProf = typeof localStorage !== "undefined" ? (localStorage.getItem(`cam_profile_${firstCam.id}`) as ZoneProfileKey | null) : null;
-            return savedProf ? { ...firstCam, zone_profile: savedProf } : firstCam;
-          }
-          return null;
+          const activeCam = cams.find((c) => c.status === "online") || cams[0];
+          const savedProf = typeof localStorage !== "undefined" ? (localStorage.getItem(`cam_profile_${activeCam.id}`) as ZoneProfileKey | null) : null;
+          const activeProf = savedProf || activeCam.zone_profile || "traffic";
+          return { ...activeCam, zone_profile: activeProf };
         });
       }
     }
 
     async function loadConfigVersions() {
-      const sb = await getSupabase();
-      const { data: vers } = await sb.from("config_versions").select("*").order("version", { ascending: false });
-      if (!active) return;
-      if (vers) setVersions(vers);
+      try {
+        const sb = await getSupabase();
+        const { data: vers } = await sb.from("config_versions").select("*").order("version", { ascending: false });
+        if (!active) return;
+        if (vers) setVersions(vers);
+      } catch {
+        /* Supabase offline */
+      }
     }
 
     async function initializeStudio() {
@@ -1778,6 +1847,14 @@ export default function AdminStudio({
                 )}
               </button>
             )}
+          </div>
+          <div className="px-3 py-2.5 border-b border-line bg-surface-2/20">
+            <button
+              onClick={onDeactivated}
+              className="flex w-full items-center justify-center gap-2 rounded-md bg-surface-2 px-3 py-1.5 text-xs font-semibold text-zinc-200 border border-line hover:bg-surface-3 hover:text-white transition shadow-sm active:scale-[0.98]"
+            >
+              <ArrowLeft size={14} /> Back to Workspace
+            </button>
           </div>
           <div className="px-3 py-3">
             <div className="flex justify-between items-center text-[10px] uppercase font-bold tracking-wider text-zinc-500 mb-2">
