@@ -36,7 +36,7 @@ const DEFAULT_FALLBACK_RELEASES: GithubRelease[] = [
     size_bytes: 423644818,
     content_type: "application/octet-stream",
     download_url: `/downloads/CamAI-Desktop-Setup-1.1.0.exe`,
-    checksum_sha256: "4a5f2dc25f80f3f92e8aa2c0d315fb4a61ee53b07b96ca9678c41e8554f1d601",
+    checksum_sha256: "b1ecff1ad140f424b0514bb774f7b4add69768766d8a6e18edb4f9ee86d598b2",
     release_notes: `
 ### 🚀 CamAI Desktop v1.1.0 & Mobile v1.0.2 — Digital Twin & Scene Intelligence Release
 - **🌐 Digital Twin 3D View**: Interactive 3D floor-plan twin with real-time camera overlays, zone visualization, and live detection feed mapped to spatial coordinates.
