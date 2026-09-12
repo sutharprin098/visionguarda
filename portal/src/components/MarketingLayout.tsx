@@ -175,8 +175,8 @@ export default function MarketingLayout() {
                   </a>
                 </li>
                 <li>
-                  <a href="/downloads/CamAI-Mobile-v1.1.0.apk" download="CamAI-Mobile-v1.1.0.apk" className="text-slate-700 font-bold hover:underline flex items-center gap-1">
-                    <Download size={11} /> Mobile App v1.1.0 (.apk)
+                  <a href="/downloads/CamAI-Mobile.apk" download="CamAI-Mobile-v1.0.2.apk" className="text-slate-700 font-bold hover:underline flex items-center gap-1">
+                    <Download size={11} /> Mobile App v1.0.2 (.apk)
                   </a>
                 </li>
               </ul>
