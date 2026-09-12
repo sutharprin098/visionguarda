@@ -27,23 +27,27 @@ const REPO_BLOB_BASE = `${REPO_URL}/blob/main/`;
 const DEFAULT_FALLBACK_RELEASES: GithubRelease[] = [
   {
     tag_name: "v1.1.0",
-    name: "CamAI Desktop v1.1.0 & Mobile v1.1.0 (Enterprise Release)",
+    name: "CamAI Desktop v1.1.0 & Mobile v1.0.2 (Enterprise Release)",
     version: "v1.1.0",
     prerelease: false,
-    published_at: "2026-09-07T18:00:00Z",
-    asset_id: 110,
+    published_at: "2026-09-12T08:00:00Z",
+    asset_id: 111,
     asset_name: "CamAI-Desktop-Setup-1.1.0.exe",
-    size_bytes: 423642359,
+    size_bytes: 423644818,
     content_type: "application/octet-stream",
     download_url: `/downloads/CamAI-Desktop-Setup-1.1.0.exe`,
     checksum_sha256: "4a5f2dc25f80f3f92e8aa2c0d315fb4a61ee53b07b96ca9678c41e8554f1d601",
     release_notes: `
-### 🚀 CamAI Desktop v1.1.0 & Mobile v1.1.0 Unified NVR Release
+### 🚀 CamAI Desktop v1.1.0 & Mobile v1.0.2 — Digital Twin & Scene Intelligence Release
+- **🌐 Digital Twin 3D View**: Interactive 3D floor-plan twin with real-time camera overlays, zone visualization, and live detection feed mapped to spatial coordinates.
+- **🤖 Auto Scene Detector**: AI-powered automatic scene classification engine that detects environment type (traffic, retail, factory, security) and auto-configures optimal zone profiles without manual setup.
+- **🗺️ Twin Zone Manager**: Full-featured zone management layer on the 3D digital twin — create, edit, lock, hide, and bind detection zones directly in the 3D spatial view.
+- **🔔 Notification Preferences Card**: Granular per-alert-type notification control — configure push, in-app, Telegram, and email channels with cooldown intervals per event class.
+- **🛡️ Error Boundary**: Production-grade error isolation layer with graceful recovery UI so a single component crash never brings down the full workspace.
 - **24/7 Continuous NVR Recording Engine**: Background segmented MP4 writing (5-60m configurable segments), zero dropped frames, SQLite metadata cataloging, and automatic FIFO disk quota cleanup.
 - **AI Detection Burn-In Export**: Hardware-accelerated OpenCV frame stamping burns YOLO bounding boxes, class confidences, tracking IDs, speed radar (km/h), and UTC watermarks directly into standard MP4 frames.
 - **4X Digital Zoom & Pan Studio**: Smooth 1.0x to 4.0x digital zoom and directional pan inspection across live streams and 24-hour timeline scrubbing.
-- **Per-Camera REC Toggle & Mobile Parity**: Dedicated recording toggle button on each camera tile, synchronized between Desktop workstation and Android APK v1.1.0.
-- **Signed Android APK v1.1.0**: High-performance mobile client with pinch-to-zoom studio, 24-hour timeline seek, and 24/7 background AI notification alerts.
+- **Signed Android APK v1.0.2**: Updated production-signed APK (3.49 MB) with all new features.
     `,
   },
   {

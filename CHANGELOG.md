@@ -1,6 +1,31 @@
 # Changelog
 
-## 2026-08-27 — Engine Optimization & Decoupled High-FPS Architecture
+## 2026-09-12 — Desktop v1.1.0 & Mobile v1.0.2 — Digital Twin & Scene Intelligence Release
+
+### Added — Mobile (v1.0.2)
+
+- **DigitalTwin3DView**: Interactive 3D floor-plan twin with real-time camera overlays, zone visualization, and live detection feed mapped to spatial coordinates using Three.js.
+- **AutoSceneDetector**: AI-powered automatic scene classification engine that detects environment type (traffic, retail, factory, security) and auto-configures optimal zone profiles without manual setup.
+- **TwinZoneManager**: Full-featured zone management layer on the 3D digital twin — create, edit, lock, hide, and bind detection zones directly in the 3D spatial view, with full undo/redo history.
+- **NotificationPreferencesCard**: Granular per-alert-type notification control — configure push, in-app, Telegram, and email channels with cooldown intervals per event class.
+- **ErrorBoundary**: Production-grade error isolation layer with graceful recovery UI so a single component crash never brings down the full workspace.
+
+### Improved — Mobile (v1.0.2)
+
+- **FloorPlanView**: Performance improvements and smoother rendering for floor plan overlays.
+- **RecordingsPlaybackView**: Updated playback controls and timeline UI.
+- **SettingsMenuModal**: Extended settings with notification preference integration.
+- **Session & Auth**: Improved session restoration logic with better offline fallback handling.
+- **AlertEngine**: Enhanced alert processing pipeline with configurable notification channels.
+- **BridgeFallback**: More robust native bridge fallback with improved error recovery.
+
+### Improved — Server
+
+- **main.py**: Updated FastAPI routes and background task handling for improved stability.
+
+---
+
+
 
 ### Added / Improved — Engine Performance & Streaming
 
