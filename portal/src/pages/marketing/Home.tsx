@@ -2,6 +2,7 @@ import React from "react";
 import { motion, useScroll, useSpring } from "framer-motion";
 import { useSmoothScroll } from "../../lib/useSmoothScroll";
 import HeroSection from "../../components/landing/HeroSection";
+import DigitalTwinSection from "../../components/landing/DigitalTwinSection";
 import MobileAppShowcaseSection from "../../components/landing/MobileAppShowcaseSection";
 import ContinuousNVRSection from "../../components/landing/ContinuousNVRSection";
 import RealtimeAlertSection from "../../components/landing/RealtimeAlertSection";
@@ -25,9 +26,10 @@ export default function Home() {
         className="fixed top-0 left-0 right-0 h-[3px] bg-gradient-to-r from-sky-400 via-blue-500 to-indigo-600 z-[100] origin-left shadow-[0_0_15px_rgba(14,165,233,0.6)]"
       />
 
-      {/* Main Content Sections with Ultra-Smooth Light Cloud Transitions */}
+      {/* Main Content Sections */}
       <main className="relative z-10 bg-sky-50/50">
         <HeroSection />
+        <DigitalTwinSection />
         <MobileAppShowcaseSection />
         <ContinuousNVRSection />
         <RealtimeAlertSection />

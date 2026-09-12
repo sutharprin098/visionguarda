@@ -4,10 +4,10 @@ import { ArrowRight, Menu, X, Shield, Zap, Terminal } from "lucide-react";
 
 const NAV_LINKS = [
   { href: "#live-demo", label: "Live Demo" },
+  { href: "#digital-twin", label: "Digital Twin" },
   { href: "#nvr-recording", label: "NVR Studio" },
   { href: "#ai-features", label: "AI Features" },
-  { href: "#live-dashboard", label: "Dashboard" },
-  { href: "/features", label: "Capabilities" },
+  { href: "#capabilities", label: "Capabilities" },
 ];
 
 export default function Navbar() {
