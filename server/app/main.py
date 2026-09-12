@@ -39,10 +39,6 @@ app = FastAPI(title="CamAI CCTV Analytics Platform")
 from app.health import router as health_router
 app.include_router(health_router)
 
-# Primed once at import time — psutil's cpu_percent() reports 0.0 on its
-# first call for a given Process object (it needs a prior sample to diff
-# against) and /api/status is polled on an interval, so a module-level
-# instance naturally gets a real reading from the second poll onward
 # instead of every caller re-priming (and always seeing 0.0) on each request.
 try:
     import psutil
@@ -51,13 +47,6 @@ try:
 except ImportError:
     _proc = None
 
-# CORS Setup. Not "*" any more: a wildcard let any page the user happened to
-# have open preflight-and-POST the control endpoints below. The allowlist is
-# config.CORS_ORIGINS (override with CAMAI_CORS_ORIGINS).
-#
-# allow_credentials is False: this engine has no cookies and no session — the
-# only credential it understands is the X-CamAI-Token header, which a
-# cross-origin page cannot obtain. Advertising credential support only widened
 # what a browser would attach to (and read back from) a cross-origin call.
 app.add_middleware(
     CORSMiddleware,
@@ -71,20 +60,7 @@ app.add_middleware(
 # --- DNS-rebinding guard ----------------------------------------------------
 import os as _os_mod
 _os_env_hosts = _os_mod.getenv("CAMAI_ALLOWED_HOSTS", "")
-# The engine binds loopback, which stops remote packets but NOT a browser: any
-# page the operator visits can point a hostname it controls at 127.0.0.1 and
-# then talk to this API as a same-origin peer, which sidesteps the CORS
-# allowlist above entirely (the origin is the attacker's own domain, and after
-# rebinding the request really is same-origin). Requiring the Host header to
-# name loopback closes that: the desktop app, the local viewer and every
-# documented client address the engine as 127.0.0.1/localhost, while a rebound
-# attacker.example page arrives carrying its own hostname and is refused.
-#
-# "testserver" is Starlette's TestClient hostname and is accepted deliberately:
-# a browser derives Host from the URL it was given and cannot be scripted into
-# sending a different one, so a name that resolves nowhere on the public
-# internet is not an attack path — while rejecting it would mean the guard
-# could only be exercised by not testing it. CAMAI_ALLOWED_HOSTS (comma
+
 # separated) covers deployments fronted by a reverse proxy under a real name.
 _ALLOWED_HOST_NAMES = {"127.0.0.1", "localhost", "::1", "[::1]", "0.0.0.0", "testserver"} | {
     h.strip().lower() for h in _os_env_hosts.split(",") if h.strip()
@@ -105,13 +81,6 @@ async def _reject_foreign_host_header(request, call_next):
 
 CONTROL_TOKEN_HEADER = "X-CamAI-Token"
 
-# Brute-force lockout for the token check below. Any local process can call
-# this endpoint at native loop speed, and compare_digest being constant-time
-# only protects against a *timing* side-channel — it does nothing to stop a
-# process that simply guesses many tokens in a row. _TOKEN_FAIL_MAX wrong
-# tokens within _TOKEN_FAIL_WINDOW_S trips a short lockout that rejects even
-# a CORRECT token for _TOKEN_LOCKOUT_S: the desktop app sends the right token
-# on effectively every call, so it never gets near the threshold, while a
 # guessing loop is throttled to a few dozen attempts per lockout cycle
 # instead of unbounded.
 _TOKEN_FAIL_WINDOW_S = 60.0
@@ -265,13 +234,6 @@ class ConnectionManager:
 
 ws_manager = ConnectionManager()
 
-# A well-behaved client (see desktop/src/lib/mediaShare.ts) pings on a
-# cadence well inside this window; a connection that's gone idle past it is
-# almost always a half-open socket the OS hasn't torn down yet (sleep,
-# network-adapter swap, dead peer with no FIN/RST ever seen) rather than a
-# legitimately quiet client — closing it lets the client's own reconnect
-# logic take over immediately instead of pushing frames into a socket that
-# looks open but is actually dead.
 WS_IDLE_TIMEOUT_SECS = 120.0
 
 def _ws_origin_allowed(websocket: WebSocket) -> bool:
@@ -346,23 +308,12 @@ async def websocket_endpoint(websocket: WebSocket):
                     cam_id = payload.get("camera_id")
                     if cam_id:
                         ws_manager.add_subscription(websocket, cam_id)
-                        # Answer the subscription immediately with whatever state
-                        # this camera is in, instead of leaving the client blank
-                        # until the camera happens to produce its next payload.
-                        #
-                        # For a HEALTHY camera that wait is one frame. For a
-                        # BROKEN one it is a full reconnect cycle — and that
-                        # backoff climbs to 30s, so a tile could sit empty and
-                        # unexplained for half a minute after the operator opened
-                        # it, which is precisely the "it just isn't detecting"
-                        # experience this release is fixing. The camera already
+
                         # knows the answer; send it on subscribe.
                         thread = manager.camera_threads.get(cam_id)
                         if thread is not None:
-                            # Only refresh when the source is NOT healthy. On a
-                            # working camera latest_telemetry is a real analytic
-                            # result seconds old at most; overwriting it with a
-                            # zeroed status frame would blank the overlay for one
+
+
                             # tick every time a viewer opened.
                             if getattr(thread, "_health_status", None) != "online":
                                 thread.refresh_status_fields()

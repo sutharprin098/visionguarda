@@ -15,7 +15,9 @@
     "@capacitor/app": "^8.1.1",
     "@capacitor/core": "^8.5.0",
     "@supabase/supabase-js": "^2.45.0",
-    "systeminformation": "^5.22.11"
+    "@types/three": "^0.185.4",
+    "systeminformation": "^5.22.11",
+    "three": "^0.185.1"
   },
   "devDependencies": {
     "@capacitor/cli": "^8.5.0",
