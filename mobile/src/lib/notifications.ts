@@ -20,9 +20,9 @@ const DEFAULT_DESKTOP_SETTINGS: DesktopNotificationSettings = {
   startTime: '22:00',
   endTime: '06:00',
   events: {
-    person: true,
-    vehicle: true,
-    intrusion: true,
+    person: false, // Only alert if user explicitly enables general presence
+    vehicle: false, // Normal traffic detections are displayed in HUD, not spammed to alerts
+    intrusion: true, // Violations, wrong-way, speeding, and perimeter breaches stay enabled
     rodent: true,
   },
 };

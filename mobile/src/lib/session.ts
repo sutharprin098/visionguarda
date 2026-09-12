@@ -105,6 +105,7 @@ export async function restoreSession(force = false): Promise<RestoreResult> {
   // the same stale failure forever instead of a fresh attempt.
   const warm = await window.camai.getWarmSession(force);
   if (!warm.ok) return warm.reason;
+  if ((warm.session as any)?.offline_session) return "ready";
 
   const sb = getSupabaseSync();
   try {
@@ -122,6 +123,8 @@ export async function restoreSession(force = false): Promise<RestoreResult> {
 export async function activateWithKey(key: string): Promise<string | null> {
   const res = await window.camai.activate(key);
   if (!res.ok) return res.error ?? "activation failed";
+  if ((res as any).offline_session) return null;
+
   const sb = getSupabaseSync();
   const { error } = await sb.auth.setSession({
     access_token: res.access_token!,

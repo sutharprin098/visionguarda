@@ -41,9 +41,46 @@ if (typeof window !== "undefined" && !window.camai) {
           }),
         });
 
-        const body = await res.json();
+        const body = await res.json().catch(() => ({}));
         if (!res.ok) {
-          return { ok: false, error: body.error ?? `Activation failed (${res.status})` };
+          // Fallback to Supabase database RPC activate_mobile_license
+          try {
+            const rpcRes = await fetch(`${SUPABASE_URL}/rest/v1/rpc/activate_mobile_license`, {
+              method: "POST",
+              headers: {
+                apikey: ANON_KEY,
+                Authorization: `Bearer ${ANON_KEY}`,
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({
+                p_license_key: licenseKey.trim().toUpperCase(),
+                p_device_fingerprint: fingerprintHash,
+                p_device_name: "CamAI Mobile Security Node",
+              }),
+            });
+            const rpcBody = await rpcRes.json();
+            if (rpcRes.ok && rpcBody && rpcBody.ok) {
+              const session = {
+                access_token: "mobile_offline_token",
+                refresh_token: "mobile_offline_refresh",
+                expires_at: Math.floor(Date.now() / 1000) + 86400 * 365,
+                offline_session: true,
+                user_id: rpcBody.user_id,
+                org_id: rpcBody.org_id,
+                license_id: rpcBody.license_id,
+                license_key: rpcBody.license_key,
+              };
+              localStorage.setItem("camai.session", JSON.stringify(session));
+              localStorage.setItem("camai_creds", JSON.stringify({
+                refresh_token: "mobile_offline_refresh",
+                device_id: rpcBody.license_id,
+              }));
+              return { ok: true, offline_session: true };
+            }
+            return { ok: false, error: body.error ?? rpcBody?.error ?? `Activation failed (${res.status})` };
+          } catch (rpcErr: any) {
+            return { ok: false, error: body.error ?? `Activation failed (${res.status})` };
+          }
         }
 
         const session = {
@@ -100,6 +137,9 @@ if (typeof window !== "undefined" && !window.camai) {
 
       try {
         const session = JSON.parse(raw);
+        if (session.offline_session) {
+          return { ok: true, session };
+        }
         if (session.expires_at && session.expires_at > Math.floor(Date.now() / 1000) + 60) {
           return { ok: true, session };
         }

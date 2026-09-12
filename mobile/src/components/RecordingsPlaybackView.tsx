@@ -759,17 +759,30 @@ export default function RecordingsPlaybackView({ cameras }: RecordingsPlaybackVi
                   {/* Speed toggle */}
                   <button
                     onClick={() => {
-                      const speeds = [0.5, 1, 1.5, 2];
+                      const speeds = [1, 1.5, 2, 4, 0.5];
                       const next = speeds[(speeds.indexOf(playbackSpeed) + 1) % speeds.length];
                       handleSpeedChange(next);
                     }}
-                    className="px-1.5 py-0.5 rounded bg-black/50 text-[10px] font-mono text-zinc-300 border border-white/10"
+                    className="flex items-center gap-1 bg-black/50 px-2 py-0.5 rounded border border-white/10 text-xs text-zinc-200 hover:text-accent transition font-mono"
+                    title="Cycle speed: 1x, 1.5x, 2x, 4x, 0.5x"
                   >
-                    {playbackSpeed}x
+                    <FastForward size={12} className="text-zinc-400" />
+                    <span className="font-bold text-accent">{playbackSpeed}x</span>
                   </button>
                 </div>
 
                 <div className="flex items-center gap-2">
+                  {/* Digital Zoom Indicator & Reset when active */}
+                  {zoomLevel > 1 && (
+                    <button
+                      onClick={handleResetZoom}
+                      className="px-2 py-0.5 rounded bg-accent text-black font-mono font-bold text-[10px] hover:bg-accent/80 transition"
+                      title="Click to reset zoom"
+                    >
+                      {zoomLevel.toFixed(1)}x Reset
+                    </button>
+                  )}
+
                   {/* Zoom In/Out Buttons */}
                   <div className="flex items-center gap-1 bg-black/50 px-1.5 py-0.5 rounded border border-white/10">
                     <button

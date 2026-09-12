@@ -12,7 +12,8 @@ import {
   Volume2,
   VolumeX,
   Smartphone,
-  RefreshCw
+  RefreshCw,
+  Activity,
 } from "lucide-react";
 import { getDesktopNotificationSettings, saveDesktopNotificationSettings, DesktopNotificationSettings } from "../lib/notifications";
 import { getEngineBase, setEngineBase } from "../lib/localEngine";
@@ -21,9 +22,10 @@ interface SettingsMenuModalProps {
   isOpen: boolean;
   onClose: () => void;
   onSignOut: () => void;
+  onOpenEngineHealth?: () => void;
 }
 
-export default function SettingsMenuModal({ isOpen, onClose, onSignOut }: SettingsMenuModalProps) {
+export default function SettingsMenuModal({ isOpen, onClose, onSignOut, onOpenEngineHealth }: SettingsMenuModalProps) {
   const [serverUrl, setServerUrl] = useState(() => {
     return localStorage.getItem("camai_engine_url") || localStorage.getItem("camai_server_url") || getEngineBase();
   });
@@ -185,6 +187,33 @@ export default function SettingsMenuModal({ isOpen, onClose, onSignOut }: Settin
               </button>
             </div>
           </div>
+
+          {/* SECTION: Engine Health & Diagnostics */}
+          {onOpenEngineHealth && (
+            <div className="rounded-xl border border-line bg-surface-2 p-4 space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2 text-xs font-semibold text-zinc-200">
+                  <Activity size={15} className="text-emerald-400" />
+                  <span>AI Engine Health &amp; Diagnostics</span>
+                </div>
+                <span className="rounded bg-emerald-500/20 px-2 py-0.5 text-[10px] font-bold text-emerald-400">
+                  Real-Time
+                </span>
+              </div>
+              <p className="text-[11px] text-zinc-400 leading-relaxed">
+                Inspect local &amp; cloud GPU/CPU load, camera inference threads, process uptime, and live engine log stream.
+              </p>
+              <button
+                onClick={() => {
+                  onClose();
+                  onOpenEngineHealth();
+                }}
+                className="w-full flex items-center justify-center gap-2 rounded-lg bg-emerald-600/20 border border-emerald-500/40 px-4 py-2.5 text-xs font-semibold text-emerald-300 shadow hover:bg-emerald-600/30 transition active:scale-[0.98]"
+              >
+                <Activity size={14} /> Open Engine Health Panel
+              </button>
+            </div>
+          )}
 
           {/* SECTION 3: 24/7 Background Notifications (WhatsApp Style) */}
           <div className="rounded-xl border border-line bg-surface-2 p-4 space-y-3">

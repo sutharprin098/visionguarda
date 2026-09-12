@@ -35,6 +35,7 @@ import {
 import { captureDetection, whenIdle, sourceSize, type CaptureMedia } from "./smartCrop";
 import { saveEvidence, updateEvidence, type EvidenceMeta, type EvidenceRecord } from "./evidenceStore";
 import { TrackLedger, trackKeyOf, type TimelineEntry, type TrackRecord } from "./trackLedger";
+import { getDesktopNotificationSettings } from "./notifications";
 
 export interface CameraContext {
   id: string;
@@ -261,6 +262,30 @@ export class AlertEngine {
       // "estimated" readings as well, so only `speed_status === "calibrated"`
       // means measured. Speeding reaches us the way the engine actually raises
       // it: as an entry in alert_counts, handled in section 2 below.
+      // Only raise detection-level alerts for genuine immediate threats or if presence alerts are explicitly requested.
+      // Normal cars, buses, bikes, pedestrians, traffic lights, and stop signs are regular
+      // scene detections (rendered on live overlay & HUD counters), NOT unacknowledged alerts!
+      const isCriticalOrThreat = ["weapon", "knife", "gun", "fire", "smoke", "no_helmet", "no_vest"].includes(d.class);
+      const isAnimal = ["dog", "cat", "cow", "horse", "bear", "wolf"].includes(d.class);
+
+      let allowPresenceAlert = false;
+      try {
+        const notifSettings = getDesktopNotificationSettings();
+        if (notifSettings.enabled) {
+          if (d.class === "person" || d.class === "face") {
+            allowPresenceAlert = !!notifSettings.events.person;
+          } else if (["car", "truck", "bus", "motorcycle", "bicycle"].includes(d.class)) {
+            allowPresenceAlert = !!notifSettings.events.vehicle;
+          }
+        }
+      } catch {
+        allowPresenceAlert = false;
+      }
+
+      if (!isCriticalOrThreat && !isAnimal && !allowPresenceAlert) {
+        continue;
+      }
+
       const def = defForClass(d.class);
 
       this.raise(cam, st, now, {
