@@ -17,7 +17,10 @@ import {
   ScanLine,
   Eye,
   Zap,
-  Cloud
+  Cloud,
+  Globe,
+  Scan,
+  MapPin,
 } from "lucide-react";
 import { motion } from "framer-motion";
 
@@ -38,6 +41,9 @@ const FEATURES = [
   { id: "parking", title: "Parking Detection", desc: "Spot occupancy monitoring & illegal parking.", icon: SquareParking, tag: "SPOT MONITOR" },
   { id: "alpr", title: "License Plate (ALPR)", desc: "Optical character recognition for license plates.", icon: ScanLine, tag: "ANPR OCR 99.8%" },
   { id: "anomaly", title: "Behavioral Anomaly", desc: "Unattended luggage & erratic motion alerts.", icon: Eye, tag: "NEURAL ANOMALY" },
+  { id: "twin", title: "Digital Twin 3D View", desc: "Interactive 3D floor-plan with live camera overlays and detection zones mapped to spatial coordinates.", icon: Globe, tag: "3D SPATIAL AI" },
+  { id: "scene", title: "Auto Scene Detector", desc: "AI classifies scene type (traffic, retail, factory) and auto-configures optimal zone profiles — zero manual setup.", icon: Scan, tag: "SCENE CLASSIFY" },
+  { id: "twinzone", title: "Twin Zone Manager", desc: "Create, edit, lock, and bind detection zones directly in the 3D digital twin with full undo/redo history.", icon: MapPin, tag: "ZONE MANAGER" },
 ];
 
 export default function AIFeaturesGrid() {
@@ -55,7 +61,7 @@ export default function AIFeaturesGrid() {
         <div className="text-center max-w-3xl mx-auto mb-12">
           <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-sky-100 border border-sky-300 text-sky-800 text-xs font-bold uppercase tracking-wider mb-3 shadow-xs">
             <Zap size={13} className="text-sky-600" />
-            <span>16 NEURAL DETECTION MODELS</span>
+            <span>19 NEURAL DETECTION MODELS</span>
           </div>
 
           <h2 className="text-2xl sm:text-4xl font-extrabold tracking-tight text-slate-900">
@@ -63,7 +69,7 @@ export default function AIFeaturesGrid() {
           </h2>
 
           <p className="mt-3 text-xs sm:text-sm leading-relaxed text-slate-600 font-medium">
-            Pre-trained neural networks running concurrently on your local GPU with sub-12ms latency.
+            Pre-trained neural networks + Digital Twin spatial intelligence running concurrently on your local GPU with sub-12ms latency.
           </p>
         </div>
 
