@@ -236,6 +236,8 @@ def _draw_normalized_overlay_boxes(frame, client_dets):
         speed = det.get("speed")
         if speed is not None:
             parts.append(f"{int(float(speed))}km/h")
+        if det.get("tracking_status") == "coasting":
+            parts.append(f"[COAST:{det.get('lost_frames', 0)}]")
         if det.get("plate_text"):
             parts.append(str(det["plate_text"]))
         label = " ".join(parts)
@@ -422,6 +424,14 @@ class Track:
         # pipeline load. Owned and written by ByteTracker (see its _clock).
         self.last_clock = 0.0
 
+    @property
+    def lost_frames(self):
+        return self.time_since_update
+
+    @lost_frames.setter
+    def lost_frames(self, val):
+        self.time_since_update = val
+
     def predict(self, dt=None):
         self.age += 1
         self.time_since_update += 1
@@ -508,7 +518,7 @@ class ByteTracker:
     # discriminative enough to safely re-identify across the whole frame.
     _REID_SPATIAL_GATE = 0.5
 
-    def __init__(self, max_lost_seconds=0.5, reid_ttl=15.0, n_init=2):
+    def __init__(self, max_lost_seconds=1.2, reid_ttl=15.0, n_init=2):
         # Seconds — NOT iterations — a track stays actively coasted before it
         # moves to the gallery. See Track.secs_since_update.
         self.max_lost_seconds = max_lost_seconds
@@ -825,7 +835,7 @@ class ByteTracker:
             })
         return out
 
-COAST_RENDER_SECONDS = 0.15
+COAST_RENDER_SECONDS = 1.2
 
 
 def resolve_emitted_detections(tracker, tracks_raw, detections, masks,
@@ -861,7 +871,7 @@ def resolve_emitted_detections(tracker, tracks_raw, detections, masks,
 
     # One box per live track. A detection that claimed a track contributes its
     # class and mask; a track that no detection claimed still emits from its
-    # own Kalman state only if within coast_render_seconds (0.15s).
+    # own Kalman state only if within coast_render_seconds.
     for trk in tracks_raw:
         tid = trk["track_id"]
         di = track_to_det.get(tid)
@@ -877,14 +887,14 @@ def resolve_emitted_detections(tracker, tracks_raw, detections, masks,
         else:
             trk_obj = next((t for t in tracker.tracks if t.track_id == tid), None)
             secs = tracker.secs_since_update(trk_obj) if trk_obj is not None else 0.0
-            # Drop coasting track immediately if it exceeds 0.15s max coast duration
+            # Drop coasting track immediately if it exceeds max coast duration
             if secs > coast_render_seconds:
                 continue
             
             # Check edge boundary: if coasting near frame edge, drop instantly (object has exited)
             b = trk.get("bbox", {})
             x1, y1, x2, y2 = b.get("x1", 50), b.get("y1", 50), b.get("x2", 50), b.get("y2", 50)
-            if x1 <= 15 or y1 <= 15 or (x2 >= 945 and x2 <= 965) or (y2 >= 525 and y2 <= 545) or x2 >= 1905 or y2 >= 1065:
+            if x1 <= 15 or y1 <= 15 or x2 >= 1905 or y2 >= 1065:
                 continue
 
             out_dets.append({
@@ -2559,13 +2569,17 @@ class PipelineCoordinator:
     # ------------------------------------------------------------------
 
     def _ai_loop_iteration_local(self, data):
+            frame   = data["frame"]
+            orig_h, orig_w = frame.shape[:2]
+
             backend = self.backend
             if backend is None:
                 try:
                     from app.camera_manager import manager
                     backend = manager.ensure_backend_loaded()
                     self.backend = backend
-                except Exception:
+                except Exception as e:
+                    print(f"[AI-{self.camera_id}] Backend auto-load retry error: {e}", flush=True)
                     backend = None
 
             if backend is None:
@@ -2583,9 +2597,6 @@ class PipelineCoordinator:
                 })
                 time.sleep(0.033)
                 return
-
-            frame   = data["frame"]
-            orig_h, orig_w = frame.shape[:2]
 
             # ROI Pre-Crop: If camera has ROI or drawn polygon zones, compute crop first
             roi = self._get_roi(orig_h, orig_w)
@@ -2885,10 +2896,8 @@ class PipelineCoordinator:
             # Out-of-order & Stale frame guard: if frame_id is older than last tracked frame or frame_age > 350ms, treat as predict_only
             cur_fid = data.get("frame_id", 0)
             last_fid = getattr(self, "_last_tracked_fid", 0)
-            cap_time = data.get("cap_time", time.time())
-            frame_age = (time.time() - cap_time) * 1000.0
 
-            if (cur_fid > 0 and cur_fid < last_fid) or frame_age > 600.0:
+            if cur_fid > 0 and cur_fid < last_fid:
                 data["motion"] = False
             elif cur_fid > 0:
                 self._last_tracked_fid = cur_fid
@@ -3271,10 +3280,15 @@ class PipelineCoordinator:
                 items_count += int(category == "item")
                 other_count += int(category in ("infrastructure", "other"))
                 _speed, _speed_status = _speed_for(det)
+                trk_obj = next((t for t in self.tracker.tracks if t.track_id == det.get("track_id")), None)
+                lost_f = trk_obj.lost_frames if trk_obj is not None else 0
+                trk_state = trk_obj.state if trk_obj is not None else "confirmed"
                 client_dets.append({
                     "class":      det["class"],
                     "confidence": round(float(conf), 2),
                     "track_id":   det.get("track_id"),
+                    "lost_frames": lost_f,
+                    "track_state": trk_state,
                     "speed":      round(float(_speed), 1) if _speed is not None else None,
                     "speed_calibrated": _speed_status in ("calibrated", "estimated"),
                     "speed_status": _speed_status,
@@ -3282,16 +3296,6 @@ class PipelineCoordinator:
                     "tracking_status": det.get("tracking_status", "tracked"),
                     "direction":  det.get("direction", "stationary"),
                     "lane":       det.get("lane"),
-                    # Present only on number_plate dets that OCR could read; None
-                    # otherwise (localised-but-unread, or a non-plate class).
-                    # plate_text_confidence is the OCR's own confidence and is
-                    # deliberately SEPARATE from `confidence` above, which is the
-                    # plate DETECTOR's score — an operator needs to see "the box
-                    # is certainly a plate, the reading of it is not" as the two
-                    # different facts they are. plate_failure says why a visible
-                    # plate produced no text (blurry / too small / low confidence
-                    # / invalid format), so an empty read is explainable instead
-                    # of silent.
                     "plate_text": det.get("plate_text"),
                     "plate_text_confidence": det.get("plate_text_confidence"),
                     "plate_reads": det.get("plate_reads"),

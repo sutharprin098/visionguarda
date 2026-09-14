@@ -296,9 +296,21 @@ class CCTVRecorder:
         filename = f"cam_{self.camera_id}_{timestamp}_continuous.mp4"
         file_path = str(RECORDINGS_DIR / filename)
         
-        self.continuous_writer = _H264Writer(file_path, self.fps, self.frame_size)
+        try:
+            self.continuous_writer = _H264Writer(file_path, self.fps, self.frame_size)
+            if not self.continuous_writer.isOpened():
+                fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+                self.continuous_writer = cv2.VideoWriter(file_path, fourcc, float(self.fps), self.frame_size)
+        except Exception as e:
+            print(f"[Recorder] _H264Writer fallback to cv2.VideoWriter due to: {e}", flush=True)
+            try:
+                fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+                self.continuous_writer = cv2.VideoWriter(file_path, fourcc, float(self.fps), self.frame_size)
+            except Exception as e2:
+                print(f"[Recorder] cv2.VideoWriter fallback failed: {e2}", flush=True)
+                self.continuous_writer = None
         
-        if self.continuous_writer.isOpened():
+        if self.continuous_writer and self.continuous_writer.isOpened():
             self.continuous_rec_id = rec_id
             self.continuous_start_time = time.time()
             start_iso = datetime.utcnow().isoformat() + "Z"
@@ -307,8 +319,6 @@ class CCTVRecorder:
             return True
 
         self.continuous_writer = None
-        # Back off before trying again, so a machine where ffmpeg cannot launch
-        # at all doesn't attempt a fresh spawn on every frame.
         self._continuous_retry_after = time.time() + 30.0
         print(f"[Recorder] Error opening continuous video writer for cam: {self.camera_id}", flush=True)
         return False
@@ -339,9 +349,19 @@ class CCTVRecorder:
         filename = f"cam_{self.camera_id}_{timestamp}_event.mp4"
         file_path = str(RECORDINGS_DIR / filename)
         
-        self.event_writer = _H264Writer(file_path, self.fps, self.frame_size)
+        try:
+            self.event_writer = _H264Writer(file_path, self.fps, self.frame_size)
+            if not self.event_writer.isOpened():
+                fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+                self.event_writer = cv2.VideoWriter(file_path, fourcc, float(self.fps), self.frame_size)
+        except Exception as e:
+            try:
+                fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+                self.event_writer = cv2.VideoWriter(file_path, fourcc, float(self.fps), self.frame_size)
+            except Exception:
+                self.event_writer = None
         
-        if self.event_writer.isOpened():
+        if self.event_writer and self.event_writer.isOpened():
             self.event_rec_id = rec_id
             start_iso = datetime.utcnow().isoformat() + "Z"
             start_recording_entry(rec_id, self.camera_id, start_iso, "event", f"/history/recordings/{filename}")

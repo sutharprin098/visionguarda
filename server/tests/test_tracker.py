@@ -285,3 +285,35 @@ def test_id_survives_an_irregular_tracking_cadence():
         f"{ids_minted} ids minted for 3 objects — the irregular cadence is "
         f"still churning identities"
     )
+
+
+def test_track_lost_frames_and_continuous_coasting_id_persistence():
+    """Verify that lost_frames is maintained and continuous coasting retains
+    the exact same track ID across 20 missed frames (~0.8s) without ID churn."""
+    tracker = ByteTracker(max_lost_seconds=1.2, reid_ttl=30.0, n_init=1)
+    RED = (30, 30, 220)
+    bbox = (100, 100, 160, 240)
+    frame = make_frame([(bbox, RED)])
+
+    # Frame 1: initial detection
+    out1 = tracker.update([det(bbox)], frame=frame, frame_shape=(H, W), conf_thresh=0.25, dt=FRAME_DT)
+    assert len(out1) == 1
+    orig_id = out1[0]["track_id"]
+    trk_obj = tracker.tracks[0]
+    assert trk_obj.lost_frames == 0
+
+    # Miss detection for 20 frames (~0.8s)
+    empty_frame = make_frame([])
+    for i in range(1, 21):
+        tracker.update([], frame=empty_frame, frame_shape=(H, W), conf_thresh=0.25, dt=FRAME_DT)
+        assert trk_obj.lost_frames == i
+
+    # Detection returns near the predicted position
+    resumed_bbox = (105, 105, 165, 245)
+    resumed_frame = make_frame([(resumed_bbox, RED)])
+    out2 = tracker.update([det(resumed_bbox)], frame=resumed_frame, frame_shape=(H, W), conf_thresh=0.25, dt=FRAME_DT)
+
+    assert len(out2) == 1
+    assert out2[0]["track_id"] == orig_id, "Track ID must remain continuous after 20 missed frames"
+    assert trk_obj.lost_frames == 0, "lost_frames must reset to 0 upon detection update"
+

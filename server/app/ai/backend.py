@@ -877,7 +877,7 @@ class EngineBackend:
         grid_c = grid[cand_mask]
         stride_c = stride[cand_mask]
 
-        class_ids_of_interest = CLASS_IDS_OF_INTEREST
+        class_ids_of_interest = list(VISDRONE_CLASS_MAP.keys()) if self.is_visdrone else CLASS_IDS_OF_INTEREST
         scores_interest = out_c[:, 5:][:, class_ids_of_interest] * out_c[:, 4:5]
         max_score_idx = np.argmax(scores_interest, axis=1)
         max_scores = np.max(scores_interest, axis=1)

@@ -305,17 +305,9 @@ def get_all_recordings():
         """, ()).fetchall()
         records = [dict(row) for row in rows]
 
-    # Filter out recordings whose file is missing or too small to contain a
-    # valid MP4 container (moov atom etc). This happens when a recorder was
-    # killed ungracefully (crash, force-kill, unclean shutdown) before
-    # cv2.VideoWriter.release() could finalize the file — the DB row exists
-    # and looks legitimate, but the video can never actually play. Without
-    # this filter these show up in the Recordings UI as clickable cards that
-    # open a playback modal with a permanently-broken <video>.
-    # 1KB is comfortably below any real encoded segment (even a single
-    # frame) and comfortably above an empty/header-only stub.
     MIN_VALID_SIZE_BYTES = 1024
     valid = []
+    seen_filenames = set()
     for rec in records:
         filename = (rec.get("file_path") or "").rsplit("/", 1)[-1]
         if not filename:
@@ -324,9 +316,36 @@ def get_all_recordings():
         try:
             if path.stat().st_size >= MIN_VALID_SIZE_BYTES:
                 valid.append(rec)
+                seen_filenames.add(filename)
         except FileNotFoundError:
             continue
-    return valid
+
+    # Auto-discover local MP4 files in RECORDINGS_DIR missing from SQLite DB
+    if RECORDINGS_DIR.exists():
+        for p in RECORDINGS_DIR.glob("*.mp4"):
+            if p.name in seen_filenames:
+                continue
+            try:
+                st = p.stat()
+                if st.st_size >= MIN_VALID_SIZE_BYTES:
+                    # Extract camera_id / timestamp if filename matches pattern cam_{cid}_{ts}_(continuous|event).mp4
+                    parts = p.stem.split("_")
+                    cam_id = parts[1] if len(parts) >= 2 else "local"
+                    rec_type = parts[-1] if len(parts) >= 3 and parts[-1] in ("continuous", "event") else "continuous"
+                    dt_str = datetime.fromtimestamp(st.st_ctime).isoformat() + "Z"
+                    valid.append({
+                        "id": f"disk_{p.stem}",
+                        "camera_id": cam_id,
+                        "camera_name": f"Camera {cam_id[:4]}",
+                        "start_time": dt_str,
+                        "end_time": datetime.fromtimestamp(st.st_mtime).isoformat() + "Z",
+                        "recording_type": rec_type,
+                        "file_path": f"/history/recordings/{p.name}",
+                    })
+            except Exception:
+                pass
+
+    return sorted(valid, key=lambda r: r.get("start_time", ""), reverse=True)
 
 def delete_single_alert(alert_id: str):
     with get_db() as conn:

@@ -1,6 +1,6 @@
 {
   "name": "camai-desktop",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "CamAI Desktop — Enterprise AI CCTV client for Windows",
   "private": true,
   "type": "module",
@@ -52,12 +52,9 @@
     },
     "win": {
       "target": "portable",
-      "artifactName": "CamAI-Desktop-Setup-${version}.exe",
+      "artifactName": "CamAI-Desktop-${version}.exe",
       "icon": "build/icon.ico",
-      "signingHashAlgorithms": [
-        "sha256"
-      ],
-      "rfc3161TimeStampServer": "http://timestamp.digicert.com"
+      "forceCodeSigning": false
     },
     "nsis": {
       "oneClick": false,

@@ -418,7 +418,7 @@ def get_system_status():
             # Comprehensive error reason across stream and capture failure classes
             "health_reason": thread.source_error_text() if hasattr(thread, "source_error_text") else None,
             "resolution": thread._last_resolution,
-            "recording": thread.recorder.continuous_writer is not None,
+            "recording": thread.recorder.is_recording(),
             "source": getattr(thread, "source", None),
             "source_type": getattr(thread, "source_type", None),
         }

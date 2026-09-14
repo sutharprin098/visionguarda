@@ -188,3 +188,15 @@ def test_no_track_is_ever_emitted_twice():
     ids = [d["track_id"] for d in dets]
     assert len(ids) == len(set(ids)) == 1, f"track emitted more than once: {dets}"
     assert dets[0]["tracking_status"] == "tracked"
+
+
+def test_coasting_continues_for_20_missed_frames_with_extended_render_window():
+    """Verify that coasting tracks continue emitting predicted bounding boxes
+    across 20 missed frames (~0.8s) under the default 1.2s coast window."""
+    BOX = (100, 100, 200, 300)
+    tracker = _tracker_with_coasting_track(BOX, frames_missed=20)
+    dets, _ = resolve_emitted_detections(tracker, [], [], [])
+    assert len(dets) == 1
+    assert dets[0]["track_id"] == 1
+    assert dets[0]["tracking_status"] == "coasting"
+
