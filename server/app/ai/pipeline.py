@@ -54,7 +54,6 @@ def _prewarm_scipy():
 _prewarm_scipy()
 
 # FFMPEG capture: low-latency RTSP over TCP, no internal buffering.
-# Timeout handling is in _preflight_network_source, not here (FFMPEG options have no effect).
 os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = (
     "rtsp_transport;tcp|threads;4|fflags;nobuffer|flags;low_delay|framedrop;1|max_delay;500000"
 )
@@ -116,9 +115,6 @@ def _vehicle_classes_compatible(a: str, b: str) -> bool:
 
 
 # Deterministic, high-contrast BGR colour per class label so every object type
-# gets its own colour on the evidence snapshot that ships to Telegram/history.
-# Common traffic/security classes get a fixed colour; anything unlisted hashes
-# into the palette so its colour is still stable frame to frame.
 _SNAPSHOT_PALETTE = [
     (66, 66, 244),    # red
     (66, 244, 66),    # green
@@ -255,19 +251,8 @@ def _draw_normalized_overlay_boxes(frame, client_dets):
 # ---------------------------------------------------------------------------
 
 # Cadence the motion model's noise terms are tuned for. Velocity state is
-# carried in units PER SECOND rather than per-call, so the filter stays correct
-# when the interval between calls varies — which it does, a lot: the tracking
-# stage shares a thread with the analytics/secondary-model passes and was
-# measured alternating between ~25ms and ~850ms per iteration on a live camera.
-# A fixed-dt constant-velocity model under-predicts a moving object by exactly
-# that ratio on the slow iterations, the predicted box then misses its own
-# detection's IoU gate, and the tracker mints a NEW id for an object it was
-# already tracking. That is the mechanism behind runaway id churn.
 REF_DT = 1.0 / 25.0
 # Bounds on a single predict step. Below the floor the step is numerically
-# pointless; above the ceiling constant-velocity extrapolation is worthless
-# anyway (an object can turn, stop, or leave), so coasting further would invent
-# motion rather than predict it.
 MIN_DT, MAX_DT = 1e-3, 2.0
 
 
@@ -283,25 +268,16 @@ class LightweightKalmanFilter:
         self.state = np.array([cx, cy, a, h, 0, 0, 0, 0], dtype=np.float32)
         self.covariance  = np.eye(8, dtype=np.float32) * 10.0
         # Velocity is px/second, so its prior uncertainty has to be expressed in
-        # those units too — rescaled from the per-frame variance this filter was
-        # originally tuned with so the filter's behaviour at the reference
-        # cadence is unchanged by the switch to real time.
         self.covariance[4:, 4:] *= (1.0 / REF_DT) ** 2
         self.transition  = np.eye(8, dtype=np.float32)   # velocity terms set per predict()
         self.measurement = np.zeros((4, 8), dtype=np.float32)
         self.measurement[0,0] = self.measurement[1,1] = 1.0
         self.measurement[2,2] = self.measurement[3,3] = 1.0
         # Process noise as a RATE (per second); predict() scales it by the real
-        # elapsed time, so a long gap widens the gate it deserves to widen.
         self._q_pos = 0.05
         self._q_vel = 0.05 / (REF_DT ** 2)
         self.measurement_noise = np.eye(4, dtype=np.float32) * 1.0
         # Memoised get_bbox() result, invalidated whenever `state` changes.
-        # get_bbox is pure with respect to state, but profiling put it at 22% of
-        # the whole tracking stage — it is called once per track per matching
-        # pass (main + gallery) and O(n^2) times in the duplicate-merge scan,
-        # and each call re-slices `state` and converts numpy scalars to Python
-        # floats, which is far more expensive than the arithmetic it performs.
         self._bbox_cache = None
 
     def predict(self, dt=None):
@@ -331,10 +307,6 @@ class LightweightKalmanFilter:
 
     def get_bbox(self):
         # A fresh list is returned every call even on a cache hit: callers treat
-        # the result as their own and some index into it repeatedly, so handing
-        # out a shared mutable list would couple two tracks' bboxes together the
-        # first time anyone assigned to one. Building a 4-element list from
-        # cached floats is still far cheaper than re-slicing `state`.
         c = self._bbox_cache
         if c is None:
             cx, cy, a, h = self.state[0:4]
@@ -408,8 +380,6 @@ class Track:
         self.age  = 1
         self.n_init = n_init
         # Tentative tracks are held back from telemetry output until they
-        # accumulate n_init hits — this is what stops a single spurious
-        # detection from ever being handed out as a "new" ID.
         self.state = "tentative" if n_init > 1 else "confirmed"
         self.embedding = embedding
         now = time.time()
@@ -417,11 +387,6 @@ class Track:
         self.last_seen  = now
 
         # Tracker-clock reading of the last match. `time_since_update` counts
-        # tracker ITERATIONS, which is the wrong unit for every ageing decision:
-        # the tracking stage does not run at a fixed rate, so N iterations can
-        # be 40ms or 2s of real time, and ageing on iterations silently expanded
-        # and contracted a track's tolerated occlusion window with unrelated
-        # pipeline load. Owned and written by ByteTracker (see its _clock).
         self.last_clock = 0.0
 
     @property
@@ -510,17 +475,12 @@ class ByteTracker:
     """
 
     # Bhattacharyya distance threshold for gallery re-identification. Same
-    # object under consistent lighting typically lands well under this;
-    # different objects (even same clothing color family) typically clear it.
     _REID_APPEARANCE_GATE = 0.40
     # Cap how far (as a fraction of the frame diagonal) a revived track's new
-    # position may be from its last known position — appearance alone is not
-    # discriminative enough to safely re-identify across the whole frame.
     _REID_SPATIAL_GATE = 0.5
 
     def __init__(self, max_lost_seconds=1.2, reid_ttl=15.0, n_init=2):
         # Seconds — NOT iterations — a track stays actively coasted before it
-        # moves to the gallery. See Track.secs_since_update.
         self.max_lost_seconds = max_lost_seconds
         self.reid_ttl        = reid_ttl         # seconds a track stays re-identifiable in the gallery
         self.n_init          = n_init
@@ -529,9 +489,6 @@ class ByteTracker:
         self.next_track_id = 1
         self._last_update_ts = None   # wall clock of the previous update(), for dt
         # Monotonic seconds-since-start, advanced by each update()'s real dt.
-        # Every ageing decision reads this rather than time.time() so a caller
-        # can drive the tracker on a virtual clock (tests, offline replay) and
-        # get exactly the behaviour a live camera would produce at that cadence.
         self._clock = 0.0
 
     def secs_since_update(self, track):
@@ -568,36 +525,16 @@ class ByteTracker:
                     class_penalty = 0.0
                 elif _vehicle_classes_compatible(t.class_name, d["class"]):
                     # Detectors routinely flip a single real vehicle between
-                    # visually-similar vehicle subtypes frame to frame (car
-                    # vs truck vs van is a classic confusion). A hard class
-                    # gate here means every flip fragments one real vehicle
-                    # into two tracks that then fight over the same
-                    # detection stream every subsequent frame (confirmed via
-                    # a real MOT-metrics run: one physical vehicle produced
-                    # 7 ID switches alternating between a "car" track and a
-                    # "truck" track for the same box). Track.class_name is
-                    # majority-voted (see Track._vote_class) so allowing a
-                    # same-vehicle-family continuation here doesn't make the
-                    # DISPLAYED class flicker — it just stops the class
-                    # noise from splitting one object into two ids. A small
-                    # cost penalty still makes Hungarian prefer a genuine
-                    # same-class match when one is available.
                     class_penalty = 0.15
                 else:
                     continue
                 # Gates are ordered cheapest-first, and each is skipped when it
-                # cannot reject anything. This matters most on the gallery pass,
-                # which runs every unmatched detection against up to 300 stored
-                # tracks: profiling the tracking thread showed it dominated by
-                # per-pair histogram comparisons and IoU on pairs that a single
-                # centre-distance check discards immediately.
                 if spatial_gate is not None and frame_diag:
                     tcx, tcy = (tb[0] + tb[2]) / 2.0, (tb[1] + tb[3]) / 2.0
                     dcx, dcy = (d["bbox"][0] + d["bbox"][2]) / 2.0, (d["bbox"][1] + d["bbox"][3]) / 2.0
                     if np.hypot(tcx - dcx, tcy - dcy) / frame_diag > spatial_gate:
                         continue
                 # The gallery pass weights IoU at zero and gates at zero, so the
-                # IoU there was computed only to be multiplied away.
                 if w_iou or iou_gate > 0.0:
                     iou = ByteTracker._compute_iou(tb, d["bbox"])
                     if iou < iou_gate:
@@ -621,9 +558,6 @@ class ByteTracker:
 
     def update(self, detections, frame=None, frame_shape=None, conf_thresh=0.25, dt=None):
         # Real elapsed time since the last association, so motion prediction and
-        # every ageing decision below are expressed in seconds rather than in
-        # tracker iterations of unpredictable duration. An explicit `dt`
-        # overrides the wall clock for deterministic replay.
         now_ts = time.time()
         if dt is None:
             dt = REF_DT if self._last_update_ts is None else (now_ts - self._last_update_ts)
@@ -631,7 +565,6 @@ class ByteTracker:
         self._last_update_ts = now_ts
         self._clock += dt
         # How many reference-cadence frames this one step covered. 1.0 on a
-        # healthy loop; 20+ when a heavy pass stalled the stage.
         gap = max(1.0, dt / REF_DT)
 
         for t in self.tracks:
@@ -670,8 +603,6 @@ class ByteTracker:
         # Stage 2: coasting tracks + stage-1 misses. Appearance-weighted, loose IoU gate.
         stage2_pool = occluded_tracks + rem_active
         # A long detector gap can move a real object entirely beyond its old
-        # box. In that case appearance plus a bounded centre-distance gate is
-        # safer than minting a replacement ID because raw IoU is necessarily 0.
         stage2_iou_gate = 0.0 if gap > 3.0 else max(0.01, 0.10 / (gap ** 0.5))
         stage2_spatial_gate = min(0.25, 0.05 * (gap ** 0.5))
         m_t2, m_d2, un_t2, un_d2 = self._hungarian_match(
@@ -717,9 +648,6 @@ class ByteTracker:
             self.next_track_id += 1
 
         # Stamp the tracker clock on everything matched, revived or created
-        # above. Track.update()/revive()/__init__ all leave time_since_update at
-        # 0, so this single point covers every path that counts as "seen now"
-        # and cannot drift out of sync with one of them.
         for t in self.tracks:
             if t.time_since_update == 0:
                 t.last_clock = self._clock
@@ -768,13 +696,11 @@ class ByteTracker:
 
         now = time.time()
         # Gallery TTL is measured on the tracker clock too, so re-id memory
-        # lasts the same wall-clock span regardless of iteration rate.
         expired = [tid for tid, t in self.lost_gallery.items()
                    if self.secs_since_update(t) > self.reid_ttl]
         for tid in expired:
             del self.lost_gallery[tid]
         # Hard cap so a very busy scene over a long shift can't grow this
-        # dict unbounded — evict the oldest entries first.
         if len(self.lost_gallery) > 300:
             oldest = sorted(self.lost_gallery.items(), key=lambda kv: kv[1].last_clock)[:len(self.lost_gallery) - 300]
             for tid, _ in oldest:
@@ -813,10 +739,6 @@ class ByteTracker:
         out = []
         for t in self.tracks:
             # Same confirmed-only rule as update(), but keyed on the coast
-            # window rather than time_since_update == 0: on a skipped frame no
-            # track can have been updated, and a confirmed track that is still
-            # inside its coast window is precisely one whose predicted position
-            # is still trustworthy enough to draw.
             if t.state != "confirmed":
                 continue
             if self.secs_since_update(t) > COAST_RENDER_SECONDS:
@@ -844,7 +766,6 @@ def resolve_emitted_detections(tracker, tracks_raw, detections, masks,
     tracks_by_id = {trk["track_id"]: trk for trk in tracks_raw}
 
     # A track may be claimed by AT MOST ONE detection, resolved greedily by
-    # descending IoU: the detection that fits a track best wins it.
     pairs = []  # (iou, det_idx, track_id)
     for di, det in enumerate(detections):
         bd = [det["bbox"]["x1"], det["bbox"]["y1"],
@@ -870,8 +791,6 @@ def resolve_emitted_detections(tracker, tracks_raw, detections, masks,
     track_to_det = {tid: di for di, tid in det_to_track.items()}
 
     # One box per live track. A detection that claimed a track contributes its
-    # class and mask; a track that no detection claimed still emits from its
-    # own Kalman state only if within coast_render_seconds.
     for trk in tracks_raw:
         tid = trk["track_id"]
         di = track_to_det.get(tid)
@@ -908,19 +827,8 @@ def resolve_emitted_detections(tracker, tracks_raw, detections, masks,
             out_masks.append([])
 
     # Unmatched raw detections are dropped. Only tracker-owned IDs are emitted;
-    # with n_init=1, genuinely new objects are already confirmed in tracks_raw.
 
     # Coasting: a confirmed track the tracker is still predicting through a
-    # brief missed detection (occlusion, motion blur, one bad frame). Emit the
-    # prediction so the object never loses its box mid-occlusion — "automatic
-    # recovery after missed detections" requires the box to keep existing (and
-    # moving) through the gap rather than blinking out and back.
-    #
-    # tracks_by_id (everything emitted above) is the exclusion set, so a track
-    # can never be emitted twice. tracks_raw only contains time_since_update==0
-    # tracks and this loop only takes time_since_update>0 ones, so the sets are
-    # already disjoint; the guard defends the invariant rather than relying on
-    # it holding forever.
     for t in tracker.tracks:
         if t.track_id in tracks_by_id or t.state != "confirmed":
             continue
@@ -963,13 +871,6 @@ def resolve_emitted_detections(tracker, tracks_raw, detections, masks,
         out_masks.append([])
 
     # Final safety net against "N boxes on one object". A single person can end
-    # up under several confirmed tracks — an ID switch leaves the old track
-    # coasting while a new one takes over, and a few of those can stack, each
-    # emitting its own box above. Suppress SAME-CLASS boxes that overlap heavily,
-    # keeping a "tracked" box over a "coasting" one and the higher-confidence of
-    # two. Different classes are never suppressed against each other, so a
-    # rider's person box and motorcycle box both survive, and a face/helmet/plate
-    # box (appended later by the caller, not present here) is unaffected.
     if len(out_dets) > 1:
         order = sorted(
             range(len(out_dets)),
@@ -1031,11 +932,6 @@ class _Slot:
         self._data  = None
         self._ready = threading.Event()
         # A put() that lands on a slot the consumer has not drained yet has
-        # just discarded a frame. That is the design (latest-wins), but it was
-        # never counted, so "the pipeline is dropping 80% of frames because the
-        # AI stage cannot keep up" and "the camera is only delivering 3fps"
-        # looked identical from the outside. Counting it is what makes the
-        # difference visible in telemetry.
         self.dropped = 0
         self.passed  = 0
 
@@ -1184,14 +1080,6 @@ class PipelineCoordinator:
         self._backend_override = None
 
         # A local video FILE (as opposed to a live device/RTSP stream) is a
-        # finite source: cap.read() returns ret=False at EOF, which is normal
-        # end-of-media, NOT a device disconnect. Treated as the latter it would
-        # flap into "network_error" and stall 3s per loop (see _capture_loop).
-        # Detected purely by "is this an existing file on disk" so it works
-        # regardless of which coarse source_type the desktop tagged it with
-        # (it maps every non-webcam/usb source to 'rtsp'). URLs and device
-        # indices are never files, so they correctly fall through to the live
-        # reconnect path.
         self._is_video_file = False
         try:
             src_str = str(source).lower()
@@ -1204,11 +1092,6 @@ class PipelineCoordinator:
             self._is_video_file = False
 
         # A YouTube/Twitch link is a web PAGE, not a media address — cv2 opens
-        # it in ~1s with isOpened() False and no error, which upstream is
-        # indistinguishable from a dead camera. These sources go through
-        # stream_resolver first (see _capture_source). Everything else, which
-        # is every camera that exists today, is passed to the decoder
-        # untouched.
         self._is_page_url = False
         try:
             if not self._is_video_file and source_type not in ("webcam", "usb", "screenshare", "screen_share", "virtual"):
@@ -1216,7 +1099,6 @@ class PipelineCoordinator:
         except Exception:
             self._is_page_url = False
         # Last resolution failure, surfaced in telemetry so "offline" comes
-        # with the reason the extractor gave (private / ended / geo-blocked).
         self._resolve_error = None
 
         self.zones = json.loads(zones_json)
@@ -1226,15 +1108,11 @@ class PipelineCoordinator:
         self.profile_features = json.loads(profile_features) if isinstance(profile_features, str) else (profile_features or {})
 
         # {alert_type: count} since this camera started — surfaced in telemetry
-        # so the per-profile dashboard can show Violations / Alerts / Falls
-        # without hitting storage. Reset on a profile switch (see update_config):
-        # a security camera's intrusion tally means nothing to a traffic camera.
         self._alert_counts = {}
 
         self.running        = False
         self.incoming_frame = None       # screenshare push target
         # Signalled by push_frame(); waited on by the capture loop's screenshare
-        # branch so an idle virtual camera sleeps instead of polling.
         self._push_event    = threading.Event()
         self._last_push_ts  = 0.0        # last time push_frame() delivered a frame (screenshare staleness)
         self.telemetry_callback = None
@@ -1251,12 +1129,8 @@ class PipelineCoordinator:
         self.current_jpeg_bytes = None
         self.jpeg_sequence_id   = 0
         # Signalled by Module 2 whenever a new JPEG is written to
-        # current_jpeg_bytes. The MJPEG HTTP generator (main.py) waits on
-        # this instead of busy-polling with time.sleep(0.01) at 100 Hz.
         self.jpeg_ready_event   = threading.Event()
         # Number of MJPEG HTTP generators currently streaming this camera.
-        # Module 2 skips the JPEG encode entirely while this is zero — see the
-        # encode block in _decode_loop and MJPEG_MAX_FPS in config.
         self._mjpeg_viewers      = 0
         self._mjpeg_viewer_lock  = threading.Lock()
         # Monotonic deadline for the next preview encode (MJPEG_MAX_FPS cap).
@@ -1269,15 +1143,10 @@ class PipelineCoordinator:
         self._latest_overlay_ts   = 0.0
 
         # Display-only encode knobs, mutable at runtime via update_display_config().
-        # Plain int/float attributes are fine to read/write without a lock here —
-        # this only affects how Module 2 encodes the MJPEG preview, never the AI path.
         self.display_max_width = 1280
         self.jpeg_quality = 70
 
         # Per-stage FPS sliding windows
-        # maxlen bounds memory even if the stage that normally trims a given
-        # deque (via _fps(), called only from _telemetry_loop) ever stalls —
-        # producers can keep appending forever without unbounded growth.
         self._cap_ts: deque = deque(maxlen=1000)
         self._dec_ts: deque = deque(maxlen=1000)
         self._ai_ts:  deque = deque(maxlen=1000)
@@ -1292,18 +1161,6 @@ class PipelineCoordinator:
         }
 
         # Stage health: heartbeat timestamp + error count per stage
-        # The watchdog loop uses this to detect a stage that has stopped
-        # making progress (thread died, or is wedged in a blocking call that
-        # even the per-iteration try/except below can't catch) and to expose
-        # per-stage error counts for diagnostics via telemetry.
-        # "cap" heartbeat is touched ONLY when a real frame is captured and
-        # forwarded downstream — never on an idle poll (no screenshare frame
-        # pushed yet) or a failed/reconnecting read. Touching it on every
-        # loop tick regardless of whether a frame was produced made the
-        # watchdog think a camera with no hardware/no active screenshare was
-        # "alive" while every downstream stage was correctly starved of any
-        # data — a false-positive stall that repeatedly restarted cameras
-        # that were simply idle, not stuck.
         now0 = time.time()
         self._heartbeat = {"cap": now0, "dec": now0, "ai": now0, "trk": now0, "tel": now0, "ws": now0}
         self._stage_errors = {"cap": 0, "dec": 0, "ai": 0, "trk": 0, "tel": 0, "ws": 0}
@@ -1332,7 +1189,6 @@ class PipelineCoordinator:
             self._pin_imgsz    = False
         self._latency_history: list = []
         # See config.TARGET_FPS: the tile engine's deadline, and the one knob
-        # that trades frame rate against small-object recall.
         self.target_fps = float(TARGET_FPS)
 
 
@@ -1346,7 +1202,6 @@ class PipelineCoordinator:
         self._latest_overlay_ts = 0.0
 
         # REST telemetry snapshot. Starts as "connecting" (not "no_human")
-        # so cameras that never open don't falsely report detection results.
         self.latest_telemetry = {
             "success": True, "people": 0, "vehicles": 0,
             "detections": [], "masks": [], "tracks": [],
@@ -1379,12 +1234,10 @@ class PipelineCoordinator:
             "latency_ms": 0.0,
         }
         # Floor for motion-gated inference: at least one pass every 150ms
-        # so still/slow objects get their first detection promptly.
         self._last_infer_ts = 0.0
         self._FORCE_INFER_INTERVAL = 0.15
 
         # Shared counter: _tracking_loop writes, _ai_loop reads.
-        # Safe under CPython GIL — int assignment is atomic.
         self._n_active_tracks = 0
 
         self.cap = None
@@ -1422,14 +1275,9 @@ class PipelineCoordinator:
         Returns True to proceed with the open, False to skip this cycle.
         """
         # Device indices, files and pushed screenshare frames have no host to
-        # dial; probing them is meaningless and must never gate them.
         if self.source_type in ("usb", "webcam", "screenshare", "screen_share", "virtual") or self._is_video_file:
             return True
         # A page URL's own host is never the host that serves the video — a
-        # YouTube link resolves onto googlevideo.com — so probing youtube.com
-        # would answer a question nobody asked. Extraction is the reachability
-        # test for these, and it reports a far better reason than "TCP failed"
-        # (see _capture_source).
         if self._is_page_url:
             return True
         src = str(self.source)
@@ -1437,10 +1285,6 @@ class PipelineCoordinator:
             return True
 
         # SSRF guard: a camera's source is chosen at portal/add-camera trust
-        # level, not engine-control-token trust level (see
-        # stream_resolver.blocked_source_reason). Checked here, before the
-        # very first network touch on every open AND every reconnect, so a
-        # blocked source is never dialled even once.
         blocked = stream_resolver.blocked_source_reason(src)
         if blocked:
             if self._health_status != "blocked":
@@ -1457,14 +1301,9 @@ class PipelineCoordinator:
 
         if result == "network_error":
             # TCP probe check failed (e.g. RTSP UDP or custom streaming port),
-            # proceed to real VideoCapture open so the camera connects.
             return True
 
         # auth_failed is reported for visibility but NOT used to skip the open.
-        # probe_connection sends OPTIONS with no credentials, and cameras that
-        # challenge OPTIONS answer 401 even when the credentials embedded in the
-        # URL are perfectly correct — refusing to open on that would break
-        # working cameras, which is the opposite of the bug being fixed here.
         if result == "auth_failed":
             self._health_status = "auth_failed"
         return True
@@ -1524,7 +1363,6 @@ class PipelineCoordinator:
             "source_error": self.source_error_text(),
             "cap_consecutive_failures": self._cap_consecutive_failures,
             # No frame was processed, so every analytic result must read as
-            # "not measured" rather than as a measurement of zero.
             "status": self._health_status,
             "detections": [], "masks": [], "tracks": [],
             "people": 0, "vehicles": 0,
@@ -1593,8 +1431,6 @@ class PipelineCoordinator:
         only re-run every few seconds, not on every fast retry tick."""
         if self._health_status == "blocked":
             # Set only by the SSRF guard in _preflight_network_source, which
-            # re-checks on every reconnect attempt on its own — nothing here
-            # should probe a host that was just refused.
             return
         if self.source_type in ("usb", "webcam"):
             self._health_status = "offline" if self._cap_consecutive_failures >= 4 else "connecting"
@@ -1603,9 +1439,6 @@ class PipelineCoordinator:
             self._health_status = "connecting"
             return
         # A page URL that failed to resolve has already been classified with a
-        # reason the extractor gave. Probing its host would overwrite that with
-        # a meaningless "connecting": youtube.com answers on :443 whether or
-        # not the stream behind the link exists.
         if self._is_page_url and self._resolve_error:
             self._health_status = "network_error"
             return
@@ -1629,9 +1462,6 @@ class PipelineCoordinator:
         self.incoming_frame = frame
         self._last_push_ts = time.time()
         # Wake the capture loop instead of leaving it to notice on its next
-        # poll. See _capture_loop's screenshare branch for why the poll was a
-        # problem: an idle virtual camera spun at 200Hz waiting for a frame
-        # that, for a camera nobody has picked a source for, never comes.
         self._push_event.set()
 
     def start(self):
@@ -1654,19 +1484,12 @@ class PipelineCoordinator:
     def stop(self):
         self.running = False
         # Join the async model workers. They are daemon threads, so this is not
-        # about process exit — it is about a camera being removed or restarted
-        # while the process keeps running, where an unjoined worker would go on
-        # holding a frame copy and running inference for a pipeline that no
-        # longer exists.
         for attr in ("_anpr_worker", "_helmet_worker"):
             w = getattr(self, attr, None)
             if w is not None:
                 w.stop()
                 setattr(self, attr, None)
         # Deregister from the shared tile budget immediately, so the cameras
-        # still running widen their allowance on their very next cycle rather
-        # than keeping a stopped camera's share reserved. Also drops this
-        # camera's tile cache.
         self._tile_engine.close()
 
     def _diagnostic(self, channel: str, message) -> None:
@@ -1713,27 +1536,12 @@ class PipelineCoordinator:
         # Zones/lines just changed, so the zoom engine's priority map is stale.
         self._push_tile_priority()
         # Counters are per-profile; a security camera's people_in and its
-        # intrusion tally must not carry into a traffic camera's vehicle counts
-        # and violations. The other stateful thing a profile switch invalidates
-        # is the face model: drop it when nothing wants it any more.
-        #
-        # Note on "unload unused models": measured, this does NOT return memory
-        # to the OS — RSS held at 276.8 MB across unload. What it buys is real
-        # but smaller: no stale model state across a switch, and the next load
-        # re-reads the new profile's confidence. yolox_tiny is deliberately NOT
-        # unloaded: every profile needs classes from it (traffic wants vehicles,
-        # security people, factory people), and it costs ~7.0 s to load — so
-        # dropping it on a switch would blind the camera for seven seconds to
-        # save nothing.
         _releases_face = not self._wants_faces()
         if _releases_face and face_detect.is_loaded():
             face_detect.unload()
         # Same treatment for the helmet model — a second network, so its toggle
-        # (unlike vehicle/person, which yolox emits for free) genuinely saves
-        # inference when off. Drop it when the new profile has no use for it.
         if not self._wants_helmet():
             # Stop the async worker before unloading the model it calls into, or
-            # an in-flight pass would run against a detector just dropped.
             hw = getattr(self, "_helmet_worker", None)
             if hw is not None:
                 hw.stop()
@@ -1743,8 +1551,6 @@ class PipelineCoordinator:
         # Same for the ANPR plate detector + its OCR — both separate networks.
         if not self._wants_anpr():
             # Stop the async worker before unloading the models it calls into,
-            # or an in-flight pass would run against a detector that has just
-            # been dropped.
             w = getattr(self, "_anpr_worker", None)
             if w is not None:
                 w.stop()
@@ -1850,24 +1656,16 @@ class PipelineCoordinator:
             self.jpeg_quality = max(30, min(95, int(quality)))
 
     # MJPEG viewer accounting
-    # The preview encode is demand-driven. Every HTTP generator serving this
-    # camera's /stream must bracket itself with these two calls (main.py does
-    # it in a try/finally, so a client that disconnects mid-stream still
-    # releases its count).
 
     def mjpeg_viewer_attached(self):
         with self._mjpeg_viewer_lock:
             self._mjpeg_viewers += 1
             # Encode the very next frame rather than waiting out a cap
-            # interval left over from the last viewer, so a tile paints
-            # immediately on open instead of up to 1/MJPEG_MAX_FPS later.
             self._next_mjpeg_due = 0.0
 
     def mjpeg_viewer_detached(self):
         with self._mjpeg_viewer_lock:
             # max() rather than a bare decrement: a double-release would
-            # otherwise drive this negative and permanently disable the
-            # preview for this camera.
             self._mjpeg_viewers = max(0, self._mjpeg_viewers - 1)
 
     def has_mjpeg_viewers(self) -> bool:
@@ -1875,8 +1673,6 @@ class PipelineCoordinator:
 
     # -----------------------------------------------------------------------
     # Module 1: Video Capture
-    # Grabs raw compressed packets at full camera rate.
-    # Never blocks on AI — just puts a grab token into the slot.
     # -----------------------------------------------------------------------
 
     def _generate_synthetic_demo_frame(self, reason: str = "Virtual Demo Stream"):
@@ -2057,9 +1853,6 @@ class PipelineCoordinator:
                                     self._cap_hw_accel = False
                                 self._update_health_on_failure()
                             # Hold the last good frame for brief drops (<3s) to
-                            # prevent the live tile from flickering to a demo
-                            # frame on every single missed grab. Only show the
-                            # synthetic standby screen once recovery is underway.
                             if hasattr(self, "_last_good_frame") and self._last_good_frame is not None and time.time() - last_good_frame_ts < 3.0:
                                 frame = self._last_good_frame
                             else:
@@ -2089,14 +1882,11 @@ class PipelineCoordinator:
                     self.incoming_frame = None
                     if frame is not None:
                         # Real push arrived — hold it for reuse between pushes
-                        # so the stream never flickers back to a demo frame.
                         self._last_virtual_frame = frame
                         self._is_standby_frame = False
                         last_good_frame_ts = time.time()
                     elif hasattr(self, "_last_virtual_frame") and self._last_virtual_frame is not None:
                         # Between pushes: reuse the last real frame instead of
-                        # injecting a demo frame that causes visible flickering
-                        # on the Admin Studio live tile.
                         frame = self._last_virtual_frame
                         self._is_standby_frame = False
                     else:
@@ -2122,20 +1912,6 @@ class PipelineCoordinator:
                 self._heartbeat["cap"] = time.time()
 
                 # Hold a FILE source to its own frame rate (see the pacing note
-                # where _file_frame_interval is set up). This sleep is the last
-                # thing in the iteration, AFTER the frame has been handed
-                # downstream and after cap_lat was measured — deliberately.
-                # Pacing before the measurement folds the wait into the reported
-                # capture latency, which then reads as ~one frame period and
-                # makes "capture" look like the pipeline's slowest stage on
-                # every file source. It is a wait for the next frame's turn, not
-                # the cost of fetching this one, and the telemetry has to say so
-                # or the bottleneck field sends people chasing the decoder.
-                #
-                # The deadline advances by exactly one interval rather than
-                # resetting to "now", so pacing does not drift; if we have
-                # already fallen a whole frame behind, it is pulled back to now
-                # so a stall cannot bank credit and then sprint to catch up.
                 if self._file_frame_interval > 0.0:
                     next_frame_due += self._file_frame_interval
                     slack = next_frame_due - time.time()
@@ -2146,9 +1922,6 @@ class PipelineCoordinator:
 
             except (Exception, MemoryError) as e:
                 # Never let a single bad frame/driver hiccup kill this thread —
-                # a dead capture thread means the video feed and every stage
-                # downstream of it freezes permanently while the process
-                # otherwise looks healthy. Log, back off briefly, keep going.
                 self._stage_errors["cap"] += 1
                 print(f"[Cap-{self.camera_id}] ERROR (recovered): {e}", flush=True)
                 traceback.print_exc()
@@ -2160,9 +1933,6 @@ class PipelineCoordinator:
 
     # -----------------------------------------------------------------------
     # Module 2: MJPEG Encoder
-    # Takes frames from _grabbed_slot, encodes JPEG → MJPEG stream immediately.
-    # This path is completely independent of AI inference speed.
-    # Also pushes frames to the recorder and to _decoded_slot for AI.
     # -----------------------------------------------------------------------
 
     def _decode_loop(self):
@@ -2185,12 +1955,6 @@ class PipelineCoordinator:
                             cv2.fillPoly(frame, [pts_px], (0, 0, 0))
 
                 # Zero-DCE Night-Vision AI Enhancement (Per-Camera Controlled)
-                # Enhancement runs here — single pass, early — so the identical
-                # enhanced frame flows synchronously to: (a) _decoded_slot → AI
-                # inference, (b) MJPEG live-screen encoder, and (c) the recorder.
-                # Keeping the local `frame` variable and data["frame"] in sync is
-                # mandatory: the MJPEG encode block below reads the local variable,
-                # not data["frame"], so they must always point to the same array.
                 try:
                     from app.ai.enhancer import zero_dce
                     nv_cfg = self.profile_features.get("night_vision_zero_dce")
@@ -2247,23 +2011,6 @@ class PipelineCoordinator:
 
 
                 # Hand the frame to the AI stage FIRST
-                # JPEG encode measures ~9ms on this hardware and the privacy
-                # masking above must precede it, but neither is something the
-                # detector needs to wait for. Publishing to _decoded_slot before
-                # encoding takes that ~9ms straight off end-to-end detection
-                # latency on every single frame, and — because this thread is
-                # also what feeds the AI stage — stops a slow encode (a large
-                # frame, a raised quality setting) from throttling inference.
-                # The masking stays above it: masked pixels must never reach the
-                # detector either.
-                #
-                # Standby/demo frames are deliberately NOT forwarded to the AI
-                # stage. Running YOLO on test_cctv_motion.mp4 (the synthetic
-                # standby clip) produces genuine car/bus detections that the
-                # canvas overlay renders as "CAR-DEMO" / "BUS-DEMO" bounding
-                # boxes even when no real camera is connected. Standby frames
-                # still reach the MJPEG encoder below so the UI shows the
-                # "Connecting..." screen; they are simply never inferred on.
                 dec_lat = (time.time() - t0) * 1000
                 self._dec_ts.append(time.time())
                 self._decoded_slot.put({
@@ -2272,20 +2019,6 @@ class PipelineCoordinator:
                 })
 
                 # MJPEG stream: demand-driven, capped, never blocked by AI
-                # This encode profiled at 25% of total engine CPU — more than
-                # twice inference — because it ran unconditionally on every
-                # decoded frame at full camera FPS, for every camera, whether
-                # or not anyone was watching. It is display-only: the AI stage
-                # was handed this frame further up, so skipping the encode
-                # cannot affect detection, tracking or recording.
-                #
-                # Nobody watching: skip. Somebody watching: at most
-                # MJPEG_MAX_FPS. The stale current_jpeg_bytes is deliberately
-                # left in place — a newly attached viewer paints the last known
-                # frame immediately and is overwritten by a live one within a
-                # frame period, which beats a blank tile.
-                # MJPEG stream: Synchronized Post-Tracking Encode
-                # Initial cold frame encoding only (until tracking loop produces synchronized frames)
                 if self._mjpeg_viewers > 0:
                     now_enc = time.monotonic()
                     if now_enc >= self._next_mjpeg_due:
@@ -2305,7 +2038,6 @@ class PipelineCoordinator:
                             latest_ts   = getattr(self, "_latest_overlay_ts", 0.0)
 
                         # Enable frame-synchronized MJPEG overlay burn-in: ensures bounding boxes and video pixels
-                        # are 100% frame-locked in the exact same JPEG frame, eliminating browser HTTP/WebSocket desync.
                         burnin_overlay = os.getenv("CAMAI_BURNIN_OVERLAY", "0").strip() == "1"
                         if burnin_overlay and latest_dets and (time.time() - latest_ts < 0.6):
                             _draw_normalized_overlay_boxes(mjpeg_f, latest_dets)
@@ -2333,20 +2065,10 @@ class PipelineCoordinator:
 
     # -----------------------------------------------------------------------
     # Module 3: AI Inference
-    # Always processes the newest decoded frame. Drops stale frames.
-    # Never waits for a previous inference to finish.
     # -----------------------------------------------------------------------
 
     def _ai_loop(self):
         # Warm up this thread's dedicated InferRequest (see EngineBackend.
-        # _get_ov_infer_request) at this camera's actual inference resolution
-        # *before* the main loop starts. OpenVINO's GPU plugin does shape-
-        # specific kernel selection/compilation on the first inference call
-        # for a given InferRequest + input shape — on slow/first-run GPU
-        # drivers this one-time cost can run well past a minute. Paying it
-        # here means the watchdog's steady-state stall timer (see
-        # _watchdog_loop) only ever starts counting once this thread is
-        # actually warm, instead of racing a compile it can't see.
         try:
             backend = self.backend
             if backend is not None:
@@ -2609,20 +2331,14 @@ class PipelineCoordinator:
                 rh, rw    = orig_h, orig_w
 
             # Zero-DCE low-light enhancement is already performed in Module 2 (_decode_loop)
-            # according to per-camera profile features before entering the AI slot.
 
             # Detect motion inside the effective ROI crop to avoid motion outside ROI
-            # forcing unnecessary inference passes and lowering FPS.
             motion_stats = self._analyze_motion(inf_frame)
             motion = bool(motion_stats.get("motion", False))
             self._motion_stats = motion_stats
 
 
             # Keyframe Subsampling (Phase 1 Optimization):
-            # Run heavy YOLO GPU inference every 3rd frame (Keyframe N=3) or on force_infer sync.
-            # Intermediate frames skip GPU inference, allowing ByteTrack Kalman filter
-            # in tracking_loop to extrapolate track positions forward seamlessly while
-            # maintaining full pipeline frame rate.
             self._ai_frame_count = getattr(self, "_ai_frame_count", 0) + 1
             keyframe_interval = max(1, int(os.getenv("CAMAI_AI_KEYFRAME_INTERVAL", "1")))
 
@@ -2641,8 +2357,6 @@ class PipelineCoordinator:
             masks_polygons: list = []
             t_pre = t_inf = t_post = t_inf_base = 0.0
             # Read once per cycle, not once per process: set_detection_confidence
-            # can land between two cycles, and this is the read that makes an
-            # admin's change take effect on the very next frame.
             base_conf   = get_detection_confidence()
             conf_thresh = base_conf
             iou_thresh  = 0.45
@@ -2653,35 +2367,10 @@ class PipelineCoordinator:
                 conf_thresh = round(base_conf * CROWDED_CONF_RATIO, 3) if crowded else base_conf
                 if low_light or self.zone_profile in ("micro_motion", "night_vision"):
                     # Low light reduces detector confidence before it reduces
-                    # geometry. Lower the floor modestly, but never below the
-                    # global safety bound, so day detection keeps its operator
-                    # setting and night footage keeps marginal real objects.
                     conf_thresh = max(MIN_CONFIDENCE, round(conf_thresh * 0.78, 3))
                 iou_thresh  = 0.65 if crowded else 0.45
 
                 # Invisible AI Zoom Engine (app.ai.tiling). Runs the same single
-                # full-frame pass this loop has always run, at the same adaptive
-                # resolution, and then — only if a wall-clock inference budget
-                # shared across every running camera allows it — adds extra
-                # passes over overlapping crops so small/distant objects reach
-                # the detector at a usable pixel size. Results come back already
-                # mapped to `inf_frame` coordinates and fused.
-                #
-                # A previous version ran 5 UNCONDITIONAL passes (full frame + 4
-                # quadrants) for any frame >=1280x720 to improve small-object
-                # recall; on a shared inference backend that fixed 5x per-cycle
-                # cost multiplied lock/queue contention with every other
-                # camera's AI thread and was the direct cause of multi-second-
-                # to-multi-minute stale overlays. The difference now is that
-                # the extra passes are budgeted, scheduled (unchanged tiles are
-                # not re-inferred) and strictly additive: when the budget is
-                # spent — many cameras, slow device, tiling switched off — the
-                # count of extra passes is zero and this is byte-for-byte the
-                # old single-pass path.
-                #
-                # NOTHING here touches the displayed video: Module 2 encodes the
-                # MJPEG preview straight off the decoded frame and never sees a
-                # tile. `inf_frame` is a read-only numpy view.
                 tile_res = self._tile_engine.infer(
                     backend, inf_frame,
                     base_imgsz=self.current_imgsz,
@@ -2691,7 +2380,6 @@ class PipelineCoordinator:
                     max_imgsz=self.max_imgsz,
                     n_tracks=self._n_active_tracks,
                     # `inf_frame` may be a zone-derived ROI crop of the camera
-                    # frame; plausible-size judgements belong to the real frame.
                     geometry_shape=(orig_h, orig_w),
                     # Cycle time budget constraint for adaptive tiling passes
                     cycle_budget_ms=max(getattr(config, "TILING_LATENCY_BUDGET_MS", 80.0), 1000.0 / max(1.0, self.target_fps)),
@@ -2713,10 +2401,6 @@ class PipelineCoordinator:
 
 
                 # Adaptive-resolution tuning below must see the cost of ONE
-                # full-frame pass, not the cycle total: fed the total it would
-                # read every tile pass as "inference got slower" and ratchet
-                # imgsz down until the detector is blind — the tile engine has
-                # its own, separate budget for the cost it adds.
                 t_inf_base     = tile_res.t_inf_base
                 self._tile_stats = tile_res.stats
 
@@ -2774,8 +2458,6 @@ class PipelineCoordinator:
                     print(f"[CustomDetector Err] {e}", flush=True)
 
                 # User Polygon Zone Gate
-                # Only detect/track/analyze objects whose centroid or bottom position
-                # falls inside user-defined active zone polygons when zones exist.
                 if self.zones and detections:
                     num_before = len(detections)
                     detections = filter_detections_by_user_zones(detections, self.zones, orig_w, orig_h)
@@ -2785,10 +2467,6 @@ class PipelineCoordinator:
                 self._last_infer_ts = time.time()
 
                 # Throttled inference/detection heartbeat (~every 5s per camera).
-                # Confirms in the (frozen) engine log that inference is running
-                # continuously and how many objects each pass yields — the
-                # "Inference Completed / Objects Detected / Detection Count /
-                # Runtime" debug signals, without a line per frame.
                 _now = time.time()
                 if _now - getattr(self, "_last_det_log_ts", 0.0) >= 5.0:
                     self._last_det_log_ts = _now
@@ -2803,12 +2481,6 @@ class PipelineCoordinator:
                           f"boost={_ts.get('boost_passes', 0)}", flush=True)
 
             # Adaptive resolution tuning based on rolling inference latency.
-            # Skipped when imgsz is pinned (static-shape iGPU): changing size
-            # there recompiles a GPU kernel mid-run, the exact stall this pin
-            # prevents. Re-check the LIVE backend too, not just the flag computed
-            # at __init__: a pipeline built before the backend finished loading
-            # (registration racing model load) starts with _pin_imgsz=False, and
-            # we must still honour the static size once the backend is present.
             static = getattr(self.backend, "static_imgsz", None)
             if static is not None and self.current_imgsz != static:
                 self.current_imgsz = static
@@ -2845,8 +2517,6 @@ class PipelineCoordinator:
 
     # -----------------------------------------------------------------------
     # Module 4: Multi-Object Tracking + Rule Engine
-    # ByteTrack, zone/line analytics, alert generation.
-    # Processes latest AI results; drops stale results automatically.
     # -----------------------------------------------------------------------
 
     def _tracking_loop(self):
@@ -2884,11 +2554,6 @@ class PipelineCoordinator:
                 self._last_tracked_fid = cur_fid
 
             # Track: input and output in absolute pixel coords
-            # data["motion"] is the AI stage's should_infer flag: True means the
-            # detector actually ran on this frame, so `detections` is evidence.
-            # False means it was skipped, and an empty `detections` then carries
-            # no information at all — feeding it to update() would assert the
-            # detector found nothing and blank the overlay (see predict_only).
             if data["motion"]:
                 tracks_raw = self.tracker.update(
                     detections, frame=frame, frame_shape=(orig_h, orig_w), conf_thresh=data["conf_thresh"]
@@ -2912,21 +2577,6 @@ class PipelineCoordinator:
 
             # ── Face pass: a SECOND model, and the only module here whose
             # toggle actually saves inference time when off ────────────────
-            # yolox emits every COCO class in one forward pass, so switching
-            # "vehicles" off saves nothing. YuNet is a separate network, so this
-            # block is the real thing: enabled -> ~35ms, disabled -> 0ms, never
-            # loaded. Runs on person crops (measured ~2x faster and +25% recall
-            # vs the whole frame — see app/ai/face.py). Must land in
-            # `detections` before analytics.update(), because analytics.py's
-            # face_detection loop matches on det["class"] == "face"; that loop
-            # has existed since the feature shipped and has never once fired.
-            # Gate on the profile too, not just the toggle. Measured: a traffic
-            # camera with face_detection left on burned 21.6ms/frame running
-            # YuNet and then had every face thrown away by the profile filter
-            # below (traffic reports vehicles only) — pure waste, invisible in
-            # the output. A profile that cannot report faces must not pay for
-            # detecting them. Same predicate update_config() uses to decide
-            # whether to unload the model, so the two can't drift apart.
             face_cfg = (self.profile_features or {}).get("face_detection")
             if not isinstance(face_cfg, dict):
                 face_cfg = {}
@@ -2939,7 +2589,6 @@ class PipelineCoordinator:
                     for fdet in faces:
                         detections.append(fdet)
                         # masks stays index-parallel with detections (see the
-                        # coasting block above); a face has no mask.
                         masks.append([])
                     if fd.last_error:
                         self._stage_errors["face"] = fd.last_error
@@ -2947,25 +2596,6 @@ class PipelineCoordinator:
             t_face = (time.perf_counter() - t_face0) * 1000
 
             # Helmet pass: a THIRD model (YOLOv8), gated exactly like faces
-            # Runs only on rider crops (each motorcycle box expanded to include
-            # the person boxes overlapping it), so a frame with no motorcycle
-            # costs zero even when enabled — same "a disabled/idle module costs
-            # nothing" property as the face pass. Appends genuine class==
-            # "helmet"/"no_helmet" boxes into `detections` (and a parallel empty
-            # mask) BEFORE the profile filter and analytics.update(); analytics
-            # turns a no_helmet sitting on a tracked motorcycle into a deduped
-            # helmet_violation / triple_riding alert. If the model file is
-            # absent the detector returns nothing and logs why — it never fakes.
-            # ASYNCHRONOUS. The pass runs on app/ai/helmet_worker.py, not here.
-            # Inline it cost ~850ms on a frame with riders and pinned the whole
-            # tracking stage at ~1 FPS; worse, it made the stage's iteration
-            # interval swing ~30x, which is what made the tracker mint new ids
-            # for objects it was already tracking. This block now only submits a
-            # frame (non-blocking, drop-oldest) and overlays the most recently
-            # published result, so tracking cadence no longer depends on helmet
-            # cost at all. The inline throttle it replaces never worked: an
-            # iteration took longer than the interval, so the interval had
-            # always elapsed and the pass ran every frame regardless.
             t_helmet0 = time.perf_counter()
             _now_sec = time.time()
             if self._wants_helmet():
@@ -2981,9 +2611,6 @@ class PipelineCoordinator:
                     if not isinstance(helmet_cfg, dict):
                         helmet_cfg = {}
                     # bbox + confidence: helmet.py's rider-association gate
-                    # (HELMET_RIDER_MIN_PERSON_CONFIDENCE) needs the person's
-                    # confidence to reject a shaky "person" call as a rider,
-                    # not just its box.
                     hworker.submit(
                         frame,
                         [{**d["bbox"], "confidence": d.get("confidence", 0.0)}
@@ -3001,8 +2628,6 @@ class PipelineCoordinator:
             t_helmet = (time.perf_counter() - t_helmet0) * 1000
 
             # ANPR pass: plate detector (+ CRNN OCR) on vehicle crops
-            # Appends class=="number_plate" boxes (with plate_text when OCR read
-            # Submit frame to asynchronous ANPR worker; decouples OCR latency from main loop FPS
             t_anpr0 = time.perf_counter()
             if self._wants_anpr():
                 worker = getattr(self, "_anpr_worker", None)
@@ -3017,11 +2642,6 @@ class PipelineCoordinator:
                     if not isinstance(anpr_cfg, dict):
                         anpr_cfg = {}
                     # Same confidence gate as the helmet/motorcycle association
-                    # (config.VEHICLE_ACTION_MIN_CONFIDENCE) — a shaky vehicle
-                    # classification shouldn't burn an ANPR pass on a crop of
-                    # the wrong object, or (if it happens to contain a real
-                    # plate) log that plate against a vehicle class nobody is
-                    # confident is correct.
                     vehicles = [d for d in detections
                                 if d.get("class") in plate_detect.PLATE_VEHICLES
                                 and d.get("confidence", 0.0) >= config.VEHICLE_ACTION_MIN_CONFIDENCE]
@@ -3035,7 +2655,6 @@ class PipelineCoordinator:
                             )
                         else:
                             # Synchronous fallback (CAMAI_ANPR_ASYNC=0) — same
-                            # code path, useful for deterministic benchmarking.
                             worker._process({
                                 "frame": frame,
                                 "boxes": [d["bbox"] for d in vehicles],
@@ -3102,21 +2721,6 @@ class PipelineCoordinator:
                     print(f"[MicroMotion Err] {e}", flush=True)
 
             # Apply the zone profile to what this camera reports
-            # Must happen here, not only inside analytics.update(): that method
-            # rebinds its own local `detections`, which never affected the list
-            # the client_dets below are built from. The result was that a
-            # traffic-profile camera still shipped person/handbag boxes to the
-            # overlay while analytics quietly ignored them — the profile looked
-            # like a UI switch because, downstream of analytics, it was one.
-            # Two independent narrowings, both applied before client_dets:
-            #   profile  — what this KIND of camera reports (traffic: no people)
-            #   features — what THIS operator switched on (Vehicle Detection off)
-            # The second existed only in the UI: person_detection /
-            # vehicle_detection / worker_detection appeared nowhere in the
-            # engine, so those switches did nothing at all and vehicles kept
-            # being boxed after being turned off.
-            # masks is index-parallel with detections and must be narrowed with it.
-            # Target Matcher pass: Compare frame crops against enrolled custom target vectors
             if detections:
                 try:
                     from app.ai.target_matcher import target_matcher
@@ -3147,9 +2751,6 @@ class PipelineCoordinator:
             ))
 
             # Rule engine + analytics: MUST receive absolute pixel coords
-            # bbox is already the tracker's smoothed position; analytics.update()
-            # only adds det["speed"] and drives zone/line/dwell logic from it.
-            # track_overlays: [{track_id, class, points: [[cx,cy]...]}] — normalized
             alerts, track_overlays, heatmap, zone_stats, line_stats, crowd_stats, parking_stats = self.analytics.update(
                 detections, self.zones, self.lines, orig_w, orig_h, frame=frame, rules=self.rules,
                 zone_profile=self.zone_profile, profile_features=self.profile_features
@@ -3160,30 +2761,6 @@ class PipelineCoordinator:
                 detections = filter_detections_by_user_zones(detections, self.zones, orig_w, orig_h)
 
             # Why speed is/isn't a number, decided once per frame
-            # "Speed Estimation" is a per-camera zone-profile toggle
-            # (desktop/src/lib/zoneProfiles.ts: key "speed_estimation",
-            # defaultEnabled: true) that, until now, NOTHING in the engine ever
-            # read — grep for it under server/ and there were zero hits. An
-            # operator could switch it on or off and the engine behaved
-            # identically either way. It now gates the feature for real, and the
-            # reason a camera has no km/h is reported to the client instead of
-            # being left as a silent blank:
-            #
-            #   disabled          — the profile's Speed Estimation toggle is off
-            #   needs_calibration — on, but no usable two-line gate is
-            #                       configured, so no honest km/h exists
-            #   calibrated        — a real gate measured this track
-            #
-            # A gate needs BOTH lines paired via speedPairId AND the true ground
-            # distance in distanceM. Anything less is not calibration, so we
-            # report needs_calibration rather than falling back to the profile's
-            # calibration_m default — guessing the distance would manufacture a
-            # plausible-looking km/h out of thin air, which is the exact failure
-            # this whole change exists to remove.
-            # Absent key == not enabled, same convention as _wants_faces(). A
-            # profile that does not declare speed_estimation (security, factory)
-            # is not asking for speed, so it must not be nagged to calibrate a
-            # gate it has no use for.
             _speed_cfg = (self.profile_features or {}).get("speed_estimation")
             _speed_enabled = bool(_speed_cfg.get("enabled", True)) if isinstance(_speed_cfg, dict) else True
 
@@ -3207,8 +2784,6 @@ class PipelineCoordinator:
                 if det.get("speed") is not None:
                     return det["speed"], "calibrated" if det.get("speed_calibrated") else "estimated"
                 # No number yet (track just (re)acquired, or box clipped): report
-                # the honest status so the client shows nothing, NOT a fake "0"
-                # stamped on a moving vehicle.
                 if det.get("class") in VEHICLE_CLASSES:
                     return None, "acquiring"
                 return None, "unavailable"
@@ -3297,17 +2872,10 @@ class PipelineCoordinator:
             # Alert handling + snapshots
             if alerts:
                 # ONE annotated full-frame snapshot for this moment, shared by
-                # every alert that fired on this frame — so we never capture (or
-                # send) the same picture again and again. Boxes are drawn once,
-                # per class, in distinct colours as the evidence image.
                 snap = f"snap_{self.camera_id}_{uuid4().hex[:8]}.jpg"
                 cv2.imwrite(str(RECORDINGS_DIR / snap), _draw_snapshot_boxes(frame, detections))
                 for alert in alerts:
                     # Helmet/triple-riding alerts carry rider_bbox + helmet_bbox
-                    # (analytics.py) — save those regions as extra evidence
-                    # alongside the full frame. Named off the same stem so they
-                    # sit next to the snapshot the DB row points at. Best-effort:
-                    # a crop failure must never drop the alert itself.
                     for tag, key in (("rider", "rider_bbox"), ("helmet", "helmet_bbox"),
                                      ("plate", "plate_bbox")):
                         box = alert.get(key)
@@ -3323,10 +2891,6 @@ class PipelineCoordinator:
                         except Exception as _e:
                             print(f"[Trk-{self.camera_id}] {tag} crop save failed: {_e}", flush=True)
                     # Structured event fields (plate number, track id, speed,
-                    # direction, confidence) persisted as queryable JSON — not
-                    # just inside the message — and carried straight to the
-                    # Supabase alerts.detail jsonb on sync. The bbox keys are
-                    # evidence geometry, kept out of the synced detail.
                     detail = {k: alert[k] for k in
                               ("track_id", "plate_text", "plate_text_confidence",
                                "speed_kmh", "direction", "confidence")
@@ -3339,16 +2903,8 @@ class PipelineCoordinator:
                     )
                     self.recorder.trigger_event_start(alert["message"])
                     # Alerts only ever went to storage, so a live dashboard had
-                    # no way to show "Violations" / "Alerts" / "Falls" without
-                    # polling the DB. Keep a per-type session tally the
-                    # telemetry payload can carry.
                     self._alert_counts[alert["type"]] = self._alert_counts.get(alert["type"], 0) + 1
                     # Tell the zoom engine where this fired. Somewhere that just
-                    # produced an alert is the most consequential part of the
-                    # frame for the next few seconds — an intrusion is usually
-                    # followed by more of the same object, and that is exactly
-                    # when losing it matters most. Best-effort: a bad bbox must
-                    # never interfere with the alert itself.
                     try:
                         _b = (alert.get("bbox") or alert.get("rider_bbox")
                               or alert.get("plate_bbox"))
@@ -3367,9 +2923,6 @@ class PipelineCoordinator:
             self._trk_ts.append(time.time())
 
             # Synchronized MJPEG Stream Output (Post-Tracking)
-            # Encode frame ONLY after tracking & detections are resolved, ensuring
-            # zero latency/phase mismatch between MJPEG image and WS bounding boxes.
-            # Save latest tracked detections for Module 2 smooth high-FPS MJPEG stream
             with self._overlay_lock:
                 self._latest_overlay_dets = list(client_dets) if client_dets else []
                 self._latest_raw_dets     = list(detections) if detections else []
@@ -3380,7 +2933,6 @@ class PipelineCoordinator:
                 "client_dets":    client_dets,
                 "masks_polygons": masks,
                 # track_overlays has normalized centroid points for motion trails
-                # and direction arrows — this is what the frontend canvas expects
                 "tracks":         track_overlays,
                 "people_count":   people_count,
                 "vehicles_count": vehicles_count,
@@ -3393,23 +2945,15 @@ class PipelineCoordinator:
                 "parking_stats":  parking_stats,
                 "trk_lat":        trk_lat,
                 # Carried separately from trk_lat so the face module's cost is
-                # attributable rather than buried in "tracking".
                 "t_face":         t_face,
                 "t_helmet":       t_helmet,
                 "t_anpr":         t_anpr,
                 # {alert_type: count} since this camera started. Lets the client
-                # render Violations / Alerts / Falls / Machine Events without
-                # querying storage.
                 "alert_counts":   dict(self._alert_counts),
             })
 
     # -----------------------------------------------------------------------
     # Module 5: Telemetry Build
-    # Packages AI + tracking results into the JSON telemetry payload.
-    # No video frame in payload — video is served via the MJPEG endpoint.
-    # Hands the finished payload to Module 6 over its own size-1 slot rather
-    # than dispatching the WS send itself, so building the next payload never
-    # waits on the previous one being delivered.
     # -----------------------------------------------------------------------
 
     def _telemetry_loop(self):
@@ -3461,10 +3005,6 @@ class PipelineCoordinator:
             try:
                 import psutil
                 # cpu_percent with interval=None returns the delta since last call
-                # for this process-level instance; calling it every telemetry frame
-                # (which runs at AI FPS) creates a high-frequency system-call stream
-                # that hurts CPU worse than the metric it's measuring. Rate-limit to
-                # once per second — fast enough for the operator's dashboard.
                 _now_tel = time.time()
                 if (_now_tel - getattr(self, "_last_cpu_sample_ts", 0.0)) >= 1.0:
                     self._last_cpu_sample_ts = _now_tel
@@ -3563,7 +3103,6 @@ class PipelineCoordinator:
                 "device":     self.backend.backend_device if self.backend else "aws_cloud",
                 "imgsz":      self.current_imgsz,
                 # Diagnostics for the Invisible AI Zoom Engine. Admin/telemetry
-                # only — the operator's live view is unchanged by any of it.
                 "zoom_engine": dict(self._tile_stats),
                 "recording":  self.recorder.is_recording(),
                 "zone_stats": data.get("zone_stats", {}),
@@ -3574,11 +3113,6 @@ class PipelineCoordinator:
                 "stage_errors": dict(self._stage_errors),
                 "queue_depth": 1 if self._grabbed_slot._ready.is_set() else 0,
                 # Per-boundary frame drops. Latest-wins slots discard by design,
-                # so a non-zero count is not a fault — but WHICH boundary drops
-                # is the single most diagnostic number in this payload: drops at
-                # "ai" mean inference is the constraint, drops at "dec" mean the
-                # encoder is, and drops nowhere with low fps means the camera
-                # itself is slow. Previously none of this was observable.
                 "dropped_frames": {
                     "grab": self._grabbed_slot.dropped,
                     "dec":  self._decoded_slot.dropped,
@@ -3590,7 +3124,6 @@ class PipelineCoordinator:
                                   + self._ai_slot.dropped + self._tracking_slot.dropped
                                   + self._telemetry_out_slot.dropped),
                 # Named for the operator overlay rather than "debug_*", which
-                # reads as something safe to strip from a release build.
                 "tracker_count": len(self.tracker.tracks),
                 "detection_count": len(data.get("client_dets", [])),
                 "debug_tracks": len(self.tracker.tracks),
@@ -3599,10 +3132,6 @@ class PipelineCoordinator:
                 "debug_recorder_qsize": self.recorder.queue.qsize(),
                 "cap_consecutive_failures": self._cap_consecutive_failures,
                 # Carried on every payload, not just the pre-first-frame stub, so
-                # a source that dies mid-session (cable pulled, stream expired)
-                # is as visible as one that never started. Frames stop, this
-                # payload stops updating, and whatever the client last received
-                # still says what went wrong.
                 "health_status": self._health_status,
                 "source_error": self.source_error_text(),
             }
@@ -3611,10 +3140,6 @@ class PipelineCoordinator:
 
     # -----------------------------------------------------------------------
     # Module 6: WebSocket Dispatch
-    # Takes the newest built telemetry payload and hands it to the WS
-    # connection manager. Always the latest payload — if dispatch falls
-    # behind (many subscribed clients, slow network), it drops straight to
-    # whatever Module 5 has built most recently instead of queuing a backlog.
     # -----------------------------------------------------------------------
 
     def _ws_dispatch_loop(self):
@@ -3636,31 +3161,10 @@ class PipelineCoordinator:
     # Watchdog: last line of defense against a truly wedged stage
     # -----------------------------------------------------------------------
     # Every stage above already catches Exception internally, so it should
-    # never die from ordinary processing errors. This watchdog exists for the
-    # remaining case a per-iteration try/except cannot help with: a call that
-    # blocks forever (native library hang) instead of raising. It only acts
-    # when there's live upstream data to prove the camera itself isn't just
-    # idle (e.g. no motion/tracks — a low activity period is not a stall).
 
     def _watchdog_loop(self):
         stage_order = ["cap", "dec", "ai", "trk", "tel", "ws"]
         # Two-tier threshold instead of one fixed value:
-        #  - startup_grace: no stall checks at all for this long after the
-        #    thread starts (or restarts). First-ever inference on a fresh
-        #    per-thread OpenVINO InferRequest can trigger shape-specific GPU
-        #    kernel compilation that legitimately takes tens of seconds on
-        #    slower/first-run drivers — even with the _ai_loop warm-up above,
-        #    this is a defense-in-depth margin, not the primary fix.
-        #  - steady_stall: once past the grace window, a stage that goes
-        #    this long without a heartbeat while capture is alive is
-        #    genuinely wedged (not "hasn't gotten to its first frame yet").
-        # A single small threshold here previously caused a self-inflicted
-        # restart loop: each restart pays the slow first-inference cost
-        # again, the watchdog fired again before it finished, forever.
-        # Bumped from 90s after benchmarking on this hardware showed a cold
-        # GPU InferRequest's first shape-specific kernel compile can take
-        # several minutes, not just "tens of seconds" — 90s was still short
-        # enough to risk exactly the restart loop this comment warns about.
         startup_grace = 240.0
         steady_stall  = 20.0
         pipeline_start = time.time()
@@ -3672,8 +3176,6 @@ class PipelineCoordinator:
             cap_alive = (now - self._heartbeat["cap"]) < steady_stall
             if not cap_alive:
                 # Capture itself is stuck (dead source, no reconnect yet) —
-                # that's already handled by its own reconnect logic, not a
-                # downstream stall. Nothing else to do here.
                 continue
             for stage in stage_order[1:]:
                 if now - self._heartbeat[stage] > steady_stall:
@@ -3693,20 +3195,6 @@ class PipelineCoordinator:
 
     def _open_capture(self, src, hw_accel: bool = True):
         # CAP_PROP_BUFFERSIZE is not a valid *open-time* parameter for the
-        # FFMPEG backend on this OpenCV build (4.11.0) — passing it in the
-        # params array makes VideoCapture.open() reject the whole params
-        # list ("unsupported parameters ... Bailout") and isOpened() come
-        # back False, silently pushing every source onto the DSHOW/MSMF
-        # fallback backends instead (worse RTSP/container support, and on at
-        # least MSMF, setting CAP_PROP_FOURCC afterward on some sources
-        # leaves the reader producing isOpened()==True but zero frames — a
-        # capture stall that looks identical to a genuinely dead source).
-        # Buffer size is still applied correctly via cap.set() right after
-        # this returns (see _capture_loop) — only the open-time list changes.
-        #
-        # hw_accel=False forces software decode — see _capture_loop's
-        # fallback logic: HW-accel decode can silently yield zero frames
-        # when it shares a GPU with concurrent AI compute on that device.
         if isinstance(src, str) and src.startswith("rtsp://"):
             try:
                 from urllib.parse import urlparse
@@ -3722,24 +3210,6 @@ class PipelineCoordinator:
         ]
 
         # Try only the backends that can actually serve this kind of source.
-        # The old list ran all four for everything, which cost real time in
-        # both directions (measured on this machine, OpenCV 4.8.1):
-        #
-        #  * URL/file source: DSHOW and MSMF open cameras BY NAME and cannot
-        #    take a URL at all — they refuse instantly with
-        #    "backend is generally available but can't be used to capture by
-        #    name". They were never going to open an RTSP stream, so the only
-        #    thing they contributed was log noise.
-        #  * Device index: CAP_FFMPEG cannot open a webcam either, but unlike
-        #    the above it does not fail fast — putting it first made opening
-        #    the local webcam take 2.00 s instead of the 0.47 s it takes when
-        #    the platform backend is tried first.
-        #
-        # What this does NOT fix is the dominant cost for an unreachable RTSP
-        # host: CAP_FFMPEG and the default backend (which is also FFmpeg for a
-        # URL) each block ~30 s before giving up, and no capture option changes
-        # that — see the option matrix in _preflight_network_source, which is
-        # what actually keeps us out of this path.
         if isinstance(src, int):
             backends = [None, cv2.CAP_DSHOW, cv2.CAP_MSMF]
         else:
@@ -3786,7 +3256,6 @@ class PipelineCoordinator:
         mean_lum = float(np.mean(small))
         low_light = mean_lum < 85.0
         # Mild denoise: enough to suppress salt-and-pepper sensor shimmer, not
-        # enough to erase tiny edges.
         proc = cv2.GaussianBlur(small, (3, 3), 0)
 
         if self._prev_motion_full is None:
@@ -3829,7 +3298,6 @@ class PipelineCoordinator:
         _, mask = cv2.threshold(diff, thr, 255, cv2.THRESH_BINARY)
 
         # Remove isolated single-pixel noise, then validate very small blobs by
-        # connected component shape instead of throwing them away by area alone.
         mask = cv2.medianBlur(mask, 3)
         num, labels, cc_stats, _ = cv2.connectedComponentsWithStats(mask, 8)
         valid_area = 0
@@ -3853,8 +3321,6 @@ class PipelineCoordinator:
         blob_gate = 1 if low_light else 2
         motion = (valid_blobs >= blob_gate and changed_ratio >= ratio_gate)
         # A broad coherent change can be a fast object; scene-wide exposure
-        # jumps are handled by the adaptive threshold and are rare after
-        # Zero-DCE's luminance-preserving LUT.
         if not motion and changed_ratio >= max(ratio_gate * 6.0, self._motion_thr * 0.2):
             motion = True
 
