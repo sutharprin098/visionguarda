@@ -3034,9 +3034,9 @@ class PipelineCoordinator:
                 "vehicles":  data.get("vehicles_count", 0),
                 "items":     data.get("items_count", 0),
                 "other_objects": data.get("other_count", 0),
-                "detections": data.get("client_dets", []),
+                "detections": [],
                 "masks":     data.get("masks_polygons", []),
-                "tracks":    data.get("tracks", []),
+                "tracks":    [],
                 "counters": {
                     "in":           self.analytics.counter_in,
                     "out":          self.analytics.counter_out,
