@@ -185,8 +185,7 @@ def _draw_snapshot_boxes(frame, detections):
 
 def _draw_normalized_overlay_boxes(frame, client_dets):
     """Draw bounding boxes from client_dets (normalized 0..1 coords) directly onto stream frame."""
-    if not client_dets or frame is None:
-        return frame
+    return frame
     h, w = frame.shape[:2]
     for det in client_dets:
         if float(det.get("confidence", 0.0)) < 0.08:
