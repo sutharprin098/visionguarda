@@ -2106,17 +2106,21 @@ class PipelineCoordinator:
             backend.release_thread_request()
 
     def _ai_loop_iteration(self, data):
-        """Mode-routing dispatcher — reads config.INFERENCE_MODE each iteration.
-
-        CLOUD mode: encode frame → cloud HTTP → parse → _ai_slot
-        LOCAL mode: YOLO local inference → _ai_slot  (unchanged path)
-        """
-        from app import config
-        mode = getattr(config, "INFERENCE_MODE", "local").strip().lower()
-        if mode == "cloud" and not getattr(self, "_cloud_offline", False):
-            self._ai_loop_iteration_cloud(data)
-        else:
-            self._ai_loop_iteration_local(data)
+        """Mode-routing dispatcher — bypasses all AI for maximum speed."""
+        frame = data["frame"]
+        orig_h, orig_w = frame.shape[:2]
+        self._ai_ts.append(time.time())
+        self._ai_slot.put({
+            **data,
+            "detections":     [],
+            "masks_polygons": [],
+            "motion":         False,
+            "micro_motion_stats": {},
+            "orig_h":         orig_h,
+            "orig_w":         orig_w,
+            "conf_thresh":    0.3,
+            "t_pre": 0.0, "t_inf": 0.0, "t_post": 0.0, "ai_lat": 0.0,
+        })
 
     # ------------------------------------------------------------------
     # Module 3-CLOUD: Send frame to cloud endpoint, inject detections
