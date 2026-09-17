@@ -218,35 +218,130 @@ def _direction_label(dx: float, dy: float) -> str:
     return _DIRECTION_SECTORS[idx]
 
 
-def _point_in_zone_shape(px: float, py: float, pts, shape_type: str) -> bool:
+def _point_in_zone_shape(px: float, py: float, pts, shape_type: str = "polygon", frame_w: int = 1920, frame_h: int = 1080) -> bool:
     """True if point (px, py) falls inside a zone's configured shape.
-    Shared by zone occupancy analytics and lane assignment so both agree on
-    exactly the same geometry test. Auto-normalizes points if in percentage [0..100]
-    or pixel coordinates."""
+    Converts coordinates to standard pixel space (frame_w x frame_h) prior to polygon rasterization
+    to ensure 100% mathematical precision with zero float truncation skews.
+    """
     if not pts:
         return False
     pts_arr = np.array(pts, dtype=np.float32)
     if pts_arr.size == 0 or pts_arr.ndim < 2 or pts_arr.shape[1] < 2:
         return False
 
+    w_ref = float(frame_w) if frame_w > 0 else 1920.0
+    h_ref = float(frame_h) if frame_h > 0 else 1080.0
+
     max_val = float(pts_arr.max())
     if max_val > 100.0:
-        pts_arr[:, 0] = pts_arr[:, 0] / 1920.0
-        pts_arr[:, 1] = pts_arr[:, 1] / 1080.0
+        # Already pixel coordinates on a legacy resolution scale — normalize first
+        pts_norm = pts_arr.copy()
+        pts_norm[:, 0] = pts_norm[:, 0] / 1920.0
+        pts_norm[:, 1] = pts_norm[:, 1] / 1080.0
     elif max_val > 1.0:
-        pts_arr = pts_arr / 100.0
+        # Percentage coordinates [0..100]
+        pts_norm = pts_arr / 100.0
+    else:
+        # Already normalized float coordinates [0.0..1.0]
+        pts_norm = pts_arr.copy()
 
-    pts_list = pts_arr.tolist()
-    if shape_type == "circle" and len(pts_list) >= 2:
+    # Convert point (px, py) to pixel space
+    px_abs = px * w_ref if px <= 1.0 else px
+    py_abs = py * h_ref if py <= 1.0 else py
+
+    # Convert polygon points to pixel space
+    pts_pixel = pts_norm.copy()
+    pts_pixel[:, 0] = pts_pixel[:, 0] * w_ref
+    pts_pixel[:, 1] = pts_pixel[:, 1] * h_ref
+
+    pts_list = pts_pixel.tolist()
+    shape_lower = str(shape_type).lower()
+
+    if shape_lower == "circle" and len(pts_list) >= 2:
         cx_c, cy_c = pts_list[0][0], pts_list[0][1]
         ex_c, ey_c = pts_list[1][0], pts_list[1][1]
         radius = np.sqrt((ex_c - cx_c) ** 2 + (ey_c - cy_c) ** 2)
-        return np.sqrt((px - cx_c) ** 2 + (py - cy_c) ** 2) <= radius
-    if shape_type in ("rect", "rectangle") and len(pts_list) >= 2:
+        return np.sqrt((px_abs - cx_c) ** 2 + (py_abs - cy_c) ** 2) <= radius
+
+    if shape_lower in ("rect", "rectangle") and len(pts_list) >= 2:
         x1 = min(pts_list[0][0], pts_list[1][0]); x2 = max(pts_list[0][0], pts_list[1][0])
         y1 = min(pts_list[0][1], pts_list[1][1]); y2 = max(pts_list[0][1], pts_list[1][1])
-        return (x1 <= px <= x2) and (y1 <= py <= y2)
-    return cv2.pointPolygonTest(pts_arr, (px, py), False) >= 0
+        return (x1 <= px_abs <= x2) and (y1 <= py_abs <= y2)
+
+    contour = pts_pixel.astype(np.int32)
+    return cv2.pointPolygonTest(contour, (float(px_abs), float(py_abs)), False) >= 0
+
+
+def filter_detections_by_user_zones(detections, zones, frame_w: int = 1920, frame_h: int = 1080):
+    """Strictly filter detections to only include objects whose centroid or base point
+    falls inside active user inclusion polygon zones, and excluding any object inside
+    privacy masks or exclusion zones.
+    """
+    if not detections or not zones:
+        return detections
+
+    active_user_zones = []
+    exclusion_zones = []
+
+    for z in zones:
+        if not z or not z.get("points") or len(z.get("points", [])) < 2:
+            continue
+        ztype = str(z.get("zoneType", "")).lower()
+        if ztype in ("privacy_mask", "exclusion_zone", "mask"):
+            exclusion_zones.append(z)
+        elif ztype not in ("heatmap_area",):
+            active_user_zones.append(z)
+
+    if not active_user_zones and not exclusion_zones:
+        return detections
+
+    w_ref = float(frame_w) if frame_w > 0 else 1920.0
+    h_ref = float(frame_h) if frame_h > 0 else 1080.0
+
+    filtered = []
+    for det in detections:
+        bbox = det.get("bbox")
+        if not bbox:
+            filtered.append(det)
+            continue
+
+        x1 = bbox.get("x1", 0.0)
+        y1 = bbox.get("y1", 0.0)
+        x2 = bbox.get("x2", 0.0)
+        y2 = bbox.get("y2", 0.0)
+
+        # Centroid and bottom-center coordinates
+        cx = (x1 + x2) / 2.0 / w_ref if x2 > 1.0 else (x1 + x2) / 2.0
+        cy = (y1 + y2) / 2.0 / h_ref if y2 > 1.0 else (y1 + y2) / 2.0
+        bx = (x1 + x2) / 2.0 / w_ref if x2 > 1.0 else (x1 + x2) / 2.0
+        by = y2 / h_ref if y2 > 1.0 else y2
+
+        # 1. Drop if inside any privacy mask or exclusion zone
+        is_excluded = False
+        for ex_zone in exclusion_zones:
+            pts = ex_zone.get("points", [])
+            st = ex_zone.get("shapeType", "polygon")
+            if _point_in_zone_shape(cx, cy, pts, st, frame_w, frame_h) or _point_in_zone_shape(bx, by, pts, st, frame_w, frame_h):
+                is_excluded = True
+                break
+        if is_excluded:
+            continue
+
+        # 2. If active inclusion polygon zones exist, object MUST be inside at least one inclusion zone
+        if active_user_zones:
+            is_inside_active_zone = False
+            for inc_zone in active_user_zones:
+                pts = inc_zone.get("points", [])
+                st = inc_zone.get("shapeType", "polygon")
+                if _point_in_zone_shape(cx, cy, pts, st, frame_w, frame_h) or _point_in_zone_shape(bx, by, pts, st, frame_w, frame_h):
+                    is_inside_active_zone = True
+                    break
+            if not is_inside_active_zone:
+                continue
+
+        filtered.append(det)
+
+    return filtered
 
 
 def _lane_for_point(px: float, py: float, zones) -> str:

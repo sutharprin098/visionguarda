@@ -24,7 +24,7 @@ from app.storage import insert_alert, insert_history_record
 from app.recorder import CCTVRecorder
 from app.analytics import (
     CameraAnalytics, VEHICLE_CLASSES, _object_category, _point_in_zone_shape,
-    PROFILE_CLASSES, filter_by_features,
+    filter_detections_by_user_zones, PROFILE_CLASSES, filter_by_features,
 )
 from app.config import RECORDINGS_DIR, HELMET_INTERVAL_S, ANPR_INTERVAL_S, TARGET_FPS, MJPEG_MAX_FPS
 from app.gpu_monitor import get_gpu_stats
@@ -2776,30 +2776,11 @@ class PipelineCoordinator:
                 # User Polygon Zone Gate
                 # Only detect/track/analyze objects whose centroid or bottom position
                 # falls inside user-defined active zone polygons when zones exist.
-                active_user_zones = [
-                    z for z in self.zones
-                    if z.get("points") and len(z.get("points")) >= 3
-                    and str(z.get("zoneType", "")).lower() not in ("privacy_mask", "exclusion_zone", "heatmap_area")
-                ]
-
-                if active_user_zones and detections:
-                    kept = []
-                    for i, det in enumerate(detections):
-                        cx = (det["bbox"]["x1"] + det["bbox"]["x2"]) / 2.0 / orig_w
-                        cy = (det["bbox"]["y1"] + det["bbox"]["y2"]) / 2.0 / orig_h
-                        bx = (det["bbox"]["x1"] + det["bbox"]["x2"]) / 2.0 / orig_w
-                        by = det["bbox"]["y2"] / orig_h
-                        inside = any(
-                            _point_in_zone_shape(cx, cy, z["points"], z.get("shapeType", "polygon")) or
-                            _point_in_zone_shape(bx, by, z["points"], z.get("shapeType", "polygon"))
-                            for z in active_user_zones
-                        )
-                        if inside:
-                            kept.append(i)
-
-                    if len(kept) != len(detections):
-                        detections = [detections[i] for i in kept]
-                        masks_polygons = [masks_polygons[i] for i in kept] if masks_polygons else masks_polygons
+                if self.zones and detections:
+                    num_before = len(detections)
+                    detections = filter_detections_by_user_zones(detections, self.zones, orig_w, orig_h)
+                    if len(detections) != num_before and masks_polygons:
+                        masks_polygons = masks_polygons[:len(detections)]
 
                 self._last_infer_ts = time.time()
 
@@ -3174,43 +3155,9 @@ class PipelineCoordinator:
                 zone_profile=self.zone_profile, profile_features=self.profile_features
             )
 
-            # Restrict detections ONLY to explicit ROI zones (if defined) or apply privacy masks/exclusion zones
-            if self.zones:
-                _incl_zones = [
-                    z for z in self.zones
-                    if (z.get("roi") or z.get("zoneType") in ("roi", "roi_zone"))
-                    and len(z.get("points", [])) >= 2
-                ]
-                _zone_filtered = []
-                for det in detections:
-                    bbox = det["bbox"]
-                    cx = (bbox["x1"] + bbox["x2"]) / 2.0 / orig_w
-                    cy = (bbox["y1"] + bbox["y2"]) / 2.0 / orig_h
-                    bottom_y = bbox["y2"] / orig_h
-
-                    is_masked = False
-                    for z in self.zones:
-                        if z.get("zoneType") in ("privacy_mask", "exclusion_zone"):
-                            pts = z.get("points", [])
-                            st = z.get("shapeType", "polygon")
-                            if len(pts) >= 2 and _point_in_zone_shape(cx, cy, pts, st):
-                                is_masked = True
-                                break
-                    if is_masked:
-                        continue
-
-                    if _incl_zones:
-                        in_any = False
-                        for z in _incl_zones:
-                            pts = z.get("points", [])
-                            st = z.get("shapeType", "polygon")
-                            if _point_in_zone_shape(cx, cy, pts, st) or _point_in_zone_shape(cx, bottom_y, pts, st):
-                                in_any = True
-                                break
-                        if not in_any:
-                            continue
-                    _zone_filtered.append(det)
-                detections = _zone_filtered
+            # Restrict detections ONLY to user polygon zones (if defined) or apply privacy masks/exclusion zones
+            if self.zones and detections:
+                detections = filter_detections_by_user_zones(detections, self.zones, orig_w, orig_h)
 
             # Why speed is/isn't a number, decided once per frame
             # "Speed Estimation" is a per-camera zone-profile toggle

@@ -1,12 +1,12 @@
 Category,Metric,Measured Value,Condition / Unit
-Detection,Precision,95.29%,Day / Night / Mixed
-Detection,Recall,80.2%,Day / Night / Mixed
-Detection,F1 Score,87.1%,Day / Night / Mixed
-Detection,mAP@0.50,76.42%,IoU >= 0.50
-Detection,mAP@0.50:0.95,67.18%,IoU Step 0.05
-Tracking,HOTA,91.74%,Multi-Object Tracking
-Tracking,IDF1,91.4%,Identification F1
-Tracking,MOTA,84.16%,MOT Accuracy
+Detection,Precision,97.75%,Day / Night / Mixed
+Detection,Recall,86.14%,Day / Night / Mixed
+Detection,F1 Score,91.58%,Day / Night / Mixed
+Detection,mAP@0.50,84.2%,IoU >= 0.50
+Detection,mAP@0.50:0.95,74.06%,IoU Step 0.05
+Tracking,HOTA,93.87%,Multi-Object Tracking
+Tracking,IDF1,93.68%,Identification F1
+Tracking,MOTA,88.12%,MOT Accuracy
 Tracking,ID Switches,0,Count
 ANPR,Plate Detection F1,100.0%,LPD-YuNet
 ANPR,Exact Match Accuracy,100.0%,CRNN OCR
@@ -17,6 +17,6 @@ Speed,Status / MAE,VALID,km/h
 Event Analytics,Event Precision,100.0%,Tripwire / Intrusion
 Event Analytics,Event Recall,100.0%,Tripwire / Intrusion
 Performance,Stream FPS,36.5 FPS,Single Stream Decoupled
-Performance,P50 Latency,2030.65 ms,Inference + Pipeline
-Performance,P95 Latency,4063.0 ms,Inference + Pipeline
-Performance,P99 Latency,5222.4 ms,Inference + Pipeline
+Performance,P50 Latency,3599.75 ms,Inference + Pipeline
+Performance,P95 Latency,4142.05 ms,Inference + Pipeline
+Performance,P99 Latency,5114.45 ms,Inference + Pipeline

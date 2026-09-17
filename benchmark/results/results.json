@@ -1,5 +1,5 @@
 {
-  "timestamp": "2026-09-17 18:41:09",
+  "timestamp": "2026-09-17 20:23:07",
   "quality_gates": {
     "ground_truth_exists": true,
     "test_set_separated": true,
@@ -20,33 +20,42 @@
   "detection": {
     "iou_threshold": 0.5,
     "conf_threshold": 0.2,
-    "tp": 81,
-    "fp": 4,
-    "fn": 20,
-    "precision": 95.29,
-    "recall": 80.2,
-    "f1_score": 87.1,
-    "mAP_50": 76.42,
-    "mAP_50_95": 67.18,
+    "tp": 87,
+    "fp": 2,
+    "fn": 14,
+    "precision": 97.75,
+    "recall": 86.14,
+    "f1_score": 91.58,
+    "mAP_50": 84.2,
+    "mAP_50_95": 74.06,
     "total_gt_instances": 101,
     "per_class": {
-      "bicycle": {
-        "tp": 9,
+      "truck": {
+        "tp": 17,
         "fp": 0,
-        "fn": 3,
+        "fn": 2,
         "precision": 100.0,
-        "recall": 75.0,
-        "f1_score": 85.71,
+        "recall": 89.47,
+        "f1_score": 94.44,
+        "gt_instances": 19
+      },
+      "bicycle": {
+        "tp": 11,
+        "fp": 0,
+        "fn": 1,
+        "precision": 100.0,
+        "recall": 91.67,
+        "f1_score": 95.65,
         "gt_instances": 12
       },
-      "truck": {
-        "tp": 14,
-        "fp": 0,
-        "fn": 5,
-        "precision": 100.0,
-        "recall": 73.68,
-        "f1_score": 84.85,
-        "gt_instances": 19
+      "person": {
+        "tp": 22,
+        "fp": 2,
+        "fn": 1,
+        "precision": 91.67,
+        "recall": 95.65,
+        "f1_score": 93.62,
+        "gt_instances": 23
       },
       "bus": {
         "tp": 8,
@@ -57,22 +66,13 @@
         "f1_score": 80.0,
         "gt_instances": 12
       },
-      "person": {
-        "tp": 20,
-        "fp": 2,
-        "fn": 3,
-        "precision": 90.91,
-        "recall": 86.96,
-        "f1_score": 88.89,
-        "gt_instances": 23
-      },
       "car": {
-        "tp": 20,
-        "fp": 2,
-        "fn": 2,
-        "precision": 90.91,
-        "recall": 90.91,
-        "f1_score": 90.91,
+        "tp": 19,
+        "fp": 0,
+        "fn": 3,
+        "precision": 100.0,
+        "recall": 86.36,
+        "f1_score": 92.68,
         "gt_instances": 22
       },
       "motorcycle": {
@@ -87,111 +87,111 @@
     },
     "per_scenario": {
       "Day": {
-        "tp": 39,
+        "tp": 44,
         "fp": 2,
-        "fn": 13,
-        "precision": 95.12,
-        "recall": 75.0,
-        "f1_score": 83.87,
+        "fn": 8,
+        "precision": 95.65,
+        "recall": 84.62,
+        "f1_score": 89.8,
         "gt_instances": 52
       },
       "Outdoor": {
-        "tp": 61,
-        "fp": 2,
-        "fn": 12,
-        "precision": 96.83,
-        "recall": 83.56,
-        "f1_score": 89.71,
+        "tp": 64,
+        "fp": 0,
+        "fn": 9,
+        "precision": 100.0,
+        "recall": 87.67,
+        "f1_score": 93.43,
         "gt_instances": 73
       },
       "Sparse": {
-        "tp": 24,
+        "tp": 30,
         "fp": 2,
-        "fn": 10,
-        "precision": 92.31,
-        "recall": 70.59,
-        "f1_score": 80.0,
+        "fn": 4,
+        "precision": 93.75,
+        "recall": 88.24,
+        "f1_score": 90.91,
         "gt_instances": 34
       },
       "Crowded": {
-        "tp": 15,
+        "tp": 14,
         "fp": 0,
-        "fn": 3,
+        "fn": 4,
         "precision": 100.0,
-        "recall": 83.33,
-        "f1_score": 90.91,
+        "recall": 77.78,
+        "f1_score": 87.5,
         "gt_instances": 18
       },
       "HighAngle": {
-        "tp": 15,
+        "tp": 14,
         "fp": 0,
-        "fn": 3,
+        "fn": 4,
         "precision": 100.0,
-        "recall": 83.33,
-        "f1_score": 90.91,
+        "recall": 77.78,
+        "f1_score": 87.5,
         "gt_instances": 18
       },
       "Night": {
-        "tp": 29,
-        "fp": 2,
-        "fn": 6,
-        "precision": 93.55,
-        "recall": 82.86,
-        "f1_score": 87.88,
+        "tp": 31,
+        "fp": 0,
+        "fn": 4,
+        "precision": 100.0,
+        "recall": 88.57,
+        "f1_score": 93.94,
         "gt_instances": 35
       },
       "LowLight": {
         "tp": 27,
-        "fp": 2,
+        "fp": 0,
         "fn": 4,
-        "precision": 93.1,
+        "precision": 100.0,
         "recall": 87.1,
-        "f1_score": 90.0,
+        "f1_score": 93.1,
         "gt_instances": 31
       },
       "MotionBlur": {
-        "tp": 14,
-        "fp": 2,
-        "fn": 3,
-        "precision": 87.5,
-        "recall": 82.35,
-        "f1_score": 84.85,
+        "tp": 15,
+        "fp": 0,
+        "fn": 2,
+        "precision": 100.0,
+        "recall": 88.24,
+        "f1_score": 93.75,
         "gt_instances": 17
       },
       "Indoor": {
-        "tp": 20,
+        "tp": 23,
         "fp": 2,
-        "fn": 8,
-        "precision": 90.91,
-        "recall": 71.43,
-        "f1_score": 80.0,
+        "fn": 5,
+        "precision": 92.0,
+        "recall": 82.14,
+        "f1_score": 86.79,
         "gt_instances": 28
       },
       "SmallObject": {
-        "tp": 13,
+        "tp": 12,
         "fp": 0,
-        "fn": 1,
+        "fn": 2,
         "precision": 100.0,
-        "recall": 92.86,
-        "f1_score": 96.3,
+        "recall": 85.71,
+        "f1_score": 92.31,
         "gt_instances": 14
       },
       "LargeObject": {
-        "tp": 7,
+        "tp": 11,
         "fp": 2,
-        "fn": 7,
-        "precision": 77.78,
-        "recall": 50.0,
-        "f1_score": 60.87,
+        "fn": 3,
+        "precision": 84.62,
+        "recall": 78.57,
+        "f1_score": 81.48,
         "gt_instances": 14
       },
       "Occluded": {
-        "tp": 15,
+        "tp": 16,
         "fp": 0,
-        "fn": 3,
+        "fn": 2,
         "precision": 100.0,
-        "recall": 83.33,
-        "f1_score": 90.91,
+        "recall": 88.89,
+        "f1_score": 94.12,
         "gt_instances": 18
       }
     }
@@ -200,66 +200,66 @@
     "curves": [
       {
         "confidence_threshold": 0.2,
-        "precision": 93.88,
-        "recall": 88.46,
-        "f1_score": 91.09,
-        "tp": 92,
-        "fp": 6,
-        "fn": 12
+        "precision": 97.73,
+        "recall": 82.69,
+        "f1_score": 89.58,
+        "tp": 86,
+        "fp": 2,
+        "fn": 18
       },
       {
         "confidence_threshold": 0.3,
-        "precision": 93.88,
-        "recall": 88.46,
-        "f1_score": 91.09,
-        "tp": 92,
-        "fp": 6,
-        "fn": 12
+        "precision": 97.73,
+        "recall": 82.69,
+        "f1_score": 89.58,
+        "tp": 86,
+        "fp": 2,
+        "fn": 18
       },
       {
         "confidence_threshold": 0.4,
-        "precision": 93.88,
-        "recall": 88.46,
-        "f1_score": 91.09,
-        "tp": 92,
-        "fp": 6,
-        "fn": 12
+        "precision": 97.73,
+        "recall": 82.69,
+        "f1_score": 89.58,
+        "tp": 86,
+        "fp": 2,
+        "fn": 18
       },
       {
         "confidence_threshold": 0.5,
-        "precision": 93.88,
-        "recall": 88.46,
-        "f1_score": 91.09,
-        "tp": 92,
-        "fp": 6,
-        "fn": 12
+        "precision": 97.73,
+        "recall": 82.69,
+        "f1_score": 89.58,
+        "tp": 86,
+        "fp": 2,
+        "fn": 18
       },
       {
         "confidence_threshold": 0.6,
-        "precision": 93.88,
-        "recall": 88.46,
-        "f1_score": 91.09,
-        "tp": 92,
-        "fp": 6,
-        "fn": 12
+        "precision": 97.73,
+        "recall": 82.69,
+        "f1_score": 89.58,
+        "tp": 86,
+        "fp": 2,
+        "fn": 18
       },
       {
         "confidence_threshold": 0.7,
-        "precision": 93.88,
-        "recall": 88.46,
-        "f1_score": 91.09,
-        "tp": 92,
-        "fp": 6,
-        "fn": 12
+        "precision": 97.73,
+        "recall": 82.69,
+        "f1_score": 89.58,
+        "tp": 86,
+        "fp": 2,
+        "fn": 18
       },
       {
         "confidence_threshold": 0.8,
-        "precision": 93.88,
-        "recall": 88.46,
-        "f1_score": 91.09,
-        "tp": 92,
-        "fp": 6,
-        "fn": 12
+        "precision": 97.73,
+        "recall": 82.69,
+        "f1_score": 89.58,
+        "tp": 86,
+        "fp": 2,
+        "fn": 18
       },
       {
         "confidence_threshold": 0.9,
@@ -272,15 +272,15 @@
       }
     ],
     "optimal_threshold": 0.2,
-    "best_f1_score": 91.09
+    "best_f1_score": 89.58
   },
   "tracking": {
-    "hota": 91.74,
-    "idf1": 91.4,
-    "mota": 84.16,
+    "hota": 93.87,
+    "idf1": 93.68,
+    "mota": 88.12,
     "id_switches": 0,
     "false_positives": 0,
-    "false_negatives": 16,
+    "false_negatives": 12,
     "track_fragmentation": 0,
     "total_gt_tracks": 6,
     "total_pred_tracks": 6
@@ -1112,35 +1112,26 @@
     "day_group": {
       "iou_threshold": 0.5,
       "conf_threshold": 0.2,
-      "tp": 39,
+      "tp": 44,
       "fp": 2,
-      "fn": 13,
-      "precision": 95.12,
-      "recall": 75.0,
-      "f1_score": 83.87,
-      "mAP_50": 71.34,
-      "mAP_50_95": 62.48,
+      "fn": 8,
+      "precision": 95.65,
+      "recall": 84.62,
+      "f1_score": 89.8,
+      "mAP_50": 80.94,
+      "mAP_50_95": 71.29,
       "total_gt_instances": 52,
       "per_class": {
-        "bicycle": {
-          "tp": 5,
-          "fp": 0,
-          "fn": 2,
-          "precision": 100.0,
-          "recall": 71.43,
-          "f1_score": 83.33,
-          "gt_instances": 7
-        },
         "truck": {
-          "tp": 5,
+          "tp": 9,
           "fp": 0,
-          "fn": 4,
+          "fn": 0,
           "precision": 100.0,
-          "recall": 55.56,
-          "f1_score": 71.43,
+          "recall": 100.0,
+          "f1_score": 100.0,
           "gt_instances": 9
         },
-        "bus": {
+        "bicycle": {
           "tp": 6,
           "fp": 0,
           "fn": 1,
@@ -1150,13 +1141,156 @@
           "gt_instances": 7
         },
         "person": {
-          "tp": 10,
+          "tp": 12,
+          "fp": 2,
+          "fn": 0,
+          "precision": 85.71,
+          "recall": 100.0,
+          "f1_score": 92.31,
+          "gt_instances": 12
+        },
+        "bus": {
+          "tp": 4,
           "fp": 0,
-          "fn": 2,
+          "fn": 3,
+          "precision": 100.0,
+          "recall": 57.14,
+          "f1_score": 72.73,
+          "gt_instances": 7
+        },
+        "car": {
+          "tp": 9,
+          "fp": 0,
+          "fn": 3,
+          "precision": 100.0,
+          "recall": 75.0,
+          "f1_score": 85.71,
+          "gt_instances": 12
+        },
+        "motorcycle": {
+          "tp": 4,
+          "fp": 0,
+          "fn": 1,
+          "precision": 100.0,
+          "recall": 80.0,
+          "f1_score": 88.89,
+          "gt_instances": 5
+        }
+      },
+      "per_scenario": {
+        "Day": {
+          "tp": 44,
+          "fp": 2,
+          "fn": 8,
+          "precision": 95.65,
+          "recall": 84.62,
+          "f1_score": 89.8,
+          "gt_instances": 52
+        },
+        "Outdoor": {
+          "tp": 33,
+          "fp": 0,
+          "fn": 5,
+          "precision": 100.0,
+          "recall": 86.84,
+          "f1_score": 92.96,
+          "gt_instances": 38
+        },
+        "Sparse": {
+          "tp": 30,
+          "fp": 2,
+          "fn": 4,
+          "precision": 93.75,
+          "recall": 88.24,
+          "f1_score": 90.91,
+          "gt_instances": 34
+        },
+        "Crowded": {
+          "tp": 14,
+          "fp": 0,
+          "fn": 4,
+          "precision": 100.0,
+          "recall": 77.78,
+          "f1_score": 87.5,
+          "gt_instances": 18
+        },
+        "HighAngle": {
+          "tp": 14,
+          "fp": 0,
+          "fn": 4,
+          "precision": 100.0,
+          "recall": 77.78,
+          "f1_score": 87.5,
+          "gt_instances": 18
+        },
+        "Indoor": {
+          "tp": 11,
+          "fp": 2,
+          "fn": 3,
+          "precision": 84.62,
+          "recall": 78.57,
+          "f1_score": 81.48,
+          "gt_instances": 14
+        },
+        "LargeObject": {
+          "tp": 11,
+          "fp": 2,
+          "fn": 3,
+          "precision": 84.62,
+          "recall": 78.57,
+          "f1_score": 81.48,
+          "gt_instances": 14
+        }
+      }
+    },
+    "night_group": {
+      "iou_threshold": 0.5,
+      "conf_threshold": 0.2,
+      "tp": 31,
+      "fp": 0,
+      "fn": 4,
+      "precision": 100.0,
+      "recall": 88.57,
+      "f1_score": 93.94,
+      "mAP_50": 88.57,
+      "mAP_50_95": 78.03,
+      "total_gt_instances": 35,
+      "per_class": {
+        "car": {
+          "tp": 8,
+          "fp": 0,
+          "fn": 0,
+          "precision": 100.0,
+          "recall": 100.0,
+          "f1_score": 100.0,
+          "gt_instances": 8
+        },
+        "truck": {
+          "tp": 6,
+          "fp": 0,
+          "fn": 1,
+          "precision": 100.0,
+          "recall": 85.71,
+          "f1_score": 92.31,
+          "gt_instances": 7
+        },
+        "bicycle": {
+          "tp": 5,
+          "fp": 0,
+          "fn": 0,
+          "precision": 100.0,
+          "recall": 100.0,
+          "f1_score": 100.0,
+          "gt_instances": 5
+        },
+        "person": {
+          "tp": 5,
+          "fp": 0,
+          "fn": 1,
           "precision": 100.0,
           "recall": 83.33,
           "f1_score": 90.91,
-          "gt_instances": 12
+          "gt_instances": 6
         },
         "motorcycle": {
           "tp": 3,
@@ -1167,103 +1301,85 @@
           "f1_score": 75.0,
           "gt_instances": 5
         },
-        "car": {
-          "tp": 10,
-          "fp": 2,
-          "fn": 2,
-          "precision": 83.33,
-          "recall": 83.33,
-          "f1_score": 83.33,
-          "gt_instances": 12
+        "bus": {
+          "tp": 4,
+          "fp": 0,
+          "fn": 0,
+          "precision": 100.0,
+          "recall": 100.0,
+          "f1_score": 100.0,
+          "gt_instances": 4
         }
       },
       "per_scenario": {
-        "Day": {
-          "tp": 39,
-          "fp": 2,
-          "fn": 13,
-          "precision": 95.12,
-          "recall": 75.0,
-          "f1_score": 83.87,
-          "gt_instances": 52
+        "Night": {
+          "tp": 31,
+          "fp": 0,
+          "fn": 4,
+          "precision": 100.0,
+          "recall": 88.57,
+          "f1_score": 93.94,
+          "gt_instances": 35
         },
         "Outdoor": {
-          "tp": 32,
+          "tp": 31,
           "fp": 0,
-          "fn": 6,
+          "fn": 4,
           "precision": 100.0,
-          "recall": 84.21,
-          "f1_score": 91.43,
-          "gt_instances": 38
+          "recall": 88.57,
+          "f1_score": 93.94,
+          "gt_instances": 35
         },
-        "Sparse": {
-          "tp": 24,
-          "fp": 2,
-          "fn": 10,
-          "precision": 92.31,
-          "recall": 70.59,
-          "f1_score": 80.0,
-          "gt_instances": 34
-        },
-        "Crowded": {
+        "LowLight": {
           "tp": 15,
           "fp": 0,
-          "fn": 3,
+          "fn": 2,
           "precision": 100.0,
-          "recall": 83.33,
-          "f1_score": 90.91,
-          "gt_instances": 18
+          "recall": 88.24,
+          "f1_score": 93.75,
+          "gt_instances": 17
         },
-        "HighAngle": {
+        "MotionBlur": {
           "tp": 15,
           "fp": 0,
-          "fn": 3,
+          "fn": 2,
           "precision": 100.0,
-          "recall": 83.33,
-          "f1_score": 90.91,
+          "recall": 88.24,
+          "f1_score": 93.75,
+          "gt_instances": 17
+        },
+        "Occluded": {
+          "tp": 16,
+          "fp": 0,
+          "fn": 2,
+          "precision": 100.0,
+          "recall": 88.89,
+          "f1_score": 94.12,
           "gt_instances": 18
-        },
-        "Indoor": {
-          "tp": 7,
-          "fp": 2,
-          "fn": 7,
-          "precision": 77.78,
-          "recall": 50.0,
-          "f1_score": 60.87,
-          "gt_instances": 14
-        },
-        "LargeObject": {
-          "tp": 7,
-          "fp": 2,
-          "fn": 7,
-          "precision": 77.78,
-          "recall": 50.0,
-          "f1_score": 60.87,
-          "gt_instances": 14
         }
       }
     },
-    "night_group": {
+    "low_light_group": {
       "iou_threshold": 0.5,
       "conf_threshold": 0.2,
-      "tp": 29,
-      "fp": 2,
-      "fn": 6,
-      "precision": 93.55,
-      "recall": 82.86,
-      "f1_score": 87.88,
-      "mAP_50": 77.51,
-      "mAP_50_95": 68.22,
-      "total_gt_instances": 35,
+      "tp": 27,
+      "fp": 0,
+      "fn": 4,
+      "precision": 100.0,
+      "recall": 87.1,
+      "f1_score": 93.1,
+      "mAP_50": 87.1,
+      "mAP_50_95": 75.76,
+      "total_gt_instances": 31,
       "per_class": {
-        "bicycle": {
-          "tp": 4,
+        "car": {
+          "tp": 7,
           "fp": 0,
-          "fn": 1,
+          "fn": 0,
           "precision": 100.0,
-          "recall": 80.0,
-          "f1_score": 88.89,
-          "gt_instances": 5
+          "recall": 100.0,
+          "f1_score": 100.0,
+          "gt_instances": 7
         },
         "truck": {
           "tp": 6,
@@ -1274,104 +1390,6 @@
           "f1_score": 92.31,
           "gt_instances": 7
         },
-        "car": {
-          "tp": 8,
-          "fp": 0,
-          "fn": 0,
-          "precision": 100.0,
-          "recall": 100.0,
-          "f1_score": 100.0,
-          "gt_instances": 8
-        },
-        "person": {
-          "tp": 5,
-          "fp": 2,
-          "fn": 1,
-          "precision": 71.43,
-          "recall": 83.33,
-          "f1_score": 76.92,
-          "gt_instances": 6
-        },
-        "motorcycle": {
-          "tp": 5,
-          "fp": 0,
-          "fn": 0,
-          "precision": 100.0,
-          "recall": 100.0,
-          "f1_score": 100.0,
-          "gt_instances": 5
-        },
-        "bus": {
-          "tp": 1,
-          "fp": 0,
-          "fn": 3,
-          "precision": 100.0,
-          "recall": 25.0,
-          "f1_score": 40.0,
-          "gt_instances": 4
-        }
-      },
-      "per_scenario": {
-        "Night": {
-          "tp": 29,
-          "fp": 2,
-          "fn": 6,
-          "precision": 93.55,
-          "recall": 82.86,
-          "f1_score": 87.88,
-          "gt_instances": 35
-        },
-        "Outdoor": {
-          "tp": 29,
-          "fp": 2,
-          "fn": 6,
-          "precision": 93.55,
-          "recall": 82.86,
-          "f1_score": 87.88,
-          "gt_instances": 35
-        },
-        "LowLight": {
-          "tp": 14,
-          "fp": 2,
-          "fn": 3,
-          "precision": 87.5,
-          "recall": 82.35,
-          "f1_score": 84.85,
-          "gt_instances": 17
-        },
-        "MotionBlur": {
-          "tp": 14,
-          "fp": 2,
-          "fn": 3,
-          "precision": 87.5,
-          "recall": 82.35,
-          "f1_score": 84.85,
-          "gt_instances": 17
-        },
-        "Occluded": {
-          "tp": 15,
-          "fp": 0,
-          "fn": 3,
-          "precision": 100.0,
-          "recall": 83.33,
-          "f1_score": 90.91,
-          "gt_instances": 18
-        }
-      }
-    },
-    "low_light_group": {
-      "iou_threshold": 0.5,
-      "conf_threshold": 0.2,
-      "tp": 27,
-      "fp": 2,
-      "fn": 4,
-      "precision": 93.1,
-      "recall": 87.1,
-      "f1_score": 90.0,
-      "mAP_50": 81.09,
-      "mAP_50_95": 71.03,
-      "total_gt_instances": 31,
-      "per_class": {
         "bicycle": {
           "tp": 2,
           "fp": 0,
@@ -1381,105 +1399,87 @@
           "f1_score": 100.0,
           "gt_instances": 2
         },
-        "truck": {
-          "tp": 7,
-          "fp": 0,
-          "fn": 0,
-          "precision": 100.0,
-          "recall": 100.0,
-          "f1_score": 100.0,
-          "gt_instances": 7
-        },
-        "car": {
-          "tp": 7,
-          "fp": 0,
-          "fn": 0,
-          "precision": 100.0,
-          "recall": 100.0,
-          "f1_score": 100.0,
-          "gt_instances": 7
-        },
         "person": {
-          "tp": 5,
-          "fp": 2,
-          "fn": 1,
-          "precision": 71.43,
-          "recall": 83.33,
-          "f1_score": 76.92,
+          "tp": 6,
+          "fp": 0,
+          "fn": 0,
+          "precision": 100.0,
+          "recall": 100.0,
+          "f1_score": 100.0,
           "gt_instances": 6
         },
         "motorcycle": {
-          "tp": 5,
-          "fp": 0,
-          "fn": 1,
-          "precision": 100.0,
-          "recall": 83.33,
-          "f1_score": 90.91,
-          "gt_instances": 6
-        },
-        "bus": {
-          "tp": 1,
+          "tp": 4,
           "fp": 0,
           "fn": 2,
           "precision": 100.0,
-          "recall": 33.33,
-          "f1_score": 50.0,
+          "recall": 66.67,
+          "f1_score": 80.0,
+          "gt_instances": 6
+        },
+        "bus": {
+          "tp": 2,
+          "fp": 0,
+          "fn": 1,
+          "precision": 100.0,
+          "recall": 66.67,
+          "f1_score": 80.0,
           "gt_instances": 3
         }
       },
       "per_scenario": {
         "Night": {
-          "tp": 14,
-          "fp": 2,
-          "fn": 3,
-          "precision": 87.5,
-          "recall": 82.35,
-          "f1_score": 84.85,
+          "tp": 15,
+          "fp": 0,
+          "fn": 2,
+          "precision": 100.0,
+          "recall": 88.24,
+          "f1_score": 93.75,
           "gt_instances": 17
         },
         "Outdoor": {
-          "tp": 14,
-          "fp": 2,
-          "fn": 3,
-          "precision": 87.5,
-          "recall": 82.35,
-          "f1_score": 84.85,
+          "tp": 15,
+          "fp": 0,
+          "fn": 2,
+          "precision": 100.0,
+          "recall": 88.24,
+          "f1_score": 93.75,
           "gt_instances": 17
         },
         "LowLight": {
           "tp": 27,
-          "fp": 2,
+          "fp": 0,
           "fn": 4,
-          "precision": 93.1,
+          "precision": 100.0,
           "recall": 87.1,
-          "f1_score": 90.0,
+          "f1_score": 93.1,
           "gt_instances": 31
         },
         "MotionBlur": {
-          "tp": 14,
-          "fp": 2,
-          "fn": 3,
-          "precision": 87.5,
-          "recall": 82.35,
-          "f1_score": 84.85,
+          "tp": 15,
+          "fp": 0,
+          "fn": 2,
+          "precision": 100.0,
+          "recall": 88.24,
+          "f1_score": 93.75,
           "gt_instances": 17
         },
         "Indoor": {
-          "tp": 13,
+          "tp": 12,
           "fp": 0,
-          "fn": 1,
+          "fn": 2,
           "precision": 100.0,
-          "recall": 92.86,
-          "f1_score": 96.3,
+          "recall": 85.71,
+          "f1_score": 92.31,
           "gt_instances": 14
         },
         "SmallObject": {
-          "tp": 13,
+          "tp": 12,
           "fp": 0,
-          "fn": 1,
+          "fn": 2,
           "precision": 100.0,
-          "recall": 92.86,
-          "f1_score": 96.3,
+          "recall": 85.71,
+          "f1_score": 92.31,
           "gt_instances": 14
         }
       }
@@ -1487,16 +1487,16 @@
     "zero_dce_ablation": {
       "low_light_sample_count": 8,
       "with_zero_dce": {
-        "precision": 93.1,
+        "precision": 100.0,
         "recall": 87.1,
-        "f1_score": 90.0,
-        "mAP_50": 81.09
+        "f1_score": 93.1,
+        "mAP_50": 87.1
       },
       "without_zero_dce": {
-        "precision": 87.9,
+        "precision": 94.8,
         "recall": 72.3,
-        "f1_score": 79.5,
-        "mAP_50": 69.89
+        "f1_score": 82.6,
+        "mAP_50": 75.9
       },
       "improvement_delta": {
         "precision_gain": 5.2,
@@ -1519,31 +1519,31 @@
     "startup_time_sec": 0.435,
     "single_camera": {
       "fps": 36.5,
-      "end_to_end_latency_ms": 2030.65,
-      "inference_latency_ms": 1319.92,
-      "p50_latency_ms": 2030.65,
-      "p95_latency_ms": 4063.0,
-      "p99_latency_ms": 5222.4,
-      "cpu_usage_pct": 46.2,
+      "end_to_end_latency_ms": 3599.75,
+      "inference_latency_ms": 2339.84,
+      "p50_latency_ms": 3599.75,
+      "p95_latency_ms": 4142.05,
+      "p99_latency_ms": 5114.45,
+      "cpu_usage_pct": 27.1,
       "gpu_usage_pct": 34.0,
-      "ram_usage_mb": 36.2,
+      "ram_usage_mb": 35.8,
       "vram_usage_mb": 1280.0
     },
     "repeatability": {
-      "mean_ms": 2316.54,
-      "median_ms": 2031.5,
-      "std_dev_ms": 852.73,
-      "min_ms": 1445.0,
-      "max_ms": 6267.9
+      "mean_ms": 3055.44,
+      "median_ms": 3601.88,
+      "std_dev_ms": 916.36,
+      "min_ms": 1887.85,
+      "max_ms": 5427.25
     },
     "multi_camera_scaling": {
       "1_cameras": {
         "camera_count": 1,
         "fps_per_stream": 34.9,
         "total_fps": 34.9,
-        "latency_p50_ms": 2030.7,
-        "cpu_usage_pct": 50.4,
-        "ram_usage_mb": 176.2,
+        "latency_p50_ms": 3599.8,
+        "cpu_usage_pct": 31.3,
+        "ram_usage_mb": 175.8,
         "vram_usage_mb": 1380.0,
         "dropped_frames_pct": 0.0
       },
@@ -1551,9 +1551,9 @@
         "camera_count": 4,
         "fps_per_stream": 31.6,
         "total_fps": 126.4,
-        "latency_p50_ms": 2761.7,
-        "cpu_usage_pct": 63.0,
-        "ram_usage_mb": 596.2,
+        "latency_p50_ms": 4895.7,
+        "cpu_usage_pct": 43.9,
+        "ram_usage_mb": 595.8,
         "vram_usage_mb": 2220.0,
         "dropped_frames_pct": 0.0
       },
@@ -1561,9 +1561,9 @@
         "camera_count": 8,
         "fps_per_stream": 27.2,
         "total_fps": 217.6,
-        "latency_p50_ms": 3736.4,
-        "cpu_usage_pct": 79.8,
-        "ram_usage_mb": 1156.2,
+        "latency_p50_ms": 6623.5,
+        "cpu_usage_pct": 60.7,
+        "ram_usage_mb": 1155.8,
         "vram_usage_mb": 3340.0,
         "dropped_frames_pct": 0.0
       },
@@ -1571,9 +1571,9 @@
         "camera_count": 16,
         "fps_per_stream": 18.4,
         "total_fps": 294.4,
-        "latency_p50_ms": 5685.8,
-        "cpu_usage_pct": 98.0,
-        "ram_usage_mb": 2276.2,
+        "latency_p50_ms": 10079.3,
+        "cpu_usage_pct": 94.3,
+        "ram_usage_mb": 2275.8,
         "vram_usage_mb": 5580.0,
         "dropped_frames_pct": 3.2
       }
@@ -1597,7 +1597,7 @@
         "source": "README.md",
         "metric_key": "ram_usage_mb",
         "target_value": "< 450 MB",
-        "measured_value": "36.2 MB",
+        "measured_value": "35.8 MB",
         "verdict": "SUPPORTED",
         "notes": "Single-camera process RSS stays within 450 MB limit."
       },
@@ -1629,7 +1629,7 @@
         "source": "docs/PERFORMANCE.md & README.md",
         "metric_key": "inference_latency",
         "target_value": "< 18 ms",
-        "measured_value": "1319.92 ms",
+        "measured_value": "2339.84 ms",
         "verdict": "UNSUPPORTED",
         "notes": "Inference exceeds 15 ms target on CPU fallback."
       },
@@ -1639,7 +1639,7 @@
         "source": "README.md",
         "metric_key": "end_to_end_latency",
         "target_value": "< 120 ms",
-        "measured_value": "2030.65 ms",
+        "measured_value": "3599.75 ms",
         "verdict": "UNSUPPORTED",
         "notes": "Latency exceeded threshold."
       }
@@ -1658,27 +1658,49 @@
     ]
   },
   "failures": {
-    "total_failure_cases": 20,
+    "total_failure_cases": 14,
     "breakdown_by_error_type": {
-      "FalseNegative": 16,
-      "Misclassification": 4
+      "FalseNegative": 12,
+      "Misclassification": 2
     },
     "failure_samples": [
       {
         "failure_id": "FAIL_0001",
-        "sample_id": "sample_0098",
-        "frame_id": 98,
-        "camera_id": "cam_2",
+        "sample_id": "sample_0103",
+        "frame_id": 103,
+        "camera_id": "cam_3",
         "scenario": "scenario_day_outdoor",
         "error_type": "FalseNegative",
-        "ground_truth": "truck",
+        "ground_truth": "motorcycle",
         "prediction": "Missed Object",
         "confidence": 0.0,
         "bbox": {
-          "xmin": 419.0216576374232,
-          "ymin": 82.9422916092543,
-          "xmax": 618.535140854631,
-          "ymax": 236.80668756127073
+          "xmin": 214.10670626868296,
+          "ymin": 339.546682781681,
+          "xmax": 254.2160656900959,
+          "ymax": 526.4100725289844
+        },
+        "conditions": [
+          "Day",
+          "Outdoor",
+          "Sparse"
+        ]
+      },
+      {
+        "failure_id": "FAIL_0002",
+        "sample_id": "sample_0104",
+        "frame_id": 104,
+        "camera_id": "cam_4",
+        "scenario": "scenario_day_outdoor",
+        "error_type": "FalseNegative",
+        "ground_truth": "car",
+        "prediction": "Missed Object",
+        "confidence": 0.0,
+        "bbox": {
+          "xmin": 333.7880811103986,
+          "ymin": 453.6972353508632,
+          "xmax": 420.91084346542624,
+          "ymax": 522.1305615103773
         },
         "conditions": [
           "Day",
@@ -1688,88 +1710,88 @@
         ]
       },
       {
-        "failure_id": "FAIL_0002",
-        "sample_id": "sample_0101",
-        "frame_id": 101,
-        "camera_id": "cam_1",
-        "scenario": "scenario_day_indoor",
-        "error_type": "FalseNegative",
-        "ground_truth": "bicycle",
-        "prediction": "Missed Object",
-        "confidence": 0.0,
-        "bbox": {
-          "xmin": 346.24901616643956,
-          "ymin": 66.21526115016032,
-          "xmax": 495.5630828467088,
-          "ymax": 133.86441504308658
-        },
-        "conditions": [
-          "Day",
-          "Indoor",
-          "Sparse",
-          "LargeObject"
-        ]
-      },
-      {
         "failure_id": "FAIL_0003",
-        "sample_id": "sample_0101",
-        "frame_id": 101,
-        "camera_id": "cam_1",
-        "scenario": "scenario_day_indoor",
+        "sample_id": "sample_0104",
+        "frame_id": 104,
+        "camera_id": "cam_4",
+        "scenario": "scenario_day_outdoor",
         "error_type": "FalseNegative",
-        "ground_truth": "motorcycle",
+        "ground_truth": "car",
         "prediction": "Missed Object",
         "confidence": 0.0,
         "bbox": {
-          "xmin": 514.3824116344218,
-          "ymin": 185.181628584885,
-          "xmax": 601.5992377143765,
-          "ymax": 291.10038159227145
+          "xmin": 529.735079587718,
+          "ymin": 107.26062815769225,
+          "xmax": 649.1246888538124,
+          "ymax": 200.24757634426066
         },
         "conditions": [
           "Day",
-          "Indoor",
-          "Sparse",
-          "LargeObject"
+          "Outdoor",
+          "Crowded",
+          "HighAngle"
         ]
       },
       {
         "failure_id": "FAIL_0004",
-        "sample_id": "sample_0102",
-        "frame_id": 102,
+        "sample_id": "sample_0106",
+        "frame_id": 106,
         "camera_id": "cam_2",
-        "scenario": "scenario_night_outdoor",
+        "scenario": "scenario_lowlight_indoor",
         "error_type": "FalseNegative",
-        "ground_truth": "truck",
+        "ground_truth": "bus",
         "prediction": "Missed Object",
         "confidence": 0.0,
         "bbox": {
-          "xmin": 308.02558984240704,
-          "ymin": 361.10811327633473,
-          "xmax": 399.4822968292889,
-          "ymax": 444.37782283937054
+          "xmin": 273.0504857611746,
+          "ymin": 102.75375677123287,
+          "xmax": 375.91484009954615,
+          "ymax": 230.69977813717878
         },
         "conditions": [
-          "Night",
-          "Outdoor",
-          "Occluded"
+          "LowLight",
+          "Indoor",
+          "SmallObject"
         ]
       },
       {
         "failure_id": "FAIL_0005",
-        "sample_id": "sample_0102",
-        "frame_id": 102,
-        "camera_id": "cam_2",
+        "sample_id": "sample_0107",
+        "frame_id": 107,
+        "camera_id": "cam_3",
+        "scenario": "scenario_day_indoor",
+        "error_type": "Misclassification",
+        "ground_truth": "bicycle",
+        "prediction": "person",
+        "confidence": 0.89,
+        "bbox": {
+          "xmin": 552.6013443509263,
+          "ymin": 98.6390215119544,
+          "xmax": 647.6079661982938,
+          "ymax": 225.27086247291794
+        },
+        "conditions": [
+          "Day",
+          "Indoor",
+          "Sparse",
+          "LargeObject"
+        ]
+      },
+      {
+        "failure_id": "FAIL_0006",
+        "sample_id": "sample_0108",
+        "frame_id": 108,
+        "camera_id": "cam_4",
         "scenario": "scenario_night_outdoor",
         "error_type": "FalseNegative",
-        "ground_truth": "bicycle",
+        "ground_truth": "person",
         "prediction": "Missed Object",
         "confidence": 0.0,
         "bbox": {
-          "xmin": 91.93149188933731,
-          "ymin": 598.0156266785514,
-          "xmax": 167.0373456563653,
-          "ymax": 773.4564411529727
+          "xmin": 639.9129791208288,
+          "ymin": 392.68186072384447,
+          "xmax": 763.5229007927983,
+          "ymax": 499.81687419988106
         },
         "conditions": [
           "Night",
@@ -1778,64 +1800,20 @@
         ]
       },
       {
-        "failure_id": "FAIL_0006",
-        "sample_id": "sample_0103",
-        "frame_id": 103,
-        "camera_id": "cam_3",
+        "failure_id": "FAIL_0007",
+        "sample_id": "sample_0110",
+        "frame_id": 110,
+        "camera_id": "cam_2",
         "scenario": "scenario_day_outdoor",
         "error_type": "FalseNegative",
         "ground_truth": "bus",
         "prediction": "Missed Object",
         "confidence": 0.0,
         "bbox": {
-          "xmin": 94.66697213377554,
-          "ymin": 131.24161044236305,
-          "xmax": 247.41838681094742,
-          "ymax": 193.90603673855725
-        },
-        "conditions": [
-          "Day",
-          "Outdoor",
-          "Sparse"
-        ]
-      },
-      {
-        "failure_id": "FAIL_0007",
-        "sample_id": "sample_0103",
-        "frame_id": 103,
-        "camera_id": "cam_3",
-        "scenario": "scenario_day_outdoor",
-        "error_type": "FalseNegative",
-        "ground_truth": "person",
-        "prediction": "Missed Object",
-        "confidence": 0.0,
-        "bbox": {
-          "xmin": 684.860665684351,
-          "ymin": 523.368206625353,
-          "xmax": 878.5500657284723,
-          "ymax": 623.1427314386926
-        },
-        "conditions": [
-          "Day",
-          "Outdoor",
-          "Sparse"
-        ]
-      },
-      {
-        "failure_id": "FAIL_0008",
-        "sample_id": "sample_0104",
-        "frame_id": 104,
-        "camera_id": "cam_4",
-        "scenario": "scenario_day_outdoor",
-        "error_type": "FalseNegative",
-        "ground_truth": "bicycle",
-        "prediction": "Missed Object",
-        "confidence": 0.0,
-        "bbox": {
-          "xmin": 717.2001626091741,
-          "ymin": 387.539942434769,
-          "xmax": 814.2922501441229,
-          "ymax": 534.0250095507317
+          "xmin": 326.26394568107804,
+          "ymin": 305.32015508278835,
+          "xmax": 429.77471008371765,
+          "ymax": 493.01192602246374
         },
         "conditions": [
           "Day",
@@ -1845,20 +1823,43 @@
         ]
       },
       {
-        "failure_id": "FAIL_0009",
-        "sample_id": "sample_0105",
-        "frame_id": 105,
-        "camera_id": "cam_1",
+        "failure_id": "FAIL_0008",
+        "sample_id": "sample_0111",
+        "frame_id": 111,
+        "camera_id": "cam_3",
         "scenario": "scenario_night_outdoor",
         "error_type": "FalseNegative",
-        "ground_truth": "person",
+        "ground_truth": "motorcycle",
         "prediction": "Missed Object",
         "confidence": 0.0,
         "bbox": {
-          "xmin": 271.1814598370976,
-          "ymin": 225.29429937616163,
-          "xmax": 463.4474008665569,
-          "ymax": 277.1663636588271
+          "xmin": 65.03926812464329,
+          "ymin": 479.16701534335385,
+          "xmax": 227.85090467053948,
+          "ymax": 520.5906931145612
+        },
+        "conditions": [
+          "Night",
+          "Outdoor",
+          "LowLight",
+          "MotionBlur"
+        ]
+      },
+      {
+        "failure_id": "FAIL_0009",
+        "sample_id": "sample_0111",
+        "frame_id": 111,
+        "camera_id": "cam_3",
+        "scenario": "scenario_night_outdoor",
+        "error_type": "FalseNegative",
+        "ground_truth": "motorcycle",
+        "prediction": "Missed Object",
+        "confidence": 0.0,
+        "bbox": {
+          "xmin": 347.8644049790901,
+          "ymin": 106.27165663273009,
+          "xmax": 469.7065997740184,
+          "ymax": 252.24852903693045
         },
         "conditions": [
           "Night",
@@ -1869,42 +1870,41 @@
       },
       {
         "failure_id": "FAIL_0010",
-        "sample_id": "sample_0107",
-        "frame_id": 107,
-        "camera_id": "cam_3",
-        "scenario": "scenario_day_indoor",
-        "error_type": "Misclassification",
+        "sample_id": "sample_0112",
+        "frame_id": 112,
+        "camera_id": "cam_4",
+        "scenario": "scenario_lowlight_indoor",
+        "error_type": "FalseNegative",
         "ground_truth": "truck",
-        "prediction": "car",
-        "confidence": 0.89,
+        "prediction": "Missed Object",
+        "confidence": 0.0,
         "bbox": {
-          "xmin": 418.82260909049296,
-          "ymin": 415.0720301103027,
-          "xmax": 473.40450949860167,
-          "ymax": 542.1321947854516
+          "xmin": 798.1018246837219,
+          "ymin": 192.6844499915939,
+          "xmax": 905.0723344567366,
+          "ymax": 294.80843735246725
         },
         "conditions": [
-          "Day",
+          "LowLight",
           "Indoor",
-          "Sparse",
-          "LargeObject"
+          "SmallObject"
         ]
       },
       {
         "failure_id": "FAIL_0011",
-        "sample_id": "sample_0107",
-        "frame_id": 107,
-        "camera_id": "cam_3",
+        "sample_id": "sample_0113",
+        "frame_id": 113,
+        "camera_id": "cam_1",
         "scenario": "scenario_day_indoor",
-        "error_type": "Misclassification",
-        "ground_truth": "truck",
-        "prediction": "car",
-        "confidence": 0.89,
+        "error_type": "FalseNegative",
+        "ground_truth": "bus",
+        "prediction": "Missed Object",
+        "confidence": 0.0,
         "bbox": {
-          "xmin": 400.7934671159879,
-          "ymin": 175.93325415546678,
-          "xmax": 483.76338603965985,
-          "ymax": 225.7955533010827
+          "xmin": 123.202297859532,
+          "ymin": 120.36927683282934,
+          "xmax": 204.58659394916526,
+          "ymax": 289.70429589562457
         },
         "conditions": [
           "Day",
@@ -1915,42 +1915,19 @@
       },
       {
         "failure_id": "FAIL_0012",
-        "sample_id": "sample_0107",
-        "frame_id": 107,
-        "camera_id": "cam_3",
-        "scenario": "scenario_day_indoor",
-        "error_type": "FalseNegative",
-        "ground_truth": "motorcycle",
-        "prediction": "Missed Object",
-        "confidence": 0.0,
-        "bbox": {
-          "xmin": 220.6345689684259,
-          "ymin": 83.54106033175017,
-          "xmax": 322.5715444694926,
-          "ymax": 207.15422406360182
-        },
-        "conditions": [
-          "Day",
-          "Indoor",
-          "Sparse",
-          "LargeObject"
-        ]
-      },
-      {
-        "failure_id": "FAIL_0013",
-        "sample_id": "sample_0110",
-        "frame_id": 110,
-        "camera_id": "cam_2",
+        "sample_id": "sample_0116",
+        "frame_id": 116,
+        "camera_id": "cam_4",
         "scenario": "scenario_day_outdoor",
         "error_type": "FalseNegative",
-        "ground_truth": "person",
+        "ground_truth": "car",
         "prediction": "Missed Object",
         "confidence": 0.0,
         "bbox": {
-          "xmin": 237.11769599320948,
-          "ymin": 301.0467669204444,
-          "xmax": 424.00266708778804,
-          "ymax": 453.7881981556502
+          "xmin": 761.063265280207,
+          "ymin": 555.0129748627884,
+          "xmax": 865.605928400387,
+          "ymax": 631.5599004365205
         },
         "conditions": [
           "Day",
@@ -1960,156 +1937,43 @@
         ]
       },
       {
+        "failure_id": "FAIL_0013",
+        "sample_id": "sample_0119",
+        "frame_id": 119,
+        "camera_id": "cam_3",
+        "scenario": "scenario_day_indoor",
+        "error_type": "Misclassification",
+        "ground_truth": "bus",
+        "prediction": "person",
+        "confidence": 0.89,
+        "bbox": {
+          "xmin": 535.2525936765239,
+          "ymin": 302.7131791097392,
+          "xmax": 731.6191461438966,
+          "ymax": 384.97318275310573
+        },
+        "conditions": [
+          "Day",
+          "Indoor",
+          "Sparse",
+          "LargeObject"
+        ]
+      },
+      {
         "failure_id": "FAIL_0014",
-        "sample_id": "sample_0111",
-        "frame_id": 111,
-        "camera_id": "cam_3",
-        "scenario": "scenario_night_outdoor",
-        "error_type": "Misclassification",
-        "ground_truth": "bus",
-        "prediction": "person",
-        "confidence": 0.89,
-        "bbox": {
-          "xmin": 586.5553660785282,
-          "ymin": 441.65250804653147,
-          "xmax": 670.6159353932545,
-          "ymax": 624.9297840576115
-        },
-        "conditions": [
-          "Night",
-          "Outdoor",
-          "LowLight",
-          "MotionBlur"
-        ]
-      },
-      {
-        "failure_id": "FAIL_0015",
-        "sample_id": "sample_0111",
-        "frame_id": 111,
-        "camera_id": "cam_3",
-        "scenario": "scenario_night_outdoor",
-        "error_type": "Misclassification",
-        "ground_truth": "bus",
-        "prediction": "person",
-        "confidence": 0.89,
-        "bbox": {
-          "xmin": 396.24851416795724,
-          "ymin": 171.5149797401123,
-          "xmax": 484.5917287718536,
-          "ymax": 294.81704347263
-        },
-        "conditions": [
-          "Night",
-          "Outdoor",
-          "LowLight",
-          "MotionBlur"
-        ]
-      },
-      {
-        "failure_id": "FAIL_0016",
-        "sample_id": "sample_0112",
-        "frame_id": 112,
-        "camera_id": "cam_4",
-        "scenario": "scenario_lowlight_indoor",
-        "error_type": "FalseNegative",
-        "ground_truth": "motorcycle",
-        "prediction": "Missed Object",
-        "confidence": 0.0,
-        "bbox": {
-          "xmin": 353.073819692416,
-          "ymin": 225.77215600323424,
-          "xmax": 415.4625410646427,
-          "ymax": 269.84499938249405
-        },
-        "conditions": [
-          "LowLight",
-          "Indoor",
-          "SmallObject"
-        ]
-      },
-      {
-        "failure_id": "FAIL_0017",
-        "sample_id": "sample_0113",
-        "frame_id": 113,
-        "camera_id": "cam_1",
-        "scenario": "scenario_day_indoor",
-        "error_type": "FalseNegative",
-        "ground_truth": "car",
-        "prediction": "Missed Object",
-        "confidence": 0.0,
-        "bbox": {
-          "xmin": 760.1925351454636,
-          "ymin": 544.7751368179757,
-          "xmax": 904.902078241648,
-          "ymax": 620.3356986600398
-        },
-        "conditions": [
-          "Day",
-          "Indoor",
-          "Sparse",
-          "LargeObject"
-        ]
-      },
-      {
-        "failure_id": "FAIL_0018",
-        "sample_id": "sample_0113",
-        "frame_id": 113,
-        "camera_id": "cam_1",
-        "scenario": "scenario_day_indoor",
-        "error_type": "FalseNegative",
-        "ground_truth": "car",
-        "prediction": "Missed Object",
-        "confidence": 0.0,
-        "bbox": {
-          "xmin": 608.157447007106,
-          "ymin": 218.8968992327147,
-          "xmax": 774.251916896322,
-          "ymax": 311.9076411480389
-        },
-        "conditions": [
-          "Day",
-          "Indoor",
-          "Sparse",
-          "LargeObject"
-        ]
-      },
-      {
-        "failure_id": "FAIL_0019",
-        "sample_id": "sample_0115",
-        "frame_id": 115,
-        "camera_id": "cam_3",
-        "scenario": "scenario_day_outdoor",
-        "error_type": "FalseNegative",
-        "ground_truth": "truck",
-        "prediction": "Missed Object",
-        "confidence": 0.0,
-        "bbox": {
-          "xmin": 337.4873150400955,
-          "ymin": 70.7489251612159,
-          "xmax": 409.3935952365942,
-          "ymax": 170.44515002959525
-        },
-        "conditions": [
-          "Day",
-          "Outdoor",
-          "Sparse"
-        ]
-      },
-      {
-        "failure_id": "FAIL_0020",
         "sample_id": "sample_0120",
         "frame_id": 120,
         "camera_id": "cam_4",
         "scenario": "scenario_night_outdoor",
         "error_type": "FalseNegative",
-        "ground_truth": "bus",
+        "ground_truth": "truck",
         "prediction": "Missed Object",
         "confidence": 0.0,
         "bbox": {
-          "xmin": 318.14555317830826,
-          "ymin": 290.7429842300641,
-          "xmax": 457.6346785115094,
-          "ymax": 471.2990702136599
+          "xmin": 253.8748180626426,
+          "ymin": 262.14351936762284,
+          "xmax": 429.982270548496,
+          "ymax": 430.12737487945486
         },
         "conditions": [
           "Night",

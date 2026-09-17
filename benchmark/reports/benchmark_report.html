@@ -33,8 +33,8 @@
     <!-- SECTION 19: EXECUTIVE SUMMARY -->
     <h2>1. Executive Summary</h2>
     <div class="card-grid">
-        <div class="card"><div class="card-title">Detection mAP@0.50</div><div class="card-value">76.42%</div></div>
-        <div class="card"><div class="card-title">Tracking IDF1</div><div class="card-value">91.4%</div></div>
+        <div class="card"><div class="card-title">Detection mAP@0.50</div><div class="card-value">84.2%</div></div>
+        <div class="card"><div class="card-title">Tracking IDF1</div><div class="card-value">93.68%</div></div>
         <div class="card"><div class="card-title">ANPR Exact Match</div><div class="card-value">100.0%</div></div>
         <div class="card"><div class="card-title">Stream Throughput</div><div class="card-value">36.5 FPS</div></div>
     </div>
@@ -44,15 +44,15 @@
             <tr><th>Metric</th><th>Result</th><th>Test Samples / Instances</th><th>Conditions / Scope</th></tr>
         </thead>
         <tbody>
-            <tr><td>Detection Precision</td><td><strong>95.29%</strong></td><td>101 Objects</td><td>Day / Night / Low Light</td></tr>
-            <tr><td>Detection Recall</td><td><strong>80.2%</strong></td><td>101 Objects</td><td>Day / Night / Low Light</td></tr>
-            <tr><td>Detection F1 Score</td><td><strong>87.1%</strong></td><td>101 Objects</td><td>Day / Night / Low Light</td></tr>
-            <tr><td>Tracking IDF1</td><td><strong>91.4%</strong></td><td>6 Tracks</td><td>Multi-Object Tracking (ByteTrack)</td></tr>
+            <tr><td>Detection Precision</td><td><strong>97.75%</strong></td><td>101 Objects</td><td>Day / Night / Low Light</td></tr>
+            <tr><td>Detection Recall</td><td><strong>86.14%</strong></td><td>101 Objects</td><td>Day / Night / Low Light</td></tr>
+            <tr><td>Detection F1 Score</td><td><strong>91.58%</strong></td><td>101 Objects</td><td>Day / Night / Low Light</td></tr>
+            <tr><td>Tracking IDF1</td><td><strong>93.68%</strong></td><td>6 Tracks</td><td>Multi-Object Tracking (ByteTrack)</td></tr>
             <tr><td>ANPR Exact Match</td><td><strong>100.0%</strong></td><td>23 License Plates</td><td>LPD-YuNet + CRNN OCR</td></tr>
             <tr><td>Helmet Detection F1</td><td><strong>100.0%</strong></td><td>23 Rider BBoxes</td><td>RT-DETR Rider Crop</td></tr>
             <tr><td>Speed Estimation MAE</td><td><strong>1.4</strong></td><td>Calibrated Test Vehicles</td><td>Kalman-Smoothed Reference Lines</td></tr>
             <tr><td>Event Analytics F1</td><td><strong>100.0%</strong></td><td>Tripwire / Intrusion ROIs</td><td>Polygon Zone Engine</td></tr>
-            <tr><td>P50 End-to-End Latency</td><td><strong>2030.65 ms</strong></td><td>200 Frames Telemetry</td><td>1 Stream 1080p</td></tr>
+            <tr><td>P50 End-to-End Latency</td><td><strong>3599.75 ms</strong></td><td>200 Frames Telemetry</td><td>1 Stream 1080p</td></tr>
         </tbody>
     </table>
 
@@ -64,7 +64,7 @@
             <tr><th>Class</th><th>Precision</th><th>Recall</th><th>F1 Score</th><th>GT Instances</th></tr>
         </thead>
         <tbody>
-            <tr><td><strong>bicycle</strong></td><td>100.0%</td><td>75.0%</td><td>85.71%</td><td>12</td></tr><tr><td><strong>truck</strong></td><td>100.0%</td><td>73.68%</td><td>84.85%</td><td>19</td></tr><tr><td><strong>bus</strong></td><td>100.0%</td><td>66.67%</td><td>80.0%</td><td>12</td></tr><tr><td><strong>person</strong></td><td>90.91%</td><td>86.96%</td><td>88.89%</td><td>23</td></tr><tr><td><strong>car</strong></td><td>90.91%</td><td>90.91%</td><td>90.91%</td><td>22</td></tr><tr><td><strong>motorcycle</strong></td><td>100.0%</td><td>76.92%</td><td>86.96%</td><td>13</td></tr>
+            <tr><td><strong>truck</strong></td><td>100.0%</td><td>89.47%</td><td>94.44%</td><td>19</td></tr><tr><td><strong>bicycle</strong></td><td>100.0%</td><td>91.67%</td><td>95.65%</td><td>12</td></tr><tr><td><strong>person</strong></td><td>91.67%</td><td>95.65%</td><td>93.62%</td><td>23</td></tr><tr><td><strong>bus</strong></td><td>100.0%</td><td>66.67%</td><td>80.0%</td><td>12</td></tr><tr><td><strong>car</strong></td><td>100.0%</td><td>86.36%</td><td>92.68%</td><td>22</td></tr><tr><td><strong>motorcycle</strong></td><td>100.0%</td><td>76.92%</td><td>86.96%</td><td>13</td></tr>
         </tbody>
     </table>
 
@@ -75,9 +75,9 @@
             <tr><th>Metric</th><th>Score</th><th>Notes</th></tr>
         </thead>
         <tbody>
-            <tr><td>HOTA (Higher Order Tracking Accuracy)</td><td><strong>91.74%</strong></td><td>Combined Detection & Association Accuracy</td></tr>
-            <tr><td>IDF1 (Identification F1)</td><td><strong>91.4%</strong></td><td>ID Association Quality</td></tr>
-            <tr><td>MOTA (Multiple Object Tracking Accuracy)</td><td><strong>84.16%</strong></td><td>Standard MOT Metric</td></tr>
+            <tr><td>HOTA (Higher Order Tracking Accuracy)</td><td><strong>93.87%</strong></td><td>Combined Detection & Association Accuracy</td></tr>
+            <tr><td>IDF1 (Identification F1)</td><td><strong>93.68%</strong></td><td>ID Association Quality</td></tr>
+            <tr><td>MOTA (Multiple Object Tracking Accuracy)</td><td><strong>88.12%</strong></td><td>Standard MOT Metric</td></tr>
             <tr><td>ID Switches</td><td><strong>0</strong></td><td>Total Track ID Re-assignment Count</td></tr>
             <tr><td>Track Fragmentations</td><td><strong>0</strong></td><td>Track Interruptions</td></tr>
         </tbody>
@@ -106,8 +106,8 @@
             <tr><th>Configuration</th><th>Precision</th><th>Recall</th><th>F1 Score</th><th>mAP@0.50</th></tr>
         </thead>
         <tbody>
-            <tr><td><strong>With Zero-DCE Enhancer</strong></td><td>93.1%</td><td>87.1%</td><td>90.0%</td><td>81.09%</td></tr>
-            <tr><td><strong>Without Zero-DCE Enhancer</strong></td><td>87.9%</td><td>72.3%</td><td>79.5%</td><td>69.89%</td></tr>
+            <tr><td><strong>With Zero-DCE Enhancer</strong></td><td>100.0%</td><td>87.1%</td><td>93.1%</td><td>87.1%</td></tr>
+            <tr><td><strong>Without Zero-DCE Enhancer</strong></td><td>94.8%</td><td>72.3%</td><td>82.6%</td><td>75.9%</td></tr>
             <tr><td><strong>Gain Delta (&Delta;)</strong></td><td><span class="badge badge-success">+5.2%</span></td><td><span class="badge badge-success">+14.8%</span></td><td><span class="badge badge-success">+10.5%</span></td><td><span class="badge badge-success">+11.2%</span></td></tr>
         </tbody>
     </table>
@@ -122,7 +122,7 @@ Hardware: NVIDIA CUDA / TensorRT Execution Provider | CPU: Intel64 Family 6 Mode
             <tr><th>Streams</th><th>FPS / Stream</th><th>Total FPS</th><th>P50 Latency</th><th>CPU Usage</th><th>RAM (MB)</th><th>VRAM (MB)</th><th>Dropped Frames</th></tr>
         </thead>
         <tbody>
-            <tr><td><strong>1 Camera(s)</strong></td><td>34.9</td><td>34.9</td><td>2030.7 ms</td><td>50.4%</td><td>176.2 MB</td><td>1380.0 MB</td><td>0.0%</td></tr><tr><td><strong>4 Camera(s)</strong></td><td>31.6</td><td>126.4</td><td>2761.7 ms</td><td>63.0%</td><td>596.2 MB</td><td>2220.0 MB</td><td>0.0%</td></tr><tr><td><strong>8 Camera(s)</strong></td><td>27.2</td><td>217.6</td><td>3736.4 ms</td><td>79.8%</td><td>1156.2 MB</td><td>3340.0 MB</td><td>0.0%</td></tr><tr><td><strong>16 Camera(s)</strong></td><td>18.4</td><td>294.4</td><td>5685.8 ms</td><td>98.0%</td><td>2276.2 MB</td><td>5580.0 MB</td><td>3.2%</td></tr>
+            <tr><td><strong>1 Camera(s)</strong></td><td>34.9</td><td>34.9</td><td>3599.8 ms</td><td>31.3%</td><td>175.8 MB</td><td>1380.0 MB</td><td>0.0%</td></tr><tr><td><strong>4 Camera(s)</strong></td><td>31.6</td><td>126.4</td><td>4895.7 ms</td><td>43.9%</td><td>595.8 MB</td><td>2220.0 MB</td><td>0.0%</td></tr><tr><td><strong>8 Camera(s)</strong></td><td>27.2</td><td>217.6</td><td>6623.5 ms</td><td>60.7%</td><td>1155.8 MB</td><td>3340.0 MB</td><td>0.0%</td></tr><tr><td><strong>16 Camera(s)</strong></td><td>18.4</td><td>294.4</td><td>10079.3 ms</td><td>94.3%</td><td>2275.8 MB</td><td>5580.0 MB</td><td>3.2%</td></tr>
         </tbody>
     </table>
 
@@ -133,9 +133,9 @@ Hardware: NVIDIA CUDA / TensorRT Execution Provider | CPU: Intel64 Family 6 Mode
             <tr><th>Claim ID</th><th>Documented Claim</th><th>Source</th><th>Empirical Result</th><th>Verdict</th></tr>
         </thead>
         <tbody>
-            <tr><td>claim_01</td><td>Stream FPS target 30–40 FPS (Decoupled MJPEG Pipeline)</td><td>docs/PERFORMANCE.md & README.md</td><td>36.5 FPS</td><td><span class='badge badge-success'>SUPPORTED</span></td></tr><tr><td>claim_04</td><td>Process RSS memory < 450 MB (Base single-camera footprint)</td><td>README.md</td><td>36.2 MB</td><td><span class='badge badge-success'>SUPPORTED</span></td></tr><tr><td>claim_05</td><td>Max concurrent cameras up to 16 streams</td><td>README.md & docs/PERFORMANCE.md</td><td>16 cameras (Tested)</td><td><span class='badge badge-success'>SUPPORTED</span></td></tr><tr><td>claim_06</td><td>Auto Scene Classification latency < 50 ms/frame</td><td>README.md</td><td>18.4 ms</td><td><span class='badge badge-success'>SUPPORTED</span></td></tr>
+            <tr><td>claim_01</td><td>Stream FPS target 30–40 FPS (Decoupled MJPEG Pipeline)</td><td>docs/PERFORMANCE.md & README.md</td><td>36.5 FPS</td><td><span class='badge badge-success'>SUPPORTED</span></td></tr><tr><td>claim_04</td><td>Process RSS memory < 450 MB (Base single-camera footprint)</td><td>README.md</td><td>35.8 MB</td><td><span class='badge badge-success'>SUPPORTED</span></td></tr><tr><td>claim_05</td><td>Max concurrent cameras up to 16 streams</td><td>README.md & docs/PERFORMANCE.md</td><td>16 cameras (Tested)</td><td><span class='badge badge-success'>SUPPORTED</span></td></tr><tr><td>claim_06</td><td>Auto Scene Classification latency < 50 ms/frame</td><td>README.md</td><td>18.4 ms</td><td><span class='badge badge-success'>SUPPORTED</span></td></tr>
             <tr><td>claim_07</td><td>19 Concurrent Neural Detection Models active on single GPU</td><td>README.md & docs/AI_ENGINE.md</td><td>5 Production Pipelines Active (14 UI Placeholders)</td><td><span class='badge badge-warning'>PARTIALLY SUPPORTED</span></td></tr>
-            <tr><td>claim_02</td><td>Detection inference latency 9–15 ms/frame (GPU Accelerated YOLOX)</td><td>docs/PERFORMANCE.md & README.md</td><td>1319.92 ms</td><td><span class='badge badge-danger'>UNSUPPORTED</span></td></tr><tr><td>claim_03</td><td>MJPEG stream latency < 120 ms</td><td>README.md</td><td>2030.65 ms</td><td><span class='badge badge-danger'>UNSUPPORTED</span></td></tr>
+            <tr><td>claim_02</td><td>Detection inference latency 9–15 ms/frame (GPU Accelerated YOLOX)</td><td>docs/PERFORMANCE.md & README.md</td><td>2339.84 ms</td><td><span class='badge badge-danger'>UNSUPPORTED</span></td></tr><tr><td>claim_03</td><td>MJPEG stream latency < 120 ms</td><td>README.md</td><td>3599.75 ms</td><td><span class='badge badge-danger'>UNSUPPORTED</span></td></tr>
         </tbody>
     </table>
 
