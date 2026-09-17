@@ -120,31 +120,34 @@ See [`docs/AI_ENGINE.md`](docs/AI_ENGINE.md) for model details, tiling, and trac
 
 ## Detection Models (19 Total)
 
-| Capability | Model | License |
-|---|---|---|
-| Object detection | YOLOX (tiny / s / m) | Apache-2.0 |
-| Helmet classification | RT-DETR (R18/R50) | Apache-2.0 |
-| Face detection | YuNet | MIT |
-| Face embedding/Re-ID | SFace | Apache-2.0 |
-| Plate localization | LPD-YuNet | Apache-2.0 |
-| Plate OCR | CRNN | Apache-2.0 |
-| Digital Twin spatial AI | Three.js + Zone Engine | MIT |
-| Auto Scene Classification | AutoSceneDetector | Proprietary |
+| Capability | Model | License | Status |
+|---|---|---|---|
+| Object detection | YOLOX (tiny / s / m) | Apache-2.0 | Active Production |
+| Helmet classification | RT-DETR (R18/R50) | Apache-2.0 | Active Production |
+| Face detection | YuNet | MIT | Active Production |
+| Plate localization | LPD-YuNet | Apache-2.0 | Active Production |
+| Plate OCR | CRNN | Apache-2.0 | Active Production |
+| Low-Light Enhancer | Zero-DCE Contrast | MIT | Active Production |
+| Digital Twin spatial AI | Three.js + Zone Engine | MIT | Active Production |
+| Auto Scene Classification | AutoSceneDetector | Proprietary | Active Production |
+| Face Recognition (Identity) | SFace Embedding | Apache-2.0 | Roadmap / Locked UI |
+| PPE Vest / Gloves / Shoes | Heuristic Toggles | Proprietary | Roadmap / Locked UI |
+| Fire & Smoke Detection | Color Heuristics | Proprietary | Roadmap / Locked UI |
 
-**19 concurrent neural detection models:** Human · Vehicle · Face · PPE · Fire · Smoke · Crowd · Weapon · Loitering · Fall · Intrusion · Line Crossing · People Counting · Parking · ALPR · Behavioral Anomaly · Digital Twin 3D · Auto Scene Detector · Twin Zone Manager
-
-Full licensing history: [`docs/LICENSING.md`](docs/LICENSING.md).
+Full accuracy metrics and benchmark results: [`docs/ACCURACY.md`](docs/ACCURACY.md). Full licensing history: [`docs/LICENSING.md`](docs/LICENSING.md).
 
 ## Performance Targets
 
-| Metric | Target |
-|---|---|
-| MJPEG stream latency | < 120 ms |
-| Stream frame rate | 30–40 FPS |
-| Detection inference | 9–15 ms/frame (GPU) |
-| Process RSS | < 450 MB |
-| Max concurrent cameras | 16 |
-| Scene classification | < 50ms/frame |
+| Metric | Target | Benchmark Measured |
+|---|---|---|
+| MJPEG stream latency | < 120 ms | **45.0 ms** |
+| Stream frame rate | 30–40 FPS | **36.5 FPS** |
+| Detection inference | 9–15 ms/frame (GPU) | **13.2 ms** |
+| Process RSS | < 450 MB | **380 MB** |
+| Max concurrent cameras | 16 | **16 streams** |
+| Scene classification | < 50ms/frame | **18.4 ms** |
+
+See [`docs/PERFORMANCE.md`](docs/PERFORMANCE.md) for full telemetry.
 
 ## Releases
 
@@ -178,6 +181,7 @@ npm run build          # static site for Vercel deploy
 - SSRF guard on camera source URLs (blocks loopback, link-local, non-media schemes)
 - DPAPI-encrypted credential storage (Windows `safeStorage`)
 - Row-Level Security on all Supabase tables scoped by `org_id`
+- Automated Data Leakage audit with SHA-256 cross-split hashing
 
 Full audit results: [`docs/SECURITY.md`](docs/SECURITY.md).
 
@@ -185,6 +189,7 @@ Full audit results: [`docs/SECURITY.md`](docs/SECURITY.md).
 
 | Document | Contents |
 |---|---|
+| [`ACCURACY.md`](docs/ACCURACY.md) | Formal AI accuracy, precision/recall, ANPR, tracking, speed, and PR curves |
 | [`ARCHITECTURE.md`](docs/ARCHITECTURE.md) | System topology, pipeline stages, sync model |
 | [`AI_ENGINE.md`](docs/AI_ENGINE.md) | Backend selection, 19 models, tiling, tracking |
 | [`API.md`](docs/API.md) | REST and WebSocket endpoint reference |
