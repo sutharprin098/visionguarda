@@ -1478,14 +1478,11 @@ const CameraTile = memo(function CameraTile({ camera: c, site, engineOnline, onF
       // sending nothing but empty arrays — see detectionsRenderEqual.
       const nextDets = Array.isArray(t?.detections) ? t.detections : [];
       const now = Date.now();
-      if (!detectionsRenderEqual(detectionsRef.current, nextDets)) {
+      // Commit active detections immediately on every telemetry tick for real-time video sync.
+      // Skip state re-renders only when detections array remains empty ([]).
+      if (nextDets.length > 0 || detectionsRef.current.length > 0) {
         detectionsRef.current = nextDets;
         setDetections(nextDets);
-      } else if (nextDets.length > 0 && now - lastDetectionRefreshRef.current >= 700) {
-        // Keep a visually unchanged track alive without restoring a 10-15 FPS
-        // React render loop for every camera tile.
-        lastDetectionRefreshRef.current = now;
-        setDetectionRefreshKey((key) => key + 1);
       }
 
       // Telemetry arrives at AI FPS (~10-15Hz per camera). Committing every

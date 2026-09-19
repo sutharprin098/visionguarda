@@ -17,14 +17,28 @@ interface Props {
   fit?: "cover" | "contain";
 }
 
-// Drop lost objects quickly so moving/exiting objects don't leave ghost boxes behind
-const TRACK_HOLD_MS = 600;
+// Drop lost objects after 1200ms hold buffer so temporary frame skips or latency don't cause blinking/gaps
+const TRACK_HOLD_MS = 1200;
+
+interface TrailPoint {
+  x: number;
+  y: number;
+  ts: number;
+}
+
+interface ActiveTrackRecord {
+  det: TelemetryDetection;
+  lastSeen: number;
+  vx: number; // norm units / sec
+  vy: number; // norm units / sec
+  trail: TrailPoint[];
+}
 
 function sourceSize(el: HTMLVideoElement | HTMLImageElement | null): { w: number; h: number } | null {
   if (!el) return null;
-  const w = (el as HTMLVideoElement).videoWidth || (el as HTMLImageElement).naturalWidth || el.clientWidth || 1280;
-  const h = (el as HTMLVideoElement).videoHeight || (el as HTMLImageElement).naturalHeight || el.clientHeight || 720;
-  return w && h ? { w, h } : { w: 1280, h: 720 };
+  const w = (el as HTMLVideoElement).videoWidth || (el as HTMLImageElement).naturalWidth;
+  const h = (el as HTMLVideoElement).videoHeight || (el as HTMLImageElement).naturalHeight;
+  return w && h ? { w, h } : null;
 }
 
 /** Black or white, whichever is readable on `hex`. The label chip is filled with
@@ -119,10 +133,6 @@ function labelFor(det: TelemetryDetection): string {
     const overBadge = det.overspeed ? " 🚨 OVERSPEED" : "";
     speedStr = ` | ${det.speed.toFixed(0)} km/h${overBadge}`;
   }
-  // No fabricated "0 km/h" fallback: a vehicle whose speed isn't measured yet
-  // (just (re)acquired, clipped by the frame edge, or estimation disabled) shows
-  // no speed label rather than a misleading 0. A real km/h appears once the
-  // track is stable for 2+ frames.
 
   return `${titleClass}${idStr}${confStr}${speedStr}`;
 }
@@ -172,27 +182,20 @@ function dedupDetections(dets: TelemetryDetection[]): TelemetryDetection[] {
   return kept;
 }
 
-interface ActiveTrackRecord {
-  det: TelemetryDetection;
-  lastSeen: number;
-}
+// Lead time compensation for camera capture + AI pipeline latency (approx 160ms)
+const LEAD_TIME_SEC = 0.16;
 
 export default function DetectionOverlay({ detections, refreshKey = 0, mediaRef, fit = "cover" }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const rectRef = useRef<{ width: number; height: number } | null>(null);
   const tracksMapRef = useRef<Map<string, ActiveTrackRecord>>(new Map());
 
-  // Ingest detections into active tracks map with spatial matching and EMA bbox smoothing.
+  // Ingest detections into active tracks map with spatial matching, EMA bbox smoothing, and motion velocity coasting
   useEffect(() => {
     const now = Date.now();
     const rawList = Array.isArray(detections) ? detections : [];
 
-    if (rawList.length === 0) {
-      tracksMapRef.current.clear();
-      return;
-    }
-
-    // Clean up tracks that have not received a telemetry keepalive.
+    // Clean up tracks older than TRACK_HOLD_MS (1200ms)
     tracksMapRef.current.forEach((val, key) => {
       if (now - val.lastSeen > TRACK_HOLD_MS) {
         tracksMapRef.current.delete(key);
@@ -201,20 +204,22 @@ export default function DetectionOverlay({ detections, refreshKey = 0, mediaRef,
 
     for (const d of rawList) {
       if (!d || !d.bbox) continue;
+
       let matchedKey: string | null = null;
       if (d.track_id != null) {
         matchedKey = `id_${d.track_id}`;
       } else {
         const cx = (d.bbox.x1 + d.bbox.x2) / 2;
         const cy = (d.bbox.y1 + d.bbox.y2) / 2;
-        let minDist = 0.15;
-        tracksMapRef.current.forEach((val, key) => {
-          if (val.det.class === d.class && !key.startsWith("id_")) {
-            const ob = val.det.bbox;
-            const distance = Math.hypot(cx - (ob.x1 + ob.x2) / 2, cy - (ob.y1 + ob.y2) / 2);
-            if (distance < minDist) {
-              minDist = distance;
-              matchedKey = key;
+        let minDist = 0.20;
+        tracksMapRef.current.forEach((val, k) => {
+          if (val.det.class === d.class) {
+            const ocx = (val.det.bbox.x1 + val.det.bbox.x2) / 2;
+            const ocy = (val.det.bbox.y1 + val.det.bbox.y2) / 2;
+            const dist = Math.hypot(cx - ocx, cy - ocy);
+            if (dist < minDist) {
+              minDist = dist;
+              matchedKey = k;
             }
           }
         });
@@ -224,18 +229,49 @@ export default function DetectionOverlay({ detections, refreshKey = 0, mediaRef,
       }
 
       const existing = tracksMapRef.current.get(matchedKey);
-      const nextDet: TelemetryDetection = { ...d, bbox: { ...d.bbox } };
-      if (existing) {
+      const cx = (d.bbox.x1 + d.bbox.x2) / 2;
+      const cy = (d.bbox.y1 + d.bbox.y2) / 2;
+
+      let vx = 0;
+      let vy = 0;
+      let trail: TrailPoint[] = existing ? [...existing.trail] : [];
+
+      const nextDet: TelemetryDetection = {
+        ...d,
+        bbox: { ...d.bbox },
+      };
+
+      if (existing && existing.det && existing.det.bbox) {
         const ob = existing.det.bbox;
         const nb = nextDet.bbox;
+        
+        const dtSec = Math.max(0.016, (now - existing.lastSeen) / 1000);
+        const oldCx = (ob.x1 + ob.x2) / 2;
+        const oldCy = (ob.y1 + ob.y2) / 2;
+        const instVx = (cx - oldCx) / dtSec;
+        const instVy = (cy - oldCy) / dtSec;
+
+        // Smooth velocity vector for breadcrumb trail
+        vx = 0.70 * instVx + 0.30 * (existing.vx || 0);
+        vy = 0.70 * instVy + 0.30 * (existing.vy || 0);
+
+        // Light spring-damped interpolation to keep box firmly glued directly on the object
         nextDet.bbox = {
-          x1: 0.75 * nb.x1 + 0.25 * ob.x1,
-          y1: 0.75 * nb.y1 + 0.25 * ob.y1,
-          x2: 0.75 * nb.x2 + 0.25 * ob.x2,
-          y2: 0.75 * nb.y2 + 0.25 * ob.y2,
+          x1: 0.85 * nb.x1 + 0.15 * ob.x1,
+          y1: 0.85 * nb.y1 + 0.15 * ob.y1,
+          x2: 0.85 * nb.x2 + 0.15 * ob.x2,
+          y2: 0.85 * nb.y2 + 0.15 * ob.y2,
         };
       }
-      tracksMapRef.current.set(matchedKey, { det: nextDet, lastSeen: now });
+
+      // Append point to motion breadcrumb trail history
+      const lastPt = trail[trail.length - 1];
+      if (!lastPt || Math.hypot(cx - lastPt.x, cy - lastPt.y) > 0.005) {
+        trail.push({ x: cx, y: cy, ts: now });
+        if (trail.length > 25) trail.shift();
+      }
+
+      tracksMapRef.current.set(matchedKey, { det: nextDet, lastSeen: now, vx, vy, trail });
     }
   }, [detections, refreshKey]);
 
@@ -246,12 +282,14 @@ export default function DetectionOverlay({ detections, refreshKey = 0, mediaRef,
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
-    const b = media.getBoundingClientRect();
-    if (b.width === 0 || b.height === 0) return;
-    const rect = { width: b.width, height: b.height };
-    rectRef.current = rect;
-
+    let rect = rectRef.current;
+    if (!rect || rect.width === 0 || rect.height === 0) {
+      const b = media.getBoundingClientRect();
+      rect = { width: b.width, height: b.height };
+      rectRef.current = rect;
+    }
     const dpr = window.devicePixelRatio || 1;
+    if (rect.width === 0 || rect.height === 0) return;
     const bw = Math.round(rect.width * dpr);
     const bh = Math.round(rect.height * dpr);
     if (canvas.width !== bw || canvas.height !== bh) {
@@ -262,7 +300,7 @@ export default function DetectionOverlay({ detections, refreshKey = 0, mediaRef,
     ctx.clearRect(0, 0, rect.width, rect.height);
 
     const src = sourceSize(media);
-    if (!src) return;
+    if (!src) return; // stream not up yet — next telemetry tick redraws
 
     const scale =
       fit === "cover"
@@ -274,20 +312,76 @@ export default function DetectionOverlay({ detections, refreshKey = 0, mediaRef,
     const oy = (rect.height - dh) / 2;
 
     const now = Date.now();
-    const activeList: TelemetryDetection[] = [];
+    const renderItems: Array<{ det: TelemetryDetection; alpha: number; trail: TrailPoint[] }> = [];
+
     tracksMapRef.current.forEach((val, key) => {
-      if (now - val.lastSeen <= TRACK_HOLD_MS) {
-        activeList.push(val.det);
+      const elapsed = now - val.lastSeen;
+      if (elapsed <= TRACK_HOLD_MS) {
+        // Opacity alpha fade out for coasting tracks beyond 150ms
+        const alpha = elapsed < 200 ? 1.0 : Math.max(0.15, 1.0 - Math.pow(elapsed / TRACK_HOLD_MS, 1.5));
+        renderItems.push({ det: val.det, alpha, trail: val.trail });
       } else {
         tracksMapRef.current.delete(key);
       }
     });
 
-    const activeDetections = dedupDetections(activeList);
+    const activeDets = renderItems.map(i => i.det);
+    const renderDets = dedupDetections(activeDets);
+    const detToItemMap = new Map<TelemetryDetection, { alpha: number; trail: TrailPoint[] }>();
+    renderItems.forEach(item => detToItemMap.set(item.det, item));
 
-    for (const det of activeDetections) {
-      if (!det || typeof det !== "object" || !det.bbox) continue;
+    // --- 1. RENDER MOTION BREADCRUMB TRAILS ---
+    for (const det of renderDets) {
       if (det.confidence != null && det.confidence < 0.35) continue;
+      const item = detToItemMap.get(det);
+      if (!item || !item.trail || item.trail.length < 2) continue;
+
+      const color = colorFor(det);
+      const alpha = item.alpha;
+      const trail = item.trail;
+
+      ctx.save();
+      ctx.lineWidth = 2.5;
+      ctx.lineCap = "round";
+      ctx.lineJoin = "round";
+
+      for (let i = 1; i < trail.length; i++) {
+        const p1 = trail[i - 1];
+        const p2 = trail[i];
+
+        const x1 = ox + p1.x * dw;
+        const y1 = oy + p1.y * dh;
+        const x2 = ox + p2.x * dw;
+        const y2 = oy + p2.y * dh;
+
+        const segmentAlpha = (i / trail.length) * 0.85 * alpha;
+        ctx.strokeStyle = color;
+        ctx.globalAlpha = segmentAlpha;
+
+        ctx.beginPath();
+        ctx.moveTo(x1, y1);
+        ctx.lineTo(x2, y2);
+        ctx.stroke();
+      }
+
+      // Draw subtle glow dot at head
+      const head = trail[trail.length - 1];
+      const hx = ox + head.x * dw;
+      const hy = oy + head.y * dh;
+      ctx.globalAlpha = alpha * 0.9;
+      ctx.fillStyle = color;
+      ctx.beginPath();
+      ctx.arc(hx, hy, 3.5, 0, 2 * Math.PI);
+      ctx.fill();
+      ctx.restore();
+    }
+
+    // --- 2. RENDER BOUNDING BOXES AND LABELS ---
+    for (const det of renderDets) {
+      if (det.confidence != null && det.confidence < 0.35) continue;
+      const item = detToItemMap.get(det);
+      const alpha = item ? item.alpha : 1.0;
+
       const x1 = ox + det.bbox.x1 * dw;
       const y1 = oy + det.bbox.y1 * dh;
       const w = (det.bbox.x2 - det.bbox.x1) * dw;
@@ -296,44 +390,58 @@ export default function DetectionOverlay({ detections, refreshKey = 0, mediaRef,
 
       const color = colorFor(det);
 
-      // One solid rectangle. Never dashed, and never a second outline: the
-      // dashed/solid pair operators used to see was one object arriving as two
-      // detections (fixed engine-side), not a stroke style.
+      // One solid rectangle with smooth alpha coasting
       ctx.save();
+      ctx.globalAlpha = alpha;
       ctx.strokeStyle = color;
       ctx.lineWidth = 2;
       ctx.strokeRect(x1, y1, w, h);
       ctx.restore();
 
-      // One label per box.
+      // One label per box
       const label = labelFor(det);
       ctx.font = "bold 11px Inter, system-ui, sans-serif";
       const tw = ctx.measureText(label).width;
       const lh = 16;
       const lw = tw + 10;
-      // Flip the label inside the box when the detection touches the top edge,
-      // otherwise it renders off-canvas and vanishes.
       const ly = y1 - lh < 0 ? y1 + 2 : y1 - lh - 2;
-      // Same reasoning horizontally, which was missing: a detection near the
-      // right edge (very common — that is where vehicles leave frame, and where
-      // a plate is read last) pushed its chip past the canvas and the text was
-      // simply cut off. Clamp into the visible box instead of overflowing it.
       const lx = Math.max(0, Math.min(x1 - 1, rect.width - lw));
+
+      ctx.save();
+      ctx.globalAlpha = alpha;
       ctx.fillStyle = color;
       ctx.fillRect(lx, ly, lw, lh);
       ctx.fillStyle = inkFor(color);
       ctx.fillText(label, lx + 5, ly + 12);
+      ctx.restore();
     }
   }, [mediaRef, fit]);
 
+  // Continuous 60 FPS sub-frame animation loop for fluid live video synchronization
   const rafRef = useRef<number | null>(null);
+
+  const drawAndAnimate = useCallback(() => {
+    draw();
+
+    const now = Date.now();
+    let isMoving = false;
+    tracksMapRef.current.forEach((val) => {
+      if (now - val.lastSeen <= TRACK_HOLD_MS && (Math.abs(val.vx) > 0.005 || Math.abs(val.vy) > 0.005)) {
+        isMoving = true;
+      }
+    });
+
+    if (isMoving) {
+      rafRef.current = requestAnimationFrame(drawAndAnimate);
+    } else {
+      rafRef.current = null;
+    }
+  }, [draw]);
+
   const scheduleDraw = useCallback(() => {
     if (rafRef.current != null) return;
-    rafRef.current = requestAnimationFrame(() => {
-      rafRef.current = null;
-      draw();
-    });
-  }, [draw]);
+    rafRef.current = requestAnimationFrame(drawAndAnimate);
+  }, [drawAndAnimate]);
 
   useEffect(() => {
     scheduleDraw();

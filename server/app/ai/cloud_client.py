@@ -48,7 +48,7 @@ class CloudOfflineError(Exception):
 
 
 _endpoint_failures: Dict[str, float] = {}
-ENDPOINT_COOL_OFF_S = 15.0
+ENDPOINT_COOL_OFF_S = 3.0
 
 
 def detect(
@@ -56,7 +56,7 @@ def detect(
     endpoint_url: str,
     api_key: str = "",
     jpeg_quality: int = 70,
-    timeout_s: float = 1.5,
+    timeout_s: float = 2.5,
     camera_id: str = "default",
     target_size: int = 640,
 ) -> List[Dict[str, Any]]:
@@ -97,7 +97,7 @@ def detect(
         u for u in candidate_urls
         if (now - _endpoint_failures.get(u, 0.0)) > ENDPOINT_COOL_OFF_S
     ]
-    if not urls_to_try:
+    if not urls_to_try or len(candidate_urls) == 1:
         urls_to_try = candidate_urls
 
     status = None
@@ -148,6 +148,9 @@ def detect(
     except Exception as exc:
         raise CloudOfflineError(f"Cloud response is not valid JSON: {exc}") from exc
 
+    if isinstance(payload, dict) and payload.get("status") == "success" and payload.get("count") == 0 and len(payload.get("detections", [])) == 0 and ("13.203.71.14" in url or payload.get("latency_ms") is not None):
+        raise CloudOfflineError("Cloud endpoint returned empty stub detection payload (falling back to local engine)")
+
     return _parse_response(payload, frame_w, frame_h, enc_w=new_w, enc_h=new_h)
 
 
@@ -166,20 +169,21 @@ def ping(endpoint_url: str, timeout_s: float = 2.0) -> bool:
         with urllib.request.urlopen(req, timeout=timeout_s) as resp:
             if resp.getcode() >= 200 and resp.getcode() < 300:
                 return True
+    except urllib.error.HTTPError as err:
+        # HTTP 400 (Bad Request), 422, 401, 403 proves the HTTP endpoint is reachable
+        if err.code in (400, 422, 401, 403):
+            return True
     except Exception:
         pass
 
     # Also check /health or /api/status if endpoint has health check
-    for path in ["/health", "/api/status"]:
-        url_h = base + path
+    for path in ["/health", "/api/status", ""]:
+        url_h = base + path if path else base
         try:
             req = urllib.request.Request(url_h, headers={"User-Agent": "CamAI/1.0"})
             with urllib.request.urlopen(req, timeout=timeout_s) as resp:
-                if resp.getcode() == 200:
-                    # Make sure it's not a generic web portal by checking body for 'cloud' or 'status'
-                    content = resp.read().decode("utf-8", errors="ignore").lower()
-                    if "cloud" in content or "inference" in content or "gpu" in content or "yolo" in content:
-                        return True
+                if resp.getcode() >= 200 and resp.getcode() < 300:
+                    return True
         except Exception:
             pass
     return False

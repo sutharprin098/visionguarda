@@ -3,6 +3,8 @@ import cv2
 import numpy as np
 
 from app import config
+import json
+from app.runtime_governor import runtime_governor
 
 # Classes tracked for abandoned-object alerts (sync with backend.COCO_CLASS_MAP).
 ITEM_CLASSES = {"backpack", "handbag", "suitcase", "umbrella"}
@@ -135,6 +137,10 @@ def filter_by_features(detections, features):
         else:
             disabled_classes |= owned
 
+    if not enabled_classes and disabled_classes:
+        # Safeguard: If no feature is explicitly enabled in config, fallback to zone profile classes
+        return detections
+
     drop_classes = disabled_classes - enabled_classes
     drop_classes.discard("micro_motion")
 
@@ -234,10 +240,10 @@ def _point_in_zone_shape(px: float, py: float, pts, shape_type: str = "polygon",
 
     max_val = float(pts_arr.max())
     if max_val > 100.0:
-        # Already pixel coordinates on a legacy resolution scale — normalize first
+        # Already pixel coordinates — normalize using current frame dimensions
         pts_norm = pts_arr.copy()
-        pts_norm[:, 0] = pts_norm[:, 0] / 1920.0
-        pts_norm[:, 1] = pts_norm[:, 1] / 1080.0
+        pts_norm[:, 0] = pts_norm[:, 0] / w_ref
+        pts_norm[:, 1] = pts_norm[:, 1] / h_ref
     elif max_val > 1.0:
         # Percentage coordinates [0..100]
         pts_norm = pts_arr / 100.0
@@ -646,6 +652,9 @@ class CameraAnalytics:
 
     def update(self, detections, zones, lines, frame_w: int = 640, frame_h: int = 480, frame=None, rules=None, zone_profile=None, profile_features=None):
         features = json.loads(profile_features) if isinstance(profile_features, str) else (profile_features or {})
+
+        if detections:
+            runtime_governor.register_detection(self.camera_id)
 
         # Extract Homography Matrix Calibration points if configured
         speed_cfg = features.get("speed_detection", {})

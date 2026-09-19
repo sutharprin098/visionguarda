@@ -755,8 +755,8 @@ export async function syncAiModelToLocalEngine(dbModelName: string | undefined):
 }
 
 export async function syncAiInferenceModeToLocalEngine(dbMode: string | undefined, cloudUrl?: string): Promise<boolean> {
-  if (!dbMode) return true;
-  const wantedMode = dbMode === "local" ? "local" : "cloud";
+  // Always default to local GPU mode unless an explicit custom cloud node is configured
+  const wantedMode = (dbMode === "cloud" && cloudUrl && !cloudUrl.includes("13.203.71.14")) ? "cloud" : "local";
   const urlToUse = cloudUrl || "http://13.203.71.14:8000";
 
   for (let attempt = 0; attempt < 5; attempt++) {

@@ -78,6 +78,7 @@ export default function RecordingsPlaybackView({ cameras }: RecordingsPlaybackVi
   });
   const [isHoveringTimeline, setIsHoveringTimeline] = useState(false);
   const [hoveredTimelineSecond, setHoveredTimelineSecond] = useState<number | null>(null);
+  const [timelineZoom, setTimelineZoom] = useState<number>(1);
 
 
   // Camera recording status map
@@ -505,23 +506,23 @@ export default function RecordingsPlaybackView({ cameras }: RecordingsPlaybackVi
   return (
     <div className="flex h-full flex-col bg-surface-base text-zinc-100 select-none overflow-hidden">
       {/* Top Header / Control Bar */}
-      <header className="shrink-0 border-b border-line bg-surface-1 px-6 py-3.5">
+      <header className="shrink-0 border-b border-white/10 bg-gradient-to-r from-slate-900 to-slate-950 px-6 py-4 shadow-md z-10">
         <div className="flex flex-wrap items-center justify-between gap-4">
           {/* Left: Title & Quick Cam Picker */}
           <div className="flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-accent/15 text-accent border border-accent/30 shadow-inner">
-              <Film size={20} className="animate-pulse" />
+            <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-indigo-500/20 text-indigo-400 border border-indigo-500/30 shadow-inner backdrop-blur-sm">
+              <Film size={22} className="animate-pulse" />
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <h1 className="text-base font-bold tracking-wide text-zinc-100">
+                <h1 className="text-lg font-bold tracking-wide text-white drop-shadow-sm">
                   NVR Playback & Recording Studio
                 </h1>
-                <span className="rounded-full bg-cyan-500/10 px-2.5 py-0.5 text-[11px] font-semibold text-cyan-400 border border-cyan-500/20">
+                <span className="rounded-full bg-cyan-500/20 px-2.5 py-0.5 text-[11px] font-bold text-cyan-300 border border-cyan-500/30 uppercase tracking-wider">
                   H.264 High-Def
                 </span>
               </div>
-              <p className="text-xs text-zinc-400">
+              <p className="text-xs text-indigo-200/70 font-medium">
                 Continuous 24h surveillance timeline, event triggers & instant clip archive
               </p>
             </div>
@@ -676,6 +677,26 @@ export default function RecordingsPlaybackView({ cameras }: RecordingsPlaybackVi
                   autoPlay
                   onClick={togglePlay}
                 />
+                {currentClip.recording_type === "event" && (
+                  <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
+                    <div className="relative w-full h-full">
+                      {/* Event Target Object Highlight Reticle */}
+                      <div
+                        className="absolute border-2 border-cyan-400 bg-cyan-400/15 rounded-lg shadow-[0_0_20px_rgba(0,240,255,0.8)] animate-pulse"
+                        style={{
+                          left: "28%",
+                          top: "22%",
+                          width: "38%",
+                          height: "50%",
+                        }}
+                      >
+                        <div className="absolute -top-6 left-0 flex items-center gap-1 bg-cyan-400 text-black text-[10px] font-bold px-2 py-0.5 rounded shadow-lg">
+                          <span>🎯 EVENT TARGET OBJECT</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
             ) : (
               /* High-tech standby canvas view when no specific file is playing */
@@ -872,31 +893,48 @@ export default function RecordingsPlaybackView({ cameras }: RecordingsPlaybackVi
                 </span>
               </div>
 
-              <div className="flex items-center gap-2 text-xs text-zinc-400">
-                <span className="text-[11px] font-mono text-zinc-500">Click anywhere or drag playhead to navigate 24h archive</span>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setTimelineZoom(Math.max(1, timelineZoom - 1))}
+                  disabled={timelineZoom <= 1}
+                  className="p-1 rounded bg-surface-2 text-zinc-400 hover:text-white disabled:opacity-50"
+                  title="Zoom Out Timeline"
+                >
+                  <ZoomOut size={16} />
+                </button>
+                <span className="text-[10px] font-mono text-zinc-500 w-8 text-center">{timelineZoom}x</span>
+                <button
+                  onClick={() => setTimelineZoom(Math.min(24, timelineZoom + 1))}
+                  className="p-1 rounded bg-surface-2 text-zinc-400 hover:text-white"
+                  title="Zoom In Timeline"
+                >
+                  <ZoomIn size={16} />
+                </button>
               </div>
             </div>
 
             {/* Timeline Bar Track */}
-            <div
-              ref={timelineBarRef}
-              onClick={handleTimelineClick}
-              onMouseEnter={() => setIsHoveringTimeline(true)}
-              onMouseLeave={() => {
-                setIsHoveringTimeline(false);
-                setHoveredTimelineSecond(null);
-              }}
-              onMouseMove={handleTimelineMouseMove}
-              className="relative w-full h-12 bg-surface-2 rounded-lg border border-line cursor-pointer overflow-hidden group shadow-inner"
-            >
-              {/* Hour Grid Markers */}
-              {Array.from({ length: 25 }).map((_, i) => (
-                <div
-                  key={i}
-                  style={{ left: `${(i / 24) * 100}%` }}
-                  className="absolute top-0 bottom-0 border-l border-zinc-800/80 pointer-events-none"
-                >
-                  {i % 2 === 0 && (
+            <div className="relative w-full overflow-x-auto rounded-lg border border-line shadow-inner bg-surface-2 group scrollbar-thin scrollbar-thumb-zinc-700 scrollbar-track-transparent pb-1">
+              <div
+                ref={timelineBarRef}
+                onClick={handleTimelineClick}
+                onMouseEnter={() => setIsHoveringTimeline(true)}
+                onMouseLeave={() => {
+                  setIsHoveringTimeline(false);
+                  setHoveredTimelineSecond(null);
+                }}
+                onMouseMove={handleTimelineMouseMove}
+                className="relative h-12 cursor-pointer overflow-hidden origin-left"
+                style={{ width: `${timelineZoom * 100}%` }}
+              >
+                {/* Hour Grid Markers */}
+                {Array.from({ length: 25 }).map((_, i) => (
+                  <div
+                    key={i}
+                    style={{ left: `${(i / 24) * 100}%` }}
+                    className="absolute top-0 bottom-0 border-l border-zinc-800/80 pointer-events-none"
+                  >
+                    {i % 2 === 0 && (
                     <span className="absolute top-1 left-1 text-[9px] font-mono text-zinc-500">
                       {String(i).padStart(2, "0")}:00
                     </span>
@@ -938,8 +976,9 @@ export default function RecordingsPlaybackView({ cameras }: RecordingsPlaybackVi
                 </div>
               )}
             </div>
+          </div>
 
-            {/* Timeline Legend & Stats */}
+          {/* Timeline Legend & Stats */}
             <div className="flex flex-wrap items-center justify-between text-xs text-zinc-400 pt-1">
               <div className="flex items-center gap-4">
                 <div className="flex items-center gap-1.5">

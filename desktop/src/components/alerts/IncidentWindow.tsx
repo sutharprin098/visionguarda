@@ -115,7 +115,7 @@ export default function IncidentWindow({
 
   return createPortal(
     <div
-      className="camai-alert-fade fixed inset-0 z-[140] flex items-center justify-center bg-black/70 p-6 backdrop-blur-sm"
+      className="camai-alert-fade fixed inset-0 z-[9999] flex items-center justify-center bg-black/80 p-6 backdrop-blur-md pointer-events-auto"
       onClick={onClose}
       role="dialog"
       aria-modal="true"
@@ -210,9 +210,9 @@ export default function IncidentWindow({
 
         {/* ---- body ---- */}
         <div className="min-h-0 flex-1 overflow-y-auto">
-          {tab === "overview" && <OverviewTab event={event} />}
+          {tab === "overview" && <OverviewTab event={event} onGoToEvidence={() => setTab("evidence")} />}
           {tab === "evidence" && <EvidenceTab event={event} />}
-          {tab === "timeline" && <TimelineTab event={event} />}
+          {tab === "timeline" && <TimelineTab event={event} onGoToEvidence={() => setTab("evidence")} />}
           {tab === "analysis" && <AnalysisTab event={event} />}
           {tab === "metadata" && <MetadataTab event={event} />}
           {tab === "downloads" && <DownloadsTab event={event} captureMediaFor={captureMediaFor} />}
@@ -233,7 +233,7 @@ export default function IncidentWindow({
 
 // --- Overview ----------------------------------------------------------------
 
-function OverviewTab({ event }: { event: AlertEvent }) {
+function OverviewTab({ event, onGoToEvidence }: { event: AlertEvent; onGoToEvidence: () => void }) {
   const theme = SEVERITY_THEME[event.severity];
   const speed = speedLabel(event.meta.speed, event.meta.speedStatus);
   const aspect = event.meta.aspect && isFinite(event.meta.aspect) ? event.meta.aspect : 16 / 9;
@@ -242,7 +242,7 @@ function OverviewTab({ event }: { event: AlertEvent }) {
     <div className="grid grid-cols-[minmax(0,1fr)_300px] gap-5 p-5">
       <div>
         <div
-          className="overflow-hidden rounded-xl border border-white/[0.07] bg-black/40"
+          className="relative group overflow-hidden rounded-xl border border-white/[0.07] bg-black/40"
           style={{ aspectRatio: String(Math.min(2.9, Math.max(0.62, aspect))), maxHeight: "46vh" }}
         >
           {event.cropUrl ? (
@@ -255,6 +255,12 @@ function OverviewTab({ event }: { event: AlertEvent }) {
           ) : (
             <NoImage />
           )}
+          <button
+            onClick={onGoToEvidence}
+            className="absolute bottom-3 right-3 flex items-center gap-1.5 rounded-lg bg-cyan-500/90 px-3 py-1.5 text-xs font-semibold text-black shadow-lg backdrop-blur-md transition hover:bg-cyan-400"
+          >
+            <Layers size={13} /> Highlight Object & View AI Boxes
+          </button>
         </div>
         <p className="mt-2 text-[11px] leading-relaxed text-zinc-500">
           Cropped from the live frame on this node at {clockTime(event.ts)}
@@ -405,7 +411,7 @@ const BASIS_STYLE: Record<Basis, { label: string; cls: string; help: string }> =
   },
 };
 
-function TimelineTab({ event }: { event: AlertEvent }) {
+function TimelineTab({ event, onGoToEvidence }: { event: AlertEvent; onGoToEvidence: () => void }) {
   const rows = useMemo(() => [...event.timeline].sort((a, b) => a.ts - b.ts), [event.timeline]);
 
   return (
@@ -417,9 +423,12 @@ function TimelineTab({ event }: { event: AlertEvent }) {
         </Empty>
       ) : (
         <>
-          <ol className="relative space-y-3 border-l border-white/[0.08] pl-5">
+          <div className="mb-3 text-[11px] text-zinc-400">
+            💡 Click any event reading timestamp below to view evidence & highlight the detected object:
+          </div>
+          <ol className="relative space-y-2 border-l border-white/[0.08] pl-5">
             {rows.map((e, i) => (
-              <TimelineRow key={`${e.ts}_${e.kind}_${i}`} entry={e} eventTs={event.ts} />
+              <TimelineRow key={`${e.ts}_${e.kind}_${i}`} entry={e} eventTs={event.ts} onClick={onGoToEvidence} />
             ))}
           </ol>
           <div className="mt-5 flex flex-wrap gap-3 border-t border-white/[0.06] pt-3">
@@ -438,25 +447,32 @@ function TimelineTab({ event }: { event: AlertEvent }) {
   );
 }
 
-function TimelineRow({ entry, eventTs }: { entry: TimelineEntry; eventTs: number }) {
+function TimelineRow({ entry, eventTs, onClick }: { entry: TimelineEntry; eventTs: number; onClick: () => void }) {
   const style = BASIS_STYLE[entry.basis] ?? BASIS_STYLE.observed;
   const isAlertMoment = Math.abs(entry.ts - eventTs) < 900;
   return (
-    <li className="relative">
+    <li
+      onClick={onClick}
+      title="Click to play evidence and highlight object"
+      className="group relative cursor-pointer rounded-lg p-2 transition hover:bg-white/[0.06]"
+    >
       <span
         className={clsx(
-          "absolute -left-[23px] top-1.5 h-1.5 w-1.5 rounded-full",
-          isAlertMoment ? "bg-zinc-100 ring-2 ring-zinc-100/25" : "bg-zinc-600",
+          "absolute -left-[23px] top-3 h-2 w-2 rounded-full transition-transform group-hover:scale-125",
+          isAlertMoment ? "bg-cyan-400 ring-4 ring-cyan-400/25 animate-pulse" : "bg-zinc-500",
         )}
       />
       <div className="flex items-baseline gap-2">
-        <span className="font-mono text-[10px] tabular-nums text-zinc-600">{clockTime(entry.ts)}</span>
-        <span className="text-[12px] font-medium text-zinc-200">{entry.label}</span>
+        <span className="font-mono text-[10px] tabular-nums text-zinc-400">{clockTime(entry.ts)}</span>
+        <span className="text-[12px] font-semibold text-zinc-200 group-hover:text-cyan-300">{entry.label}</span>
         <span className={clsx("rounded px-1.5 py-0.5 text-[9px] font-medium", style.cls)}>
           {style.label}
         </span>
+        <span className="ml-auto text-[10px] text-cyan-400 opacity-0 transition-opacity group-hover:opacity-100">
+          ▶ View & Highlight Box
+        </span>
       </div>
-      {entry.detail && <div className="mt-0.5 text-[10px] text-zinc-600">{entry.detail}</div>}
+      {entry.detail && <div className="mt-0.5 text-[10px] text-zinc-400">{entry.detail}</div>}
     </li>
   );
 }

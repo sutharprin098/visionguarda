@@ -179,25 +179,49 @@ export function drawFrameBoxes(
 
     const isSubject =
       highlight != null &&
-      Math.abs(highlight.x1 - d.bbox.x1) < 1e-6 &&
-      Math.abs(highlight.y1 - d.bbox.y1) < 1e-6;
+      Math.abs(highlight.x1 - d.bbox.x1) < 1e-4 &&
+      Math.abs(highlight.y1 - d.bbox.y1) < 1e-4;
 
-    const color = boxColor(d.class);
+    const color = isSubject ? "#00f0ff" : boxColor(d.class);
     ctx.save();
-    ctx.strokeStyle = color;
-    ctx.lineWidth = isSubject ? 2.5 : 1.25;
-    ctx.globalAlpha = isSubject ? 1 : 0.55;
-    ctx.strokeRect(x, y, w, h);
+    if (isSubject) {
+      ctx.shadowColor = "#00f0ff";
+      ctx.shadowBlur = 16;
+      ctx.strokeStyle = "#ffffff";
+      ctx.lineWidth = 3.5;
+      ctx.globalAlpha = 1.0;
+      ctx.strokeRect(x - 2, y - 2, w + 4, h + 4);
+
+      // Corner target brackets
+      const cl = Math.min(16, w / 4, h / 4);
+      ctx.strokeStyle = "#00f0ff";
+      ctx.lineWidth = 3;
+
+      // Top-Left
+      ctx.beginPath(); ctx.moveTo(x - 4, y - 4 + cl); ctx.lineTo(x - 4, y - 4); ctx.lineTo(x - 4 + cl, y - 4); ctx.stroke();
+      // Top-Right
+      ctx.beginPath(); ctx.moveTo(x + w + 4 - cl, y - 4); ctx.lineTo(x + w + 4, y - 4); ctx.lineTo(x + w + 4, y - 4 + cl); ctx.stroke();
+      // Bottom-Left
+      ctx.beginPath(); ctx.moveTo(x - 4, y + h + 4 - cl); ctx.lineTo(x - 4, y + h + 4); ctx.lineTo(x - 4 + cl, y + h + 4); ctx.stroke();
+      // Bottom-Right
+      ctx.beginPath(); ctx.moveTo(x + w + 4 - cl, y + h + 4); ctx.lineTo(x + w + 4, y + h + 4); ctx.lineTo(x + w + 4, y + h + 4 - cl); ctx.stroke();
+    } else {
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 1.25;
+      ctx.globalAlpha = 0.55;
+      ctx.strokeRect(x, y, w, h);
+    }
     ctx.restore();
 
-    const label = `${d.class.replace(/_/g, " ")} ${Math.round((d.confidence ?? 0) * 100)}%`;
+    const label = `${isSubject ? "🎯 TARGET: " : ""}${d.class.replace(/_/g, " ")} ${Math.round((d.confidence ?? 0) * 100)}%`;
     const tw = ctx.measureText(label).width;
-    const ly = y - 15 < 0 ? y + 2 : y - 15;
-    ctx.globalAlpha = isSubject ? 0.95 : 0.6;
-    ctx.fillStyle = color;
-    ctx.fillRect(x, ly, tw + 8, 14);
+    const ly = y - 18 < 0 ? y + 4 : y - 18;
+    ctx.globalAlpha = isSubject ? 1.0 : 0.6;
+    ctx.fillStyle = isSubject ? "#00f0ff" : color;
+    ctx.fillRect(x, ly, tw + 10, 16);
     ctx.fillStyle = "#0b0d10";
-    ctx.fillText(label, x + 4, ly + 10.5);
+    ctx.font = isSubject ? "700 11px Inter, system-ui, sans-serif" : "600 11px Inter, system-ui, sans-serif";
+    ctx.fillText(label, x + 5, ly + 12);
     ctx.globalAlpha = 1;
   }
 }

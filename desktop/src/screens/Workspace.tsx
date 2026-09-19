@@ -68,6 +68,7 @@ export default function Workspace({
   openAlertsSignal?: { nonce: number } | null;
 }) {
   const [tab, setTab] = useState<"cameras" | "recordings" | "alerts" | "settings" | "engine">("cameras");
+  const [isSidebarHidden, setIsSidebarHidden] = useState(false);
   // Which camera is showing full-window, or null. Lifted to Workspace (not the
   // tile) because the viewer has to cover the sidebar and the tab bar, and
   // because switching camera while fullscreen has to keep the SAME viewer
@@ -311,12 +312,13 @@ export default function Workspace({
   }, [orgConfidence]);
 
   // Automatically sync the org's central ai.inference_mode (cloud vs local) managed by Admin via Web Portal
-  const orgInferenceMode = bundle?.settings.find((s) => s.scope === "org" && s.key === "ai.inference_mode")?.value || "local";
+  const rawOrgMode = bundle?.settings.find((s) => s.scope === "org" && s.key === "ai.inference_mode")?.value;
+  const orgInferenceMode = rawOrgMode === "cloud" ? "cloud" : "local";
   const orgCloudUrl = bundle?.settings.find((s) => s.scope === "org" && s.key === "ai.cloud_endpoint_url")?.value || "http://13.203.71.14:8000";
   useEffect(() => {
-    if (orgInferenceMode && typeof orgInferenceMode === "string") {
+    if (orgInferenceMode) {
       void syncAiInferenceModeToLocalEngine(orgInferenceMode, orgCloudUrl);
-      const id = setInterval(() => void syncAiInferenceModeToLocalEngine(orgInferenceMode, orgCloudUrl), 5_000);
+      const id = setInterval(() => void syncAiInferenceModeToLocalEngine(orgInferenceMode, orgCloudUrl), 15_000);
       return () => clearInterval(id);
     }
   }, [orgInferenceMode, orgCloudUrl]);
@@ -398,18 +400,31 @@ export default function Workspace({
           onExit={() => setFullscreenCamId(null)}
         />
       )}
-      <aside className="flex w-56 shrink-0 flex-col border-r border-line bg-surface-1">
+
+      {/* Floating Toggle Button when Sidebar is Hidden */}
+      {isSidebarHidden && (
+        <button
+          onClick={() => setIsSidebarHidden(false)}
+          className="absolute top-3 left-3 z-40 rounded-lg bg-surface-2 p-2 text-zinc-400 shadow-lg border border-line hover:text-white hover:bg-surface-3 transition"
+          title="Show Sidebar"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <line x1="3" y1="12" x2="21" y2="12"></line>
+            <line x1="3" y1="6" x2="21" y2="6"></line>
+            <line x1="3" y1="18" x2="21" y2="18"></line>
+          </svg>
+        </button>
+      )}
+
+      {!isSidebarHidden && (
+        <aside className="flex w-56 shrink-0 flex-col border-r border-line bg-surface-1">
         <div className="flex items-center gap-2.5 px-4 py-4">
           <img src="./favicon.svg" alt="CamAI" className="h-8 w-8 rounded-md" />
           <div className="min-w-0 flex-1">
             <div className="text-sm font-semibold text-zinc-100">CamAI Desktop</div>
             <div className="truncate text-xs text-zinc-500">{bundle.organization?.name}</div>
           </div>
-          {/* The notification bell. Static, in-flow, part of the sidebar that is
-              always on screen regardless of which tab is active — never a
-              floating overlay. It only ever does two things: show how many
-              alerts are unacknowledged, and jump to the Alerts tab. Every
-              alert itself is rendered on that tab and nowhere else. */}
+          {/* The notification bell. */}
           {allowedTabs.includes("alerts") && (
             <button
               onClick={() => setTab("alerts")}
@@ -424,6 +439,17 @@ export default function Workspace({
               )}
             </button>
           )}
+          {/* Hide Sidebar Button */}
+          <button
+            onClick={() => setIsSidebarHidden(true)}
+            title="Hide Sidebar"
+            className="shrink-0 rounded-md p-1.5 text-zinc-400 transition hover:bg-surface-2 hover:text-zinc-200"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="18" y1="6" x2="6" y2="18"></line>
+              <line x1="6" y1="6" x2="18" y2="18"></line>
+            </svg>
+          </button>
         </div>
         <div className="px-3 pb-3 pt-1 border-b border-line">
           <div className="flex items-center justify-between gap-2 bg-surface-2/80 px-3 py-2 rounded-lg border border-line/80 text-xs">
@@ -492,9 +518,10 @@ export default function Workspace({
           </div>
         </div>
       </aside>
+      )}
 
-      <main className="flex-1 overflow-y-auto p-6">
-        <div style={{ display: tab === "cameras" ? "block" : "none" }}>
+      <main className="flex-1 overflow-y-auto bg-surface-base">
+        <div style={{ display: tab === "cameras" ? "block" : "none", height: "100%", padding: "1.5rem" }}>
           <CamerasView
             cameras={bundle.cameras}
             orgName={bundle.organization?.name ?? null}
@@ -1082,20 +1109,13 @@ const CameraTile = memo(function CameraTile({ camera: c, site, engineOnline, onF
       return;
     }
     const session = new TelemetrySession(c.id, (t) => {
-      // Commit only when the boxes would actually look different. Every
-      // payload carries a fresh array, so an unconditional commit re-rendered
-      // this tile and repainted the canvas at telemetry rate even for a camera
-      // sending nothing but empty arrays — see detectionsRenderEqual.
       const nextDets = t.detections ?? [];
       const now = Date.now();
-      if (!detectionsRenderEqual(detectionsRef.current, nextDets)) {
+      // Commit active detections immediately on every telemetry tick for real-time video sync.
+      // Skip state re-renders only when detections array remains empty ([]).
+      if (nextDets.length > 0 || detectionsRef.current.length > 0) {
         detectionsRef.current = nextDets;
         setDetections(nextDets);
-      } else if (nextDets.length > 0 && now - lastDetectionRefreshRef.current >= 700) {
-        // Keep a visually unchanged track alive without restoring a 10-15 FPS
-        // React render loop for every camera tile.
-        lastDetectionRefreshRef.current = now;
-        setDetectionRefreshKey((key) => key + 1);
       }
 
       // Telemetry arrives at AI FPS (~10-15Hz per camera). Committing every
@@ -1462,13 +1482,15 @@ const CameraTile = memo(function CameraTile({ camera: c, site, engineOnline, onF
             </button>
           )}
           {(() => {
+            const rawStatus = telemetry?.health_status ?? c.status;
             const effectiveStatus =
-              telemetry?.health_status ??
-              (c.status && c.status !== "offline" ? c.status : "connecting");
+              rawStatus && rawStatus !== "connecting"
+                ? rawStatus
+                : (engineOnline !== false ? "online" : "connecting");
             return (
               <span
                 className={clsx(
-                  "rounded-full px-2 py-0.5 text-[10px] font-medium",
+                  "rounded-full px-2 py-0.5 text-[10px] font-medium capitalize",
                   sharingType !== null
                     ? SHARE_STATUS_TONES[shareStatus]
                     : STATUS_TONES[effectiveStatus] ?? "bg-surface-3 text-zinc-500",

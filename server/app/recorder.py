@@ -16,17 +16,8 @@ _FFMPEG_EXE = imageio_ffmpeg.get_ffmpeg_exe()
 
 class _H264Writer:
     """
-    cv2.VideoWriter-compatible wrapper (isOpened/write/release) that pipes
-    raw BGR24 frames into ffmpeg for H.264 encoding.
-
-    cv2.VideoWriter's own H.264 path depends on the OpenH264 DLL being
-    present on the machine; when it's missing, cv2 silently falls back to
-    mp4v (MPEG-4 Part 2) instead of raising — which produces valid,
-    ffprobe-readable video files that no web browser can actually play
-    (Chrome/Firefox/Edge only support H.264/VP8/VP9/AV1 in <video>). This
-    reuses the ffmpeg binary already bundled via imageio_ffmpeg (same one
-    used by _mini_rtsp_server.py) with libx264, sidestepping the OpenH264
-    dependency entirely.
+    Wrapper that pipes raw BGR24 frames into ffmpeg for H.264 encoding.
+    Ensures .mp4 files are compatible with native HTML5 <video> tags on all browsers.
     """
     def __init__(self, file_path: str, fps: float, frame_size: tuple):
         self._proc = None
@@ -58,13 +49,10 @@ class _H264Writer:
             return
         try:
             self._proc.stdin.write(frame.tobytes())
+            self._proc.stdin.flush()  # CRITICAL: Prevents silent hangs on Windows!
         except (BrokenPipeError, OSError) as e:
             print(f"[Recorder] ffmpeg write failed (encoder process died): {e}", flush=True)
             self._opened = False
-            # Reap it. Clearing _opened alone left the dead ffmpeg unwaited —
-            # a zombie process still holding its half-written .mp4 open — for
-            # the entire lifetime of the engine, because nothing else ever
-            # calls release() on a writer the caller believes is still live.
             self.release()
 
     def release(self):

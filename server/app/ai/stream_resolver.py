@@ -252,7 +252,7 @@ def _extract(url: str) -> _Resolved:
         "extractor_retries": 1,
         "extractor_args": {
             "youtube": {
-                "player_client": ["mweb", "ios", "web", "tv", "android"]
+                "player_client": ["android", "ios", "mweb", "web"]
             }
         },
     }
@@ -299,13 +299,35 @@ def _extract(url: str) -> _Resolved:
     return _Resolved(direct, _expiry_of(direct, info))
 
 
+def normalize_url(url: str) -> str:
+    """Clean and format bare YouTube IDs or tagged inputs into standard URLs."""
+    s = str(url).strip()
+    if s.startswith("[youtube]"):
+        s = s[9:].strip()
+    if not s.startswith("http://") and not s.startswith("https://"):
+        if re.match(r"^[A-Za-z0-9_-]{10,12}$", s):
+            s = f"https://www.youtube.com/watch?v={s}"
+        elif "youtube.com" in s or "youtu.be" in s:
+            s = f"https://{s}"
+    return s
+
+
+def needs_resolution(url) -> bool:
+    """Is this a page URL that must be resolved before cv2 can open it?"""
+    src = normalize_url(url)
+    host = _host_of(src)
+    if not host:
+        return False
+    return any(host == h or host.endswith("." + h) for h in _PAGE_HOSTS)
+
+
 def resolve(url: str, force: bool = False) -> str:
     """Direct media URL for `url`, cached until shortly before it expires.
 
     Returns non-page URLs unchanged, so this is safe to call on every source.
     Raises StreamResolveError if extraction fails.
     """
-    src = str(url)
+    src = normalize_url(url)
     if not needs_resolution(src):
         return src
 
@@ -318,7 +340,16 @@ def resolve(url: str, force: bool = False) -> str:
     # Extraction runs outside the lock: it is a multi-second network call and
     # must not block another camera's capture thread. Two cameras on the same
     # URL may briefly duplicate the work, which costs one extra request.
-    resolved = _extract(src)
+    try:
+        resolved = _extract(src)
+    except Exception as err:
+        err_msg = str(err)
+        if "truncated" in err_msg.lower() or "incomplete" in err_msg.lower():
+            raise StreamResolveError(
+                f"YouTube video ID '{url}' is incomplete. YouTube IDs require 11 characters. "
+                f"Please enter a valid link (e.g. https://www.youtube.com/watch?v=dQw4w9WgXcQ)"
+            )
+        raise
     with _cache_lock:
         _cache[src] = resolved
     return resolved.url

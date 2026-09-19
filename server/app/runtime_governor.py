@@ -17,6 +17,25 @@ class RuntimeGovernor:
         self.state = RuntimeState.OFFLINE
         self.last_error: Optional[str] = None
         self.switching_started_at: float = 0.0
+        self.camera_last_detection: Dict[str, float] = {}
+        self._liveness_task = None
+
+    def register_detection(self, camera_id: str):
+        """Called by pipeline whenever a detection is successfully yielded, proving AI is alive."""
+        self.camera_last_detection[camera_id] = time.time()
+
+    async def _liveness_monitor(self):
+        """Background task that alerts if AI completely stops yielding detections."""
+        while True:
+            await asyncio.sleep(60)
+            now = time.time()
+            for cam, last_time in list(self.camera_last_detection.items()):
+                if now - last_time > 300: # 5 minutes of dead silence
+                    print(f"\n=======================================================")
+                    print(f"[CRITICAL ALERT] AI FAILURE DETECTED ON CAMERA {cam}!")
+                    print(f"No detections in over 5 minutes. Possible AI bypass or model crash.")
+                    print(f"=======================================================\n", flush=True)
+
 
     def get_status(self) -> Dict[str, Any]:
         mode = getattr(config, "INFERENCE_MODE", "local").strip().lower()
@@ -39,6 +58,9 @@ class RuntimeGovernor:
 
     async def initialize(self, manager):
         """Called once during FastAPI startup to initialize the selected mode."""
+        if not self._liveness_task:
+            self._liveness_task = asyncio.create_task(self._liveness_monitor())
+            
         async with self.lock:
             self.state = RuntimeState.SWITCHING
             self.switching_started_at = time.time()
@@ -172,11 +194,10 @@ class RuntimeGovernor:
         await asyncio.to_thread(manager.start_cameras)
 
         if self.last_error and "CLOUD OFFLINE" in self.last_error:
-            print(f"[RuntimeGovernor] [CLOUD] Cloud endpoint offline ({self.last_error}). Falling back to LOCAL mode for seamless detection...", flush=True)
-            await self._activate_local_mode(manager)
-        else:
-            self.state = RuntimeState.CLOUD_ACTIVE
-            print("[RuntimeGovernor] [CLOUD] Cloud mode ACTIVE.", flush=True)
+            print(f"[RuntimeGovernor] [CLOUD] Cloud endpoint notice ({self.last_error}). Camera streams started in Cloud Mode — auto-connecting when endpoint responds.", flush=True)
+        
+        self.state = RuntimeState.CLOUD_ACTIVE
+        print("[RuntimeGovernor] [CLOUD] Cloud mode ACTIVE.", flush=True)
 
     async def _activate_local_mode(self, manager):
         """Strictly activates Local mode:

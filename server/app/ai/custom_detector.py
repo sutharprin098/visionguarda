@@ -4,10 +4,8 @@ import json
 import uuid
 import time
 import numpy as np
-import torch
 import threading
 from PIL import Image
-from torchvision import models, transforms
 
 # Base directory for custom models
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -38,6 +36,9 @@ def _init_model():
         if _feature_extractor is not None:
             return
         
+        import torch
+        from torchvision import models, transforms
+
         _device = "cuda" if torch.cuda.is_available() else "cpu"
         print(f"[CustomDetector] Initializing MobileNetV3 on {_device}...")
         
@@ -54,6 +55,7 @@ def _init_model():
 
 def get_embedding(img_bgr):
     """Extracts a 960-dimensional unit-normalized feature vector from a BGR image crop."""
+    import torch
     _init_model()
     img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
     pil_img = Image.fromarray(img_rgb)

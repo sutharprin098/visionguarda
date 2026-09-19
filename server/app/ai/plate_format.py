@@ -75,25 +75,55 @@ class CountryFormat:
 # BH (Bharat)     : YY BH NNNN LL   e.g. 22BH1234AA — digits first, so it is
 #                   listed explicitly; it does not fit the SS-first shape.
 _IN_TEMPLATES = (
-    "AADDAADDDD",    # MH12AB1234  — by far the most common
+    # 4 digits at the end
+    "AADDAADDDD",    # MH12AB1234
     "AADDADDDD",     # MH12A1234
     "AADDAAADDDD",   # MH12ABC1234
-    "AADDDDDD",      # MH121234    — no series letters (older)
-    "AADAADDDD",     # DL1AB1234   — single-digit RTO
+    "AADDDDDD",      # MH121234
+    "AADAADDDD",     # DL1AB1234
     "AADADDDD",      # DL1A1234
     "AADAAADDDD",    # DL1ABC1234
-    "DDAADDDDAA",    # 22BH1234AA  — Bharat series
+    
+    # 3 digits at the end
+    "AADDAADDD",     # MH12AB123
+    "AADDADDD",      # MH12A123
+    "AADDAAADDD",    # MH12ABC123
+    "AADDDDD",       # MH12123
+    "AADAADDD",      # DL1AB123
+    "AADADDD",       # DL1A123
+    "AADAAADDD",     # DL1ABC123
+
+    # 2 digits at the end
+    "AADDAADD",      # MH12AB12
+    "AADDADD",       # MH12A12
+    "AADDAAADD",     # MH12ABC12
+    "AADDDD",        # MH1212
+    "AADAADD",       # DL1AB12
+    "AADADD",        # DL1A12
+    "AADAAADD",      # DL1ABC12
+
+    # 1 digit at the end (VIP numbers)
+    "AADDAAD",       # MH12AB1
+    "AADDAD",        # MH12A1
+    "AADDAAAD",      # MH12ABC1
+    "AADDD",         # MH121
+    "AADAAD",        # DL1AB1
+    "AADAD",         # DL1A1
+    "AADAAAD",       # DL1ABC1
+
+    # Bharat Series
+    "DDAADDDDAA",    # 22BH1234AA
     "DDAADDDDA",     # 22BH1234A
 )
 
 _IN_REGEX = (
     r"(?:"
-    r"[A-Z]{2}[0-9]{1,2}[A-Z]{0,3}[0-9]{4}"     # standard + older variants
+    r"[A-Z]{2}[0-9]{1,2}[A-Z]{0,3}[0-9]{1,4}"     # standard + older variants (1-4 ending digits)
     r"|[0-9]{2}BH[0-9]{4}[A-Z]{1,2}"            # Bharat series
     r")"
 )
 
-INDIA = CountryFormat("IN", "India", _IN_TEMPLATES, _IN_REGEX, min_len=8, max_len=11)
+INDIA = CountryFormat("IN", "India", _IN_TEMPLATES, _IN_REGEX, min_len=4, max_len=11)
 
 # --- Generic ---------------------------------------------------------------
 # No structural constraint: any alphanumeric run of a plausible length. Used

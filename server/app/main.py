@@ -4,6 +4,14 @@ import hmac
 import io
 import time
 import uuid
+import sys
+if sys.platform == "win32":
+    try:
+        import ctypes
+        ctypes.windll.winmm.timeBeginPeriod(1)
+    except Exception:
+        pass
+
 import json
 import numpy as np
 from collections import deque
@@ -44,6 +52,14 @@ try:
     import psutil
     _proc = psutil.Process()
     _proc.cpu_percent(interval=None)
+    
+    # Disable Windows Efficiency Mode / Background Throttling by elevating priority
+    import sys
+    if sys.platform == "win32":
+        try:
+            _proc.nice(psutil.HIGH_PRIORITY_CLASS)
+        except Exception:
+            pass
 except ImportError:
     _proc = None
 

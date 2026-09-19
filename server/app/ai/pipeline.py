@@ -85,6 +85,7 @@ CROWDED_CONF_RATIO = 0.6
 CROWDED_TRACK_COUNT = 5
 
 _confidence_lock = threading.Lock()
+_capture_lock = threading.Lock()
 _detection_confidence = DEFAULT_CONFIDENCE
 
 
@@ -478,7 +479,7 @@ class ByteTracker:
     # Cap how far (as a fraction of the frame diagonal) a revived track's new
     _REID_SPATIAL_GATE = 0.5
 
-    def __init__(self, max_lost_seconds=1.2, reid_ttl=15.0, n_init=2):
+    def __init__(self, max_lost_seconds=2.5, reid_ttl=15.0, n_init=1):
         # Seconds — NOT iterations — a track stays actively coasted before it
         self.max_lost_seconds = max_lost_seconds
         self.reid_ttl        = reid_ttl         # seconds a track stays re-identifiable in the gallery
@@ -756,7 +757,7 @@ class ByteTracker:
             })
         return out
 
-COAST_RENDER_SECONDS = 1.2
+COAST_RENDER_SECONDS = 0.8
 
 
 def resolve_emitted_detections(tracker, tracks_raw, detections, masks,
@@ -1910,14 +1911,12 @@ class PipelineCoordinator:
                 })
                 self._heartbeat["cap"] = time.time()
 
-                # Hold a FILE source to its own frame rate (see the pacing note
+                # Hold a FILE source to its own frame rate per frame
                 if self._file_frame_interval > 0.0:
-                    next_frame_due += self._file_frame_interval
-                    slack = next_frame_due - time.time()
+                    t_elapsed = time.time() - t0
+                    slack = self._file_frame_interval - t_elapsed
                     if slack > 0:
                         time.sleep(slack)
-                    elif slack < -self._file_frame_interval:
-                        next_frame_due = time.time()
 
             except (Exception, MemoryError) as e:
                 # Never let a single bad frame/driver hiccup kill this thread —
@@ -1969,7 +1968,7 @@ class PipelineCoordinator:
                         is_enabled = nv_cfg
                         params = {}
                     else:
-                        is_enabled = True
+                        is_enabled = False
                         params = {}
 
                     mode = str(params.get("mode", getattr(self, "zero_dce_mode", "auto"))).lower()
@@ -1980,7 +1979,15 @@ class PipelineCoordinator:
                         thresh = 140.0
 
                     force_on = (mode in ("on", "always_on", "forced", "always", "manual", "true", "1")) or (self.zone_profile in ("micro_motion", "night_vision"))
-                    lum_fast = round(zero_dce.calculate_luminance(frame), 1)
+                    if is_enabled and mode != "off":
+                        _now_zd = time.time()
+                        if not hasattr(self, "_last_lum_val") or (_now_zd - getattr(self, "_last_lum_check_ts", 0.0) >= 0.4):
+                            self._last_lum_check_ts = _now_zd
+                            self._last_lum_val = round(zero_dce.calculate_luminance(frame), 1)
+                        lum_fast = getattr(self, "_last_lum_val", 128.0)
+                    else:
+                        lum_fast = 128.0
+
                     scene_is_dark = lum_fast < max(70.0, min(120.0, thresh))
                     if is_enabled and mode != "off" and (scene_is_dark or (force_on and lum_fast < 130.0)):
                         # Enhance low-light frames
@@ -2089,6 +2096,12 @@ class PipelineCoordinator:
             # Calculate frame queue age (time spent waiting before AI processing starts)
             cap_ts = data.get("cap_time", time.time())
             ai_queue_age = (time.time() - cap_ts) * 1000.0
+            if ai_queue_age > 40.0:
+                fresh = self._decoded_slot.take_latest()
+                if fresh is not None:
+                    data = fresh
+                    cap_ts = data.get("cap_time", time.time())
+                    ai_queue_age = (time.time() - cap_ts) * 1000.0
             data["ai_queue_age"] = round(ai_queue_age, 1)
 
             try:
@@ -2106,21 +2119,27 @@ class PipelineCoordinator:
             backend.release_thread_request()
 
     def _ai_loop_iteration(self, data):
-        """Mode-routing dispatcher — bypasses all AI for maximum speed."""
-        frame = data["frame"]
-        orig_h, orig_w = frame.shape[:2]
-        self._ai_ts.append(time.time())
-        self._ai_slot.put({
-            **data,
-            "detections":     [],
-            "masks_polygons": [],
-            "motion":         False,
-            "micro_motion_stats": {},
-            "orig_h":         orig_h,
-            "orig_w":         orig_w,
-            "conf_thresh":    0.3,
-            "t_pre": 0.0, "t_inf": 0.0, "t_post": 0.0, "ai_lat": 0.0,
-        })
+        """Mode-routing dispatcher — reads config.INFERENCE_MODE each iteration.
+
+        CLOUD mode: encode frame → cloud HTTP → parse → _ai_slot
+        LOCAL mode: YOLO local inference → _ai_slot  (unchanged path)
+        """
+        from app import config
+        mode = getattr(config, "INFERENCE_MODE", "local").strip().lower()
+        if mode == "cloud":
+            now = time.time()
+            if getattr(self, "_cloud_offline", False):
+                # Auto-recovery probe: try cloud inference every 2.0s instead of permanent lockout
+                if now - getattr(self, "_last_cloud_retry_ts", 0.0) >= 2.0:
+                    self._last_cloud_retry_ts = now
+                    self._ai_loop_iteration_cloud(data)
+                else:
+                    self._ai_loop_iteration_local(data)
+            else:
+                self._ai_loop_iteration_cloud(data)
+        else:
+            self._ai_loop_iteration_local(data)
+
 
     # ------------------------------------------------------------------
     # Module 3-CLOUD: Send frame to cloud endpoint, inject detections
@@ -2141,10 +2160,17 @@ class PipelineCoordinator:
         cloud_url = getattr(config, "CLOUD_ENDPOINT_URL", "").strip()
         cloud_key = getattr(config, "CLOUD_API_KEY", "").strip()
 
-        if not cloud_url:
+        if not cloud_url or getattr(self, "_cloud_offline", False):
             self._cloud_offline = True
-            self._ai_loop_iteration_local(data)
-            return
+            if self.backend is None:
+                try:
+                    from app.camera_manager import manager
+                    self.backend = manager.ensure_backend_loaded()
+                except Exception:
+                    pass
+            if self.backend is not None:
+                self._ai_loop_iteration_local(data)
+                return
 
         if getattr(self, "_is_standby_frame", False):
             with self._overlay_lock:
@@ -2189,7 +2215,7 @@ class PipelineCoordinator:
                 endpoint_url=cloud_url,
                 api_key=cloud_key,
                 jpeg_quality=65,
-                timeout_s=1.0,
+                timeout_s=2.5,
                 camera_id=self.camera_id,
                 target_size=480,
             )
@@ -2202,11 +2228,24 @@ class PipelineCoordinator:
             except Exception as e:
                 print(f"[Cloud TargetMatcher Err] {e}", flush=True)
 
+            # If cloud mode returns 0 detections, check local backend fallback so detection never drops
+            if not detections:
+                if self.backend is None:
+                    try:
+                        from app.camera_manager import manager
+                        self.backend = manager.ensure_backend_loaded()
+                    except Exception:
+                        pass
+                if self.backend is not None:
+                    self._ai_loop_iteration_local(data)
+                    return
+
             # Successful cloud inference
             if getattr(self, "_cloud_offline", False):
-                print(f"[AI-{self.camera_id}] Cloud endpoint recovered — detections resuming.",
+                print(f"[AI-{self.camera_id}] Cloud endpoint recovered — cloud detections resuming seamlessly.",
                       flush=True)
             self._cloud_offline = False
+            self._cloud_consecutive_fails = 0
             self._cloud_offline_logged = False
             self._last_infer_ts = time.time()
 
@@ -2235,11 +2274,12 @@ class PipelineCoordinator:
                 "ai_lat": round(t_inf, 1),
             })
 
-        except CloudOfflineError as exc:
+        except (CloudOfflineError, Exception) as exc:
             now_ts = time.time()
-            if not getattr(self, "_cloud_offline", False) or \
-               now_ts - getattr(self, "_cloud_last_err_log", 0.0) >= 30.0:
-                print(f"[AI-{self.camera_id}] CLOUD OFFLINE: {exc}. Trying local fallback...", flush=True)
+            fails = getattr(self, "_cloud_consecutive_fails", 0) + 1
+            self._cloud_consecutive_fails = fails
+            if not getattr(self, "_cloud_offline", False) or now_ts - getattr(self, "_cloud_last_err_log", 0.0) >= 15.0:
+                print(f"[AI-{self.camera_id}] CLOUD OFFLINE/ERROR: {exc}. Falling back to local engine...", flush=True)
                 self._cloud_last_err_log = now_ts
             self._cloud_offline = True
 
@@ -2253,7 +2293,6 @@ class PipelineCoordinator:
             if self.backend is not None:
                 self._ai_loop_iteration_local(data)
             else:
-                # Forward frame with recent detections so tracking coasts smoothly across jitter
                 with self._overlay_lock:
                     cached_dets = list(getattr(self, "_latest_raw_dets", []))
                 age = time.time() - getattr(self, "_last_infer_ts", 0.0)
@@ -2269,25 +2308,6 @@ class PipelineCoordinator:
                     "conf_thresh":    0.3,
                     "t_pre": 0.0, "t_inf": 0.0, "t_post": 0.0, "ai_lat": 0.0,
                 })
-
-        except Exception as exc:
-            self._stage_errors["ai"] += 1
-            print(f"[AI-{self.camera_id}] Cloud inference unexpected error: {exc}", flush=True)
-            with self._overlay_lock:
-                cached_dets = list(getattr(self, "_latest_raw_dets", []))
-            age = time.time() - getattr(self, "_last_infer_ts", 0.0)
-            coasted_dets = cached_dets if (cached_dets and age < 2.0) else []
-            self._ai_slot.put({
-                **data,
-                "detections":     coasted_dets,
-                "masks_polygons": [],
-                "motion":         False,
-                "micro_motion_stats": self._motion_stats,
-                "orig_h":         orig_h,
-                "orig_w":         orig_w,
-                "conf_thresh":    0.3,
-                "t_pre": 0.0, "t_inf": 0.0, "t_post": 0.0, "ai_lat": 0.0,
-            })
 
     # ------------------------------------------------------------------
     # Module 3-LOCAL: Original YOLO local inference path (unchanged)
@@ -2385,7 +2405,7 @@ class PipelineCoordinator:
                     # `inf_frame` may be a zone-derived ROI crop of the camera
                     geometry_shape=(orig_h, orig_w),
                     # Cycle time budget constraint for adaptive tiling passes
-                    cycle_budget_ms=max(getattr(config, "TILING_LATENCY_BUDGET_MS", 80.0), 1000.0 / max(1.0, self.target_fps)),
+                    cycle_budget_ms=min(getattr(config, "TILING_LATENCY_BUDGET_MS", 20.0), 1000.0 / max(1.0, self.target_fps)),
                 )
                 detections     = tile_res.detections
                 masks_polygons = tile_res.masks
@@ -2753,15 +2773,19 @@ class PipelineCoordinator:
                 )
             ))
 
+            # Restrict detections ONLY to user polygon zones (if defined) or apply privacy masks/exclusion zones
+            if self.zones and detections:
+                num_before = len(detections)
+                detections = filter_detections_by_user_zones(detections, self.zones, orig_w, orig_h)
+                if len(detections) != num_before and len(masks) == num_before:
+                    _keep_ids = {id(d) for d in detections}
+                    masks = [m for d, m in zip(detections, masks) if id(d) in _keep_ids]
+
             # Rule engine + analytics: MUST receive absolute pixel coords
             alerts, track_overlays, heatmap, zone_stats, line_stats, crowd_stats, parking_stats = self.analytics.update(
                 detections, self.zones, self.lines, orig_w, orig_h, frame=frame, rules=self.rules,
                 zone_profile=self.zone_profile, profile_features=self.profile_features
             )
-
-            # Restrict detections ONLY to user polygon zones (if defined) or apply privacy masks/exclusion zones
-            if self.zones and detections:
-                detections = filter_detections_by_user_zones(detections, self.zones, orig_w, orig_h)
 
             # Why speed is/isn't a number, decided once per frame
             _speed_cfg = (self.profile_features or {}).get("speed_estimation")
@@ -3218,15 +3242,30 @@ class PipelineCoordinator:
         else:
             backends = [cv2.CAP_FFMPEG, None]
 
-        for backend in backends:
+        is_http_stream = isinstance(src, str) and ("m3u8" in src or "googlevideo.com" in src or src.startswith("http"))
+        
+        with _capture_lock:
+            old_options = os.environ.get("OPENCV_FFMPEG_CAPTURE_OPTIONS")
+            if is_http_stream:
+                os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "reconnect;1|reconnect_streamed;1|reconnect_delay_max;5"
+            else:
+                os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "rtsp_transport;tcp|threads;4|fflags;nobuffer|flags;low_delay|framedrop;1|max_delay;500000"
+                
             try:
-                cap = cv2.VideoCapture(src, backend, params) if backend else cv2.VideoCapture(src)
-                if cap.isOpened():
-                    return cap
-                cap.release()
-            except Exception:
-                pass
-        return cv2.VideoCapture(src)
+                for backend in backends:
+                    try:
+                        cap = cv2.VideoCapture(src, backend, params) if backend else cv2.VideoCapture(src)
+                        if cap.isOpened():
+                            return cap
+                        cap.release()
+                    except Exception:
+                        pass
+                return cv2.VideoCapture(src)
+            finally:
+                if old_options is not None:
+                    os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = old_options
+                else:
+                    os.environ.pop("OPENCV_FFMPEG_CAPTURE_OPTIONS", None)
 
     def _analyze_motion(self, frame):
         """Cheap, noise-aware motion gate for inference scheduling.
@@ -3290,19 +3329,28 @@ class PipelineCoordinator:
             if self._prev_motion is not None and self._prev_motion.shape == proc.shape else proc
         )
 
-        med = float(np.median(diff))
-        mad = float(np.median(np.abs(diff.astype(np.float32) - med)))
-        sigma = 1.4826 * mad
-        self._motion_noise_ema = sigma if self._motion_noise_ema is None else (0.9 * self._motion_noise_ema + 0.1 * sigma)
-        sigma_ref = max(float(self._motion_noise_ema or 0.0), sigma)
-        floor = 2.0 if low_light else 4.0
-        k = 3.9 if low_light else 3.0
-        thr = int(np.clip(max(floor, med + k * sigma_ref), floor, 18.0 if low_light else 24.0))
-        _, mask = cv2.threshold(diff, thr, 255, cv2.THRESH_BINARY)
+        try:
+            med = float(np.median(diff))
+            mad = float(np.median(np.abs(diff.astype(np.int16) - int(med))))
+            sigma = 1.4826 * mad
+            self._motion_noise_ema = sigma if self._motion_noise_ema is None else (0.9 * self._motion_noise_ema + 0.1 * sigma)
+            sigma_ref = max(float(self._motion_noise_ema or 0.0), sigma)
+            floor = 2.0 if low_light else 4.0
+            k = 3.9 if low_light else 3.0
+            thr = int(np.clip(max(floor, med + k * sigma_ref), floor, 18.0 if low_light else 24.0))
+            _, mask = cv2.threshold(diff, thr, 255, cv2.THRESH_BINARY)
 
-        # Remove isolated single-pixel noise, then validate very small blobs by
-        mask = cv2.medianBlur(mask, 3)
-        num, labels, cc_stats, _ = cv2.connectedComponentsWithStats(mask, 8)
+            # Remove isolated single-pixel noise, then validate very small blobs by
+            mask = cv2.medianBlur(mask, 3)
+            num, labels, cc_stats, _ = cv2.connectedComponentsWithStats(mask, 8)
+        except Exception as e:
+            stats.update({
+                "motion": True,
+                "mean_luminance": round(mean_lum, 1),
+                "low_light": low_light,
+                "latency_ms": round((time.perf_counter() - t0) * 1000.0, 2),
+            })
+            return stats
         valid_area = 0
         valid_blobs = 0
         min_area = 3 if low_light else 5
