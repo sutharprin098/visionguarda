@@ -1109,6 +1109,7 @@ class PipelineCoordinator:
 
         # {alert_type: count} since this camera started — surfaced in telemetry
         self._alert_counts = {}
+        self._last_target_alerts = {}
 
         self.running        = False
         self.incoming_frame = None       # screenshare push target
@@ -1559,6 +1560,9 @@ class PipelineCoordinator:
                 plate_detect.unload()
             if plate_ocr.is_loaded():
                 plate_ocr.unload()
+        if not self._wants_micro_motion():
+            if hasattr(self, "_micro_motion_detector"):
+                self._micro_motion_detector = None
 
     def _helmet_stats(self):
         """Worker-side helmet timing for telemetry. Mirrors AnprWorker.stats():
@@ -1618,34 +1622,145 @@ class PipelineCoordinator:
             return bool(cfg.get("enabled"))
         return bool(cfg)
 
+    def _feature_enabled(self, profile_features: dict, key: str, default: bool = False) -> bool:
+        if not profile_features or key not in profile_features:
+            return default
+        cfg = profile_features.get(key)
+        if isinstance(cfg, dict):
+            return bool(cfg.get("enabled", default))
+        if isinstance(cfg, bool):
+            return cfg
+        return default
+
+    def _wants_face_detection(self) -> bool:
+        """Returns True ONLY if face_detection is explicitly toggled ON in profile_features."""
+        if self.profile_features:
+            return self._feature_enabled(self.profile_features, "face_detection", default=False)
+        return False
+
+    def _wants_face_recognition(self) -> bool:
+        """Returns True ONLY if face_recognition, vip_face, or customer_demographics is explicitly toggled ON."""
+        if self.profile_features:
+            return (
+                self._feature_enabled(self.profile_features, "face_recognition", default=False)
+                or self._feature_enabled(self.profile_features, "vip_face", default=False)
+                or self._feature_enabled(self.profile_features, "customer_demographics", default=False)
+            )
+        return False
+
     def _wants_faces(self) -> bool:
-        """Both gates must pass: the operator's toggle AND a profile whose class
-        list actually reports faces (a traffic camera discards them, so paying
-        ~35ms to detect them would be pure waste)."""
-        if not self._feature_enabled(self.profile_features, "face_detection"):
-            return False
-        allowed = PROFILE_CLASSES.get(self.zone_profile)
-        return "face" in allowed if allowed else True
+        """Returns True if face_detection, face_recognition, vip_face, or customer_demographics is explicitly toggled ON."""
+        return self._wants_face_detection() or self._wants_face_recognition()
 
     def _wants_helmet(self) -> bool:
-        """Both gates, same as _wants_faces: the operator's helmet_detection
-        toggle AND a profile that actually reports helmets (only traffic does).
-        A security camera left with the toggle on must not pay for a helmet net
-        whose output the profile filter would then discard."""
-        if not self._feature_enabled(self.profile_features, "helmet_detection"):
-            return False
-        allowed = PROFILE_CLASSES.get(self.zone_profile)
-        return "no_helmet" in allowed if allowed else True
+        """Returns True ONLY if helmet_detection or twowheeler_safety_helmet is explicitly enabled in profile_features."""
+        if self.profile_features:
+            return (
+                self._feature_enabled(self.profile_features, "helmet_detection", default=False)
+                or self._feature_enabled(self.profile_features, "twowheeler_safety_helmet", default=False)
+            )
+        return False
+
+    def _wants_ppe(self) -> bool:
+        """Returns True ONLY if ppe_detection is explicitly enabled in profile_features."""
+        if self.profile_features:
+            return self._feature_enabled(self.profile_features, "ppe_detection", default=False)
+        return False
+
+    def _wants_vest(self) -> bool:
+        """Returns True ONLY if safety_vest is explicitly enabled in profile_features."""
+        if self.profile_features:
+            return self._feature_enabled(self.profile_features, "safety_vest", default=False)
+        return False
+
+    def _wants_gloves(self) -> bool:
+        """Returns True ONLY if gloves is explicitly enabled in profile_features."""
+        if self.profile_features:
+            return self._feature_enabled(self.profile_features, "gloves", default=False)
+        return False
+
+    def _wants_shoes(self) -> bool:
+        """Returns True ONLY if safety_shoes or shoes is explicitly enabled in profile_features."""
+        if self.profile_features:
+            return (
+                self._feature_enabled(self.profile_features, "safety_shoes", default=False)
+                or self._feature_enabled(self.profile_features, "shoes", default=False)
+            )
+        return False
+
+    def _wants_zero_dce(self) -> bool:
+        """Returns True ONLY if zero_dce or night_vision is explicitly enabled in profile_features."""
+        if self.profile_features:
+            return (
+                self._feature_enabled(self.profile_features, "zero_dce", default=False)
+                or self._feature_enabled(self.profile_features, "night_vision_zero_dce", default=False)
+                or self._feature_enabled(self.profile_features, "night_vision", default=False)
+            )
+        return False
+
+    def _wants_fire(self) -> bool:
+        """Returns True ONLY if fire_detection or smoke_detection is enabled in profile_features."""
+        if self.profile_features:
+            return (
+                self._feature_enabled(self.profile_features, "fire_detection", default=False)
+                or self._feature_enabled(self.profile_features, "smoke_detection", default=False)
+            )
+        return False
+
+    def _wants_forklift(self) -> bool:
+        """Returns True ONLY if forklift_detection is enabled in profile_features."""
+        if self.profile_features:
+            return self._feature_enabled(self.profile_features, "forklift_detection", default=False)
+        return False
+
+    def _wants_machine_monitoring(self) -> bool:
+        """Returns True ONLY if machine_monitoring is enabled in profile_features."""
+        if self.profile_features:
+            return self._feature_enabled(self.profile_features, "machine_monitoring", default=False)
+        return False
+
+    def _wants_conveyor_monitoring(self) -> bool:
+        """Returns True ONLY if conveyor_monitoring is enabled in profile_features."""
+        if self.profile_features:
+            return self._feature_enabled(self.profile_features, "conveyor_monitoring", default=False)
+        return False
 
     def _wants_anpr(self) -> bool:
-        """Both gates, same as _wants_helmet: the operator's anpr toggle AND a
-        profile that reports plates (only traffic does). The plate detector +
-        OCR are separate networks, so keeping them off a non-traffic camera is a
-        real inference saving, not just a display filter."""
-        if not self._feature_enabled(self.profile_features, "anpr"):
-            return False
-        allowed = PROFILE_CLASSES.get(self.zone_profile)
-        return "number_plate" in allowed if allowed else True
+        """Returns True ONLY if ANPR feature is explicitly enabled in profile_features."""
+        if self.profile_features:
+            return self._feature_enabled(self.profile_features, "anpr", default=False)
+        return False
+
+    def _wants_micro_motion(self) -> bool:
+        """Returns True ONLY if micro_motion or micro_motion_hud is explicitly enabled in profile_features."""
+        if self.profile_features:
+            return (
+                self._feature_enabled(self.profile_features, "micro_motion", default=False)
+                or self._feature_enabled(self.profile_features, "micro_motion_hud", default=False)
+            )
+        return False
+
+    def _wants_custom(self) -> bool:
+        """Returns True ONLY if custom_detector, custom_detection_zone, or detection_zone is explicitly enabled in profile_features."""
+        if self.profile_features:
+            return (
+                self._feature_enabled(self.profile_features, "custom_detector", default=False)
+                or self._feature_enabled(self.profile_features, "custom_detection_zone", default=False)
+                or self._feature_enabled(self.profile_features, "detection_zone", default=False)
+            )
+        return False
+
+    def _wants_tracking(self) -> bool:
+        """Returns True ONLY if multi-object tracking is enabled in profile_features."""
+        if self.profile_features:
+            return self._feature_enabled(self.profile_features, "multi_object_tracking", default=False)
+        return True
+
+    def _wants_speed(self) -> bool:
+        """Returns True ONLY if speed estimation is enabled in profile_features."""
+        if self.profile_features:
+            return self._feature_enabled(self.profile_features, "speed_estimation", default=False)
+        return False
 
     def update_display_config(self, max_width: int = None, quality: int = None):
         """Adjust the MJPEG preview encode target at runtime (display only —
@@ -1955,21 +2070,9 @@ class PipelineCoordinator:
                 # Zero-DCE Night-Vision AI Enhancement (Per-Camera Controlled)
                 try:
                     from app.ai.enhancer import zero_dce
-                    nv_cfg = self.profile_features.get("night_vision_zero_dce")
-                    if nv_cfg is None and "night_vision" in self.profile_features:
-                        nv_cfg = self.profile_features.get("night_vision")
-                    if nv_cfg is None and "zero_dce" in self.profile_features:
-                        nv_cfg = self.profile_features.get("zero_dce")
-
-                    if isinstance(nv_cfg, dict):
-                        is_enabled = bool(nv_cfg.get("enabled", True))
-                        params = nv_cfg.get("params", {}) if isinstance(nv_cfg.get("params"), dict) else {}
-                    elif isinstance(nv_cfg, bool):
-                        is_enabled = nv_cfg
-                        params = {}
-                    else:
-                        is_enabled = False
-                        params = {}
+                    is_enabled = self._wants_zero_dce()
+                    nv_cfg = self.profile_features.get("zero_dce") or self.profile_features.get("night_vision_zero_dce") or self.profile_features.get("night_vision")
+                    params = nv_cfg.get("params", {}) if isinstance(nv_cfg, dict) and isinstance(nv_cfg.get("params"), dict) else {}
 
                     mode = str(params.get("mode", getattr(self, "zero_dce_mode", "auto"))).lower()
                     raw_thresh = params.get("threshold", getattr(self, "zero_dce_threshold", 140.0))
@@ -2222,11 +2325,12 @@ class PipelineCoordinator:
             t_inf = (time.perf_counter() - t0_cloud) * 1000
 
             # Match custom target reference images on cloud detections
-            try:
-                from app.ai.target_matcher import target_matcher
-                detections = target_matcher.match_detections(frame, detections)
-            except Exception as e:
-                print(f"[Cloud TargetMatcher Err] {e}", flush=True)
+            if self._wants_faces():
+                try:
+                    from app.ai.target_matcher import target_matcher
+                    detections = target_matcher.match_detections(frame, detections)
+                except Exception as e:
+                    print(f"[Cloud TargetMatcher Err] {e}", flush=True)
 
             # If cloud mode returns 0 detections, check local backend fallback so detection never drops
             if not detections:
@@ -2445,40 +2549,41 @@ class PipelineCoordinator:
                     masks_polygons = scaled
 
                 # Custom Visual Embedding Matcher & Target Image Matcher
-                try:
-                    from app.ai.target_matcher import target_matcher
-                    detections = target_matcher.match_detections(frame, detections)
-                except Exception as e:
-                    print(f"[TargetMatcher Err] {e}", flush=True)
+                if self._wants_face_recognition():
+                    try:
+                        from app.ai.target_matcher import target_matcher
+                        detections = target_matcher.match_detections(frame, detections)
+                    except Exception as e:
+                        print(f"[TargetMatcher Err] {e}", flush=True)
 
-                try:
-                    from app.ai.custom_detector import match_crop, has_active_custom_models
-                    wants_custom = self.zone_profile == "custom" or self.profile_features.get("custom_detector", False)
-                    if wants_custom or has_active_custom_models():
-                        # Evaluate only top 3 detections with confidence >= 0.45 to prevent PyTorch inference lag
-                        candidates = [d for d in detections if float(d.get("confidence", 0.0)) >= 0.45]
-                        candidates = sorted(candidates, key=lambda d: float(d.get("confidence", 0.0)), reverse=True)[:3]
-                        for det in candidates:
-                            b = det["bbox"]
-                            x1 = max(0, min(orig_w - 1, int(b["x1"])))
-                            y1 = max(0, min(orig_h - 1, int(b["y1"])))
-                            x2 = max(0, min(orig_w - 1, int(b["x2"])))
-                            y2 = max(0, min(orig_h - 1, int(b["y2"])))
-                            crop = frame[y1:y2, x1:x2]
-                            if crop.size > 0:
-                                is_match, similarity, matched_name = match_crop(crop, threshold=0.65)
-                                current_cls = str(det.get("class", "")).lower()
-                                yolo_conf = float(det.get("confidence", 0.0))
-                                is_primary = current_cls in ("car", "person", "truck", "bus", "motorcycle", "bicycle", "vehicle")
-                                # Overwrite label ONLY if strict threshold (0.65) is passed AND primary class is not overwritten falsely
-                                if is_match and matched_name:
-                                    if not is_primary or similarity > (yolo_conf + 0.15) or self.zone_profile == "custom":
-                                        det["class"] = matched_name
-                                        det["confidence"] = round(float(similarity), 2)
-                                        det["custom_match"] = True
-                                        det["label"] = f"{matched_name} ({int(similarity * 100)}%)"
-                except Exception as e:
-                    print(f"[CustomDetector Err] {e}", flush=True)
+                if self._wants_custom():
+                    try:
+                        from app.ai.custom_detector import match_crop, has_active_custom_models
+                        if has_active_custom_models():
+                            # Evaluate only top 3 detections with confidence >= 0.45 to prevent PyTorch inference lag
+                            candidates = [d for d in detections if float(d.get("confidence", 0.0)) >= 0.45]
+                            candidates = sorted(candidates, key=lambda d: float(d.get("confidence", 0.0)), reverse=True)[:3]
+                            for det in candidates:
+                                b = det["bbox"]
+                                x1 = max(0, min(orig_w - 1, int(b["x1"])))
+                                y1 = max(0, min(orig_h - 1, int(b["y1"])))
+                                x2 = max(0, min(orig_w - 1, int(b["x2"])))
+                                y2 = max(0, min(orig_h - 1, int(b["y2"])))
+                                crop = frame[y1:y2, x1:x2]
+                                if crop.size > 0:
+                                    is_match, similarity, matched_name = match_crop(crop, threshold=0.65)
+                                    current_cls = str(det.get("class", "")).lower()
+                                    yolo_conf = float(det.get("confidence", 0.0))
+                                    is_primary = current_cls in ("car", "person", "truck", "bus", "motorcycle", "bicycle", "vehicle")
+                                    # Overwrite label ONLY if strict threshold (0.65) is passed AND primary class is not overwritten falsely
+                                    if is_match and matched_name:
+                                        if not is_primary or similarity > (yolo_conf + 0.15) or self.zone_profile == "custom":
+                                            det["class"] = matched_name
+                                            det["confidence"] = round(float(similarity), 2)
+                                            det["custom_match"] = True
+                                            det["label"] = f"{matched_name} ({int(similarity * 100)}%)"
+                    except Exception as e:
+                        print(f"[CustomDetector Err] {e}", flush=True)
 
                 # User Polygon Zone Gate
                 if self.zones and detections:
@@ -2577,18 +2682,22 @@ class PipelineCoordinator:
                 self._last_tracked_fid = cur_fid
 
             # Track: input and output in absolute pixel coords
-            if data["motion"]:
-                tracks_raw = self.tracker.update(
-                    detections, frame=frame, frame_shape=(orig_h, orig_w), conf_thresh=data["conf_thresh"]
+            if self._wants_tracking():
+                if data["motion"]:
+                    tracks_raw = self.tracker.update(
+                        detections, frame=frame, frame_shape=(orig_h, orig_w), conf_thresh=data["conf_thresh"]
+                    )
+                else:
+                    tracks_raw = self.tracker.predict_only()
+                self._n_active_tracks = len(self.tracker.tracks)
+                detections, masks = resolve_emitted_detections(
+                    self.tracker, tracks_raw, detections, masks
                 )
             else:
-                tracks_raw = self.tracker.predict_only()
-            # Update shared counter so _ai_loop can decide whether to keep inferring
-            self._n_active_tracks = len(self.tracker.tracks)
-
-            detections, masks = resolve_emitted_detections(
-                self.tracker, tracks_raw, detections, masks
-            )
+                tracks_raw = []
+                if hasattr(self.tracker, "reset"):
+                    self.tracker.reset()
+                self._n_active_tracks = 0
 
             self._diagnostic("tracked", lambda: (
                 "[CLOUD_DIAG] [TRACKED_OBJECTS] Camera={} Count={} Tracks={}".format(
@@ -2608,6 +2717,9 @@ class PipelineCoordinator:
                 fd = face_detect.get_detector(float(face_cfg.get("confidence", 0.6)))
                 if fd is not None:
                     person_boxes = [d["bbox"] for d in detections if d.get("class") == "person"]
+                    if not person_boxes:
+                        h_f, w_f = frame.shape[:2]
+                        person_boxes = [{"x1": 0, "y1": 0, "x2": w_f, "y2": h_f}]
                     faces = fd.detect_in_persons(frame, person_boxes)
                     for fdet in faces:
                         detections.append(fdet)
@@ -2648,6 +2760,11 @@ class PipelineCoordinator:
                 if hworker.last_error:
                     self._stage_errors["helmet"] = hworker.last_error
                     hworker.last_error = None
+            else:
+                hworker = getattr(self, "_helmet_worker", None)
+                if hworker is not None:
+                    hworker.stop()
+                    self._helmet_worker = None
             t_helmet = (time.perf_counter() - t_helmet0) * 1000
 
             # ANPR pass: plate detector (+ CRNN OCR) on vehicle crops
@@ -2692,11 +2809,15 @@ class PipelineCoordinator:
                 if worker.last_error:
                     self._stage_errors["anpr"] = worker.last_error
                     worker.last_error = None
+            else:
+                worker = getattr(self, "_anpr_worker", None)
+                if worker is not None:
+                    worker.stop()
+                    self._anpr_worker = None
             t_anpr = (time.perf_counter() - t_anpr0) * 1000
 
-            # Micro Motion pass: Runs when micro_motion profile or feature is enabled
-            _is_micro = (self.zone_profile in ("micro_motion", "rodent")) or self._feature_enabled(self.profile_features, "micro_motion")
-            if _is_micro:
+            # Micro Motion pass: Runs ONLY when micro_motion profile or feature is enabled
+            if self._wants_micro_motion():
                 try:
                     if not hasattr(self, "_micro_motion_detector") or self._micro_motion_detector is None:
                         from app.ai.screen_motion_detector import ScreenMicroMotionDetector
@@ -2742,9 +2863,12 @@ class PipelineCoordinator:
                             masks.append([])
                 except Exception as e:
                     print(f"[MicroMotion Err] {e}", flush=True)
+            else:
+                if hasattr(self, "_micro_motion_detector") and self._micro_motion_detector is not None:
+                    self._micro_motion_detector = None
 
             # Apply the zone profile to what this camera reports
-            if detections:
+            if detections and self._wants_face_recognition():
                 try:
                     from app.ai.target_matcher import target_matcher
                     detections = target_matcher.match_detections(frame, detections)
@@ -2752,13 +2876,28 @@ class PipelineCoordinator:
                     pass
 
             _allowed = PROFILE_CLASSES.get(self.zone_profile)
+            wants_faces = self._wants_faces()
+            wants_micro = (self.zone_profile in ("micro_motion", "rodent")) or self._feature_enabled(self.profile_features, "micro_motion")
+
             if detections:
                 _feat_keep = filter_by_features(detections, self.profile_features)
                 _feat_ids = {id(d) for d in _feat_keep}
-                _keep = [
-                    i for i, d in enumerate(detections)
-                    if id(d) in _feat_ids and (not _allowed or d.get("class") in _allowed or d.get("custom_match") or d.get("class") == "micro_motion")
-                ]
+                _keep = []
+                for i, d in enumerate(detections):
+                    if id(d) not in _feat_ids:
+                        continue
+                    cls_name = d.get("class", "")
+                    if cls_name == "micro_motion":
+                        if wants_micro:
+                            _keep.append(i)
+                        continue
+                    if cls_name == "face" or str(cls_name).startswith("TARGET:") or d.get("custom_match"):
+                        if wants_faces:
+                            _keep.append(i)
+                        continue
+                    if not _allowed or cls_name in _allowed:
+                        _keep.append(i)
+
                 if len(_keep) != len(detections):
                     if len(masks) == len(detections):
                         masks = [masks[i] for i in _keep]
@@ -2787,9 +2926,30 @@ class PipelineCoordinator:
                 zone_profile=self.zone_profile, profile_features=self.profile_features
             )
 
+            if detections:
+                for det in detections:
+                    if det.get("custom_match") and det.get("target_name"):
+                        t_name = det.get("target_name")
+                        t_id = det.get("target_id") or t_name
+                        t_score = int(float(det.get("match_score", 0.9)) * 100)
+                        last_ts = self._last_target_alerts.get(t_id, 0.0)
+                        now_ts = time.time()
+                        if now_ts - last_ts >= 5.0:
+                            self._last_target_alerts[t_id] = now_ts
+                            alerts.append({
+                                "type": "target_match",
+                                "message": f"Target Match Alert: '{t_name}' detected ({t_score}% match score)",
+                                "bbox": det.get("bbox"),
+                                "detail": {
+                                    "target_name": t_name,
+                                    "target_id": t_id,
+                                    "match_score": det.get("match_score"),
+                                    "confidence": det.get("confidence"),
+                                }
+                            })
+
             # Why speed is/isn't a number, decided once per frame
-            _speed_cfg = (self.profile_features or {}).get("speed_estimation")
-            _speed_enabled = bool(_speed_cfg.get("enabled", True)) if isinstance(_speed_cfg, dict) else True
+            _speed_enabled = self._wants_speed()
 
             def _speed_for(det):
                 """(speed_kmh|None, status) for one detection.
@@ -2832,6 +2992,15 @@ class PipelineCoordinator:
                 trk_obj = next((t for t in self.tracker.tracks if t.track_id == det.get("track_id")), None)
                 lost_f = trk_obj.lost_frames if trk_obj is not None else 0
                 trk_state = trk_obj.state if trk_obj is not None else "confirmed"
+                bx1 = float(bbox.get("x1", 0))
+                by1 = float(bbox.get("y1", 0))
+                bx2 = float(bbox.get("x2", 0))
+                by2 = float(bbox.get("y2", 0))
+                nx1 = round(bx1 / orig_w if (bx1 > 1.0 or bx2 > 1.0) else bx1, 4)
+                ny1 = round(by1 / orig_h if (by1 > 1.0 or by2 > 1.0) else by1, 4)
+                nx2 = round(bx2 / orig_w if (bx1 > 1.0 or bx2 > 1.0) else bx2, 4)
+                ny2 = round(by2 / orig_h if (by1 > 1.0 or by2 > 1.0) else by2, 4)
+
                 client_dets.append({
                     "class":      det["class"],
                     "confidence": round(float(conf), 2),
@@ -2852,17 +3021,14 @@ class PipelineCoordinator:
                     "label": det.get("label"),
                     "custom_match": det.get("custom_match", False),
                     "bbox": {
-                        "x1": round(float(bbox["x1"]) / orig_w, 4),
-                        "y1": round(float(bbox["y1"]) / orig_h, 4),
-                        "x2": round(float(bbox["x2"]) / orig_w, 4),
-                        "y2": round(float(bbox["y2"]) / orig_h, 4),
+                        "x1": nx1,
+                        "y1": ny1,
+                        "x2": nx2,
+                        "y2": ny2,
                     }
                 })
 
-            # Ensure each client_det has a consistent track_id
-            for cd in client_dets:
-                if cd.get("track_id") is None:
-                    cd["track_id"] = f"{cd['class']}_{cd['bbox']['x1']:.2f}_{cd['bbox']['y1']:.2f}"
+
 
             # Recalculate object category counts from smoothed client_dets
             people_count = sum(1 for cd in client_dets if _object_category(cd.get("class", "")) == "person")
@@ -2871,9 +3037,13 @@ class PipelineCoordinator:
             other_count = sum(1 for cd in client_dets if _object_category(cd.get("class", "")) in ("infrastructure", "other"))
 
             data["client_dets"] = client_dets
+            data["detections"] = client_dets
             data["people_count"] = people_count
+            data["people"] = people_count
             data["vehicles_count"] = vehicles_count
+            data["vehicles"] = vehicles_count
             data["items_count"] = items_count
+            data["items"] = items_count
             data["other_count"] = other_count
 
             self._diagnostic("rendered", lambda: (
@@ -2897,6 +3067,26 @@ class PipelineCoordinator:
                 self._trk_last_history_log = last_history_log
 
             # Alert handling + snapshots
+            if alerts:
+                now_sec = time.time()
+                if not hasattr(self, "_alert_dedup_cache"):
+                    self._alert_dedup_cache = {}
+                
+                # Prune cache entries older than 120s
+                self._alert_dedup_cache = {k: v for k, v in self._alert_dedup_cache.items() if now_sec - v < 120.0}
+
+                deduped_alerts = []
+                for alert in alerts:
+                    a_type = alert.get("type", "generic")
+                    a_key = alert.get("track_id") or alert.get("target_id") or alert.get("plate_text") or alert.get("message") or "gen"
+                    dedup_id = f"{self.camera_id}_{a_type}_{a_key}"
+                    last_ts = self._alert_dedup_cache.get(dedup_id, 0.0)
+                    if now_sec - last_ts >= 45.0:
+                        self._alert_dedup_cache[dedup_id] = now_sec
+                        deduped_alerts.append(alert)
+                
+                alerts = deduped_alerts
+
             if alerts:
                 # ONE annotated full-frame snapshot for this moment, shared by
                 snap = f"snap_{self.camera_id}_{uuid4().hex[:8]}.jpg"
@@ -3062,9 +3252,9 @@ class PipelineCoordinator:
                 "vehicles":  data.get("vehicles_count", 0),
                 "items":     data.get("items_count", 0),
                 "other_objects": data.get("other_count", 0),
-                "detections": [],
+                "detections": data.get("client_dets", []) or data.get("detections", []),
                 "masks":     data.get("masks_polygons", []),
-                "tracks":    [],
+                "tracks":    data.get("tracks", []),
                 "counters": {
                     "in":           self.analytics.counter_in,
                     "out":          self.analytics.counter_out,

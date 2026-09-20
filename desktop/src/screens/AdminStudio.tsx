@@ -45,6 +45,7 @@ import {
   isEngineOnline,
   mjpegStreamUrl,
   controlHeaders,
+  getEngineBase,
   fetchRecordingSettings,
   updateRecordingSettings,
   RecordingSettings,
@@ -606,8 +607,12 @@ export default function AdminStudio({
   }, [activeProfile, selectedCam, fetchCustomModels]);
 
   // ---- per-camera load: drawings, rules, profile config ----
-  const loadProfileConfig = useCallback(async (cam: Camera, profileKey: ZoneProfileKey) => {
+  // ---- per-camera load: drawings, rules, profile config ----
+  const loadProfileConfig = useCallback(async (cam: Camera, profileKey: ZoneProfileKey): Promise<ProfileFeatures> => {
     const effectiveOrgId = orgId || bundle?.organization?.id || "org-local";
+    let loaded: ProfileFeatures | null = null;
+    let loadedConfigId: string | null = null;
+
     try {
       const sb = await getSupabase();
       const { data: cfg } = await sb
@@ -619,31 +624,47 @@ export default function AdminStudio({
         .maybeSingle();
 
       if (cfg) {
-        setConfigId(cfg.id);
-        setFeatures(reconcileFeatures(profileKey, cfg.features));
-        return;
-      } else {
-        // Create a fresh draft config from catalog defaults.
-        const defaults = buildDefaultFeatures(profileKey);
-        try {
-          const { data: created } = await sb
-            .from("zone_profile_configs")
-            .insert([{ org_id: effectiveOrgId, camera_id: cam.id, profile: profileKey, features: defaults, is_draft: true }])
-            .select()
-            .single();
-          setConfigId(created?.id ?? null);
-        } catch {
-          setConfigId(null);
-        }
-        setFeatures(defaults);
-        return;
+        loadedConfigId = cfg.id;
+        loaded = reconcileFeatures(profileKey, cfg.features);
       }
     } catch (err) {
-      console.warn("[AdminStudio] loadProfileConfig fallback to catalog defaults:", err);
-      const defaults = buildDefaultFeatures(profileKey);
-      setFeatures(defaults);
-      setConfigId(null);
+      console.warn("[AdminStudio] loadProfileConfig Supabase check skipped:", err);
     }
+
+    if (!loaded) {
+      try {
+        const localStr = typeof localStorage !== "undefined" ? localStorage.getItem(`cam_features_${cam.id}_${profileKey}`) : null;
+        if (localStr) {
+          loaded = reconcileFeatures(profileKey, JSON.parse(localStr));
+        }
+      } catch {}
+    }
+
+    if (!loaded) {
+      const defaults = buildDefaultFeatures(profileKey);
+      loaded = defaults;
+      try {
+        const sb = await getSupabase();
+        const { data: created } = await sb
+          .from("zone_profile_configs")
+          .insert([{ org_id: effectiveOrgId, camera_id: cam.id, profile: profileKey, features: defaults, is_draft: true }])
+          .select()
+          .single();
+        loadedConfigId = created?.id ?? null;
+      } catch {
+        loadedConfigId = null;
+      }
+    }
+
+    setConfigId(loadedConfigId);
+    setFeatures(loaded);
+    try {
+      if (typeof localStorage !== "undefined") {
+        localStorage.setItem(`cam_features_${cam.id}_${profileKey}`, JSON.stringify(loaded));
+      }
+    } catch {}
+
+    return loaded;
   }, [orgId, bundle?.organization?.id]);
 
   // A previous camera's dead stream must not poison the next one's viewport.
@@ -702,9 +723,8 @@ export default function AdminStudio({
       const prof = savedProf || (cam.zone_profile as ZoneProfileKey) || "traffic";
       setActiveProfile(prof);
       if (prof) {
-        await loadProfileConfig(cam, prof);
-        const defaults = buildDefaultFeatures(prof);
-        syncEngineDirectly(defaults, prof);
+        const loadedFeats = await loadProfileConfig(cam, prof);
+        syncEngineDirectly(loadedFeats, prof);
       } else {
         setFeatures({});
         setConfigId(null);
@@ -724,7 +744,7 @@ export default function AdminStudio({
       const targetProfile = profileOverride || activeProfile || "security";
       void (async () => {
         try {
-          await fetch(`http://127.0.0.1:8000/api/cameras/${selectedCam.id}/config`, {
+          await fetch(`${getEngineBase()}/api/cameras/${selectedCam.id}/config`, {
             method: "POST",
             headers: await controlHeaders(),
             body: JSON.stringify({
@@ -766,15 +786,18 @@ export default function AdminStudio({
 
     setCameras((prev) => prev.map((c) => (c.id === selectedCam.id ? { ...c, zone_profile: profileKey } : c)));
     setSelectedCam((prev) => (prev ? { ...prev, zone_profile: profileKey } : prev));
-    await loadProfileConfig(selectedCam, profileKey);
-
-    const defaults = buildDefaultFeatures(profileKey);
-    syncEngineDirectly(defaults, profileKey);
+    const loadedFeats = await loadProfileConfig(selectedCam, profileKey);
+    syncEngineDirectly(loadedFeats, profileKey);
   }
 
   // ---- feature config persistence (debounced) --------------
   const persistFeatures = useCallback(
     (next: ProfileFeatures) => {
+      if (selectedCam && activeProfile && typeof localStorage !== "undefined") {
+        try {
+          localStorage.setItem(`cam_features_${selectedCam.id}_${activeProfile}`, JSON.stringify(next));
+        } catch {}
+      }
       if (saveTimer.current) clearTimeout(saveTimer.current);
       setSavingConfig(true);
       const effectiveOrgId = orgId || bundle?.organization?.id || "org-local";
@@ -1541,6 +1564,12 @@ export default function AdminStudio({
         {cfg.enabled && !blocked && (
           <div className="mt-2.5 space-y-2 pt-2 border-t border-line">
             {f.params.map((p) => <div key={p.key}>{renderParam(f.key, p, cfg.params[p.key])}</div>)}
+
+            {(f.key === "face_recognition" || f.key === "face_detection") && (
+              <div className="mt-3 pt-2 border-t border-line/60">
+                <TargetMatcherUI />
+              </div>
+            )}
 
             {f.requiresGeometry && (
               <div className="flex items-center justify-between pt-1">

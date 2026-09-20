@@ -1502,25 +1502,36 @@ const CameraTile = memo(function CameraTile({ camera: c, site, engineOnline, onF
       // it — but it rides along with a commit that was going to happen anyway
       // instead of forcing one of its own.
       const prev = telemetryRef.current;
-      telemetryRef.current = t;
+      const normalizedTelemetry: CameraTelemetry = {
+        ...t,
+        people: t.people ?? (t as any).people_count ?? 0,
+        vehicles: t.vehicles ?? (t as any).vehicles_count ?? 0,
+        items: t.items ?? (t as any).items_count ?? 0,
+        detections: t.detections ?? (t as any).client_dets ?? [],
+      };
+      telemetryRef.current = normalizedTelemetry;
+
       const fpsDue = now - lastFpsCommitRef.current >= FPS_COMMIT_INTERVAL_MS;
+      const prevPeople = prev ? (prev.people ?? (prev as any).people_count ?? 0) : -1;
+      const currPeople = normalizedTelemetry.people;
+      const prevVehicles = prev ? (prev.vehicles ?? (prev as any).vehicles_count ?? 0) : -1;
+      const currVehicles = normalizedTelemetry.vehicles;
+
       const changed =
         prev == null ||
         prev.health_status !== t.health_status ||
         prev.source_error !== t.source_error ||
         prev.device !== t.device ||
+        prevPeople !== currPeople ||
+        prevVehicles !== currVehicles ||
+        prev.recording !== t.recording ||
         (fpsDue && (prev.fps ?? 0).toFixed(1) !== (t.fps ?? 0).toFixed(1));
       if (changed) {
         if (fpsDue) lastFpsCommitRef.current = now;
-        setTelemetry(t);
+        setTelemetry(normalizedTelemetry);
       }
 
-      // Same payload, second consumer. The alert engine decides on its own
-      // what is an event (a track it has not seen, an analytics counter that
-      // moved) and rate-limits itself; this call is a handful of map lookups
-      // in the common case where nothing new happened, and never blocks —
-      // snapshot encoding is queued to idle time inside the engine.
-      ingestAlert({ id: c.id, name: c.name, site }, t, captureRef.current);
+      ingestAlert({ id: c.id, name: c.name, site }, normalizedTelemetry, captureRef.current);
     }, setTelemetryConn);
     telemetrySessionRef.current = session;
     session.start();

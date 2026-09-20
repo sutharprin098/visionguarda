@@ -747,6 +747,32 @@ def delete_target_image(target_id: str):
     return {"success": True, "target_id": target_id}
 
 
+class RenameTargetPayload(BaseModel):
+    target_id: str
+    name: str
+
+@app.post("/api/target/rename")
+@app.post("/api/targets/rename")
+def rename_target_image(payload: RenameTargetPayload):
+    success = target_matcher.rename_target(payload.target_id, payload.name)
+    if not success:
+        raise HTTPException(status_code=404, detail="Target ID not found or invalid name.")
+    return {"success": True, "target_id": payload.target_id, "name": payload.name}
+
+
+class AutoEnrollPayload(BaseModel):
+    enabled: bool
+
+@app.post("/api/target/auto-enroll")
+def set_auto_enroll_status(payload: AutoEnrollPayload):
+    target_matcher.auto_enroll_enabled = payload.enabled
+    return {"success": True, "enabled": target_matcher.auto_enroll_enabled}
+
+@app.get("/api/target/auto-enroll")
+def get_auto_enroll_status():
+    return {"enabled": getattr(target_matcher, "auto_enroll_enabled", True)}
+
+
 class ZeroDCEPayload(BaseModel):
     enabled: Optional[bool] = None
     auto_mode: Optional[bool] = None

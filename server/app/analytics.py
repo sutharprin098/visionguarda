@@ -19,13 +19,27 @@ PARKING_OCCUPANCY_SCORE_THRESHOLD = 24.0
 
 def _object_category(class_name: str) -> str:
     """Map detection class to category bucket (person, vehicle, item, infrastructure, other)."""
-    if class_name in ITEM_CLASSES or class_name == "micro_motion":
+    if not class_name:
+        return "other"
+    cn = str(class_name).lower().strip()
+    if cn in ITEM_CLASSES or cn == "micro_motion":
         return "item"
-    if class_name in VEHICLE_CLASSES:
+    if cn in VEHICLE_CLASSES:
         return "vehicle"
-    if class_name in INFRASTRUCTURE_CLASSES:
+    if cn in INFRASTRUCTURE_CLASSES:
         return "infrastructure"
-    if class_name == "person":
+    if (
+        cn == "person"
+        or cn == "face"
+        or cn == "worker"
+        or cn == "customer"
+        or cn == "rider"
+        or cn == "helmet"
+        or cn == "no_helmet"
+        or cn == "vest"
+        or cn == "no_vest"
+        or cn.startswith("target")
+    ):
         return "person"
     return "other"
 
@@ -42,8 +56,8 @@ PROFILE_CLASSES = {
     "traffic": set(PRODUCIBLE_VEHICLE_CLASSES) | {"person", "traffic_light", "stop_sign", "helmet", "no_helmet", "number_plate", "fire", "smoke"},
     "security": set(PRODUCIBLE_VEHICLE_CLASSES) | set(PRODUCIBLE_ANIMAL_CLASSES) | {"person", "backpack", "handbag", "suitcase", "umbrella", "face", "fire", "smoke"},
     "factory": set(PRODUCIBLE_VEHICLE_CLASSES) | set(PRODUCIBLE_ANIMAL_CLASSES) | {"person", "face", "helmet", "no_helmet", "vest", "no_vest", "gloves", "shoes", "mask", "goggles", "fire", "smoke", "forklift"},
-    "retail": set(PRODUCIBLE_VEHICLE_CLASSES) | {"person", "backpack", "handbag", "suitcase", "cell phone"},
-    "smart_city": set(PRODUCIBLE_VEHICLE_CLASSES) | set(PRODUCIBLE_ANIMAL_CLASSES) | {"person", "traffic_light", "stop_sign", "fire", "smoke", "number_plate", "helmet", "no_helmet"},
+    "retail": set(PRODUCIBLE_VEHICLE_CLASSES) | {"person", "backpack", "handbag", "suitcase", "cell phone", "face"},
+    "smart_city": set(PRODUCIBLE_VEHICLE_CLASSES) | set(PRODUCIBLE_ANIMAL_CLASSES) | {"person", "traffic_light", "stop_sign", "fire", "smoke", "number_plate", "helmet", "no_helmet", "face"},
     "micro_motion": set(PRODUCIBLE_VEHICLE_CLASSES) | set(PRODUCIBLE_ANIMAL_CLASSES) | {"person", "backpack", "handbag", "suitcase", "umbrella", "face", "micro_motion"},
     "custom": set(PRODUCIBLE_VEHICLE_CLASSES) | set(PRODUCIBLE_ANIMAL_CLASSES) | {"person", "backpack", "handbag", "suitcase", "umbrella", "face", "custom_object", "fire", "smoke", "helmet", "vest"},
 }
@@ -52,11 +66,29 @@ PROFILE_CLASSES = {
 FEATURE_CLASSES = {
     "person_detection": {"person"},
     "worker_detection": {"person"},
+    "customer_detection": {"person"},
     "person_counting": {"person"},
+    "footfall_counting": {"person"},
+    "worker_counting": {"person"},
     "crowd_detection": {"person"},
-    "vehicle_detection": set(PRODUCIBLE_VEHICLE_CLASSES),
+    "loitering_detection": {"person"},
+    "intrusion_detection": {"person"},
+    "perimeter_breach": {"person"},
+    "restricted_zone": {"person"},
+    "shelf_dwell_time": {"person"},
+    "checkout_queue_monitoring": {"person"},
+    "littering_detection": {"person"},
+    "vandalism_detection": {"person"},
+    "crowd_gathering": {"person"},
+    "spill_detection": {"person"},
+    "vehicle_detection": set(PRODUCIBLE_VEHICLE_CLASSES) | {"person", "van", "auto", "rickshaw", "vehicle"},
     "vehicle_classification": set(PRODUCIBLE_VEHICLE_CLASSES),
     "vehicle_counting": set(PRODUCIBLE_VEHICLE_CLASSES),
+    "wrong_way_driving": set(PRODUCIBLE_VEHICLE_CLASSES),
+    "congestion_detection": set(PRODUCIBLE_VEHICLE_CLASSES),
+    "accident_detection": set(PRODUCIBLE_VEHICLE_CLASSES),
+    "illegal_parking": set(PRODUCIBLE_VEHICLE_CLASSES),
+    "multi_object_tracking": set(PRODUCIBLE_VEHICLE_CLASSES) | {"person"},
     "animal_detection": set(PRODUCIBLE_ANIMAL_CLASSES),
     "face_detection": {"face"},
     "face_recognition": {"face"},
@@ -71,29 +103,50 @@ FEATURE_CLASSES = {
     "queue_length": set(PRODUCIBLE_VEHICLE_CLASSES) | {"person"},
     "u_turn_detection": set(PRODUCIBLE_VEHICLE_CLASSES),
     "anpr": {"number_plate"},
-    "object_left_behind": set(ITEM_CLASSES),
-    "object_removed": set(ITEM_CLASSES),
+    "object_left_behind": {"backpack", "handbag", "suitcase", "umbrella", "cell phone"},
+    "object_removed": {"backpack", "handbag", "suitcase", "umbrella", "cell phone"},
     "traffic_light_violation": {"traffic_light"},
     "stop_line_violation": {"stop_sign"},
     "micro_motion_hud": {"micro_motion"},
+    "custom_detector": {"custom_object", "person"},
+    "custom_counting": set(PRODUCIBLE_VEHICLE_CLASSES) | {"person"},
+    "custom_classification": {"custom_object"},
 }
+
+
+def is_feature_enabled(profile_features, key: str, default: bool = False) -> bool:
+    """Check if a specific feature is enabled in profile_features dictionary."""
+    if not profile_features:
+        return default
+    if isinstance(profile_features, str):
+        try:
+            profile_features = json.loads(profile_features)
+        except Exception:
+            profile_features = {}
+    if key not in profile_features:
+        return default
+    cfg = profile_features.get(key)
+    if isinstance(cfg, dict):
+        return bool(cfg.get("enabled", default))
+    elif isinstance(cfg, bool):
+        return cfg
+    return default
 
 
 def filter_by_features(detections, features):
     """Drop classes whose owning feature is switched off, or whose detection confidence
     is below the selected feature confidence threshold, or whose class is not included in
     the feature's allowed object classes list.
-
-    Complements filter_by_profile(): the profile says what this KIND of camera
-    reports, the features say what this operator asked for. Both must hold.
     """
     if not features or not detections:
         return detections
 
+    has_detection_feature = False
     enabled_classes = set()
     disabled_classes = set()
     class_min_conf = {}
-    class_allowed_subclasses = {}
+    specific_allowed_classes = set()
+    has_specific_classes = False
 
     for key, cfg in features.items():
         owned = FEATURE_CLASSES.get(key)
@@ -102,10 +155,9 @@ def filter_by_features(detections, features):
 
         is_enabled = False
         conf_thresh = None
-        allowed_classes = None
 
         if isinstance(cfg, dict):
-            is_enabled = cfg.get("enabled", True)
+            is_enabled = bool(cfg.get("enabled", False))
             for c_key in ("confidence", "conf_threshold", "threshold", "min_confidence"):
                 if c_key in cfg and cfg[c_key] is not None:
                     try:
@@ -117,53 +169,48 @@ def filter_by_features(detections, features):
                     except (ValueError, TypeError):
                         pass
 
-            if "classes" in cfg and isinstance(cfg["classes"], (list, set, tuple)) and len(cfg["classes"]) > 0:
-                allowed_classes = set(cfg["classes"])
+            if is_enabled and "classes" in cfg and isinstance(cfg["classes"], (list, set, tuple)) and len(cfg["classes"]) > 0:
+                has_specific_classes = True
+                specific_allowed_classes |= {str(c).lower().strip() for c in cfg["classes"]}
         elif isinstance(cfg, bool):
             is_enabled = cfg
 
         if is_enabled:
+            has_detection_feature = True
             enabled_classes |= owned
             if conf_thresh is not None:
                 for cls_name in owned:
                     if cls_name not in class_min_conf or conf_thresh > class_min_conf[cls_name]:
                         class_min_conf[cls_name] = conf_thresh
-            if allowed_classes:
-                for cls_name in owned:
-                    if cls_name not in class_allowed_subclasses:
-                        class_allowed_subclasses[cls_name] = set(allowed_classes)
-                    else:
-                        class_allowed_subclasses[cls_name] |= set(allowed_classes)
         else:
             disabled_classes |= owned
 
-    if not enabled_classes and disabled_classes:
-        # Safeguard: If no feature is explicitly enabled in config, fallback to zone profile classes
-        return detections
+    if has_specific_classes:
+        enabled_classes |= specific_allowed_classes
 
     drop_classes = disabled_classes - enabled_classes
-    drop_classes.discard("micro_motion")
 
     filtered = []
     for d in detections:
-        cls_name = d.get("class")
-        if cls_name == "micro_motion" or d.get("custom_match"):
+        cls_name = str(d.get("class", "")).lower().strip()
+
+        # Retain custom target matches
+        if d.get("custom_match") or str(d.get("class", "")).startswith("TARGET:"):
             filtered.append(d)
             continue
 
-        # 1. Drop if class belongs to a disabled feature
+        # 1. Drop if class belongs to a disabled core feature
         if cls_name in drop_classes:
             continue
 
-        # 2. Check confidence threshold set by operator (e.g. 0.6)
+        # 2. Check confidence threshold set by operator (e.g. 0.4)
         det_conf = float(d.get("confidence", 0.0))
-        required_conf = class_min_conf.get(cls_name)
+        required_conf = class_min_conf.get(cls_name) or class_min_conf.get(d.get("class", ""))
         if required_conf is not None and det_conf < required_conf:
             continue
 
         # 3. Check allowed sub-classes filter if specified
-        allowed_subs = class_allowed_subclasses.get(cls_name)
-        if allowed_subs is not None and len(allowed_subs) > 0 and cls_name not in allowed_subs:
+        if has_specific_classes and cls_name not in specific_allowed_classes and str(d.get("class", "")).lower() not in specific_allowed_classes:
             continue
 
         filtered.append(d)
@@ -176,7 +223,11 @@ def filter_by_profile(detections, zone_profile):
     allowed = PROFILE_CLASSES.get(zone_profile)
     if not allowed:
         return detections
-    return [d for d in detections if d.get("class") in allowed or d.get("custom_match") or d.get("class") == "micro_motion"]
+    return [
+        d for d in detections
+        if d.get("class") in allowed
+        or (d.get("custom_match") and ("face" in allowed or "person" in allowed))
+    ]
 
 
 # --- Geometry Utilities ---
@@ -720,8 +771,8 @@ class CameraAnalytics:
         filtered_detections = []
         inclusion_zones = [
             z for z in zones
-            if z.get("zoneType") not in ("privacy_mask", "exclusion_zone", "speed_zone", "calibration_line", "heatmap_area")
-            and len(z.get("points", [])) >= 2
+            if (z.get("roi") is True or z.get("is_roi") is True or z.get("zoneType") in ("roi", "inclusion_zone"))
+            and len(z.get("points", [])) >= 3
         ]
 
         for det in detections:
@@ -1305,14 +1356,16 @@ class CameraAnalytics:
                                         self.alert_cooldowns[alert_key] = now
                     
                     if not custom_triggered:
-                        alert_key = f"{alert_type}_{z_id}_{tid}"
-                        if zone_profile is None and now - self.alert_cooldowns.get(alert_key, 0) > self.cooldown_period:
-                            alerts.append({
-                                "type": alert_type,
-                                "message": f"{class_name.capitalize()} (ID: {tid}) entered {zone_type} Zone '{z_name}'",
-                                "zone_id": z_id
-                            })
-                            self.alert_cooldowns[alert_key] = now
+                        feat_key = "restricted_machine_zone" if zone_type == "restricted_machine" else ("hazard_zone" if zone_type == "hazard" else "intrusion_detection")
+                        if is_feature_enabled(features, feat_key, default=True):
+                            alert_key = f"{alert_type}_{z_id}_{tid}"
+                            if zone_profile is None and now - self.alert_cooldowns.get(alert_key, 0) > self.cooldown_period:
+                                alerts.append({
+                                    "type": alert_type,
+                                    "message": f"{class_name.capitalize()} (ID: {tid}) entered {zone_type} Zone '{z_name}'",
+                                    "zone_id": z_id
+                                })
+                                self.alert_cooldowns[alert_key] = now
                         
             # Exits
             exited_tids = []
@@ -1561,34 +1614,37 @@ class CameraAnalytics:
                                         })
                                         self.alert_cooldowns[alert_key] = now
 
-                    # Increment standard counters
-                    if is_in:
-                        self.line_counters[l_id]["in_count"] += 1
-                        if is_vehicle:
-                            self.counter_in_vehicle += 1
-                            self.counter_in += 1
-                        elif category == "person":
-                            self.counter_in_person += 1
-                            self.counter_in += 1
-                    elif is_out:
-                        self.line_counters[l_id]["out_count"] += 1
-                        if is_vehicle:
-                            self.counter_out_vehicle += 1
-                            self.counter_out += 1
-                        elif category == "person":
-                            self.counter_out_person += 1
-                            self.counter_out += 1
+                    # Increment standard counters if footfall_counting or person_counting is enabled
+                    if is_feature_enabled(features, "footfall_counting", default=True) or is_feature_enabled(features, "person_counting", default=True):
+                        if is_in:
+                            self.line_counters[l_id]["in_count"] += 1
+                            if is_vehicle:
+                                self.counter_in_vehicle += 1
+                                self.counter_in += 1
+                            elif category == "person":
+                                self.counter_in_person += 1
+                                self.counter_in += 1
+                        elif is_out:
+                            self.line_counters[l_id]["out_count"] += 1
+                            if is_vehicle:
+                                self.counter_out_vehicle += 1
+                                self.counter_out += 1
+                            elif category == "person":
+                                self.counter_out_person += 1
+                                self.counter_out += 1
 
                     if not custom_crossing_triggered:
-                        if zone_profile is None and is_in and category == "person":
-                            alert_key = f"crossing_{l_id}_{track_id}"
-                            if now - self.alert_cooldowns.get(alert_key, 0) > self.cooldown_period:
-                                alerts.append({
-                                    "type": "crossing",
-                                    "message": f"{class_name.capitalize()} crossed line '{l_name}' (Entry, ID: {track_id})",
-                                    "line_id": l_id
-                                })
-                                self.alert_cooldowns[alert_key] = now
+                        feat_key = "dedicated_lane_violation" if line_type == "dedicated_lane" else "perimeter_protection"
+                        if is_feature_enabled(features, feat_key, default=True) or is_feature_enabled(features, "tripwire", default=True):
+                            if zone_profile is None and is_in and category == "person":
+                                alert_key = f"crossing_{l_id}_{track_id}"
+                                if now - self.alert_cooldowns.get(alert_key, 0) > self.cooldown_period:
+                                    alerts.append({
+                                        "type": "crossing",
+                                        "message": f"{class_name.capitalize()} (ID: {track_id}) crossed Line '{l_name}'",
+                                        "line_id": l_id
+                                    })
+                                    self.alert_cooldowns[alert_key] = now
                         elif is_out:
                             if zone_profile is None and line_type in ["one_way", "wrong_direction"]:
                                 alert_key = f"wrong_dir_{l_id}_{track_id}"

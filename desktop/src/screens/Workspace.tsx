@@ -1109,53 +1109,46 @@ const CameraTile = memo(function CameraTile({ camera: c, site, engineOnline, onF
       return;
     }
     const session = new TelemetrySession(c.id, (t) => {
-      const nextDets = t.detections ?? [];
+      const rawDets = (t.detections && t.detections.length > 0) ? t.detections : ((t as any).client_dets && (t as any).client_dets.length > 0 ? (t as any).client_dets : (t.detections ?? (t as any).client_dets ?? []));
+      const nextDets = Array.isArray(rawDets) ? rawDets : [];
       const now = Date.now();
-      // Commit active detections immediately on every telemetry tick for real-time video sync.
-      // Skip state re-renders only when detections array remains empty ([]).
-      if (nextDets.length > 0 || detectionsRef.current.length > 0) {
-        detectionsRef.current = nextDets;
-        setDetections(nextDets);
-      }
 
-      // Telemetry arrives at AI FPS (~10-15Hz per camera). Committing every
-      // payload to state re-rendered this whole tile that often — times every
-      // tile on the grid, so a 6-camera workspace was doing ~90 subtree
-      // re-renders a second to update text nobody can read at that rate. That
-      // is the "dashboard becomes sluggish" symptom, and it gets worse with
-      // each camera added.
-      //
-      // Only four fields of this payload are ever rendered (health_status,
-      // source_error, device, fps). Three of them change rarely; fps changes
-      // constantly but is displayed to one decimal, where 15Hz and 2Hz are
-      // indistinguishable to a human. So commit only when something visible
-      // actually changed, and rate-limit the one field that always "changes".
-      //
-      // The full payload is still stored — the perf HUD reads every field of
-      // it — but it rides along with a commit that was going to happen anyway
-      // instead of forcing one of its own.
+      detectionsRef.current = nextDets;
+      setDetections(nextDets);
+
       const prev = telemetryRef.current;
-      telemetryRef.current = t;
+      const normalizedTelemetry: CameraTelemetry = {
+        ...t,
+        people: t.people ?? (t as any).people_count ?? 0,
+        vehicles: t.vehicles ?? (t as any).vehicles_count ?? 0,
+        items: t.items ?? (t as any).items_count ?? 0,
+        detections: nextDets,
+      };
+      telemetryRef.current = normalizedTelemetry;
+
       const fpsDue = now - lastFpsCommitRef.current >= FPS_COMMIT_INTERVAL_MS;
       const prevFps = prev ? (prev.fps ?? prev.decode_fps ?? prev.camera_fps ?? 0) : 0;
       const currFps = t.fps ?? t.decode_fps ?? t.camera_fps ?? 0;
+      const prevPeople = prev ? (prev.people ?? (prev as any).people_count ?? 0) : -1;
+      const currPeople = normalizedTelemetry.people;
+      const prevVehicles = prev ? (prev.vehicles ?? (prev as any).vehicles_count ?? 0) : -1;
+      const currVehicles = normalizedTelemetry.vehicles;
+
       const changed =
         prev == null ||
         prev.health_status !== t.health_status ||
         prev.source_error !== t.source_error ||
         prev.device !== t.device ||
+        prevPeople !== currPeople ||
+        prevVehicles !== currVehicles ||
+        prev.recording !== t.recording ||
         (fpsDue && prevFps.toFixed(1) !== currFps.toFixed(1));
       if (changed) {
         if (fpsDue) lastFpsCommitRef.current = now;
-        setTelemetry(t);
+        setTelemetry(normalizedTelemetry);
       }
 
-      // Same payload, second consumer. The alert engine decides on its own
-      // what is an event (a track it has not seen, an analytics counter that
-      // moved) and rate-limits itself; this call is a handful of map lookups
-      // in the common case where nothing new happened, and never blocks —
-      // snapshot encoding is queued to idle time inside the engine.
-      ingestAlert({ id: c.id, name: c.name, site }, t, captureRef.current);
+      ingestAlert({ id: c.id, name: c.name, site }, normalizedTelemetry, captureRef.current);
     }, setTelemetryConn);
     telemetrySessionRef.current = session;
     session.start();

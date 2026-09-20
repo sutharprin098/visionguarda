@@ -1,5 +1,5 @@
 import { useEffect, useState, FormEvent, ChangeEvent } from "react";
-import { Target, Upload, Trash2, CheckCircle2, AlertCircle, RefreshCw } from "lucide-react";
+import { Target, Upload, Trash2, CheckCircle2, AlertCircle, RefreshCw, Edit3, Check, Sparkles } from "lucide-react";
 import { controlHeaders, getEngineBase } from "../lib/localEngine";
 
 interface EnrolledTarget {
@@ -15,11 +15,14 @@ interface EnrolledTarget {
 export default function TargetMatcherUI() {
   const [targets, setTargets] = useState<EnrolledTarget[]>([]);
   const [name, setName] = useState("");
-  const [threshold, setThreshold] = useState(0.65);
+  const [threshold, setThreshold] = useState(0.70);
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
+  const [autoEnroll, setAutoEnroll] = useState(true);
   const [statusMsg, setStatusMsg] = useState<{ type: "success" | "error"; text: string } | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editingName, setEditingName] = useState("");
 
   const fetchTargets = async () => {
     try {
@@ -28,6 +31,11 @@ export default function TargetMatcherUI() {
         const data = await res.json();
         setTargets(data.targets || []);
       }
+      const autoRes = await fetch(`${getEngineBase()}/api/target/auto-enroll`);
+      if (autoRes.ok) {
+        const autoData = await autoRes.json();
+        setAutoEnroll(autoData.enabled ?? true);
+      }
     } catch (e) {
       console.warn("Failed to fetch targets from local engine:", e);
     }
@@ -35,7 +43,24 @@ export default function TargetMatcherUI() {
 
   useEffect(() => {
     fetchTargets();
+    const timer = setInterval(fetchTargets, 4000);
+    return () => clearInterval(timer);
   }, []);
+
+  const handleToggleAutoEnroll = async () => {
+    const nextVal = !autoEnroll;
+    setAutoEnroll(nextVal);
+    try {
+      const headers = await controlHeaders();
+      await fetch(`${getEngineBase()}/api/target/auto-enroll`, {
+        method: "POST",
+        headers: { ...headers, "Content-Type": "application/json" },
+        body: JSON.stringify({ enabled: nextVal }),
+      });
+    } catch (e) {
+      console.error("Failed to toggle auto-enroll:", e);
+    }
+  };
 
   const handleFileChange = (e: ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
@@ -75,7 +100,7 @@ export default function TargetMatcherUI() {
 
       const data = await res.json();
       if (res.ok && data.success) {
-        setStatusMsg({ type: "success", text: `Target "${data.name}" enrolled & live tracking activated!` });
+        setStatusMsg({ type: "success", text: `Target "${data.name}" (ID: ${data.target_id}) enrolled!` });
         setName("");
         setFile(null);
         setPreview(null);
@@ -90,8 +115,28 @@ export default function TargetMatcherUI() {
     }
   };
 
+  const handleSaveRename = async (targetId: string) => {
+    if (!editingName.trim()) return;
+    try {
+      const headers = await controlHeaders();
+      const res = await fetch(`${getEngineBase()}/api/target/rename`, {
+        method: "POST",
+        headers: { ...headers, "Content-Type": "application/json" },
+        body: JSON.stringify({ target_id: targetId, name: editingName.trim() }),
+      });
+      if (res.ok) {
+        setStatusMsg({ type: "success", text: `Renamed to "${editingName.trim()}" successfully!` });
+        setEditingId(null);
+        setEditingName("");
+        fetchTargets();
+      }
+    } catch (e) {
+      console.error("Rename failed:", e);
+    }
+  };
+
   const handleDelete = async (targetId: string, targetName: string) => {
-    if (!confirm(`Delete search target "${targetName}"?`)) return;
+    if (!confirm(`Delete face target "${targetName}"?`)) return;
     try {
       const headers = await controlHeaders();
       const res = await fetch(`${getEngineBase()}/api/target/${targetId}`, {
@@ -107,77 +152,84 @@ export default function TargetMatcherUI() {
   };
 
   return (
-    <div className="space-y-4 rounded-lg border border-accent/40 bg-surface-2/60 p-4 text-xs">
-      <div className="flex items-center justify-between border-b border-line pb-2.5">
-        <div className="flex items-center gap-2">
-          <div className="flex h-7 w-7 items-center justify-center rounded bg-accent/20 text-accent">
+    <div className="w-full max-w-full overflow-hidden space-y-3 rounded-lg border border-zinc-700/80 bg-zinc-900/95 p-3 text-xs shadow-md">
+      {/* Header */}
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-zinc-800 pb-2">
+        <div className="flex items-center gap-2 min-w-0">
+          <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded bg-cyan-500/20 text-cyan-400">
             <Target size={16} />
           </div>
-          <div>
-            <h3 className="font-bold text-ink-1 text-sm">Target Image Upload &amp; Tracker</h3>
-            <p className="text-[10px] text-ink-3">Mobile One-Shot Neural Appearance &amp; Face Matcher Engine</p>
+          <div className="min-w-0">
+            <h3 className="font-bold text-zinc-100 text-xs truncate">Face Database &amp; Re-ID</h3>
+            <p className="text-[10px] text-zinc-400 truncate">Face detection &amp; target matching</p>
           </div>
         </div>
-        <button
-          onClick={fetchTargets}
-          className="p-1.5 rounded bg-surface-1 border border-line text-ink-3 hover:text-ink-1 transition"
-          title="Refresh Target List"
-        >
-          <RefreshCw size={12} />
-        </button>
+        <div className="flex items-center gap-2 shrink-0">
+          <label className="flex items-center gap-1.5 cursor-pointer rounded bg-zinc-800 border border-zinc-700 px-2 py-1 text-[10px] text-zinc-200">
+            <input type="checkbox" checked={autoEnroll} onChange={handleToggleAutoEnroll} className="accent-cyan-500" />
+            <Sparkles size={11} className="text-amber-400" />
+            <span>Auto-Save Faces</span>
+          </label>
+          <button
+            onClick={fetchTargets}
+            className="p-1 rounded bg-zinc-800 border border-zinc-700 text-zinc-400 hover:text-zinc-100 transition"
+            title="Refresh Target List"
+          >
+            <RefreshCw size={12} />
+          </button>
+        </div>
       </div>
 
-      <form onSubmit={handleUpload} className="space-y-3">
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <div>
-            <label className="block text-[10px] font-semibold uppercase tracking-wider text-ink-3 mb-1">
-              Target Label / Name
-            </label>
-            <input
-              type="text"
-              placeholder="e.g. John Doe, Suspect Person, Red Car"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              className="input w-full"
-              required
-            />
-          </div>
-
-          <div>
-            <label className="block text-[10px] font-semibold uppercase tracking-wider text-ink-3 mb-1">
-              Match Sensitivity: {(threshold * 100).toFixed(0)}% (Far-Distance Tolerant)
-            </label>
-            <input
-              type="range"
-              min="0.40"
-              max="0.95"
-              step="0.05"
-              value={threshold}
-              onChange={(e) => setThreshold(parseFloat(e.target.value))}
-              className="w-full cursor-pointer accent-accent mt-2"
-            />
-          </div>
+      {/* Enrollment Form */}
+      <form onSubmit={handleUpload} className="space-y-2.5">
+        <div>
+          <label className="block text-[10px] font-bold uppercase tracking-wider text-zinc-400 mb-1">
+            Person / Target Name
+          </label>
+          <input
+            type="text"
+            placeholder="e.g. Rahul Sharma, Security Officer"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            className="w-full rounded bg-zinc-950 border border-zinc-700 px-2.5 py-1.5 text-xs text-zinc-100 placeholder:text-zinc-500 focus:border-cyan-500 focus:outline-none focus:ring-1 focus:ring-cyan-500"
+            required
+          />
         </div>
 
         <div>
-          <label className="block text-[10px] font-semibold uppercase tracking-wider text-ink-3 mb-1">
-            Upload Target Photo / Crop
+          <div className="flex items-center justify-between text-[10px] font-bold uppercase tracking-wider text-zinc-400 mb-1">
+            <span>Sensitivity (Match Ratio)</span>
+            <span className="text-cyan-400 font-mono">{(threshold * 100).toFixed(0)}%</span>
+          </div>
+          <input
+            type="range"
+            min="0.40"
+            max="0.95"
+            step="0.05"
+            value={threshold}
+            onChange={(e) => setThreshold(parseFloat(e.target.value))}
+            className="w-full cursor-pointer accent-cyan-500"
+          />
+        </div>
+
+        <div>
+          <label className="block text-[10px] font-bold uppercase tracking-wider text-zinc-400 mb-1">
+            Reference Face Photo
           </label>
-          <div className="flex items-center gap-3">
-            <label className="flex items-center gap-2 px-3 py-2 rounded bg-surface-1 border border-line cursor-pointer hover:bg-surface-2 transition text-ink-2">
-              <Upload size={14} className="text-accent" />
-              <span>{file ? file.name : "Choose Photo File..."}</span>
+          <div className="flex flex-wrap items-center gap-2">
+            <label className="flex items-center gap-1.5 px-2.5 py-1.5 rounded bg-zinc-800 border border-zinc-700 cursor-pointer hover:bg-zinc-700 transition text-zinc-200 text-xs shrink-0 max-w-full truncate">
+              <Upload size={13} className="text-cyan-400 shrink-0" />
+              <span className="truncate">{file ? file.name : "Choose Image..."}</span>
               <input
                 type="file"
                 accept="image/*"
                 onChange={handleFileChange}
                 className="hidden"
-                required
               />
             </label>
 
             {preview && (
-              <div className="h-10 w-10 rounded border border-accent overflow-hidden shrink-0">
+              <div className="h-8 w-8 rounded border border-cyan-500 overflow-hidden shrink-0">
                 <img src={preview} alt="Preview" className="h-full w-full object-cover" />
               </div>
             )}
@@ -185,17 +237,17 @@ export default function TargetMatcherUI() {
             <button
               type="submit"
               disabled={uploading || !file || !name.trim()}
-              className="ml-auto flex items-center gap-1.5 rounded bg-accent px-4 py-2 text-xs font-bold text-zinc-950 hover:bg-accent/80 transition disabled:opacity-50"
+              className="ml-auto flex items-center gap-1.5 rounded bg-cyan-500 px-3 py-1.5 text-xs font-bold text-zinc-950 hover:bg-cyan-400 transition disabled:opacity-50 shrink-0"
             >
               {uploading ? (
                 <>
                   <RefreshCw size={12} className="animate-spin" />
-                  <span>Enrolling...</span>
+                  <span>Saving...</span>
                 </>
               ) : (
                 <>
-                  <Target size={14} />
-                  <span>Enroll Target</span>
+                  <Target size={13} />
+                  <span>Save Face</span>
                 </>
               )}
             </button>
@@ -203,59 +255,87 @@ export default function TargetMatcherUI() {
         </div>
       </form>
 
+      {/* Status Alert */}
       {statusMsg && (
         <div
-          className={`flex items-center gap-2 p-2 rounded border text-[11px] font-medium ${
+          className={`flex items-center gap-1.5 p-2 rounded border text-[11px] font-medium leading-tight ${
             statusMsg.type === "success"
               ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/30"
               : "bg-rose-500/10 text-rose-400 border-rose-500/30"
           }`}
         >
-          {statusMsg.type === "success" ? <CheckCircle2 size={14} /> : <AlertCircle size={14} />}
-          <span>{statusMsg.text}</span>
+          {statusMsg.type === "success" ? <CheckCircle2 size={13} className="shrink-0" /> : <AlertCircle size={13} className="shrink-0" />}
+          <span className="break-all">{statusMsg.text}</span>
         </div>
       )}
 
+      {/* Enrolled Targets List */}
       {targets.length > 0 && (
-        <div className="space-y-2 pt-2 border-t border-line/60">
-          <div className="flex items-center justify-between text-[10px] font-semibold uppercase tracking-wider text-ink-3">
-            <span>Enrolled Active Search Targets ({targets.length})</span>
-            <span className="text-emerald-400 font-mono">● Real-Time Scanning</span>
+        <div className="space-y-1.5 pt-2 border-t border-zinc-800">
+          <div className="flex items-center justify-between text-[10px] font-bold uppercase tracking-wider text-zinc-400">
+            <span>Enrolled Faces ({targets.length})</span>
+            <span className="text-emerald-400 font-mono">● Active</span>
           </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+          <div className="space-y-1.5 max-h-56 overflow-y-auto pr-0.5">
             {targets.map((t) => (
               <div
                 key={t.target_id}
-                className="flex items-center justify-between p-2.5 rounded bg-surface-1 border border-line gap-2"
+                className="flex items-center justify-between p-2 rounded bg-zinc-950/80 border border-zinc-800 gap-2 w-full min-w-0"
               >
-                <div className="flex items-center gap-2.5 truncate">
+                <div className="flex items-center gap-2 min-w-0 flex-1">
                   {t.thumbnail ? (
                     <img
                       src={t.thumbnail}
                       alt={t.name}
-                      className="h-9 w-9 rounded object-cover border border-accent/40 shrink-0"
+                      className="h-8 w-8 rounded object-cover border border-cyan-500/40 shrink-0"
                     />
                   ) : (
-                    <div className="flex h-9 w-9 items-center justify-center rounded bg-accent/20 text-accent shrink-0">
-                      <Target size={16} />
+                    <div className="flex h-8 w-8 items-center justify-center rounded bg-cyan-500/20 text-cyan-400 shrink-0">
+                      <Target size={14} />
                     </div>
                   )}
-                  <div className="truncate">
-                    <div className="font-bold text-ink-1 truncate">{t.name}</div>
-                    <div className="flex items-center gap-1.5 text-[10px] text-ink-3">
-                      <span className="font-mono text-accent">Thresh: {(t.threshold * 100).toFixed(0)}%</span>
-                      {t.has_face && (
-                        <span className="px-1 py-0.2 rounded bg-sky-500/20 text-sky-300 text-[9px]">Face+Body</span>
-                      )}
+                  <div className="min-w-0 flex-1">
+                    {editingId === t.target_id ? (
+                      <div className="flex items-center gap-1">
+                        <input
+                          type="text"
+                          value={editingName}
+                          onChange={(e) => setEditingName(e.target.value)}
+                          className="w-24 rounded bg-zinc-900 border border-zinc-700 px-1.5 py-0.5 text-xs text-zinc-100 focus:outline-none"
+                          autoFocus
+                        />
+                        <button
+                          onClick={() => handleSaveRename(t.target_id)}
+                          className="p-1 rounded bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500/30 shrink-0"
+                          title="Save Name"
+                        >
+                          <Check size={12} />
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="flex items-center gap-1 font-bold text-zinc-100 min-w-0">
+                        <span className="truncate text-xs">{t.name}</span>
+                        <button
+                          onClick={() => { setEditingId(t.target_id); setEditingName(t.name); }}
+                          className="text-zinc-500 hover:text-cyan-400 transition shrink-0"
+                          title="Edit Name"
+                        >
+                          <Edit3 size={10} />
+                        </button>
+                      </div>
+                    )}
+                    <div className="flex items-center gap-1.5 text-[10px] text-zinc-400 truncate">
+                      <span className="font-mono bg-zinc-800 text-zinc-300 px-1 rounded text-[9px]">ID: {t.target_id}</span>
+                      <span className="font-mono text-cyan-400 text-[9px]">{(t.threshold * 100).toFixed(0)}%</span>
                     </div>
                   </div>
                 </div>
                 <button
                   onClick={() => handleDelete(t.target_id, t.name)}
-                  className="text-ink-3 hover:text-rose-400 p-1.5 transition shrink-0"
-                  title="Remove Search Target"
+                  className="text-zinc-400 hover:text-rose-400 p-1 transition shrink-0"
+                  title="Remove Face Record"
                 >
-                  <Trash2 size={14} />
+                  <Trash2 size={13} />
                 </button>
               </div>
             ))}

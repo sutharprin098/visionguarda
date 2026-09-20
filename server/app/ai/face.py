@@ -43,6 +43,8 @@ from typing import Any, Dict, List, Optional, Tuple
 import cv2
 import numpy as np
 
+import threading
+
 # Recall saturates by 160: 192x192 measured 77 faces vs 160's 76, for 38% more
 # time. 128 drops to 65. 160 is the knee.
 _CROP_INPUT = 160
@@ -97,11 +99,13 @@ class FaceDetector:
     def __init__(self, model_path: str, conf: float = 0.6, nms: float = 0.3):
         self.model_path = model_path
         self.conf = conf
-        self._det = cv2.FaceDetectorYN.create(
-            model_path, "", (_CROP_INPUT, _CROP_INPUT), conf, nms, 5000
-        )
-        # Set once. See module docstring — re-setting per crop tripled the cost.
-        self._det.setInputSize((_CROP_INPUT, _CROP_INPUT))
+        self._lock = threading.Lock()
+        with self._lock:
+            self._det = cv2.FaceDetectorYN.create(
+                model_path, "", (_CROP_INPUT, _CROP_INPUT), conf, nms, 5000
+            )
+            # Set once. See module docstring — re-setting per crop tripled the cost.
+            self._det.setInputSize((_CROP_INPUT, _CROP_INPUT))
         self.last_error: Optional[str] = None
 
     def set_confidence(self, conf: float) -> None:
@@ -110,15 +114,16 @@ class FaceDetector:
         if abs(conf - self.conf) < 1e-3:
             return
         self.conf = conf
-        try:
-            self._det.setScoreThreshold(conf)
-        except Exception:
-            # Older cv2 builds lack the setter; rebuild instead of silently
-            # running at the wrong threshold.
-            self._det = cv2.FaceDetectorYN.create(
-                self.model_path, "", (_CROP_INPUT, _CROP_INPUT), conf, 0.3, 5000
-            )
-            self._det.setInputSize((_CROP_INPUT, _CROP_INPUT))
+        with self._lock:
+            try:
+                self._det.setScoreThreshold(conf)
+            except Exception:
+                # Older cv2 builds lack the setter; rebuild instead of silently
+                # running at the wrong threshold.
+                self._det = cv2.FaceDetectorYN.create(
+                    self.model_path, "", (_CROP_INPUT, _CROP_INPUT), conf, 0.3, 5000
+                )
+                self._det.setInputSize((_CROP_INPUT, _CROP_INPUT))
 
     @staticmethod
     def _nms(dets: List[Dict[str, Any]], iou_thresh: float = 0.4) -> List[Dict[str, Any]]:
@@ -181,7 +186,8 @@ class FaceDetector:
 
             canvas, scale = _letterbox(crop, _CROP_INPUT)
             try:
-                _, faces = self._det.detect(canvas)
+                with self._lock:
+                    _, faces = self._det.detect(canvas)
             except cv2.error as e:
                 # One bad crop must not kill the frame, but it must not be
                 # swallowed either — the pipeline surfaces stage_errors.

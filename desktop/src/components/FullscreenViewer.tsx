@@ -144,7 +144,8 @@ export default function FullscreenViewer({
       site: siteLabel(cam, orgName),
     };
     const session = new TelemetrySession(cameraId, (t) => {
-      setDetections(t.detections ?? []);
+      const rawDets = (t.detections && t.detections.length > 0) ? t.detections : ((t as any).client_dets && (t as any).client_dets.length > 0 ? (t as any).client_dets : (t.detections ?? (t as any).client_dets ?? []));
+      setDetections(rawDets);
       setTelemetry(t);
       ingestAlert(ctx, t, imgCors ? imgRef.current : null);
     });
