@@ -229,6 +229,11 @@ export default function DetectionOverlay({ detections, refreshKey = 0, mediaRef,
       }
     });
 
+    const isPersonOrFaceOrTarget = (c: string) => {
+      const lc = (c || "").toLowerCase();
+      return lc === "person" || lc === "face" || lc.startsWith("target:") || lc === "worker" || lc === "customer" || lc === "staff" || lc.includes("target") || lc.includes("vip");
+    };
+
     for (const d of rawList) {
       if (!d || !d.bbox) continue;
 
@@ -243,7 +248,10 @@ export default function DetectionOverlay({ detections, refreshKey = 0, mediaRef,
         tracksMapRef.current.forEach((val, k) => {
           const dCls = (d.class || "").toLowerCase();
           const vCls = (val.det.class || "").toLowerCase();
-          const sameCategory = dCls === vCls || (VEHICLE_CLS_SET.has(dCls) && VEHICLE_CLS_SET.has(vCls));
+          const sameCategory =
+            dCls === vCls ||
+            (VEHICLE_CLS_SET.has(dCls) && VEHICLE_CLS_SET.has(vCls)) ||
+            (isPersonOrFaceOrTarget(dCls) && isPersonOrFaceOrTarget(vCls));
           if (sameCategory) {
             const ocx = (val.det.bbox.x1 + val.det.bbox.x2) / 2;
             const ocy = (val.det.bbox.y1 + val.det.bbox.y2) / 2;
@@ -272,6 +280,15 @@ export default function DetectionOverlay({ detections, refreshKey = 0, mediaRef,
       };
 
       if (existing && existing.det && existing.det.bbox) {
+        const eDet = existing.det;
+        const eIsTarget = eDet.custom_match || (eDet.class && eDet.class.toLowerCase().startsWith("target:"));
+        const nIsTarget = nextDet.custom_match || (nextDet.class && nextDet.class.toLowerCase().startsWith("target:"));
+        if (eIsTarget && !nIsTarget) {
+          nextDet.custom_match = true;
+          nextDet.class = eDet.class;
+          if (eDet.label) nextDet.label = eDet.label;
+        }
+
         const ob = existing.det.bbox;
         const nb = nextDet.bbox;
         

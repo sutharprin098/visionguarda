@@ -110,9 +110,23 @@ def _diagnostic_enabled() -> bool:
     return bool(getattr(config, "PIPELINE_DIAGNOSTICS", False))
 
 
+def _classes_compatible(a: str, b: str) -> bool:
+    """Return True if both classes belong to compatible tracking families (vehicles or person/face/target)."""
+    if a == b:
+        return True
+    a_lower, b_lower = str(a).lower(), str(b).lower()
+    if a_lower == b_lower:
+        return True
+    if a in VEHICLE_CLASSES and b in VEHICLE_CLASSES:
+        return True
+    p_family = ("person", "face", "worker", "customer", "staff")
+    a_p = a_lower in p_family or a_lower.startswith("target:") or "target" in a_lower or "vip" in a_lower
+    b_p = b_lower in p_family or b_lower.startswith("target:") or "target" in b_lower or "vip" in b_lower
+    return a_p and b_p
+
+
 def _vehicle_classes_compatible(a: str, b: str) -> bool:
-    """Return True if both classes belong to the vehicle category family."""
-    return a in VEHICLE_CLASSES and b in VEHICLE_CLASSES
+    return _classes_compatible(a, b)
 
 
 # Deterministic, high-contrast BGR colour per class label so every object type
@@ -369,7 +383,8 @@ class Track:
     box) never forces an ID change — the goal is one stable ID for the
     object's entire time in view, not one ID per detection streak.
     """
-    def __init__(self, track_id, bbox, class_name, confidence, embedding=None, n_init=2):
+    def __init__(self, track_id, bbox, class_name, confidence, embedding=None, n_init=2,
+                 custom_match=False, target_name=None, target_id=None, track_label=None):
         self.track_id   = track_id
         self.class_name = class_name
         self._class_votes = deque([class_name], maxlen=7)
@@ -385,6 +400,10 @@ class Track:
         now = time.time()
         self.first_seen = now
         self.last_seen  = now
+        self.custom_match = custom_match or str(class_name).lower().startswith("target:")
+        self.target_name = target_name
+        self.target_id = target_id
+        self.track_label = track_label
 
         # Tracker-clock reading of the last match. `time_since_update` counts
         self.last_clock = 0.0
@@ -404,8 +423,14 @@ class Track:
 
     def _vote_class(self, class_name):
         if class_name:
-            self._class_votes.append(class_name)
-            self.class_name = max(set(self._class_votes), key=self._class_votes.count)
+            c_str = str(class_name).lower()
+            if c_str.startswith("target:") or "target" in c_str or "vip" in c_str:
+                self.class_name = class_name
+                self.custom_match = True
+                self._class_votes.append(class_name)
+            else:
+                self._class_votes.append(class_name)
+                self.class_name = max(set(self._class_votes), key=self._class_votes.count)
 
     def _blend_embedding(self, embedding, new_weight):
         if embedding is None:
@@ -417,12 +442,19 @@ class Track:
         norm = np.linalg.norm(blended)
         self.embedding = blended / norm if norm > 1e-6 else blended
 
-    def update(self, bbox, confidence, embedding=None, class_name=None):
+    def update(self, bbox, confidence, embedding=None, class_name=None,
+               custom_match=False, target_name=None, target_id=None, track_label=None):
         self.time_since_update = 0
         self.hits += 1
         self.confidence = confidence
         self.last_seen = time.time()
         self.kf.update(bbox)
+        if custom_match or (class_name and str(class_name).lower().startswith("target:")):
+            self.custom_match = True
+            if target_name: self.target_name = target_name
+            if target_id: self.target_id = target_id
+            if track_label: self.track_label = track_label
+            self.class_name = class_name or self.class_name
         self._vote_class(class_name)
         self._blend_embedding(embedding, new_weight=0.15)
         if self.state == "tentative" and self.hits >= self.n_init:
@@ -794,6 +826,7 @@ def resolve_emitted_detections(tracker, tracks_raw, detections, masks,
     for trk in tracks_raw:
         tid = trk["track_id"]
         di = track_to_det.get(tid)
+        trk_obj = next((t for t in tracker.tracks if t.track_id == tid), None)
         if di is not None:
             det = detections[di]
             det["track_id"] = tid
@@ -801,10 +834,14 @@ def resolve_emitted_detections(tracker, tracks_raw, detections, masks,
             det["bbox"] = dict(trk["bbox"])
             det["confidence"] = trk["confidence"]
             det["tracking_status"] = "tracked"
+            if trk_obj and getattr(trk_obj, "custom_match", False):
+                det["custom_match"] = True
+                if getattr(trk_obj, "target_name", None): det["target_name"] = trk_obj.target_name
+                if getattr(trk_obj, "target_id", None): det["target_id"] = trk_obj.target_id
+                if getattr(trk_obj, "track_label", None): det["label"] = trk_obj.track_label
             out_dets.append(det)
             out_masks.append(masks[di] if masks_parallel else [])
         else:
-            trk_obj = next((t for t in tracker.tracks if t.track_id == tid), None)
             secs = tracker.secs_since_update(trk_obj) if trk_obj is not None else 0.0
             # Drop coasting track immediately if it exceeds max coast duration
             if secs > coast_render_seconds:
@@ -816,14 +853,20 @@ def resolve_emitted_detections(tracker, tracks_raw, detections, masks,
             if x1 <= 15 or y1 <= 15 or x2 >= 1905 or y2 >= 1065:
                 continue
 
-            out_dets.append({
+            coasted = {
                 "class": trk["class"],
                 "confidence": trk["confidence"],
                 "track_id": tid,
                 "dwell_time": trk["dwell_time"],
                 "bbox": dict(trk["bbox"]),
                 "tracking_status": "tracked",
-            })
+            }
+            if trk_obj and getattr(trk_obj, "custom_match", False):
+                coasted["custom_match"] = True
+                if getattr(trk_obj, "target_name", None): coasted["target_name"] = trk_obj.target_name
+                if getattr(trk_obj, "target_id", None): coasted["target_id"] = trk_obj.target_id
+                if getattr(trk_obj, "track_label", None): coasted["label"] = trk_obj.track_label
+            out_dets.append(coasted)
             out_masks.append([])
 
     # Unmatched raw detections are dropped. Only tracker-owned IDs are emitted;

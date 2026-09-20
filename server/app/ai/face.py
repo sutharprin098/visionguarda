@@ -96,7 +96,7 @@ class FaceDetector:
     camera actually enables face_detection — that is what makes a disabled
     module cost exactly zero rather than merely 'a bit less'."""
 
-    def __init__(self, model_path: str, conf: float = 0.6, nms: float = 0.3):
+    def __init__(self, model_path: str, conf: float = 0.35, nms: float = 0.3):
         self.model_path = model_path
         self.conf = conf
         self._lock = threading.Lock()
@@ -251,7 +251,7 @@ def is_loaded() -> bool:
     return _INSTANCE is not None
 
 
-def get_detector(conf: float = 0.6) -> Optional[FaceDetector]:
+def get_detector(conf: float = 0.35) -> Optional[FaceDetector]:
     """Process-wide singleton — the model is ~230 KB but constructing it costs
     ~130 ms, and every camera thread that enables the feature would otherwise
     pay that repeatedly. Returns None (once, loudly) if the model is missing."""
