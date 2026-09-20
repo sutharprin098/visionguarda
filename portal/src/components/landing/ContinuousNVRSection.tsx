@@ -242,47 +242,6 @@ export default function ContinuousNVRSection() {
                 playsInline
                 className="w-full h-full object-cover select-none pointer-events-none"
               />
-
-              {/* Burned-in AI Overlays when burnDetections is true */}
-              {burnDetections && (
-                <div className="absolute inset-0 pointer-events-none">
-                  {/* Top-left burn-in watermark */}
-                  <div className="absolute top-4 left-4 font-mono text-[10px] sm:text-xs text-white bg-black/60 px-2.5 py-1 rounded backdrop-blur-xs border border-white/20">
-                    <span className="text-emerald-400 font-bold">CAMAI PRO REC · {activeCam}</span>
-                    <span className="mx-1.5 text-slate-500">|</span>
-                    <span>2026-09-07 {currentTimeStr} UTC</span>
-                  </div>
-
-                  {/* Top-right codec and bitrate watermark */}
-                  <div className="absolute top-4 right-4 font-mono text-[9px] sm:text-[10px] text-slate-300 bg-black/60 px-2.5 py-1 rounded backdrop-blur-xs border border-white/20">
-                    <span>H.264 · 1080p@60FPS · 4.8 Mbps</span>
-                  </div>
-
-                  {/* Bounding Box 1 */}
-                  {activeCam === "CAM-01" ? (
-                    <>
-                      <div className="absolute top-[28%] left-[24%] w-[26%] h-[24%] border-2 border-sky-400 bg-sky-500/10 rounded">
-                        <div className="bg-sky-500 text-slate-950 font-bold font-mono text-[9px] sm:text-[10px] px-1.5 py-0.5 inline-block">
-                          VEHICLE #104 · 98.4% · 54 km/h
-                        </div>
-                      </div>
-                      <div className="absolute bottom-[22%] right-[28%] w-[22%] h-[28%] border-2 border-emerald-400 bg-emerald-500/10 rounded">
-                        <div className="bg-emerald-500 text-slate-950 font-bold font-mono text-[9px] sm:text-[10px] px-1.5 py-0.5 inline-block">
-                          BUS #88 · 96.1% · IN-LANE
-                        </div>
-                      </div>
-                    </>
-                  ) : (
-                    <>
-                      <div className="absolute top-[32%] left-[34%] w-[28%] h-[30%] border-2 border-amber-400 bg-amber-500/10 rounded">
-                        <div className="bg-amber-500 text-slate-950 font-bold font-mono text-[9px] sm:text-[10px] px-1.5 py-0.5 inline-block">
-                          SPEED RADAR: 68.4 km/h [ZONE ALERT]
-                        </div>
-                      </div>
-                    </>
-                  )}
-                </div>
-              )}
             </div>
 
             {/* Non-scaling HUD Controls Overlay (Floating inside player) */}

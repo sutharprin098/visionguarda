@@ -4,9 +4,8 @@ import { ArrowRight, Menu, X, Shield, Zap, Terminal } from "lucide-react";
 
 const NAV_LINKS = [
   { href: "#live-demo", label: "Live Demo" },
-  { href: "#digital-twin", label: "Digital Twin" },
+  { href: "#ai-modules", label: "7 AI Modules" },
   { href: "#nvr-recording", label: "NVR Studio" },
-  { href: "#ai-features", label: "AI Features" },
   { href: "#capabilities", label: "Capabilities" },
 ];
 

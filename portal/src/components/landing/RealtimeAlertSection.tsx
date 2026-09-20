@@ -73,7 +73,7 @@ export default function RealtimeAlertSection() {
                 </span>
               </div>
 
-              {/* Clean Human Video Feed */}
+              {/* Real Human AI Tracking Feed Video */}
               <div className="relative rounded-2xl overflow-hidden aspect-video bg-black border border-slate-800 shadow-inner">
                 <video
                   src="/videos/humans.mp4"
