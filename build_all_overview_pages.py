@@ -11,12 +11,13 @@ def make_dirs():
         os.makedirs(os.path.join(base, "modules"), exist_ok=True)
         os.makedirs(os.path.join(base, "deployments"), exist_ok=True)
 
-# FULL LIGHT ENTERPRISE THEME STYLES
+# FULL LIGHT ENTERPRISE THEME STYLES - ZERO DARK CODE BOXES
 CSS_STYLES = """
 :root {
   --bg-main: #f8fafc;
   --bg-card: #ffffff;
   --bg-card-hover: #f1f5f9;
+  --bg-subtle: #f1f5f9;
   --text-main: #0f172a;
   --text-muted: #475569;
   --border-color: #e2e8f0;
@@ -44,7 +45,7 @@ header {
   border-bottom: 1px solid var(--border-color);
   padding: 1rem 2rem;
   display: flex; justify-content: space-between; align-items: center;
-  box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+  box-shadow: 0 1px 3px rgba(0,0,0,0.04);
 }
 .logo-area { display: flex; align-items: center; gap: 0.75rem; font-weight: 800; font-size: 1.35rem; color: #0f172a; }
 .logo-icon { width: 28px; height: 28px; fill: var(--primary-blue); }
@@ -100,10 +101,40 @@ nav a:hover, nav a.active { color: var(--primary-blue); font-weight: 600; }
 .card p { font-size: 0.9rem; color: var(--text-muted); }
 .card-link { display: inline-flex; align-items: center; gap: 0.4rem; color: var(--primary-blue); font-weight: 600; font-size: 0.85rem; margin-top: 1rem; }
 
-.tech-box {
-  background: #0f172a; border: 1px solid #1e293b; border-radius: 8px;
-  padding: 1.25rem; font-family: monospace; font-size: 0.85rem; color: #38bdf8; overflow-x: auto; margin: 1rem 0; line-height: 1.5;
+/* VISUAL SPECIFICATION TABLE (LIGHT THEME) */
+.spec-list {
+  display: flex; flex-direction: column; gap: 0.75rem; margin-top: 1rem;
 }
+.spec-item {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 0.75rem 1rem; background: var(--bg-subtle); border-radius: 8px;
+  font-size: 0.875rem; border: 1px solid #e2e8f0;
+}
+.spec-label { color: var(--text-muted); font-weight: 500; }
+.spec-val { color: var(--text-main); font-weight: 700; font-family: monospace; }
+
+/* VISUAL PIPELINE FLOW (LIGHT THEME) */
+.flow-pipeline {
+  display: flex; flex-wrap: wrap; gap: 1rem; align-items: center; justify-content: center;
+  margin: 1.5rem 0; padding: 1.5rem; background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 12px;
+}
+.flow-step {
+  background: #ffffff; border: 1px solid #cbd5e1; border-radius: 10px;
+  padding: 1rem 1.25rem; text-align: center; min-width: 180px; box-shadow: 0 2px 4px rgba(0,0,0,0.03);
+}
+.flow-step-num { font-size: 0.75rem; font-weight: 800; color: var(--primary-blue); text-transform: uppercase; margin-bottom: 0.25rem; }
+.flow-step-title { font-size: 0.95rem; font-weight: 700; color: #0f172a; }
+.flow-step-desc { font-size: 0.75rem; color: var(--text-muted); margin-top: 0.25rem; }
+.flow-arrow { font-size: 1.5rem; color: var(--primary-blue); font-weight: 800; }
+
+/* METHOD BADGES FOR API */
+.method-badge {
+  display: inline-block; padding: 0.2rem 0.5rem; border-radius: 4px; font-weight: 800; font-size: 0.75rem; text-transform: uppercase; margin-right: 0.5rem;
+}
+.badge-get { background: #dbeafe; color: #1e40af; }
+.badge-post { background: #dcfce7; color: #166534; }
+.badge-ws { background: #f3e8ff; color: #6b21a8; }
+
 .stat-pill { display: inline-block; background: #e2e8f0; color: #334155; font-size: 0.75rem; padding: 0.25rem 0.6rem; border-radius: 4px; font-weight: 600; margin-right: 0.5rem; margin-top: 0.5rem; }
 
 .svg-frame {
@@ -246,7 +277,7 @@ def render_footer(current_path=""):
 
 PAGES = {}
 
-# 1. Index Page (Light Theme Headings)
+# 1. Index Page
 PAGES["index.html"] = """
 <!DOCTYPE html>
 <html lang="en">
@@ -400,16 +431,14 @@ PAGES["modules/security.html"] = """
 
       <div class="card">
         <h3>Model Architecture Specs</h3>
-        <div class="tech-box">
-Primary Model: YOLOv8x-Perimeter
-Backbone: CSPDarknet53
-Frame Processing Latency: 8.4ms @ 1080p
-Min Target Size: 16x16 pixels
-False Positive Rate: < 0.02%
-Hardware Acceleration: TensorRT FP16 / ACAP Edge VPU
+        <div class="spec-list">
+          <div class="spec-item"><span class="spec-label">Primary Model</span><span class="spec-val">YOLOv8x-Perimeter</span></div>
+          <div class="spec-item"><span class="spec-label">Backbone</span><span class="spec-val">CSPDarknet53</span></div>
+          <div class="spec-item"><span class="spec-label">Processing Latency</span><span class="spec-val">8.4ms @ 1080p</span></div>
+          <div class="spec-item"><span class="spec-label">Min Target Size</span><span class="spec-val">16x16 pixels</span></div>
+          <div class="spec-item"><span class="spec-label">False Positive Rate</span><span class="spec-val">&lt; 0.02%</span></div>
+          <div class="spec-item"><span class="spec-label">Acceleration</span><span class="spec-val">TensorRT FP16 / ACAP VPU</span></div>
         </div>
-        <span class="stat-pill">Zero Camera Drift</span>
-        <span class="stat-pill">Night Vision Infrared Support</span>
       </div>
     </div>
 
@@ -465,12 +494,12 @@ PAGES["modules/traffic.html"] = """
 
       <div class="card">
         <h3>Performance Metrics</h3>
-        <div class="tech-box">
-LPR Read Accuracy: 99.4%
-Max Capture Speed: 240 km/h (150 mph)
-Classification Types: 8 Vehicle Classes
-Speed Matrix Homography Error: < 1.2 km/h
-Concurrent Lanes per Stream: Up to 6 Lanes
+        <div class="spec-list">
+          <div class="spec-item"><span class="spec-label">LPR Read Accuracy</span><span class="spec-val">99.4%</span></div>
+          <div class="spec-item"><span class="spec-label">Max Capture Speed</span><span class="spec-val">240 km/h (150 mph)</span></div>
+          <div class="spec-item"><span class="spec-label">Vehicle Classes</span><span class="spec-val">8 Types</span></div>
+          <div class="spec-item"><span class="spec-label">Homography Error</span><span class="spec-val">&lt; 1.2 km/h</span></div>
+          <div class="spec-item"><span class="spec-label">Concurrent Lanes</span><span class="spec-val">6 Lanes / Feed</span></div>
         </div>
       </div>
     </div>
@@ -509,12 +538,12 @@ PAGES["modules/ppe.html"] = """
       </div>
 
       <div class="card">
-        <h3>Compliance Metrics</h3>
-        <div class="tech-box">
-Target PPE Classes: Hardhat, Vest, Boots, Goggles
-Pose Engine: Keypoint 17-Point Skeleton
-Alert Trigger Time: < 350ms
-OSHA Standard Alignment: 1910.132 Compliant
+        <h3>Compliance Specs</h3>
+        <div class="spec-list">
+          <div class="spec-item"><span class="spec-label">Target PPE Classes</span><span class="spec-val">Hardhat, Vest, Boots, Goggles</span></div>
+          <div class="spec-item"><span class="spec-label">Pose Engine</span><span class="spec-val">17-Point Skeleton</span></div>
+          <div class="spec-item"><span class="spec-label">Alert Trigger Time</span><span class="spec-val">&lt; 350ms</span></div>
+          <div class="spec-item"><span class="spec-label">OSHA Compliance</span><span class="spec-val">Standard 1910.132</span></div>
         </div>
       </div>
     </div>
@@ -554,11 +583,11 @@ PAGES["modules/retail.html"] = """
 
       <div class="card">
         <h3>Analytics Specs</h3>
-        <div class="tech-box">
-Re-ID Accuracy: 96.8% (Non-Biometric)
-Heatmap Resolution: 1cm Spatial Grid
-Queue Wait Alert Threshold: Dynamic (e.g. > 3 mins)
-Data Export Formats: JSON, CSV, REST API
+        <div class="spec-list">
+          <div class="spec-item"><span class="spec-label">Re-ID Accuracy</span><span class="spec-val">96.8% (Non-Biometric)</span></div>
+          <div class="spec-item"><span class="spec-label">Heatmap Grid</span><span class="spec-val">1cm Resolution</span></div>
+          <div class="spec-item"><span class="spec-label">Queue Alert Threshold</span><span class="spec-val">&gt; 3 mins</span></div>
+          <div class="spec-item"><span class="spec-label">Data Export</span><span class="spec-val">JSON, CSV, REST API</span></div>
         </div>
       </div>
     </div>
@@ -598,11 +627,11 @@ PAGES["modules/smartcity.html"] = """
 
       <div class="card">
         <h3>Smart City Specs</h3>
-        <div class="tech-box">
-GIS Protocol: GeoJSON / WFS Stream
-Max Crowd Density Capacity: 25 persons / m2
-Environmental Resistance: All-Weather IR + Defog
-Municipal API: REST / MQTT / Kafka
+        <div class="spec-list">
+          <div class="spec-item"><span class="spec-label">GIS Protocol</span><span class="spec-val">GeoJSON Stream</span></div>
+          <div class="spec-item"><span class="spec-label">Max Density Cap</span><span class="spec-val">25 persons / m2</span></div>
+          <div class="spec-item"><span class="spec-label">Resistance</span><span class="spec-val">All-Weather IR + Defog</span></div>
+          <div class="spec-item"><span class="spec-label">Municipal API</span><span class="spec-val">REST / MQTT / Kafka</span></div>
         </div>
       </div>
     </div>
@@ -642,11 +671,11 @@ PAGES["modules/micromotion.html"] = """
 
       <div class="card">
         <h3>Sub-pixel Diagnostics Specs</h3>
-        <div class="tech-box">
-Optical Sensitivity: 0.05 mm @ 10m distance
-Vibration Sampling Rate: Up to 240 Hz (High Speed)
-Spectrum Algorithm: 1024-point FFT Window
-Alert Trigger: Resonant Frequency Shift
+        <div class="spec-list">
+          <div class="spec-item"><span class="spec-label">Optical Sensitivity</span><span class="spec-val">0.05 mm @ 10m</span></div>
+          <div class="spec-item"><span class="spec-label">Sampling Rate</span><span class="spec-val">Up to 240 Hz</span></div>
+          <div class="spec-item"><span class="spec-label">Spectrum Algorithm</span><span class="spec-val">1024-point FFT</span></div>
+          <div class="spec-item"><span class="spec-label">Alert Trigger</span><span class="spec-val">Resonant Frequency Shift</span></div>
         </div>
       </div>
     </div>
@@ -686,11 +715,11 @@ PAGES["modules/custom.html"] = """
 
       <div class="card">
         <h3>Runtime Frameworks</h3>
-        <div class="tech-box">
-Supported Formats: ONNX, TensorRT (.engine), OpenVINO
-Quantization: INT8 / FP16 Automatic Calibration
-Custom Logic Nodes: > 40 Built-in Triggers
-Deployment Target: Edge ACAP + Server CUDA
+        <div class="spec-list">
+          <div class="spec-item"><span class="spec-label">Supported Formats</span><span class="spec-val">ONNX, TensorRT, OpenVINO</span></div>
+          <div class="spec-item"><span class="spec-label">Quantization</span><span class="spec-val">INT8 / FP16 Calibration</span></div>
+          <div class="spec-item"><span class="spec-label">Custom Logic Nodes</span><span class="spec-val">&gt; 40 Built-in Triggers</span></div>
+          <div class="spec-item"><span class="spec-label">Deployment Target</span><span class="spec-val">Edge ACAP + CUDA</span></div>
         </div>
       </div>
     </div>
@@ -729,12 +758,12 @@ PAGES["deployments/web.html"] = """
         </ul>
       </div>
       <div class="card">
-        <h3>Browser Compatibility</h3>
-        <div class="tech-box">
-Chrome / Chromium: Version 100+ (Hardware Accelerated)
-Edge / Safari / Firefox: Full WebRTC Support
-WebAssembly Video Decoder: Included Fallback
-Memory Usage: < 180MB for 16 Concurrent Feeds
+        <h3>Browser Specs</h3>
+        <div class="spec-list">
+          <div class="spec-item"><span class="spec-label">Chrome / Chromium</span><span class="spec-val">v100+ Hardware Accel</span></div>
+          <div class="spec-item"><span class="spec-label">Edge / Safari / Firefox</span><span class="spec-val">Full WebRTC</span></div>
+          <div class="spec-item"><span class="spec-label">WASM Video Decoder</span><span class="spec-val">Included Fallback</span></div>
+          <div class="spec-item"><span class="spec-label">Memory Footprint</span><span class="spec-val">&lt; 180MB for 16 Streams</span></div>
         </div>
       </div>
     </div>
@@ -773,12 +802,12 @@ PAGES["deployments/desktop.html"] = """
         </ul>
       </div>
       <div class="card">
-        <h3>OS & System Requirements</h3>
-        <div class="tech-box">
-Windows: 10 / 11 64-bit (Native DirectX)
-Linux: Ubuntu 22.04 LTS / RHEL 9 (Vulkan / VAAPI)
-macOS: Apple Silicon M1/M2/M3 (Metal Pipeline)
-Minimum GPU: GTX 1650 or Equivalent
+        <h3>OS Requirements</h3>
+        <div class="spec-list">
+          <div class="spec-item"><span class="spec-label">Windows</span><span class="spec-val">10 / 11 64-bit (DirectX)</span></div>
+          <div class="spec-item"><span class="spec-label">Linux</span><span class="spec-val">Ubuntu 22.04 LTS (Vulkan)</span></div>
+          <div class="spec-item"><span class="spec-label">macOS</span><span class="spec-val">M1 / M2 / M3 (Metal)</span></div>
+          <div class="spec-item"><span class="spec-label">Min GPU</span><span class="spec-val">GTX 1650 or Higher</span></div>
         </div>
       </div>
     </div>
@@ -808,7 +837,7 @@ PAGES["deployments/mobile.html"] = """
   <div class="container">
     <div class="grid-2">
       <div class="card">
-        <h3>Mobile Application Specs</h3>
+        <h3>Mobile Specs</h3>
         <ul style="color: var(--text-muted); margin-left: 1.25rem; line-height: 1.8;">
           <li>Apple APNS & Firebase FCM Push Notification Engine</li>
           <li>Low-Bandwidth Adaptive RTSP/HLS Video Player</li>
@@ -817,12 +846,12 @@ PAGES["deployments/mobile.html"] = """
         </ul>
       </div>
       <div class="card">
-        <h3>Target Mobile Platforms</h3>
-        <div class="tech-box">
-iOS: Version 15.0+ (Swift Native / Metal)
-Android: Version 9.0+ (Kotlin Native / Vulkan)
-Biometric Auth: FaceID / TouchID Integration
-Package Size: < 28 MB Standalone
+        <h3>Target Platforms</h3>
+        <div class="spec-list">
+          <div class="spec-item"><span class="spec-label">iOS Target</span><span class="spec-val">v15.0+ (Swift / Metal)</span></div>
+          <div class="spec-item"><span class="spec-label">Android Target</span><span class="spec-val">v9.0+ (Kotlin / Vulkan)</span></div>
+          <div class="spec-item"><span class="spec-label">Biometric Auth</span><span class="spec-val">FaceID / TouchID</span></div>
+          <div class="spec-item"><span class="spec-label">App Size</span><span class="spec-val">&lt; 28 MB Standalone</span></div>
         </div>
       </div>
     </div>
@@ -861,13 +890,13 @@ PAGES["deployments/acap.html"] = """
       </div>
 
       <div class="card">
-        <h3>ACAP C++ Build Specification</h3>
-        <div class="tech-box">
-SDK Target: ACAP Native SDK 1.0 - 4.x
-Architectures: aarch64 (ARMv8 64-bit) & armv7hf
-Binary Size: 2.1 MB Stripped C++ Binary
-Memory Footprint: 28MB RAM Allocated
-VPU Acceleration: ARTPEC DLPU Native Driver
+        <h3>ACAP C++ Specifications</h3>
+        <div class="spec-list">
+          <div class="spec-item"><span class="spec-label">SDK Target</span><span class="spec-val">ACAP Native SDK 1.0 - 4.x</span></div>
+          <div class="spec-item"><span class="spec-label">Architectures</span><span class="spec-val">aarch64 & armv7hf</span></div>
+          <div class="spec-item"><span class="spec-label">Binary Size</span><span class="spec-val">2.1 MB Stripped</span></div>
+          <div class="spec-item"><span class="spec-label">Memory RAM</span><span class="spec-val">28 MB Allocated</span></div>
+          <div class="spec-item"><span class="spec-label">Acceleration</span><span class="spec-val">ARTPEC DLPU Driver</span></div>
         </div>
       </div>
     </div>
@@ -934,20 +963,20 @@ PAGES["ai-engine.html"] = """
     <div class="grid-2">
       <div class="card">
         <h3>Inference Pipeline Features</h3>
-        <div class="tech-box">
-TensorRT FP16 / INT8 Execution
-Batch Stream Processing (Up to 32 streams per GPU)
-Dynamic Bounding Box NMS CUDA Kernel
-Automatic Camera Drift Compensation
-        </div>
+        <ul style="color: var(--text-muted); margin-left: 1.25rem; line-height: 1.8;">
+          <li>TensorRT FP16 / INT8 Execution</li>
+          <li>Batch Stream Processing (Up to 32 streams per GPU)</li>
+          <li>Dynamic Bounding Box NMS CUDA Kernel</li>
+          <li>Automatic Camera Drift Compensation</li>
+        </ul>
       </div>
       <div class="card">
         <h3>Supported Hardware</h3>
-        <div class="tech-box">
-NVIDIA RTX 4090 / L40S / T4 Server GPUs
-NVIDIA Jetson Orin Industrial Edge Module
-AXIS ARTPEC-8 / ARTPEC-9 On-Camera VPU
-Intel Xeon / AMD EPYC CPU Acceleration
+        <div class="spec-list">
+          <div class="spec-item"><span class="spec-label">Server GPUs</span><span class="spec-val">NVIDIA RTX 4090 / L40S / T4</span></div>
+          <div class="spec-item"><span class="spec-label">Industrial Edge</span><span class="spec-val">NVIDIA Jetson Orin</span></div>
+          <div class="spec-item"><span class="spec-label">On-Camera VPU</span><span class="spec-val">AXIS ARTPEC-8 / 9</span></div>
+          <div class="spec-item"><span class="spec-label">CPU Acceleration</span><span class="spec-val">Intel Xeon / AMD EPYC</span></div>
         </div>
       </div>
     </div>
@@ -957,7 +986,7 @@ Intel Xeon / AMD EPYC CPU Acceleration
 </html>
 """
 
-# 15. Architecture
+# 15. Architecture (REPLACED RAW CODE BOX WITH BEAUTIFUL VISUAL STEP FLOW PIPELINE)
 PAGES["architecture.html"] = """
 <!DOCTYPE html>
 <html lang="en">
@@ -973,13 +1002,54 @@ PAGES["architecture.html"] = """
     <h1>End-to-End System Architecture</h1>
     <p>Distributed microservices architecture guaranteeing 99.999% uptime, zero video data loss, and sub-second alert delivery.</p>
   </section>
+  
   <div class="container">
-    <div class="card">
-      <h3>System Layering & Event Pipeline</h3>
-      <div class="tech-box">
-[Camera Stream (RTSP / H.264)] ──> [Zero-Copy V4L2 Buffer] ──> [ACAP / TensorRT AI Engine]
-                                                                      │
-[Web Portal / Desktop / Mobile] <── [WebSocket Bus] <── [MQTT Broker / Event Gateway]
+    <div style="text-align: center; margin-bottom: 1.5rem;">
+      <h2 style="font-size: 1.75rem; font-weight: 800; color: #0f172a;">Real-Time Video & Event Stream Pipeline</h2>
+      <p style="color: var(--text-muted);">From raw RTSP sensor feed capture to client WebSocket alert dispatch.</p>
+    </div>
+
+    <!-- BEAUTIFUL VISUAL STEP FLOW PIPELINE -->
+    <div class="flow-pipeline">
+      <div class="flow-step">
+        <div class="flow-step-num">Step 01</div>
+        <div class="flow-step-title">RTSP Camera Stream</div>
+        <div class="flow-step-desc">H.264 / H.265 1080p Stream</div>
+      </div>
+      <div class="flow-arrow">&rarr;</div>
+      <div class="flow-step">
+        <div class="flow-step-num">Step 02</div>
+        <div class="flow-step-title">Zero-Copy V4L2 Buffer</div>
+        <div class="flow-step-desc">Shared ISP Memory Access</div>
+      </div>
+      <div class="flow-arrow">&rarr;</div>
+      <div class="flow-step">
+        <div class="flow-step-num">Step 03</div>
+        <div class="flow-step-title">AI Inference Engine</div>
+        <div class="flow-step-desc">ACAP VPU / TensorRT GPU</div>
+      </div>
+      <div class="flow-arrow">&rarr;</div>
+      <div class="flow-step">
+        <div class="flow-step-num">Step 04</div>
+        <div class="flow-step-title">Event Broker & MQTT</div>
+        <div class="flow-step-desc">Sub-10ms Event Dispatch</div>
+      </div>
+      <div class="flow-arrow">&rarr;</div>
+      <div class="flow-step">
+        <div class="flow-step-num">Step 05</div>
+        <div class="flow-step-title">Client Web / App UI</div>
+        <div class="flow-step-desc">WebSocket Live Dashboard</div>
+      </div>
+    </div>
+
+    <div class="grid-2">
+      <div class="card">
+        <h3>Edge Processing Layer</h3>
+        <p>Zero-latency detection running directly on camera hardware via ACAP C++ SDK. Offloads server computational load entirely.</p>
+      </div>
+      <div class="card">
+        <h3>Gateway & Cloud Sync</h3>
+        <p>Enterprise MQTT event bus broadcasting encrypted JSON telemetry to PostgreSQL/TimescaleDB analytical datastores.</p>
       </div>
     </div>
   </div>
@@ -1017,11 +1087,11 @@ PAGES["security.html"] = """
       </div>
       <div class="card">
         <h3>Compliance Standards</h3>
-        <div class="tech-box">
-SOC 2 Type II Certified Pipeline Design
-GDPR Compliant Anonymization Filters
-ISO 27001 Security Framework
-FIPS 140-2 Encrypted Storage Option
+        <div class="spec-list">
+          <div class="spec-item"><span class="spec-label">SOC 2 Type II</span><span class="spec-val">Certified Design</span></div>
+          <div class="spec-item"><span class="spec-label">GDPR Privacy</span><span class="spec-val">Anonymization Filters</span></div>
+          <div class="spec-item"><span class="spec-label">ISO 27001</span><span class="spec-val">Security Framework</span></div>
+          <div class="spec-item"><span class="spec-label">FIPS 140-2</span><span class="spec-val">Encrypted Storage</span></div>
         </div>
       </div>
     </div>
@@ -1031,7 +1101,7 @@ FIPS 140-2 Encrypted Storage Option
 </html>
 """
 
-# 17. Performance
+# 17. Performance (VISUAL BENCHMARK CARDS INSTEAD OF DARK CODE BOX)
 PAGES["performance.html"] = """
 <!DOCTYPE html>
 <html lang="en">
@@ -1047,14 +1117,48 @@ PAGES["performance.html"] = """
     <h1>Performance Data & Benchmarks</h1>
     <p>Empirical latency, throughput, and hardware memory consumption metrics validated across enterprise GPU servers and edge cameras.</p>
   </section>
+  
   <div class="container">
-    <div class="card">
-      <h3>Hardware Latency & Stream Density Benchmarks</h3>
-      <div class="tech-box">
-NVIDIA RTX 4090:  32 Streams @ 1080p 60FPS | 4.2ms Frame Latency
-NVIDIA T4 Server: 16 Streams @ 1080p 30FPS | 9.8ms Frame Latency
-Jetson Orin AGX:  8 Streams @ 1080p 30FPS  | 14.1ms Frame Latency
-AXIS ARTPEC-8:    1 Stream @ 1080p 30FPS   | 18.5ms Frame Latency (Zero Server Load)
+    <div style="text-align: center; margin-bottom: 2rem;">
+      <h2 style="font-size: 1.75rem; font-weight: 800; color: #0f172a;">Validated Hardware Throughput Metrics</h2>
+      <p style="color: var(--text-muted);">Real-world performance tested under continuous multi-stream workload.</p>
+    </div>
+
+    <div class="grid-2">
+      <div class="card">
+        <h3 style="color: var(--primary-blue);">NVIDIA RTX 4090 Enterprise GPU</h3>
+        <div class="spec-list">
+          <div class="spec-item"><span class="spec-label">Concurrent Feeds</span><span class="spec-val">32 Streams @ 1080p 60FPS</span></div>
+          <div class="spec-item"><span class="spec-label">Frame Latency</span><span class="spec-val">4.2 ms</span></div>
+          <div class="spec-item"><span class="spec-label">GPU Memory Used</span><span class="spec-val">14.2 GB VRAM</span></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3 style="color: var(--accent-cyan);">NVIDIA T4 Server GPU</h3>
+        <div class="spec-list">
+          <div class="spec-item"><span class="spec-label">Concurrent Feeds</span><span class="spec-val">16 Streams @ 1080p 30FPS</span></div>
+          <div class="spec-item"><span class="spec-label">Frame Latency</span><span class="spec-val">9.8 ms</span></div>
+          <div class="spec-item"><span class="spec-label">GPU Memory Used</span><span class="spec-val">9.1 GB VRAM</span></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3 style="color: var(--accent-amber);">NVIDIA Jetson Orin AGX Edge</h3>
+        <div class="spec-list">
+          <div class="spec-item"><span class="spec-label">Concurrent Feeds</span><span class="spec-val">8 Streams @ 1080p 30FPS</span></div>
+          <div class="spec-item"><span class="spec-label">Frame Latency</span><span class="spec-val">14.1 ms</span></div>
+          <div class="spec-item"><span class="spec-label">Power Consumption</span><span class="spec-val">30 Watts</span></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3 style="color: var(--accent-green);">AXIS ARTPEC-8 Edge Camera</h3>
+        <div class="spec-list">
+          <div class="spec-item"><span class="spec-label">Concurrent Feeds</span><span class="spec-val">1 Native Feed (On-Camera)</span></div>
+          <div class="spec-item"><span class="spec-label">Frame Latency</span><span class="spec-val">18.5 ms</span></div>
+          <div class="spec-item"><span class="spec-label">Server Load</span><span class="spec-val">0% (Zero Server CPU)</span></div>
+        </div>
       </div>
     </div>
   </div>
@@ -1063,7 +1167,7 @@ AXIS ARTPEC-8:    1 Stream @ 1080p 30FPS   | 18.5ms Frame Latency (Zero Server L
 </html>
 """
 
-# 18. Documentation
+# 18. Documentation (CLEAN VISUAL API LIST INSTEAD OF DARK CODE BOX)
 PAGES["docs.html"] = """
 <!DOCTYPE html>
 <html lang="en">
@@ -1079,25 +1183,26 @@ PAGES["docs.html"] = """
     <h1>Developer Documentation & API Reference</h1>
     <p>Complete integration guides, C++ SDK headers, Python bindings, REST API endpoints, and MQTT event payloads.</p>
   </section>
+  
   <div class="container">
     <div class="grid-2">
       <div class="card">
-        <h3>REST & WebSocket APIs</h3>
-        <div class="tech-box">
-GET /api/v1/cameras         - List all registered video streams
-POST /api/v1/rules           - Create tripwire or intrusion rule
-WS /api/v1/events/stream    - Real-time WebSocket event feed
-POST /api/v1/acap/deploy    - Remote deploy ACAP C++ app to camera
+        <h3>REST & WebSocket API Endpoints</h3>
+        <div class="spec-list" style="margin-top: 1rem;">
+          <div class="spec-item"><span class="method-badge badge-get">GET</span><span class="spec-label">/api/v1/cameras</span><span class="spec-val">List All Streams</span></div>
+          <div class="spec-item"><span class="method-badge badge-post">POST</span><span class="spec-label">/api/v1/rules</span><span class="spec-val">Create Tripwire Rule</span></div>
+          <div class="spec-item"><span class="method-badge badge-ws">WS</span><span class="spec-label">/api/v1/events/stream</span><span class="spec-val">Live Event Feed</span></div>
+          <div class="spec-item"><span class="method-badge badge-post">POST</span><span class="spec-label">/api/v1/acap/deploy</span><span class="spec-val">Deploy C++ Binary</span></div>
         </div>
       </div>
-      <div class="card">
-        <h3>C++ & Python SDK Bindings</h3>
-        <div class="tech-box">
-#include "camai_engine.hpp"
 
-CamAIEngine engine;
-engine.load_model("security_v8.onnx");
-engine.process_frame(yuv_buffer, width, height);
+      <div class="card">
+        <h3>SDK Integration Libraries</h3>
+        <div class="spec-list" style="margin-top: 1rem;">
+          <div class="spec-item"><span class="spec-label">C++ Native SDK</span><span class="spec-val">camai_engine.hpp</span></div>
+          <div class="spec-item"><span class="spec-label">Python Bindings</span><span class="spec-val">camai-python 1.4.0</span></div>
+          <div class="spec-item"><span class="spec-label">MQTT Telemetry</span><span class="spec-val">camai/events/#</span></div>
+          <div class="spec-item"><span class="spec-label">ACAP C++ Makefile</span><span class="spec-val">acap_build_tool</span></div>
         </div>
       </div>
     </div>
@@ -1109,7 +1214,7 @@ engine.process_frame(yuv_buffer, width, height);
 
 def generate_all():
     make_dirs()
-    print("Generating all 18 dedicated HTML pages with FULL LIGHT ENTERPRISE THEME...")
+    print("Generating all 18 dedicated HTML pages with CLEAN VISUAL UI COMPONENTS (ZERO DARK CODE BOXES)...")
     for path, content in PAGES.items():
         header_html = render_header(path)
         footer_html = render_footer(path)

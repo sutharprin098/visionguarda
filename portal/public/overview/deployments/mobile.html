@@ -9,6 +9,7 @@
   --bg-main: #f8fafc;
   --bg-card: #ffffff;
   --bg-card-hover: #f1f5f9;
+  --bg-subtle: #f1f5f9;
   --text-main: #0f172a;
   --text-muted: #475569;
   --border-color: #e2e8f0;
@@ -36,7 +37,7 @@ header {
   border-bottom: 1px solid var(--border-color);
   padding: 1rem 2rem;
   display: flex; justify-content: space-between; align-items: center;
-  box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+  box-shadow: 0 1px 3px rgba(0,0,0,0.04);
 }
 .logo-area { display: flex; align-items: center; gap: 0.75rem; font-weight: 800; font-size: 1.35rem; color: #0f172a; }
 .logo-icon { width: 28px; height: 28px; fill: var(--primary-blue); }
@@ -92,10 +93,40 @@ nav a:hover, nav a.active { color: var(--primary-blue); font-weight: 600; }
 .card p { font-size: 0.9rem; color: var(--text-muted); }
 .card-link { display: inline-flex; align-items: center; gap: 0.4rem; color: var(--primary-blue); font-weight: 600; font-size: 0.85rem; margin-top: 1rem; }
 
-.tech-box {
-  background: #0f172a; border: 1px solid #1e293b; border-radius: 8px;
-  padding: 1.25rem; font-family: monospace; font-size: 0.85rem; color: #38bdf8; overflow-x: auto; margin: 1rem 0; line-height: 1.5;
+/* VISUAL SPECIFICATION TABLE (LIGHT THEME) */
+.spec-list {
+  display: flex; flex-direction: column; gap: 0.75rem; margin-top: 1rem;
 }
+.spec-item {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 0.75rem 1rem; background: var(--bg-subtle); border-radius: 8px;
+  font-size: 0.875rem; border: 1px solid #e2e8f0;
+}
+.spec-label { color: var(--text-muted); font-weight: 500; }
+.spec-val { color: var(--text-main); font-weight: 700; font-family: monospace; }
+
+/* VISUAL PIPELINE FLOW (LIGHT THEME) */
+.flow-pipeline {
+  display: flex; flex-wrap: wrap; gap: 1rem; align-items: center; justify-content: center;
+  margin: 1.5rem 0; padding: 1.5rem; background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 12px;
+}
+.flow-step {
+  background: #ffffff; border: 1px solid #cbd5e1; border-radius: 10px;
+  padding: 1rem 1.25rem; text-align: center; min-width: 180px; box-shadow: 0 2px 4px rgba(0,0,0,0.03);
+}
+.flow-step-num { font-size: 0.75rem; font-weight: 800; color: var(--primary-blue); text-transform: uppercase; margin-bottom: 0.25rem; }
+.flow-step-title { font-size: 0.95rem; font-weight: 700; color: #0f172a; }
+.flow-step-desc { font-size: 0.75rem; color: var(--text-muted); margin-top: 0.25rem; }
+.flow-arrow { font-size: 1.5rem; color: var(--primary-blue); font-weight: 800; }
+
+/* METHOD BADGES FOR API */
+.method-badge {
+  display: inline-block; padding: 0.2rem 0.5rem; border-radius: 4px; font-weight: 800; font-size: 0.75rem; text-transform: uppercase; margin-right: 0.5rem;
+}
+.badge-get { background: #dbeafe; color: #1e40af; }
+.badge-post { background: #dcfce7; color: #166534; }
+.badge-ws { background: #f3e8ff; color: #6b21a8; }
+
 .stat-pill { display: inline-block; background: #e2e8f0; color: #334155; font-size: 0.75rem; padding: 0.25rem 0.6rem; border-radius: 4px; font-weight: 600; margin-right: 0.5rem; margin-top: 0.5rem; }
 
 .svg-frame {
@@ -172,7 +203,7 @@ footer {
   <div class="container">
     <div class="grid-2">
       <div class="card">
-        <h3>Mobile Application Specs</h3>
+        <h3>Mobile Specs</h3>
         <ul style="color: var(--text-muted); margin-left: 1.25rem; line-height: 1.8;">
           <li>Apple APNS & Firebase FCM Push Notification Engine</li>
           <li>Low-Bandwidth Adaptive RTSP/HLS Video Player</li>
@@ -181,12 +212,12 @@ footer {
         </ul>
       </div>
       <div class="card">
-        <h3>Target Mobile Platforms</h3>
-        <div class="tech-box">
-iOS: Version 15.0+ (Swift Native / Metal)
-Android: Version 9.0+ (Kotlin Native / Vulkan)
-Biometric Auth: FaceID / TouchID Integration
-Package Size: < 28 MB Standalone
+        <h3>Target Platforms</h3>
+        <div class="spec-list">
+          <div class="spec-item"><span class="spec-label">iOS Target</span><span class="spec-val">v15.0+ (Swift / Metal)</span></div>
+          <div class="spec-item"><span class="spec-label">Android Target</span><span class="spec-val">v9.0+ (Kotlin / Vulkan)</span></div>
+          <div class="spec-item"><span class="spec-label">Biometric Auth</span><span class="spec-val">FaceID / TouchID</span></div>
+          <div class="spec-item"><span class="spec-label">App Size</span><span class="spec-val">&lt; 28 MB Standalone</span></div>
         </div>
       </div>
     </div>
