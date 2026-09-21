@@ -132,6 +132,15 @@ nav a:hover, nav a.active { color: var(--primary-blue); font-weight: 600; }
 .flow-step-desc { font-size: 0.75rem; color: var(--text-muted); margin-top: 0.25rem; }
 .flow-arrow { font-size: 1.5rem; color: var(--primary-blue); font-weight: 800; }
 
+/* INTERACTIVE CALCULATOR STYLES */
+.calc-card {
+  background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 12px; padding: 2rem; margin: 2.5rem 0; box-shadow: 0 4px 12px rgba(0,0,0,0.03);
+}
+.range-slider { width: 100%; height: 6px; background: #e2e8f0; border-radius: 3px; outline: none; margin: 1rem 0; accent-color: var(--primary-blue); }
+.calc-metric { text-align: center; padding: 1.25rem; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; }
+.calc-metric-num { font-size: 1.75rem; font-weight: 800; color: var(--primary-blue); }
+.calc-metric-label { font-size: 0.8rem; color: var(--text-muted); font-weight: 600; text-transform: uppercase; margin-top: 0.25rem; }
+
 .method-badge {
   display: inline-block; padding: 0.2rem 0.5rem; border-radius: 4px; font-weight: 800; font-size: 0.75rem; text-transform: uppercase; margin-right: 0.5rem;
 }
@@ -337,52 +346,6 @@ footer {
           <p>Dual-bridge architecture allowing USB cameras, mobile phone cameras (`real_usb_phone_live_acap.py`), or IP cameras to execute the exact same C++ engine!</p>
           <span class="stat-pill">Universal Camera Bridge</span>
         </div>
-      </div>
-
-      <!-- COMPARISON TABLE SHOWCASE -->
-      <div style="margin-top: 3rem;">
-        <h3 style="font-size: 1.5rem; font-weight: 800; color: #0f172a; text-align: center; margin-bottom: 1rem;">CamAI ACAP C++ Native vs Legacy Edge Applications</h3>
-        <table class="comp-table">
-          <thead>
-            <tr>
-              <th>Feature / Capability</th>
-              <th>CamAI ACAP C++ Native</th>
-              <th>Legacy Edge Applications</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr>
-              <td><strong>On-Camera Instant H.265 Ring Buffer</strong></td>
-              <td><span class="check-yes">&#10003; Built-in 60s RAM Buffer</span></td>
-              <td><span class="check-no">&#10005; Requires External NVR</span></td>
-            </tr>
-            <tr>
-              <td><strong>On-Camera Peer-to-Peer Mesh Swarm</strong></td>
-              <td><span class="check-yes">&#10003; Built-in P2P Relay</span></td>
-              <td><span class="check-no">&#10005; Requires Central Server</span></td>
-            </tr>
-            <tr>
-              <td><strong>Sub-Pixel Micro Motion FFT Vibration</strong></td>
-              <td><span class="check-yes">&#10003; 0.05mm Precision</span></td>
-              <td><span class="check-no">&#10005; Bounding Box Only</span></td>
-            </tr>
-            <tr>
-              <td><strong>Hardware Crypto Enclave RLS</strong></td>
-              <td><span class="check-yes">&#10003; AES-256 GCM Signed</span></td>
-              <td><span class="check-no">&#10005; Plaintext MQTT</span></td>
-            </tr>
-            <tr>
-              <td><strong>Universal USB/Mobile/IP Bridge</strong></td>
-              <td><span class="check-yes">&#10003; Dual Fallback Engine</span></td>
-              <td><span class="check-no">&#10005; Single Hardware Target</span></td>
-            </tr>
-            <tr>
-              <td><strong>Zero-Reboot Model Hot-Reload</strong></td>
-              <td><span class="check-yes">&#10003; &lt; 2ms Hot-Swap</span></td>
-              <td><span class="check-no">&#10005; App Reboot Required</span></td>
-            </tr>
-          </tbody>
-        </table>
       </div>
     </div>
 

@@ -139,6 +139,15 @@ nav a:hover, nav a.active { color: var(--primary-blue); font-weight: 600; }
 .flow-step-desc { font-size: 0.75rem; color: var(--text-muted); margin-top: 0.25rem; }
 .flow-arrow { font-size: 1.5rem; color: var(--primary-blue); font-weight: 800; }
 
+/* INTERACTIVE CALCULATOR STYLES */
+.calc-card {
+  background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 12px; padding: 2rem; margin: 2.5rem 0; box-shadow: 0 4px 12px rgba(0,0,0,0.03);
+}
+.range-slider { width: 100%; height: 6px; background: #e2e8f0; border-radius: 3px; outline: none; margin: 1rem 0; accent-color: var(--primary-blue); }
+.calc-metric { text-align: center; padding: 1.25rem; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; }
+.calc-metric-num { font-size: 1.75rem; font-weight: 800; color: var(--primary-blue); }
+.calc-metric-label { font-size: 0.8rem; color: var(--text-muted); font-weight: 600; text-transform: uppercase; margin-top: 0.25rem; }
+
 .method-badge {
   display: inline-block; padding: 0.2rem 0.5rem; border-radius: 4px; font-weight: 800; font-size: 0.75rem; text-transform: uppercase; margin-right: 0.5rem;
 }
@@ -432,52 +441,6 @@ PAGES["index.html"] = """
           <span class="stat-pill">Universal Camera Bridge</span>
         </div>
       </div>
-
-      <!-- COMPARISON TABLE SHOWCASE -->
-      <div style="margin-top: 3rem;">
-        <h3 style="font-size: 1.5rem; font-weight: 800; color: #0f172a; text-align: center; margin-bottom: 1rem;">CamAI ACAP C++ Native vs Legacy Edge Applications</h3>
-        <table class="comp-table">
-          <thead>
-            <tr>
-              <th>Feature / Capability</th>
-              <th>CamAI ACAP C++ Native</th>
-              <th>Legacy Edge Applications</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr>
-              <td><strong>On-Camera Instant H.265 Ring Buffer</strong></td>
-              <td><span class="check-yes">&#10003; Built-in 60s RAM Buffer</span></td>
-              <td><span class="check-no">&#10005; Requires External NVR</span></td>
-            </tr>
-            <tr>
-              <td><strong>On-Camera Peer-to-Peer Mesh Swarm</strong></td>
-              <td><span class="check-yes">&#10003; Built-in P2P Relay</span></td>
-              <td><span class="check-no">&#10005; Requires Central Server</span></td>
-            </tr>
-            <tr>
-              <td><strong>Sub-Pixel Micro Motion FFT Vibration</strong></td>
-              <td><span class="check-yes">&#10003; 0.05mm Precision</span></td>
-              <td><span class="check-no">&#10005; Bounding Box Only</span></td>
-            </tr>
-            <tr>
-              <td><strong>Hardware Crypto Enclave RLS</strong></td>
-              <td><span class="check-yes">&#10003; AES-256 GCM Signed</span></td>
-              <td><span class="check-no">&#10005; Plaintext MQTT</span></td>
-            </tr>
-            <tr>
-              <td><strong>Universal USB/Mobile/IP Bridge</strong></td>
-              <td><span class="check-yes">&#10003; Dual Fallback Engine</span></td>
-              <td><span class="check-no">&#10005; Single Hardware Target</span></td>
-            </tr>
-            <tr>
-              <td><strong>Zero-Reboot Model Hot-Reload</strong></td>
-              <td><span class="check-yes">&#10003; &lt; 2ms Hot-Swap</span></td>
-              <td><span class="check-no">&#10005; App Reboot Required</span></td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
     </div>
 
     <div style="margin-top: 5rem; border-top: 1px solid var(--border-color); padding-top: 3rem;">
@@ -516,7 +479,7 @@ PAGES["index.html"] = """
 </html>
 """
 
-# ENHANCED ACAP DEVELOPER PORTAL PAGE (acap.html & deployments/acap.html)
+# ENHANCED ACAP DEVELOPER PORTAL PAGE WITH INTERACTIVE COST CALCULATOR & LIVE DIAGNOSTICS
 ACAP_PAGE_HTML = """
 <!DOCTYPE html>
 <html lang="en">
@@ -524,6 +487,22 @@ ACAP_PAGE_HTML = """
   <meta charset="UTF-8">
   <title>CamAI ACAP C++ Native — Edge Application Development Platform</title>
   <style>""" + CSS_STYLES + """</style>
+  <script>
+    function updateCalculator() {
+      const cameraCount = document.getElementById('cameraSlider').value;
+      document.getElementById('cameraCountDisplay').innerText = cameraCount + " Cameras";
+      
+      // Calculations
+      const cloudBandwidthMbps = cameraCount * 5; // 5Mbps per 1080p stream
+      const cloudStorageCostYr = cameraCount * 1200; // $1200/yr server/bandwidth per cam
+      const camaiCostYr = 0; // Baseline metadata on-camera
+      const savingsYr = cloudStorageCostYr - camaiCostYr;
+
+      document.getElementById('bandwidthDisplay').innerText = cloudBandwidthMbps + " Mbps vs 0 Mbps";
+      document.getElementById('costDisplay').innerText = "$" + cloudStorageCostYr.toLocaleString() + "/yr";
+      document.getElementById('savingsDisplay').innerText = "$" + savingsYr.toLocaleString() + "/yr (100% Saved)";
+    }
+  </script>
 </head>
 <body>
   {HEADER}
@@ -534,7 +513,7 @@ ACAP_PAGE_HTML = """
     <p>Develop, compile, and deploy high-performance computer vision applications natively on-camera. Powered by C++20, zero-copy V4L2 buffer management, and hardware VPU acceleration.</p>
     <div class="hero-actions">
       <a href="#getting-started" class="nav-btn" style="padding: 0.75rem 1.75rem; font-size: 1rem;">Developer Quickstart</a>
-      <a href="#innovations" style="background: #ffffff; border: 1px solid var(--border-color); color: #0f172a; padding: 0.75rem 1.75rem; border-radius: 6px; font-weight: 600; font-size: 1rem; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">6 Exclusive Innovations</a>
+      <a href="#calculator" style="background: #ffffff; border: 1px solid var(--border-color); color: #0f172a; padding: 0.75rem 1.75rem; border-radius: 6px; font-weight: 600; font-size: 1rem; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">Interactive Cost Calculator</a>
     </div>
   </section>
 
@@ -545,6 +524,36 @@ ACAP_PAGE_HTML = """
       <p style="color: var(--text-muted); max-width: 800px; margin: 0.5rem auto 0 auto;">
         CamAI ACAP (Analytics & Camera Application Platform) is an enterprise edge application runtime that allows C++ models to run directly inside camera hardware. It eliminates cloud latency, reduces network bandwidth to zero, and processes video streams at 60 FPS natively.
       </p>
+    </div>
+
+    <!-- INTERACTIVE ZERO-CLOUD COST & BANDWIDTH SAVINGS CALCULATOR -->
+    <div id="calculator" class="calc-card">
+      <div style="text-align: center; margin-bottom: 1.5rem;">
+        <div class="hero-badge">Interactive Enterprise Tool</div>
+        <h2 style="font-size: 1.75rem; font-weight: 800; color: #0f172a;">On-Camera Edge Cost & Bandwidth Savings Calculator</h2>
+        <p style="color: var(--text-muted);">See how much server infrastructure and cloud bandwidth CamAI ACAP C++ Native saves.</p>
+      </div>
+
+      <div style="max-width: 600px; margin: 0 auto 2rem auto; text-align: center;">
+        <label style="font-weight: 700; color: #0f172a; font-size: 1.1rem;">Number of Enterprise Camera Streams:</label>
+        <span id="cameraCountDisplay" style="font-weight: 800; color: var(--primary-blue); font-size: 1.2rem; margin-left: 0.5rem;">50 Cameras</span>
+        <input type="range" id="cameraSlider" min="5" max="500" value="50" step="5" class="range-slider" oninput="updateCalculator()">
+      </div>
+
+      <div class="grid-3">
+        <div class="calc-metric">
+          <div id="bandwidthDisplay" class="calc-metric-num">250 Mbps vs 0 Mbps</div>
+          <div class="calc-metric-label">Network Bandwidth Required</div>
+        </div>
+        <div class="calc-metric">
+          <div id="costDisplay" class="calc-metric-num" style="color: var(--accent-rose);">$60,000/yr</div>
+          <div class="calc-metric-label">Legacy NVR / Cloud Server Cost</div>
+        </div>
+        <div class="calc-metric" style="background: #f0fdf4; border-color: #bbf7d0;">
+          <div id="savingsDisplay" class="calc-metric-num" style="color: var(--accent-green);">$60,000/yr (100% Saved)</div>
+          <div class="calc-metric-label">Net Savings with CamAI ACAP</div>
+        </div>
+      </div>
     </div>
 
     <!-- 4 Key Architecture Pillars -->
@@ -687,91 +696,6 @@ ACAP_PAGE_HTML = """
       </div>
     </div>
 
-    <!-- On-Camera Pipeline Visual Flow -->
-    <div style="margin-top: 4rem;">
-      <h2 style="font-size: 1.75rem; font-weight: 800; color: #0f172a; text-align: center; margin-bottom: 1.5rem;">On-Camera Execution Pipeline Flow</h2>
-      
-      <div class="flow-pipeline">
-        <div class="flow-step">
-          <div class="flow-step-num">Step 01</div>
-          <div class="flow-step-title">Camera Sensor & ISP</div>
-          <div class="flow-step-desc">1080p 60FPS Raw Capture</div>
-        </div>
-        <div class="flow-arrow">&rarr;</div>
-        <div class="flow-step">
-          <div class="flow-step-num">Step 02</div>
-          <div class="flow-step-title">V4L2 YUV Buffer</div>
-          <div class="flow-step-desc">Direct Video Pipeline</div>
-        </div>
-        <div class="flow-arrow">&rarr;</div>
-        <div class="flow-step">
-          <div class="flow-step-num">Step 03</div>
-          <div class="flow-step-title">CamAI ACAP C++ Core</div>
-          <div class="flow-step-desc">DLPU Hardware Inference</div>
-        </div>
-        <div class="flow-arrow">&rarr;</div>
-        <div class="flow-step">
-          <div class="flow-step-num">Step 04</div>
-          <div class="flow-step-title">MQTT & GPIO Output</div>
-          <div class="flow-step-desc">Real-time Relay Event</div>
-        </div>
-      </div>
-    </div>
-
-    <!-- Core C++ Subsystems -->
-    <div id="subsystems" style="margin-top: 4rem;">
-      <div style="text-align: center; margin-bottom: 2rem;">
-        <h2 style="font-size: 2rem; font-weight: 800; color: #0f172a;">Core C++ Subsystems in Codebase</h2>
-        <p style="color: var(--text-muted);">Built directly from `d:\\camAI\\ACAP\\app\\` production codebase.</p>
-      </div>
-
-      <div class="grid-2">
-        <div class="card">
-          <h3>1. Video Pipeline (`video_pipeline.cpp`)</h3>
-          <p style="margin-bottom: 1rem;">Manages high-speed frame capture, ISP format conversion, and OpenCV Matrix bindings for AI analytics.</p>
-          <div class="spec-list">
-            <div class="spec-item"><span class="spec-label">Header File</span><span class="spec-val">video_pipeline.hpp</span></div>
-            <div class="spec-item"><span class="spec-label">Frame Format</span><span class="spec-val">YUV420sp / NV12</span></div>
-            <div class="spec-item"><span class="spec-label">Buffer Mode</span><span class="spec-val">V4L2_MEMORY_MMAP</span></div>
-            <div class="spec-item"><span class="spec-label">FPS Target</span><span class="spec-val">60 FPS @ 1080p</span></div>
-          </div>
-        </div>
-
-        <div class="card">
-          <h3>2. Event Publisher (`events.cpp`)</h3>
-          <p style="margin-bottom: 1rem;">Handles real-time event formatting, MQTT topic publishing, WebSocket stream relay, and GPIO hardware alarm triggers.</p>
-          <div class="spec-list">
-            <div class="spec-item"><span class="spec-label">Header File</span><span class="spec-val">events.hpp</span></div>
-            <div class="spec-item"><span class="spec-label">Protocol</span><span class="spec-val">MQTT 3.1.1 / WebSockets</span></div>
-            <div class="spec-item"><span class="spec-label">Default Port</span><span class="spec-val">1883 / 8085</span></div>
-            <div class="spec-item"><span class="spec-label">GPIO Relay</span><span class="spec-val">Hardware Pin Output</span></div>
-          </div>
-        </div>
-
-        <div class="card">
-          <h3>3. Analytics Modules (`modules/`)</h3>
-          <p style="margin-bottom: 1rem;">Modular C++ headers executing All 7 AI analytics algorithms directly on Edge VPU.</p>
-          <div class="spec-list">
-            <div class="spec-item"><span class="spec-label">Micro Motion</span><span class="spec-val">micro_motion_module.hpp</span></div>
-            <div class="spec-item"><span class="spec-label">Perimeter Security</span><span class="spec-val">security_module.hpp</span></div>
-            <div class="spec-item"><span class="spec-label">ANPR Traffic</span><span class="spec-val">traffic_module.hpp</span></div>
-            <div class="spec-item"><span class="spec-label">Industrial PPE</span><span class="spec-val">ppe_module.hpp</span></div>
-          </div>
-        </div>
-
-        <div class="card">
-          <h3>4. Model Packaging (`export_acap_model.py`)</h3>
-          <p style="margin-bottom: 1rem;">Quantizes ONNX neural network weights into INT8 / FP16 DLPU binary engines for on-camera execution.</p>
-          <div class="spec-list">
-            <div class="spec-item"><span class="spec-label">Export Script</span><span class="spec-val">export_acap_model.py</span></div>
-            <div class="spec-item"><span class="spec-label">Quantization</span><span class="spec-val">INT8 Automatic Calibration</span></div>
-            <div class="spec-item"><span class="spec-label">Package Tool</span><span class="spec-val">build_eap_package.py</span></div>
-            <div class="spec-item"><span class="spec-label">Output Artifact</span><span class="spec-val">camai_acap_1_0_0.eap</span></div>
-          </div>
-        </div>
-      </div>
-    </div>
-
     <!-- Developer Workflow Section -->
     <div id="getting-started" style="margin-top: 4rem; border-top: 1px solid var(--border-color); padding-top: 3rem;">
       <div style="text-align: center; margin-bottom: 2rem;">
@@ -836,42 +760,6 @@ ACAP_PAGE_HTML = """
             <div class="spec-item"><span class="spec-label">Vendor Name</span><span class="spec-val">CamAI Platform</span></div>
             <div class="spec-item"><span class="spec-label">Executable Name</span><span class="spec-val">camai_acap</span></div>
           </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- C++ API Sample -->
-    <div style="margin-top: 3rem;">
-      <div class="card">
-        <h3>C++ Native Initialization Code Sample</h3>
-        <p style="color: var(--text-muted); font-size: 0.9rem; margin-bottom: 1rem;">Excerpt from `d:\\camAI\\ACAP\\app\\main.cpp` showing how the C++ pipeline initializes hardware VPU inference:</p>
-        
-        <div class="code-light">
-#include "video_pipeline.hpp"
-#include "events.hpp"
-#include "micro_motion_module.hpp"
-
-int main(int argc, char* argv[]) {
-    // 1. Initialize Zero-Copy V4L2 Video Pipeline
-    CamAI::ACAP::VideoPipeline pipeline("/dev/video0", 1920, 1080);
-    pipeline.start_capture();
-
-    // 2. Initialize On-Camera Event Publisher
-    CamAI::ACAP::EventPublisher events("127.0.0.1", 1883);
-
-    // 3. Initialize Micro Motion Analytics Engine
-    CamAI::ACAP::MicroMotionModule motion_engine;
-
-    // 4. Main Inference Loop
-    while (pipeline.is_running()) {
-        auto frame = pipeline.get_next_frame();
-        auto result = motion_engine.process_frame(frame);
-        if (result.has_anomaly) {
-            events.publish_event("camai/events/micromotion", result.to_json());
-        }
-    }
-    return 0;
-}
         </div>
       </div>
     </div>
@@ -1638,7 +1526,7 @@ PAGES["docs.html"] = """
 
 def generate_all():
     make_dirs()
-    print("Generating all 19 dedicated HTML pages with 6 EXCLUSIVE UNMATCHED INNOVATIONS...")
+    print("Generating all 19 dedicated HTML pages with INTERACTIVE ENTERPRISE CALCULATORS & TOOLS...")
     for path, content in PAGES.items():
         header_html = render_header(path)
         footer_html = render_footer(path)
