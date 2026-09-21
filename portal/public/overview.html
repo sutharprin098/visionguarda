@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>CamAI Enterprise — System Architecture, AI Models, 7 Modules & Team Management</title>
+    <title>CamAI Enterprise — System Architecture, AI Models, 7 Modules & ACAP Native Edge</title>
     <meta name="description" content="Comprehensive Web Application Architecture Overview for CamAI Enterprise CCTV AI Platform covering AI Models, 7 Security Analytics Modules, Team Management RBAC, Web SaaS Portal, Desktop Client, Mobile App, and ACAP Native Edge Application.">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -593,10 +593,10 @@
             <a href="#ai-models" class="nav-btn">AI Models</a>
             <a href="#modules-7" class="nav-btn">7 Analytics Modules</a>
             <a href="#team-rbac" class="nav-btn">Team & RBAC</a>
+            <a href="#acap-edge" class="nav-btn primary">ACAP Native Edge Full</a>
             <a href="#web-saas" class="nav-btn">Web SaaS</a>
             <a href="#desktop-client" class="nav-btn">Desktop</a>
             <a href="#mobile-app" class="nav-btn">Mobile</a>
-            <a href="#acap-edge" class="nav-btn primary">ACAP Native Edge</a>
         </div>
     </nav>
 
@@ -607,13 +607,13 @@
             <div class="hero-domain">camai.princesite.in/overview</div>
             <h1 class="hero-title">CamAI Enterprise Platform Architecture</h1>
             <p class="hero-desc">
-                Complete A-to-Z breakdown of CamAI AI Models, 7 Specialized Analytics Modules, Team RBAC Management, Web SaaS Portal, Desktop Client, Mobile App, and ACAP Native Edge.
+                Complete A-to-Z breakdown of CamAI AI Models, 7 Specialized Analytics Modules, Team RBAC Management, Web SaaS Portal, Desktop Client, Mobile App, and ACAP Native Edge C++ Application.
             </p>
             <div class="hero-actions">
-                <a href="#tree" class="nav-btn primary">Explore Architecture Tree</a>
+                <a href="#acap-edge" class="nav-btn primary">Explore ACAP/ Full Breakdown</a>
+                <a href="#tree" class="nav-btn">Architecture Tree</a>
                 <a href="#ai-models" class="nav-btn">AI Model Zoo</a>
                 <a href="#modules-7" class="nav-btn">7 Core Modules</a>
-                <a href="#team-rbac" class="nav-btn">Team Management</a>
             </div>
         </header>
 
@@ -691,6 +691,119 @@
                             <li class="tree-leaf-item"><span class="tree-dot" style="background:var(--accent-amber);"></span> axevent & axoverlay ONVIF</li>
                         </ul>
                     </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- SECTION: ACAP Native Edge Application (FULL END-TO-END BREAKDOWN) -->
+        <section id="acap-edge" class="section-block acap">
+            <div class="pillar-header">
+                <div class="pillar-title-group">
+                    <div class="pillar-icon-wrapper">
+                        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z"/></svg>
+                    </div>
+                    <div>
+                        <h2 class="pillar-title">ACAP Native Edge Application (`ACAP/` Directory)</h2>
+                        <div class="pillar-path">C++ Native Codebase, Hardware SDK APIs, Packaging & Testing Suite</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="section-grid">
+                <div>
+                    <p class="branch-desc">
+                        `ACAP/` is a production-ready C++20 Native Edge Application compiled specifically for IP camera hardware platforms (ARTPEC-8 / ARTPEC-7). It executes 100% on-device AI analytics with sub-15ms latency, zero cloud dependency, zero CPU video copying, and full ONVIF event compliance.
+                    </p>
+                    <ul class="feature-list">
+                        <li class="feature-item">
+                            <svg class="check-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>
+                            <div><strong>VDO Stream API (`vdo_pipeline.cpp`):</strong> Zero-copy NV12 frame buffer acquisition directly from camera ISP hardware via `vdo-stream.h`.</div>
+                        </li>
+                        <li class="feature-item">
+                            <svg class="check-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>
+                            <div><strong>Larod NPU API (`inference.cpp`):</strong> Hardware NPU tensor acceleration for YOLOX-Tiny ONNX 8-bit models via `larod.h`.</div>
+                        </li>
+                        <li class="feature-item">
+                            <svg class="check-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>
+                            <div><strong>C++ ByteTrack Tracker (`tracking.cpp`):</strong> Kalman Filter motion state vectors & Hungarian matching for zero ID switches.</div>
+                        </li>
+                        <li class="feature-item">
+                            <svg class="check-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>
+                            <div><strong>axevent ONVIF Publisher (`events.cpp`):</strong> Native XML event producer publishing intrusion alarms to Milestone/Genetec VMS.</div>
+                        </li>
+                        <li class="feature-item">
+                            <svg class="check-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>
+                            <div><strong>axoverlay Bounding Box Renderer (`overlay.cpp`):</strong> Draws real-time hardware bounding boxes directly on camera H.264/H.265 streams.</div>
+                        </li>
+                    </ul>
+                </div>
+                <div>
+                    <div class="code-box">// ACAP/app/camai_engine.cpp
+void CamAIEngine::process_loop() {
+    while (is_running_) {
+        VideoFrame frame;
+        video_pipeline_.capture_frame(frame);
+        
+        // 1. Larod NPU AI Inference (8-bit YOLOX)
+        std::vector<BoundingBox> detections;
+        inference_engine_.run_inference(frame, detections, latency_ms);
+        
+        // 2. C++ ByteTrack Multi-Object Tracking
+        std::vector<BoundingBox> tracked;
+        tracker_.update(detections, tracked);
+        
+        // 3. Security ROI Intrusion Math & Event Emission
+        security_module_->process_frame(meta, alerts);
+        for (auto& alert : alerts) event_producer_.send_event(alert);
+        
+        // 4. axoverlay Stream Bounding Box Overlay
+        overlay_manager_.render(tracked, alerts);
+    }
+}</div>
+                </div>
+            </div>
+
+            <!-- ACAP File Hierarchy & Module Breakdown -->
+            <div class="gallery-header">
+                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V7M3 7l9 6 9-6"/></svg>
+                Complete `ACAP/` File Architecture & Component Matrix
+            </div>
+
+            <div class="grid-3">
+                <div class="grid-card">
+                    <span class="card-badge" style="background:#fef3c7; color:#d97706;">ACAP/manifest.json</span>
+                    <div class="card-title">Manifest Schema v2.0</div>
+                    <div class="card-desc">Defines app ID `camai_acap`, version `1.0.0`, `aarch64` target architecture, embedded web server endpoint, and hardware permissions.</div>
+                </div>
+
+                <div class="grid-card">
+                    <span class="card-badge" style="background:#fef3c7; color:#d97706;">ACAP/Dockerfile & Makefile</span>
+                    <div class="card-title">SDK Build Environment</div>
+                    <div class="card-desc">Containerized ACAP Native SDK cross-compilation toolchain targeting `arm64v8/gcc` with zero host dependency requirements.</div>
+                </div>
+
+                <div class="grid-card">
+                    <span class="card-badge" style="background:#fef3c7; color:#d97706;">ACAP/app/config.cpp</span>
+                    <div class="card-title">axparameter Config API</div>
+                    <div class="card-desc">VAPIX HTTP parameter manager for dynamic ROI threshold tuning, sensitivity adjustment, and zone persistence without app restart.</div>
+                </div>
+
+                <div class="grid-card">
+                    <span class="card-badge" style="background:#fef3c7; color:#d97706;">ACAP/app/diagnostics.cpp</span>
+                    <div class="card-title">ResourceGovernor Watchdog</div>
+                    <div class="card-desc">Real-time memory and CPU resource governor enforcing `DROP_OLDEST` frame queue policy when RAM usage exceeds 85%.</div>
+                </div>
+
+                <div class="grid-card">
+                    <span class="card-badge" style="background:#fef3c7; color:#d97706;">ACAP/build_eap_package.py</span>
+                    <div class="card-title">EAP Package Builder</div>
+                    <div class="card-desc">Automated packaging script that bundles manifest, model weights, C++ binary, and assets into `camai_acap_1_0_0_aarch64.eap`.</div>
+                </div>
+
+                <div class="grid-card">
+                    <span class="card-badge" style="background:#fef3c7; color:#d97706;">ACAP/real_usb_phone_live_acap.py</span>
+                    <div class="card-title">Real USB/IP Streamer</div>
+                    <div class="card-desc">Live camera connector streaming real-time USB or IP phone camera feed to AI detector running locally at `http://localhost:8080`.</div>
                 </div>
             </div>
         </section>
@@ -797,7 +910,7 @@
                     <div class="card-desc">Sub-pixel motion analysis for industrial machinery vibration monitoring, conveyor belt jamming, and subtle structural movement detection.</div>
                 </div>
 
-                <div class="grid-card" style="grid-column: span 1;">
+                <div class="grid-card">
                     <span class="card-badge" style="background:#ccfbf1; color:#0d9488;">Module 7</span>
                     <div class="card-title">⚡ Custom Rules & Trigger Engine</div>
                     <div class="card-desc">User-defined logic engine for combining multi-condition triggers (e.g., Person AND Vehicle AND Night Hours = High Severity Alert).</div>
@@ -1139,70 +1252,6 @@ def connect_mobile_phone_stream(phone_ip="192.168.29.24", port=8080):
                         <div class="screenshot-title">Telegram Security Bot Alerts</div>
                         <div class="screenshot-desc">Instant Telegram push messages with annotated intrusion images and video links.</div>
                     </div>
-                </div>
-            </div>
-        </section>
-
-        <!-- Pillar 4: ACAP Native Edge -->
-        <section id="acap-edge" class="section-block acap">
-            <div class="pillar-header">
-                <div class="pillar-title-group">
-                    <div class="pillar-icon-wrapper">
-                        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z"/></svg>
-                    </div>
-                    <div>
-                        <h2 class="pillar-title">ACAP Native Edge Application</h2>
-                        <div class="pillar-path">ACAP/</div>
-                    </div>
-                </div>
-            </div>
-            <div class="section-grid">
-                <div>
-                    <p class="branch-desc">
-                        A C/C++ native application compiled for IP camera edge hardware (ARTPEC-8 / ARTPEC-7). Runs 100% on-device AI analytics with zero cloud latency and full ONVIF compliance.
-                    </p>
-                    <ul class="feature-list">
-                        <li class="feature-item">
-                            <svg class="check-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>
-                            <div><strong>VDO Stream API (`vdo-stream.h`):</strong> Zero-copy NV12 frame buffer acquisition directly from camera hardware ISP.</div>
-                        </li>
-                        <li class="feature-item">
-                            <svg class="check-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>
-                            <div><strong>Larod NPU API (`larod.h`):</strong> NPU hardware acceleration for YOLOX-Tiny ONNX models with 8-bit quantization.</div>
-                        </li>
-                        <li class="feature-item">
-                            <svg class="check-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>
-                            <div><strong>Native axevent & axoverlay:</strong> ONVIF XML event publishing and hardware stream bounding box rendering.</div>
-                        </li>
-                        <li class="feature-item">
-                            <svg class="check-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>
-                            <div><strong>C++ ByteTrack Tracker:</strong> Kalman Filter state vector + Hungarian matching algorithm for 0 ID switches.</div>
-                        </li>
-                    </ul>
-                </div>
-                <div>
-                    <div class="code-box">// ACAP/app/camai_engine.cpp
-void CamAIEngine::process_loop() {
-    while (is_running_) {
-        VideoFrame frame;
-        video_pipeline_.capture_frame(frame);
-        
-        // 1. Larod NPU AI Inference
-        std::vector<BoundingBox> detections;
-        inference_engine_.run_inference(frame, detections, latency_ms);
-        
-        // 2. C++ ByteTrack Multi-Object Tracking
-        std::vector<BoundingBox> tracked;
-        tracker_.update(detections, tracked);
-        
-        // 3. Security ROI Intrusion Math & Event Emission
-        security_module_->process_frame(meta, alerts);
-        for (auto& alert : alerts) event_producer_.send_event(alert);
-        
-        // 4. axoverlay Stream Bounding Box Overlay
-        overlay_manager_.render(tracked, alerts);
-    }
-}</div>
                 </div>
             </div>
         </section>

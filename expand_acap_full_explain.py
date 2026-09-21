@@ -1,4 +1,6 @@
-<!DOCTYPE html>
+import os
+
+html_code = """<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -1265,3 +1267,17 @@ def connect_mobile_phone_stream(phone_ip="192.168.29.24", port=8080):
     </footer>
 </body>
 </html>
+"""
+
+paths = [
+    r"d:\camAI\overview_site\index.html",
+    r"d:\camAI\portal\public\overview\index.html",
+    r"d:\camAI\portal\public\overview.html"
+]
+
+for p in paths:
+    os.makedirs(os.path.dirname(p), exist_ok=True)
+    with open(p, "w", encoding="utf-8") as f:
+        f.write(html_code)
+
+print("ACAP section fully expanded and updated across all target HTML pages!")
