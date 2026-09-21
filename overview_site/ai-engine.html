@@ -105,6 +105,18 @@ nav a:hover, nav a.active { color: var(--primary-blue); font-weight: 600; }
 .spec-label { color: var(--text-muted); font-weight: 500; }
 .spec-val { color: var(--text-main); font-weight: 700; font-family: monospace; }
 
+/* COMPARISON TABLE */
+.comp-table {
+  width: 100%; border-collapse: collapse; margin: 2rem 0; background: var(--bg-card); border-radius: 12px; overflow: hidden; border: 1px solid var(--border-color); box-shadow: 0 1px 3px rgba(0,0,0,0.03);
+}
+.comp-table th, .comp-table td {
+  padding: 1rem 1.25rem; text-align: left; border-bottom: 1px solid var(--border-color); font-size: 0.9rem;
+}
+.comp-table th { background: #f1f5f9; color: #0f172a; font-weight: 800; text-transform: uppercase; font-size: 0.8rem; letter-spacing: 0.05em; }
+.comp-table tr:last-child td { border-bottom: none; }
+.check-yes { color: var(--accent-green); font-weight: 800; display: inline-flex; align-items: center; gap: 0.3rem; }
+.check-no { color: var(--accent-rose); font-weight: 800; display: inline-flex; align-items: center; gap: 0.3rem; }
+
 /* VISUAL PIPELINE FLOW (LIGHT THEME) */
 .flow-pipeline {
   display: flex; flex-wrap: wrap; gap: 1rem; align-items: center; justify-content: center;
@@ -119,7 +131,6 @@ nav a:hover, nav a.active { color: var(--primary-blue); font-weight: 600; }
 .flow-step-desc { font-size: 0.75rem; color: var(--text-muted); margin-top: 0.25rem; }
 .flow-arrow { font-size: 1.5rem; color: var(--primary-blue); font-weight: 800; }
 
-/* METHOD BADGES FOR API */
 .method-badge {
   display: inline-block; padding: 0.2rem 0.5rem; border-radius: 4px; font-weight: 800; font-size: 0.75rem; text-transform: uppercase; margin-right: 0.5rem;
 }

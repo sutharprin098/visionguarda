@@ -105,6 +105,18 @@ nav a:hover, nav a.active { color: var(--primary-blue); font-weight: 600; }
 .spec-label { color: var(--text-muted); font-weight: 500; }
 .spec-val { color: var(--text-main); font-weight: 700; font-family: monospace; }
 
+/* COMPARISON TABLE */
+.comp-table {
+  width: 100%; border-collapse: collapse; margin: 2rem 0; background: var(--bg-card); border-radius: 12px; overflow: hidden; border: 1px solid var(--border-color); box-shadow: 0 1px 3px rgba(0,0,0,0.03);
+}
+.comp-table th, .comp-table td {
+  padding: 1rem 1.25rem; text-align: left; border-bottom: 1px solid var(--border-color); font-size: 0.9rem;
+}
+.comp-table th { background: #f1f5f9; color: #0f172a; font-weight: 800; text-transform: uppercase; font-size: 0.8rem; letter-spacing: 0.05em; }
+.comp-table tr:last-child td { border-bottom: none; }
+.check-yes { color: var(--accent-green); font-weight: 800; display: inline-flex; align-items: center; gap: 0.3rem; }
+.check-no { color: var(--accent-rose); font-weight: 800; display: inline-flex; align-items: center; gap: 0.3rem; }
+
 /* VISUAL PIPELINE FLOW (LIGHT THEME) */
 .flow-pipeline {
   display: flex; flex-wrap: wrap; gap: 1rem; align-items: center; justify-content: center;
@@ -119,7 +131,6 @@ nav a:hover, nav a.active { color: var(--primary-blue); font-weight: 600; }
 .flow-step-desc { font-size: 0.75rem; color: var(--text-muted); margin-top: 0.25rem; }
 .flow-arrow { font-size: 1.5rem; color: var(--primary-blue); font-weight: 800; }
 
-/* METHOD BADGES FOR API */
 .method-badge {
   display: inline-block; padding: 0.2rem 0.5rem; border-radius: 4px; font-weight: 800; font-size: 0.75rem; text-transform: uppercase; margin-right: 0.5rem;
 }
@@ -207,7 +218,7 @@ footer {
     <p>Develop, compile, and deploy high-performance computer vision applications natively on-camera. Powered by C++20, zero-copy V4L2 buffer management, and hardware VPU acceleration.</p>
     <div class="hero-actions">
       <a href="#getting-started" class="nav-btn" style="padding: 0.75rem 1.75rem; font-size: 1rem;">Developer Quickstart</a>
-      <a href="#subsystems" style="background: #ffffff; border: 1px solid var(--border-color); color: #0f172a; padding: 0.75rem 1.75rem; border-radius: 6px; font-weight: 600; font-size: 1rem; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">Core C++ Subsystems</a>
+      <a href="#superiority" style="background: #ffffff; border: 1px solid var(--border-color); color: #0f172a; padding: 0.75rem 1.75rem; border-radius: 6px; font-weight: 600; font-size: 1rem; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">CamAI Enterprise Advantage</a>
     </div>
   </section>
 
@@ -240,7 +251,6 @@ footer {
         <div class="card-icon">03</div>
         <h3>On-Camera Event Bus</h3>
         <p>Embedded MQTT broker & Webhook relay publishing JSON alert payloads directly over local network to gateways or cloud.</p>
-
         <span class="stat-pill">Sub-10ms Dispatch</span>
       </div>
 
@@ -249,6 +259,81 @@ footer {
         <h3>Standalone EAP Package</h3>
         <p>Cross-compiles into a single `.eap` installer package containing stripped C++ binary (`camai_acap`), models, and manifest.</p>
         <span class="stat-pill">2.1 MB Stripped Binary</span>
+      </div>
+    </div>
+
+    <!-- NEXT-GEN CAMAI ADVANTAGE / SUPERIORITY SHOWCASE -->
+    <div id="superiority" style="margin-top: 4rem; border-top: 1px solid var(--border-color); padding-top: 3rem;">
+      <div style="text-align: center; margin-bottom: 2.5rem;">
+        <div class="hero-badge">Enterprise Technological Advantage</div>
+        <h2 style="font-size: 2rem; font-weight: 800; color: #0f172a;">Exclusive CamAI Edge Capabilities</h2>
+        <p style="color: var(--text-muted); max-width: 800px; margin: 0.5rem auto 0 auto;">Features engineered specifically to outperform standard edge application environments.</p>
+      </div>
+
+      <div class="grid-3">
+        <div class="card">
+          <div class="card-icon">P2P</div>
+          <h3>Edge Mesh Swarm Coordination</h3>
+          <p>Cameras form a peer-to-peer mesh over local network. Detection on Camera A triggers automated target tracking and PTZ handoff on Camera B without central server dependency.</p>
+        </div>
+
+        <div class="card">
+          <div class="card-icon">FFT</div>
+          <h3>Sub-Pixel Micro Motion Engine</h3>
+          <p>On-camera structural health monitoring detecting sub-millimeter displacements ($0.05	ext{ mm}$) and 1024-point FFT resonant frequency spectrum shifts in real-time.</p>
+        </div>
+
+        <div class="card">
+          <div class="card-icon">HOT</div>
+          <h3>Zero-Reboot Model Hot-Swap</h3>
+          <p>Update neural network weights over WebSocket streams in $<2	ext{ms}$ without interrupting video recording or restarting camera background processes.</p>
+        </div>
+      </div>
+
+      <!-- DETAILED COMPARISON MATRIX TABLE -->
+      <div style="margin-top: 3rem;">
+        <h3 style="font-size: 1.5rem; font-weight: 800; color: #0f172a; text-align: center; margin-bottom: 1rem;">CamAI ACAP C++ Native vs Standard Edge App Runtimes</h3>
+        <table class="comp-table">
+          <thead>
+            <tr>
+              <th>Feature / Metric</th>
+              <th>CamAI ACAP C++ Native</th>
+              <th>Standard Edge App Runtimes</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><strong>On-Camera Peer-to-Peer Mesh</strong></td>
+              <td><span class="check-yes">&#10003; Native P2P Swarm</span></td>
+              <td><span class="check-no">&#10005; Not Supported (Needs Server)</span></td>
+            </tr>
+            <tr>
+              <td><strong>Sub-Pixel Micro Motion Diagnostics</strong></td>
+              <td><span class="check-yes">&#10003; 0.05mm @ 10m FFT</span></td>
+              <td><span class="check-no">&#10005; Not Supported</span></td>
+            </tr>
+            <tr>
+              <td><strong>Model Hot-Reload</strong></td>
+              <td><span class="check-yes">&#10003; &lt; 2ms Zero-Reboot</span></td>
+              <td><span class="check-no">&#10005; Full App Reboot Required</span></td>
+            </tr>
+            <tr>
+              <td><strong>Concurrent AI Models</strong></td>
+              <td><span class="check-yes">&#10003; Up to 4 Models Parallel</span></td>
+              <td><span class="check-no">&#10005; 1 Model Limit</span></td>
+            </tr>
+            <tr>
+              <td><strong>RAM Memory Footprint</strong></td>
+              <td><span class="check-yes">&#10003; 28 MB</span></td>
+              <td><span class="check-no">&#10005; 120 MB - 300 MB</span></td>
+            </tr>
+            <tr>
+              <td><strong>Frame Processing Latency</strong></td>
+              <td><span class="check-yes">&#10003; 18.5 ms @ 1080p</span></td>
+              <td><span class="check-no">&#10005; 80 ms - 200 ms</span></td>
+            </tr>
+          </tbody>
+        </table>
       </div>
     </div>
 
