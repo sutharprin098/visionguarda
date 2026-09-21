@@ -3,8 +3,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>CamAI — Enterprise Video Intelligence Platform</title>
+  <title>CamAI Deep Learning Engine</title>
   <style>
 :root {
   --bg-dark: #090d16;
@@ -162,112 +161,33 @@ footer {
   </nav>
 </header>
 
-  
   <section class="hero-page">
-    <div class="hero-badge">Autonomous Computer Vision AI</div>
-    <h1>Enterprise Video Intelligence Platform</h1>
-    <p>From real-time camera stream processing to enterprise-wide security, industrial compliance, traffic management, and structural health monitoring.</p>
-    <div class="hero-actions">
-      <a href="ecosystem.html" class="nav-btn" style="padding: 0.75rem 1.75rem; font-size: 1rem;">Explore Platform Ecosystem</a>
-      <a href="architecture.html" style="background: var(--bg-card); border: 1px solid var(--border-color); color: #fff; padding: 0.75rem 1.75rem; border-radius: 6px; font-weight: 600; font-size: 1rem;">System Architecture</a>
-    </div>
+    <div class="hero-badge">Core Engine</div>
+    <h1>Deep Learning AI Engine</h1>
+    <p>High-throughput neural network inference engine powered by TensorRT, CUDA, and ONNX Runtime.</p>
   </section>
-
   <div class="container">
-    <div style="text-align: center; margin-bottom: 2rem;">
-      <h2 style="font-size: 2rem; font-weight: 800; color: #fff;">All 7 Core AI Analytics Modules</h2>
-      <p style="color: var(--text-muted);">Explore dedicated technical specifications for each production-ready AI module.</p>
-    </div>
-
-    <div class="grid-3">
+    <div class="grid-2">
       <div class="card">
-        <div class="card-icon">01</div>
-        <h3>Security & Perimeter Defense</h3>
-        <p>Virtual tripwire line crossing, polygon intrusion zones, loitering analysis, and directional vector anomaly alerts.</p>
-        <span class="stat-pill">Sub-12ms Latency</span><span class="stat-pill">YOLOv8x Engine</span>
-        <a href="modules/security.html" class="card-link">View Module Specs &rarr;</a>
-      </div>
-
-      <div class="card">
-        <div class="card-icon">02</div>
-        <h3>Traffic & Vehicle Analytics</h3>
-        <p>License Plate Recognition (ANPR/LPR), vehicle classification, homography speed estimation, and red light violation tracking.</p>
-        <span class="stat-pill">99.4% LPR Accuracy</span><span class="stat-pill">Speed Radar Homography</span>
-        <a href="modules/traffic.html" class="card-link">View Module Specs &rarr;</a>
-      </div>
-
-      <div class="card">
-        <div class="card-icon">03</div>
-        <h3>Factory PPE & Safety</h3>
-        <p>Hardhat, high-visibility vest, safety goggles compliance monitoring, fall detection, and machinery hazard perimeters.</p>
-        <span class="stat-pill">OSHA Compliant</span><span class="stat-pill">Multi-Class Pose</span>
-        <a href="modules/ppe.html" class="card-link">View Module Specs &rarr;</a>
-      </div>
-
-      <div class="card">
-        <div class="card-icon">04</div>
-        <h3>Retail Footfall & Dwell</h3>
-        <p>Store entrance counting, multi-camera Re-ID customer tracking, queue depth analysis, and interactive dwell heatmaps.</p>
-        <span class="stat-pill">Multi-Cam Re-ID</span><span class="stat-pill">Spatial Heatmaps</span>
-        <a href="modules/retail.html" class="card-link">View Module Specs &rarr;</a>
-      </div>
-
-      <div class="card">
-        <div class="card-icon">05</div>
-        <h3>Smart City Crowding</h3>
-        <p>Public density estimation, illegal waste dumping detection, street flood level monitoring, and disturbance vectoring.</p>
-        <span class="stat-pill">GIS GeoJSON</span><span class="stat-pill">Urban Infrastructure</span>
-        <a href="modules/smartcity.html" class="card-link">View Module Specs &rarr;</a>
-      </div>
-
-      <div class="card">
-        <div class="card-icon">06</div>
-        <h3>Micro Motion Anomaly</h3>
-        <p>Sub-pixel optical displacement analysis, Fast Fourier Transform (FFT) structural vibration, and cable deflection monitoring.</p>
-        <span class="stat-pill">Sub-millimeter Resolution</span><span class="stat-pill">FFT Frequency Spectrum</span>
-        <a href="modules/micromotion.html" class="card-link">View Module Specs &rarr;</a>
-      </div>
-
-      <div class="card" style="grid-column: 1 / -1;">
-        <div class="card-icon">07</div>
-        <h3>Custom Trigger & AI Model Engine</h3>
-        <p>Bring-Your-Own-Model (BYOM) runtime supporting ONNX, TensorRT, zero-code logic builders, and synthetic training pipelines.</p>
-        <span class="stat-pill">BYOM ONNX / TensorRT</span><span class="stat-pill">INT8 Edge Quantization</span>
-        <a href="modules/custom.html" class="card-link">View Module Specs &rarr;</a>
-      </div>
-    </div>
-
-    <div style="margin-top: 5rem; border-top: 1px solid var(--border-color); padding-top: 3rem;">
-      <div style="text-align: center; margin-bottom: 2rem;">
-        <h2 style="font-size: 2rem; font-weight: 800; color: #fff;">4 Native Deployment Surfaces</h2>
-        <p style="color: var(--text-muted);">Unified video intelligence running natively across all client and edge platforms.</p>
-      </div>
-
-      <div class="grid-4">
-        <div class="card">
-          <h3>Web Portal</h3>
-          <p>React 18 + Vite enterprise console with live multi-stream web grid, spatial maps, and real-time WebSocket triage.</p>
-          <a href="deployments/web.html" class="card-link">Explore Web Surface &rarr;</a>
+        <h3>Inference Pipeline Features</h3>
+        <div class="tech-box">
+TensorRT FP16 / INT8 Execution
+Batch Stream Processing (Up to 32 streams per GPU)
+Dynamic Bounding Box NMS CUDA Kernel
+Automatic Camera Drift Compensation
         </div>
-        <div class="card">
-          <h3>Desktop Client</h3>
-          <p>Native C++ / Electron high-performance desktop application for control rooms with GPU zero-copy grid display.</p>
-          <a href="deployments/desktop.html" class="card-link">Explore Desktop Surface &rarr;</a>
-        </div>
-        <div class="card">
-          <h3>Mobile App</h3>
-          <p>iOS & Android native application with real-time push alert notifications, ROI region drawing, and mobile stream triage.</p>
-          <a href="deployments/mobile.html" class="card-link">Explore Mobile Surface &rarr;</a>
-        </div>
-        <div class="card">
-          <h3>Edge / ACAP</h3>
-          <p>C++ Native application running directly on-camera with zero-copy V4L2 pipeline and hardware VPU acceleration.</p>
-          <a href="deployments/acap.html" class="card-link">Explore ACAP Edge &rarr;</a>
+      </div>
+      <div class="card">
+        <h3>Supported Hardware</h3>
+        <div class="tech-box">
+NVIDIA RTX 4090 / L40S / T4 Server GPUs
+NVIDIA Jetson Orin Industrial Edge Module
+AXIS ARTPEC-8 / ARTPEC-9 On-Camera VPU
+Intel Xeon / AMD EPYC CPU Acceleration
         </div>
       </div>
     </div>
   </div>
-
   
 <footer>
   <div class="footer-grid">
