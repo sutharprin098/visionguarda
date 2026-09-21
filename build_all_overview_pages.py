@@ -381,42 +381,61 @@ PAGES["index.html"] = """
       </div>
     </div>
 
-    <!-- NEXT-GEN CAMAI ADVANTAGE SECTION -->
+    <!-- 6 EXCLUSIVE CAMAI ACAP INNOVATIONS MISSING IN LEGACY ACAP -->
     <div style="margin-top: 5rem; border-top: 1px solid var(--border-color); padding-top: 3rem;">
       <div style="text-align: center; margin-bottom: 2.5rem;">
-        <div class="hero-badge">Next-Generation Superiority</div>
-        <h2 style="font-size: 2.25rem; font-weight: 800; color: #0f172a;">Why CamAI Outperforms Legacy Edge Platforms</h2>
-        <p style="color: var(--text-muted); max-width: 800px; margin: 0.5rem auto 0 auto;">
-          Built for zero-cloud latency, extreme structural accuracy, and autonomous edge swarm coordination.
-        </p>
+        <div class="hero-badge">Architectural Superiority</div>
+        <h2 style="font-size: 2.25rem; font-weight: 800; color: #0f172a;">6 Exclusive Innovations Missing in Standard ACAP Runtimes</h2>
+        <p style="color: var(--text-muted); max-width: 800px; margin: 0.5rem auto 0 auto;">Features engineered specifically to elevate CamAI beyond legacy camera applications.</p>
       </div>
 
       <div class="grid-3">
         <div class="card">
           <div class="card-icon">01</div>
-          <h3>Multi-Camera Edge Mesh Swarm</h3>
-          <p>Cameras communicate peer-to-peer over local network without central servers. Camera A triggers automated PTZ camera tracking handoff on Camera B.</p>
-          <span class="stat-pill">P2P Mesh Network</span>
+          <h3>On-Camera Instant H.265 Ring Buffer</h3>
+          <p>Maintains a 60-second RAM video buffer inside the camera. When AI triggers, it exports a 4K encrypted video clip directly without an NVR server.</p>
+          <span class="stat-pill">Zero Server NVR Needed</span>
         </div>
 
         <div class="card">
           <div class="card-icon">02</div>
-          <h3>Sub-Pixel Structural FFT Diagnostics</h3>
-          <p>Industry-first sub-millimeter displacement tracking ($0.05\text{ mm}$ at $10\text{m}$) and 1024-point Fast Fourier Transform vibration analysis directly on-camera.</p>
-          <span class="stat-pill">Sub-millimeter Sensitivity</span>
+          <h3>Multi-Camera Edge Mesh Swarm</h3>
+          <p>Cameras communicate peer-to-peer over local network. Camera A detects target; automatically hands off tracking to Camera B PTZ motor.</p>
+          <span class="stat-pill">Peer-to-Peer Relay</span>
         </div>
 
         <div class="card">
           <div class="card-icon">03</div>
-          <h3>Zero-Reboot Hot-Reload Runtime</h3>
-          <p>Update AI model weights (`.engine` / `.onnx`) over WebSockets in $<2\text{ms}$ without dropping video frames or rebooting the camera runtime.</p>
-          <span class="stat-pill">Zero Frame Drop</span>
+          <h3>Sub-Pixel Structural Vibration FFT</h3>
+          <p>Measures sub-millimeter structural displacement (0.05mm at 10m) and 1024-point Fast Fourier Transform (FFT) frequency spectrum shift directly on-camera.</p>
+          <span class="stat-pill">Sub-millimeter Precision</span>
+        </div>
+
+        <div class="card">
+          <div class="card-icon">04</div>
+          <h3>Auto Environmental Self-Tuner</h3>
+          <p>On-camera background calibration dynamically adjusting confidence thresholds to rain, fog, glare, and IR night-vision noise without retraining.</p>
+          <span class="stat-pill">All-Weather Calibration</span>
+        </div>
+
+        <div class="card">
+          <div class="card-icon">05</div>
+          <h3>Hardware Crypto Enclave RLS</h3>
+          <p>Every event payload is cryptographically signed using the camera hardware secure element with per-tenant AES-256 GCM encryption.</p>
+          <span class="stat-pill">Hardware Crypto Sign</span>
+        </div>
+
+        <div class="card">
+          <div class="card-icon">06</div>
+          <h3>Universal Fallback Bridge</h3>
+          <p>Dual-bridge architecture allowing USB cameras, mobile phone cameras (`real_usb_phone_live_acap.py`), or IP cameras to execute the exact same C++ engine!</p>
+          <span class="stat-pill">Universal Camera Bridge</span>
         </div>
       </div>
 
       <!-- COMPARISON TABLE SHOWCASE -->
       <div style="margin-top: 3rem;">
-        <h3 style="font-size: 1.5rem; font-weight: 800; color: #0f172a; text-align: center; margin-bottom: 1rem;">CamAI ACAP Native vs Legacy Edge Applications</h3>
+        <h3 style="font-size: 1.5rem; font-weight: 800; color: #0f172a; text-align: center; margin-bottom: 1rem;">CamAI ACAP C++ Native vs Legacy Edge Applications</h3>
         <table class="comp-table">
           <thead>
             <tr>
@@ -426,6 +445,11 @@ PAGES["index.html"] = """
             </tr>
           </thead>
           <tbody>
+            <tr>
+              <td><strong>On-Camera Instant H.265 Ring Buffer</strong></td>
+              <td><span class="check-yes">&#10003; Built-in 60s RAM Buffer</span></td>
+              <td><span class="check-no">&#10005; Requires External NVR</span></td>
+            </tr>
             <tr>
               <td><strong>On-Camera Peer-to-Peer Mesh Swarm</strong></td>
               <td><span class="check-yes">&#10003; Built-in P2P Relay</span></td>
@@ -437,24 +461,19 @@ PAGES["index.html"] = """
               <td><span class="check-no">&#10005; Bounding Box Only</span></td>
             </tr>
             <tr>
+              <td><strong>Hardware Crypto Enclave RLS</strong></td>
+              <td><span class="check-yes">&#10003; AES-256 GCM Signed</span></td>
+              <td><span class="check-no">&#10005; Plaintext MQTT</span></td>
+            </tr>
+            <tr>
+              <td><strong>Universal USB/Mobile/IP Bridge</strong></td>
+              <td><span class="check-yes">&#10003; Dual Fallback Engine</span></td>
+              <td><span class="check-no">&#10005; Single Hardware Target</span></td>
+            </tr>
+            <tr>
               <td><strong>Zero-Reboot Model Hot-Reload</strong></td>
               <td><span class="check-yes">&#10003; &lt; 2ms Hot-Swap</span></td>
               <td><span class="check-no">&#10005; App Reboot Required</span></td>
-            </tr>
-            <tr>
-              <td><strong>Concurrent AI Models per Stream</strong></td>
-              <td><span class="check-yes">&#10003; Up to 4 Parallel Models</span></td>
-              <td><span class="check-no">&#10005; 1 Model Only</span></td>
-            </tr>
-            <tr>
-              <td><strong>Memory RAM Allocation</strong></td>
-              <td><span class="check-yes">&#10003; 28 MB Ultra-light</span></td>
-              <td><span class="check-no">&#10005; 120 MB - 300 MB</span></td>
-            </tr>
-            <tr>
-              <td><strong>Frame Processing Latency</strong></td>
-              <td><span class="check-yes">&#10003; 18.5 ms (Sub-20ms)</span></td>
-              <td><span class="check-no">&#10005; 80 ms - 200 ms</span></td>
             </tr>
           </tbody>
         </table>
@@ -515,7 +534,7 @@ ACAP_PAGE_HTML = """
     <p>Develop, compile, and deploy high-performance computer vision applications natively on-camera. Powered by C++20, zero-copy V4L2 buffer management, and hardware VPU acceleration.</p>
     <div class="hero-actions">
       <a href="#getting-started" class="nav-btn" style="padding: 0.75rem 1.75rem; font-size: 1rem;">Developer Quickstart</a>
-      <a href="#superiority" style="background: #ffffff; border: 1px solid var(--border-color); color: #0f172a; padding: 0.75rem 1.75rem; border-radius: 6px; font-weight: 600; font-size: 1rem; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">CamAI Enterprise Advantage</a>
+      <a href="#innovations" style="background: #ffffff; border: 1px solid var(--border-color); color: #0f172a; padding: 0.75rem 1.75rem; border-radius: 6px; font-weight: 600; font-size: 1rem; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">6 Exclusive Innovations</a>
     </div>
   </section>
 
@@ -559,31 +578,55 @@ ACAP_PAGE_HTML = """
       </div>
     </div>
 
-    <!-- NEXT-GEN CAMAI ADVANTAGE / SUPERIORITY SHOWCASE -->
-    <div id="superiority" style="margin-top: 4rem; border-top: 1px solid var(--border-color); padding-top: 3rem;">
+    <!-- 6 EXCLUSIVE CAMAI ACAP INNOVATIONS MISSING IN LEGACY ACAP -->
+    <div id="innovations" style="margin-top: 4rem; border-top: 1px solid var(--border-color); padding-top: 3rem;">
       <div style="text-align: center; margin-bottom: 2.5rem;">
-        <div class="hero-badge">Enterprise Technological Advantage</div>
-        <h2 style="font-size: 2rem; font-weight: 800; color: #0f172a;">Exclusive CamAI Edge Capabilities</h2>
-        <p style="color: var(--text-muted); max-width: 800px; margin: 0.5rem auto 0 auto;">Features engineered specifically to outperform standard edge application environments.</p>
+        <div class="hero-badge">6 Exclusive Technological Innovations</div>
+        <h2 style="font-size: 2rem; font-weight: 800; color: #0f172a;">What CamAI ACAP Has That Legacy Runtimes Lack</h2>
+        <p style="color: var(--text-muted); max-width: 800px; margin: 0.5rem auto 0 auto;">Unmatched features engineered specifically to elevate CamAI beyond conventional edge applications.</p>
       </div>
 
       <div class="grid-3">
         <div class="card">
-          <div class="card-icon">P2P</div>
+          <div class="card-icon">01</div>
+          <h3>On-Camera Instant H.265 Ring Buffer</h3>
+          <p>Maintains a continuous 60-second 4K video circular buffer in RAM/MicroSD. Instant clip export directly from camera upon AI event trigger without requiring NVR servers.</p>
+          <span class="stat-pill">Zero Server NVR Needed</span>
+        </div>
+
+        <div class="card">
+          <div class="card-icon">02</div>
           <h3>Edge Mesh Swarm Coordination</h3>
           <p>Cameras form a peer-to-peer mesh over local network. Detection on Camera A triggers automated target tracking and PTZ handoff on Camera B without central server dependency.</p>
+          <span class="stat-pill">Peer-to-Peer Mesh</span>
         </div>
 
         <div class="card">
-          <div class="card-icon">FFT</div>
+          <div class="card-icon">03</div>
           <h3>Sub-Pixel Micro Motion Engine</h3>
-          <p>On-camera structural health monitoring detecting sub-millimeter displacements ($0.05\text{ mm}$) and 1024-point FFT resonant frequency spectrum shifts in real-time.</p>
+          <p>On-camera structural health monitoring detecting sub-millimeter displacements (0.05mm at 10m) and 1024-point Fast Fourier Transform (FFT) resonant frequency spectrum shifts.</p>
+          <span class="stat-pill">0.05mm Precision FFT</span>
         </div>
 
         <div class="card">
-          <div class="card-icon">HOT</div>
-          <h3>Zero-Reboot Model Hot-Swap</h3>
-          <p>Update neural network weights over WebSocket streams in $<2\text{ms}$ without interrupting video recording or restarting camera background processes.</p>
+          <div class="card-icon">04</div>
+          <h3>Auto Environmental Self-Tuner</h3>
+          <p>On-camera background calibration dynamically adjusting confidence thresholds to rain, fog, glare, and IR night-vision noise in real-time without cloud retraining.</p>
+          <span class="stat-pill">Real-Time Calibration</span>
+        </div>
+
+        <div class="card">
+          <div class="card-icon">05</div>
+          <h3>Hardware Crypto Enclave RLS</h3>
+          <p>Every telemetry payload is signed using the camera hardware secure element with per-tenant AES-256 GCM encryption and PostgreSQL Row-Level Security tags.</p>
+          <span class="stat-pill">Hardware Crypto Sign</span>
+        </div>
+
+        <div class="card">
+          <div class="card-icon">06</div>
+          <h3>Universal Fallback Camera Bridge</h3>
+          <p>Dual-bridge engine allowing USB webcams, mobile phone cameras (`real_usb_phone_live_acap.py`), or IP cameras to run the exact same C++ native binary!</p>
+          <span class="stat-pill">Universal Hardware Bridge</span>
         </div>
       </div>
 
@@ -600,9 +643,14 @@ ACAP_PAGE_HTML = """
           </thead>
           <tbody>
             <tr>
-              <td><strong>On-Camera Peer-to-Peer Mesh</strong></td>
+              <td><strong>On-Camera Instant H.265 Ring Buffer</strong></td>
+              <td><span class="check-yes">&#10003; Built-in 60s RAM Buffer</span></td>
+              <td><span class="check-no">&#10005; Requires External NVR</span></td>
+            </tr>
+            <tr>
+              <td><strong>On-Camera Peer-to-Peer Mesh Swarm</strong></td>
               <td><span class="check-yes">&#10003; Native P2P Swarm</span></td>
-              <td><span class="check-no">&#10005; Not Supported (Needs Server)</span></td>
+              <td><span class="check-no">&#10005; Requires Central Server</span></td>
             </tr>
             <tr>
               <td><strong>Sub-Pixel Micro Motion Diagnostics</strong></td>
@@ -610,14 +658,19 @@ ACAP_PAGE_HTML = """
               <td><span class="check-no">&#10005; Not Supported</span></td>
             </tr>
             <tr>
+              <td><strong>Hardware Crypto Enclave RLS</strong></td>
+              <td><span class="check-yes">&#10003; AES-256 GCM Signed</span></td>
+              <td><span class="check-no">&#10005; Plaintext MQTT</span></td>
+            </tr>
+            <tr>
+              <td><strong>Universal USB/Mobile/IP Bridge</strong></td>
+              <td><span class="check-yes">&#10003; Dual Fallback Engine</span></td>
+              <td><span class="check-no">&#10005; Single Hardware Target</span></td>
+            </tr>
+            <tr>
               <td><strong>Model Hot-Reload</strong></td>
               <td><span class="check-yes">&#10003; &lt; 2ms Zero-Reboot</span></td>
               <td><span class="check-no">&#10005; Full App Reboot Required</span></td>
-            </tr>
-            <tr>
-              <td><strong>Concurrent AI Models</strong></td>
-              <td><span class="check-yes">&#10003; Up to 4 Models Parallel</span></td>
-              <td><span class="check-no">&#10005; 1 Model Limit</span></td>
             </tr>
             <tr>
               <td><strong>RAM Memory Footprint</strong></td>
@@ -1585,7 +1638,7 @@ PAGES["docs.html"] = """
 
 def generate_all():
     make_dirs()
-    print("Generating all 19 dedicated HTML pages with NEXT-GEN CAMAI ADVANTAGE FEATURES...")
+    print("Generating all 19 dedicated HTML pages with 6 EXCLUSIVE UNMATCHED INNOVATIONS...")
     for path, content in PAGES.items():
         header_html = render_header(path)
         footer_html = render_footer(path)
