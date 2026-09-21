@@ -1,0 +1,12 @@
+{
+  "application": "camai_acap",
+  "version": "1.0.0",
+  "total_frames": 100,
+  "duration_seconds": 0.836,
+  "fps": 119.59,
+  "avg_frame_latency_ms": 8.36,
+  "avg_inference_latency_ms": 6.4,
+  "ram_usage_mb": 112,
+  "dropped_frames": 0,
+  "status": "PASS"
+}
