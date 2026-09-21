@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>CamAI Enterprise — System Architecture & Pillar Overview</title>
-    <meta name="description" content="Comprehensive Light Theme Architecture Overview for CamAI Enterprise CCTV AI Platform covering Web SaaS Portal, Desktop Client, Mobile App, and AXIS ACAP Native Edge Application with full UI screenshots.">
+    <meta name="description" content="Comprehensive Light Theme Architecture Overview for CamAI Enterprise CCTV AI Platform covering Web SaaS Portal, Desktop Client, Mobile App, and ACAP Native Edge Application with full UI screenshots.">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=Fira+Code:wght@400;500;600&display=swap" rel="stylesheet">
@@ -525,7 +525,7 @@
             </button>
             <button class="pillar-tab" onclick="switchTab('acap')">
                 <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z"/></svg>
-                AXIS ACAP Native
+                ACAP Native Edge
             </button>
             <button class="pillar-tab" onclick="switchTab('matrix')">
                 <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M3 10h18M3 14h18m-9-4v8m-7 0h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
@@ -541,7 +541,7 @@
             <div class="hero-domain">camai.princesite.in/overview</div>
             <h1 class="hero-title">CamAI Platform Overview & Architecture</h1>
             <p class="hero-desc">
-                An end-to-end breakdown of CamAI across all four enterprise branches: Web SaaS Portal, Desktop Client, Mobile Push App, and AXIS ACAP Native Edge Analytics with full UI screenshots.
+                An end-to-end breakdown of CamAI across all four enterprise branches: Web SaaS Portal, Desktop Client, Mobile Push App, and ACAP Native Edge Analytics with full UI screenshots.
             </p>
         </header>
 
@@ -610,11 +610,11 @@
                         <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z"/></svg>
                     </div>
                     <div>
-                        <div class="branch-title">AXIS ACAP Native</div>
+                        <div class="branch-title">ACAP Native Edge</div>
                         <div class="branch-subtitle">ACAP/</div>
                     </div>
                 </div>
-                <div class="branch-desc">Hardware native edge C++ application for AXIS network cameras with ARTPEC-8 DLPU acceleration & VDO zero-copy.</div>
+                <div class="branch-desc">Hardware native edge C++ application for IP camera hardware with NPU DLPU acceleration & VDO zero-copy.</div>
                 <div class="branch-tags">
                     <span class="tag">C/C++20</span>
                     <span class="tag">VDO API</span>
@@ -888,29 +888,29 @@ def connect_mobile_phone_stream(phone_ip="192.168.29.24", port=8080):
             </div>
         </div>
 
-        <!-- Detail Panel 4: AXIS ACAP Native Application -->
+        <!-- Detail Panel 4: ACAP Native Edge Application -->
         <div id="panel-acap" class="panel">
             <div class="panel-title-bar">
                 <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z"/></svg>
-                <h2 class="panel-title">AXIS ACAP Native Edge Application (`ACAP/`)</h2>
+                <h2 class="panel-title">ACAP Native Edge Application (`ACAP/`)</h2>
             </div>
             <div class="panel-grid">
                 <div>
                     <p class="branch-desc">
-                        A C/C++ native application compiled for AXIS network cameras (ARTPEC-8 / ARTPEC-7). Runs 100% on-device AI analytics with zero cloud latency and full ONVIF compliance.
+                        A C/C++ native application compiled for IP camera edge hardware (ARTPEC-8 / ARTPEC-7). Runs 100% on-device AI analytics with zero cloud latency and full ONVIF compliance.
                     </p>
                     <ul class="feature-list">
                         <li class="feature-item">
                             <svg class="check-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>
-                            <div><strong>AXIS VDO API (`vdo-stream.h`):</strong> Zero-copy NV12 frame buffer acquisition directly from camera hardware ISP.</div>
+                            <div><strong>VDO Stream API (`vdo-stream.h`):</strong> Zero-copy NV12 frame buffer acquisition directly from camera hardware ISP.</div>
                         </li>
                         <li class="feature-item">
                             <svg class="check-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>
-                            <div><strong>AXIS Larod API (`larod.h`):</strong> NPU hardware acceleration for YOLOX-Tiny ONNX models with 8-bit quantization.</div>
+                            <div><strong>Larod NPU API (`larod.h`):</strong> NPU hardware acceleration for YOLOX-Tiny ONNX models with 8-bit quantization.</div>
                         </li>
                         <li class="feature-item">
                             <svg class="check-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>
-                            <div><strong>AXIS axevent & axoverlay:</strong> Native ONVIF XML event publishing and hardware stream bounding box rendering.</div>
+                            <div><strong>Native axevent & axoverlay:</strong> ONVIF XML event publishing and hardware stream bounding box rendering.</div>
                         </li>
                         <li class="feature-item">
                             <svg class="check-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>
@@ -965,7 +965,7 @@ void CamAIEngine::process_loop() {
                             <th>Web SaaS (`portal/`)</th>
                             <th>Desktop Client (`desktop/`)</th>
                             <th>Mobile App (`mobile/`)</th>
-                            <th>AXIS ACAP Native (`ACAP/`)</th>
+                            <th>ACAP Native Edge (`ACAP/`)</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -981,7 +981,7 @@ void CamAIEngine::process_loop() {
                             <td>WebRTC / HLS</td>
                             <td>MJPEG Grid (30-40 FPS)</td>
                             <td>RTSP / MJPEG Mobile</td>
-                            <td><span style="color: var(--accent-emerald); font-weight: 700;">✓ AXIS VDO Zero-Copy</span></td>
+                            <td><span style="color: var(--accent-emerald); font-weight: 700;">✓ Edge VDO Zero-Copy</span></td>
                         </tr>
                         <tr>
                             <td><strong>Multi-Object Tracking</strong></td>
@@ -995,21 +995,21 @@ void CamAIEngine::process_loop() {
                             <td>Supabase Realtime</td>
                             <td>Local Telemetry / WS</td>
                             <td>Telegram / Push Alert</td>
-                            <td><span style="color: var(--accent-emerald); font-weight: 700;">✓ AXIS axevent (ONVIF)</span></td>
+                            <td><span style="color: var(--accent-emerald); font-weight: 700;">✓ axevent (ONVIF)</span></td>
                         </tr>
                         <tr>
                             <td><strong>Stream Overlays</strong></td>
                             <td>Canvas SVG Overlay</td>
                             <td>Client Canvas Overlay</td>
                             <td>Mobile Browser Overlay</td>
-                            <td><span style="color: var(--accent-emerald); font-weight: 700;">✓ AXIS axoverlay (Hardware)</span></td>
+                            <td><span style="color: var(--accent-emerald); font-weight: 700;">✓ axoverlay (Hardware)</span></td>
                         </tr>
                         <tr>
                             <td><strong>Configuration UI</strong></td>
                             <td>Cloud Admin Studio</td>
                             <td>Local Desktop Config</td>
                             <td>Mobile App Settings</td>
-                            <td><span style="color: var(--accent-emerald); font-weight: 700;">✓ AXIS axparameter (VAPIX)</span></td>
+                            <td><span style="color: var(--accent-emerald); font-weight: 700;">✓ axparameter (VAPIX)</span></td>
                         </tr>
                         <tr>
                             <td><strong>Resource Watchdog</strong></td>
