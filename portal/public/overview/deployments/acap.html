@@ -171,22 +171,6 @@ footer {
 .footer-col ul li a:hover { color: var(--primary-blue); }
 .footer-bottom { max-width: 1200px; margin: 3rem auto 0 auto; padding-top: 2rem; border-top: 1px solid var(--border-color); display: flex; justify-content: space-between; align-items: center; color: var(--text-muted); font-size: 0.8rem; }
 </style>
-  <script>
-    function updateCalculator() {
-      const cameraCount = document.getElementById('cameraSlider').value;
-      document.getElementById('cameraCountDisplay').innerText = cameraCount + " Cameras";
-      
-      // Calculations
-      const cloudBandwidthMbps = cameraCount * 5; // 5Mbps per 1080p stream
-      const cloudStorageCostYr = cameraCount * 1200; // $1200/yr server/bandwidth per cam
-      const camaiCostYr = 0; // Baseline metadata on-camera
-      const savingsYr = cloudStorageCostYr - camaiCostYr;
-
-      document.getElementById('bandwidthDisplay').innerText = cloudBandwidthMbps + " Mbps vs 0 Mbps";
-      document.getElementById('costDisplay').innerText = "$" + cloudStorageCostYr.toLocaleString() + "/yr";
-      document.getElementById('savingsDisplay').innerText = "$" + savingsYr.toLocaleString() + "/yr (100% Saved)";
-    }
-  </script>
 </head>
 <body>
   
@@ -243,7 +227,6 @@ footer {
     <p>Develop, compile, and deploy high-performance computer vision applications natively on-camera. Powered by C++20, zero-copy V4L2 buffer management, and hardware VPU acceleration.</p>
     <div class="hero-actions">
       <a href="#getting-started" class="nav-btn" style="padding: 0.75rem 1.75rem; font-size: 1rem;">Developer Quickstart</a>
-      <a href="#calculator" style="background: #ffffff; border: 1px solid var(--border-color); color: #0f172a; padding: 0.75rem 1.75rem; border-radius: 6px; font-weight: 600; font-size: 1rem; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">Interactive Cost Calculator</a>
     </div>
   </section>
 
@@ -254,36 +237,6 @@ footer {
       <p style="color: var(--text-muted); max-width: 800px; margin: 0.5rem auto 0 auto;">
         CamAI ACAP (Analytics & Camera Application Platform) is an enterprise edge application runtime that allows C++ models to run directly inside camera hardware. It eliminates cloud latency, reduces network bandwidth to zero, and processes video streams at 60 FPS natively.
       </p>
-    </div>
-
-    <!-- INTERACTIVE ZERO-CLOUD COST & BANDWIDTH SAVINGS CALCULATOR -->
-    <div id="calculator" class="calc-card">
-      <div style="text-align: center; margin-bottom: 1.5rem;">
-        <div class="hero-badge">Interactive Enterprise Tool</div>
-        <h2 style="font-size: 1.75rem; font-weight: 800; color: #0f172a;">On-Camera Edge Cost & Bandwidth Savings Calculator</h2>
-        <p style="color: var(--text-muted);">See how much server infrastructure and cloud bandwidth CamAI ACAP C++ Native saves.</p>
-      </div>
-
-      <div style="max-width: 600px; margin: 0 auto 2rem auto; text-align: center;">
-        <label style="font-weight: 700; color: #0f172a; font-size: 1.1rem;">Number of Enterprise Camera Streams:</label>
-        <span id="cameraCountDisplay" style="font-weight: 800; color: var(--primary-blue); font-size: 1.2rem; margin-left: 0.5rem;">50 Cameras</span>
-        <input type="range" id="cameraSlider" min="5" max="500" value="50" step="5" class="range-slider" oninput="updateCalculator()">
-      </div>
-
-      <div class="grid-3">
-        <div class="calc-metric">
-          <div id="bandwidthDisplay" class="calc-metric-num">250 Mbps vs 0 Mbps</div>
-          <div class="calc-metric-label">Network Bandwidth Required</div>
-        </div>
-        <div class="calc-metric">
-          <div id="costDisplay" class="calc-metric-num" style="color: var(--accent-rose);">$60,000/yr</div>
-          <div class="calc-metric-label">Legacy NVR / Cloud Server Cost</div>
-        </div>
-        <div class="calc-metric" style="background: #f0fdf4; border-color: #bbf7d0;">
-          <div id="savingsDisplay" class="calc-metric-num" style="color: var(--accent-green);">$60,000/yr (100% Saved)</div>
-          <div class="calc-metric-label">Net Savings with CamAI ACAP</div>
-        </div>
-      </div>
     </div>
 
     <!-- 4 Key Architecture Pillars -->
