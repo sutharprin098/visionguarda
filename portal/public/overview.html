@@ -3,8 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>CamAI Enterprise — System Architecture, AI Models, 7 Modules & ACAP Native Edge</title>
-    <meta name="description" content="Comprehensive Web Application Architecture Overview for CamAI Enterprise CCTV AI Platform covering AI Models, 7 Security Analytics Modules, Team Management RBAC, Web SaaS Portal, Desktop Client, Mobile App, and ACAP Native Edge Application.">
+    <title>CamAI — Enterprise Video Intelligence Platform</title>
+    <meta name="description" content="CamAI is an enterprise video intelligence platform that transforms live camera streams into real-time computer vision analytics across Web, Desktop, Mobile, and Edge.">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=Fira+Code:wght@400;500;600&display=swap" rel="stylesheet">
@@ -12,1256 +12,1142 @@
         :root {
             --bg-body: #f8fafc;
             --bg-card: #ffffff;
-            --bg-card-hover: #f1f5f9;
-            --border-color: #e2e8f0;
+            --bg-dark: #090d16;
+            --bg-dark-card: #111827;
+            --border-light: #e2e8f0;
+            --border-dark: #1e293b;
             --border-highlight: #cbd5e1;
             --text-primary: #0f172a;
             --text-secondary: #475569;
             --text-muted: #64748b;
+            --text-dark-primary: #f8fafc;
+            --text-dark-secondary: #94a3b8;
             --accent-blue: #2563eb;
             --accent-cyan: #0284c7;
             --accent-emerald: #059669;
             --accent-indigo: #4f46e5;
             --accent-amber: #d97706;
             --accent-rose: #e11d48;
-            --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.05);
-            --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.05);
-            --shadow-lg: 0 10px 25px rgba(0, 0, 0, 0.08);
+            --radius-md: 8px;
             --radius-lg: 12px;
             --radius-xl: 16px;
+            --shadow-sm: 0 1px 3px rgba(0,0,0,0.05);
+            --shadow-md: 0 4px 12px rgba(0,0,0,0.05);
+            --shadow-lg: 0 10px 25px rgba(0,0,0,0.08);
         }
 
         * { margin: 0; padding: 0; box-sizing: border-box; }
-
         html { scroll-behavior: smooth; }
-
         body {
-            font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
             background-color: var(--bg-body);
             color: var(--text-primary);
             line-height: 1.6;
-            padding-top: 80px;
-            padding-bottom: 60px;
+            padding-top: 72px;
+            overflow-x: hidden;
         }
 
-        /* Top Navigation Bar */
+        /* Mono text helper */
+        .font-mono { font-family: 'Fira Code', monospace; }
+
+        /* Sticky Navigation Bar */
         .navbar {
             position: fixed;
-            top: 0;
-            left: 0;
-            right: 0;
+            top: 0; left: 0; right: 0;
             height: 72px;
-            background: rgba(255, 255, 255, 0.95);
-            backdrop-filter: blur(12px);
-            border-bottom: 1px solid var(--border-color);
-            box-shadow: var(--shadow-sm);
+            background: rgba(255, 255, 255, 0.92);
+            backdrop-filter: blur(16px);
+            border-bottom: 1px solid var(--border-light);
             z-index: 1000;
             display: flex;
             align-items: center;
             justify-content: space-between;
             padding: 0 2rem;
+            transition: all 0.3s ease;
         }
 
         .brand-logo {
             display: flex;
             align-items: center;
-            gap: 12px;
-            font-size: 1.2rem;
-            font-weight: 800;
+            gap: 10px;
+            font-size: 1.25rem;
+            font-weight: 900;
             color: var(--text-primary);
             text-decoration: none;
             letter-spacing: -0.5px;
         }
 
-        .brand-logo svg {
-            width: 28px;
-            height: 28px;
-            color: var(--accent-blue);
-        }
+        .brand-logo svg { width: 26px; height: 26px; color: var(--accent-blue); }
 
-        .badge-tag {
-            font-size: 0.75rem;
-            background: #eff6ff;
-            color: var(--accent-blue);
-            padding: 3px 10px;
-            border-radius: 20px;
-            border: 1px solid #bfdbfe;
-            font-weight: 700;
-        }
-
-        .nav-links {
+        .nav-menu {
             display: flex;
             align-items: center;
-            gap: 6px;
+            gap: 4px;
         }
 
-        .nav-btn {
-            padding: 7px 12px;
-            border-radius: 8px;
-            font-size: 0.825rem;
+        .nav-link {
+            padding: 8px 14px;
+            border-radius: var(--radius-md);
+            font-size: 0.85rem;
             font-weight: 600;
             color: var(--text-secondary);
-            background: transparent;
-            border: 1px solid transparent;
-            cursor: pointer;
-            transition: all 0.2s ease;
             text-decoration: none;
+            transition: all 0.2s ease;
+        }
+
+        .nav-link:hover {
+            color: var(--text-primary);
+            background: #f1f5f9;
+        }
+
+        .nav-cta-group {
             display: flex;
             align-items: center;
-            gap: 5px;
+            gap: 10px;
         }
 
-        .nav-btn svg {
-            width: 15px;
-            height: 15px;
-        }
-
-        .nav-btn:hover {
+        .btn-outline {
+            padding: 8px 16px;
+            border-radius: var(--radius-md);
+            font-size: 0.85rem;
+            font-weight: 600;
             color: var(--text-primary);
-            background: var(--bg-card-hover);
-            border-color: var(--border-color);
+            background: #ffffff;
+            border: 1px solid var(--border-highlight);
+            text-decoration: none;
+            transition: all 0.2s ease;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            cursor: pointer;
         }
 
-        .nav-btn.primary {
-            background: var(--accent-blue);
-            color: #ffffff;
+        .btn-outline:hover {
+            background: #f8fafc;
             border-color: var(--accent-blue);
+            color: var(--accent-blue);
         }
 
-        .nav-btn.primary:hover {
+        .btn-primary {
+            padding: 8px 18px;
+            border-radius: var(--radius-md);
+            font-size: 0.85rem;
+            font-weight: 700;
+            color: #ffffff;
+            background: var(--accent-blue);
+            border: 1px solid var(--accent-blue);
+            text-decoration: none;
+            transition: all 0.2s ease;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            cursor: pointer;
+            box-shadow: 0 2px 6px rgba(37, 99, 235, 0.25);
+        }
+
+        .btn-primary:hover {
             background: #1d4ed8;
         }
 
         .container {
-            max-width: 1240px;
+            max-width: 1280px;
             margin: 0 auto;
             padding: 0 1.5rem;
         }
 
-        /* Hero Header */
-        .hero {
+        /* Section Wrappers */
+        .section-padding { padding: 4.5rem 0; }
+        .section-dark {
+            background: var(--bg-dark);
+            color: var(--text-dark-primary);
+            border-top: 1px solid var(--border-dark);
+            border-bottom: 1px solid var(--border-dark);
+        }
+
+        .section-header {
             text-align: center;
-            padding: 3rem 1.5rem 2.5rem;
-            background: #ffffff;
-            border: 1px solid var(--border-color);
-            border-radius: var(--radius-xl);
-            margin-bottom: 2rem;
-            box-shadow: var(--shadow-sm);
+            max-width: 780px;
+            margin: 0 auto 3rem;
         }
 
-        .hero-domain {
-            display: inline-flex;
-            align-items: center;
-            gap: 8px;
-            background: #f1f5f9;
-            border: 1px solid var(--border-color);
-            padding: 6px 16px;
-            border-radius: 30px;
-            font-family: 'Fira Code', monospace;
-            font-size: 0.85rem;
-            color: var(--accent-indigo);
-            font-weight: 600;
-            margin-bottom: 1.25rem;
-        }
-
-        .hero-title {
-            font-size: 2.75rem;
-            font-weight: 900;
-            letter-spacing: -1px;
-            color: var(--text-primary);
+        .section-badge {
+            font-size: 0.75rem;
+            font-weight: 800;
+            letter-spacing: 1px;
+            text-transform: uppercase;
+            color: var(--accent-blue);
+            background: #eff6ff;
+            border: 1px solid #bfdbfe;
+            padding: 4px 12px;
+            border-radius: 20px;
+            display: inline-block;
             margin-bottom: 1rem;
-            line-height: 1.2;
         }
 
-        .hero-desc {
-            max-width: 860px;
-            margin: 0 auto 2rem;
+        .section-dark .section-badge {
+            background: rgba(38, 99, 235, 0.15);
+            color: #60a5fa;
+            border-color: rgba(96, 165, 250, 0.3);
+        }
+
+        .section-title {
+            font-size: 2.25rem;
+            font-weight: 900;
+            letter-spacing: -0.8px;
+            line-height: 1.25;
+            margin-bottom: 1rem;
+        }
+
+        .section-desc {
             font-size: 1.05rem;
             color: var(--text-secondary);
         }
 
-        .hero-actions {
-            display: flex;
-            justify-content: center;
-            gap: 12px;
-            flex-wrap: wrap;
+        .section-dark .section-desc {
+            color: var(--text-dark-secondary);
         }
 
-        /* System Architecture Tree Styling */
-        .tree-section {
-            background: #ffffff;
-            border: 1px solid var(--border-color);
-            border-radius: var(--radius-xl);
-            padding: 2.25rem 1.75rem;
-            margin-bottom: 2.5rem;
-            box-shadow: var(--shadow-sm);
-        }
-
-        .section-header-title {
-            font-size: 1.35rem;
-            font-weight: 800;
-            color: var(--text-primary);
-            letter-spacing: -0.4px;
-            margin-bottom: 1.5rem;
-            display: flex;
-            align-items: center;
-            gap: 10px;
-        }
-
-        .section-header-title svg {
-            width: 24px;
-            height: 24px;
-            color: var(--accent-blue);
-        }
-
-        .tree-container {
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            width: 100%;
-        }
-
-        .tree-root-node {
-            background: #0f172a;
+        /* 02 HERO SECTION */
+        .hero-section {
+            background: #090d16;
             color: #ffffff;
-            padding: 14px 32px;
-            border-radius: 10px;
-            font-weight: 800;
-            font-size: 0.95rem;
-            letter-spacing: 0.5px;
-            text-transform: uppercase;
-            box-shadow: var(--shadow-md);
-            border: 1px solid #1e293b;
-            text-align: center;
-            display: flex;
+            padding: 4.5rem 0 5rem;
+            border-bottom: 1px solid #1e293b;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .hero-grid {
+            display: grid;
+            grid-template-columns: 1.1fr 0.9fr;
+            gap: 3rem;
             align-items: center;
-            gap: 10px;
         }
 
-        .tree-root-node svg {
-            width: 22px;
-            height: 22px;
-            color: var(--accent-cyan);
+        @media (max-width: 960px) {
+            .hero-grid { grid-template-columns: 1fr; text-align: center; }
         }
 
-        .tree-stem {
-            width: 2px;
-            height: 24px;
-            background: #cbd5e1;
+        .hero-headline {
+            font-size: 3.5rem;
+            font-weight: 900;
+            letter-spacing: -1.5px;
+            line-height: 1.1;
+            margin-bottom: 1.25rem;
+            background: linear-gradient(135deg, #ffffff 0%, #cbd5e1 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
         }
 
-        .tree-branch-connector {
-            width: 80%;
-            height: 2px;
-            background: #cbd5e1;
+        .hero-badges {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+            margin-bottom: 1.5rem;
+        }
+
+        .tag-pill {
+            font-family: 'Fira Code', monospace;
+            font-size: 0.725rem;
+            padding: 3px 10px;
+            border-radius: 4px;
+            background: rgba(255, 255, 255, 0.08);
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            color: #94a3b8;
+            font-weight: 600;
+        }
+
+        .hero-sub {
+            font-size: 1.15rem;
+            color: #94a3b8;
+            margin-bottom: 2rem;
+            line-height: 1.6;
+        }
+
+        /* Hero SVG Visualizer */
+        .hero-viz-card {
+            background: #111827;
+            border: 1px solid #1f2937;
+            border-radius: var(--radius-xl);
+            padding: 1.5rem;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.5);
             position: relative;
         }
 
-        .tree-branches {
+        .viz-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding-bottom: 1rem;
+            border-bottom: 1px solid #1f2937;
+            margin-bottom: 1rem;
+        }
+
+        .status-dot {
+            width: 8px; height: 8px; border-radius: 50%; background: #10b981;
+            box-shadow: 0 0 10px #10b981;
+            display: inline-block;
+        }
+
+        /* 03 PLATFORM STATEMENT */
+        .statement-grid {
             display: grid;
             grid-template-columns: repeat(4, 1fr);
             gap: 1.25rem;
-            width: 100%;
-            margin-top: 18px;
+            margin-top: 2rem;
         }
 
-        @media (max-width: 900px) {
-            .tree-branches { grid-template-columns: repeat(2, 1fr); }
-        }
-        @media (max-width: 550px) {
-            .tree-branches { grid-template-columns: 1fr; }
-        }
+        @media (max-width: 900px) { .statement-grid { grid-template-columns: repeat(2, 1fr); } }
+        @media (max-width: 500px) { .statement-grid { grid-template-columns: 1fr; } }
 
-        .tree-branch-card {
-            background: #f8fafc;
-            border: 1px solid var(--border-color);
-            border-top: 4px solid var(--accent-blue);
+        .statement-card {
+            background: #ffffff;
+            border: 1px solid var(--border-light);
             border-radius: var(--radius-lg);
-            padding: 1.25rem;
+            padding: 1.5rem;
+            box-shadow: var(--shadow-sm);
             transition: all 0.25s ease;
-            cursor: pointer;
         }
 
-        .tree-branch-card:hover {
+        .statement-card:hover {
+            transform: translateY(-4px);
+            box-shadow: var(--shadow-md);
+            border-color: var(--accent-blue);
+        }
+
+        .statement-icon {
+            width: 40px; height: 40px;
+            border-radius: 8px;
+            background: #f1f5f9;
+            color: var(--accent-blue);
+            display: flex; align-items: center; justify-content: center;
+            margin-bottom: 1rem;
+        }
+
+        .statement-icon svg { width: 22px; height: 22px; }
+
+        /* 06 CORE AI ENGINE PIPELINE */
+        .pipeline-flow {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
+            overflow-x: auto;
+            padding: 1rem 0;
+        }
+
+        .pipeline-node {
+            background: #ffffff;
+            border: 1px solid var(--border-light);
+            border-top: 3px solid var(--accent-blue);
+            border-radius: var(--radius-md);
+            padding: 1rem 1.25rem;
+            text-align: center;
+            min-width: 130px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .pipeline-node:hover {
+            transform: translateY(-3px);
+            border-color: var(--accent-blue);
+            box-shadow: var(--shadow-md);
+        }
+
+        .pipeline-arrow {
+            color: var(--text-muted);
+            font-weight: bold;
+        }
+
+        /* 07 SEVEN MODULES CARDS */
+        .modules-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+            gap: 1.5rem;
+        }
+
+        .module-card {
+            background: #ffffff;
+            border: 1px solid var(--border-light);
+            border-radius: var(--radius-xl);
+            padding: 1.75rem;
+            box-shadow: var(--shadow-sm);
+            transition: all 0.25s ease;
+            position: relative;
+        }
+
+        .module-card:hover {
             transform: translateY(-4px);
             box-shadow: var(--shadow-md);
             border-color: var(--border-highlight);
         }
 
-        .tree-branch-card.portal { border-top-color: var(--accent-cyan); }
-        .tree-branch-card.desktop { border-top-color: var(--accent-indigo); }
-        .tree-branch-card.mobile { border-top-color: var(--accent-emerald); }
-        .tree-branch-card.acap { border-top-color: var(--accent-amber); }
-
-        .tree-branch-title {
-            font-size: 1.05rem;
-            font-weight: 800;
-            color: var(--text-primary);
-            margin-bottom: 4px;
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
-
-        .tree-branch-title svg {
-            width: 20px;
-            height: 20px;
-        }
-
-        .tree-sub-tag {
+        .module-num {
             font-family: 'Fira Code', monospace;
-            font-size: 0.75rem;
-            color: var(--text-secondary);
-            background: #e2e8f0;
-            padding: 2px 8px;
-            border-radius: 4px;
-            display: inline-block;
-            margin-bottom: 12px;
+            font-size: 2rem;
+            font-weight: 900;
+            color: #cbd5e1;
+            position: absolute;
+            top: 1.25rem; right: 1.5rem;
         }
 
-        .tree-leaf-list {
-            list-style: none;
+        .module-title {
+            font-size: 1.2rem;
+            font-weight: 800;
+            margin-bottom: 0.5rem;
+            color: var(--text-primary);
         }
 
-        .tree-leaf-item {
-            font-size: 0.825rem;
-            color: var(--text-secondary);
-            padding: 4px 0;
-            border-bottom: 1px dashed var(--border-color);
+        .module-tags {
             display: flex;
-            align-items: center;
-            gap: 8px;
+            flex-wrap: wrap;
+            gap: 6px;
+            margin-top: 1rem;
         }
 
-        .tree-leaf-item:last-child { border-bottom: none; }
-
-        .tree-dot {
-            width: 6px;
-            height: 6px;
-            border-radius: 50%;
-            background: var(--accent-blue);
-            flex-shrink: 0;
-        }
-
-        /* Dedicated Section Cards */
-        .section-block {
-            background: var(--bg-card);
-            border: 1px solid var(--border-color);
+        /* 08 LIVE VISION SIMULATION */
+        .vision-viewport {
+            background: #000000;
+            border: 2px solid #1e293b;
             border-radius: var(--radius-xl);
-            padding: 2.25rem 2rem;
-            margin-bottom: 2.5rem;
-            box-shadow: var(--shadow-sm);
+            aspect-ratio: 16 / 9;
+            width: 100%;
+            position: relative;
+            overflow: hidden;
+            box-shadow: var(--shadow-lg);
         }
 
-        .pillar-header {
+        .vision-overlay-box {
+            position: absolute;
+            border: 2px solid #10b981;
+            background: rgba(16, 185, 129, 0.1);
+            border-radius: 4px;
+            padding: 4px 8px;
+        }
+
+        .vision-overlay-label {
+            position: absolute;
+            top: -24px; left: -2px;
+            background: #10b981;
+            color: #000000;
+            font-family: 'Fira Code', monospace;
+            font-size: 0.7rem;
+            font-weight: 800;
+            padding: 1px 6px;
+            border-radius: 2px;
+            white-space: nowrap;
+        }
+
+        /* UI SIMULATION BOARDS */
+        .simulated-ui-card {
+            background: #ffffff;
+            border: 1px solid var(--border-light);
+            border-radius: var(--radius-xl);
+            box-shadow: var(--shadow-md);
+            overflow: hidden;
+        }
+
+        .simulated-header {
+            background: #f8fafc;
+            border-bottom: 1px solid var(--border-light);
+            padding: 12px 20px;
             display: flex;
             align-items: center;
             justify-content: space-between;
-            margin-bottom: 1.5rem;
-            padding-bottom: 1rem;
-            border-bottom: 1px solid var(--border-color);
         }
 
-        .pillar-title-group {
-            display: flex;
-            align-items: center;
-            gap: 12px;
+        .simulated-body { padding: 1.5rem; }
+
+        /* Tables & Lists */
+        .data-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.875rem;
         }
 
-        .pillar-icon-wrapper {
-            width: 44px;
-            height: 44px;
-            border-radius: 10px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            background: #f1f5f9;
+        .data-table th, .data-table td {
+            padding: 10px 14px;
+            border-bottom: 1px solid var(--border-light);
+            text-align: left;
         }
 
-        .pillar-icon-wrapper svg {
-            width: 24px;
-            height: 24px;
-        }
-
-        .portal .pillar-icon-wrapper { background: #e0f2fe; color: var(--accent-cyan); }
-        .desktop .pillar-icon-wrapper { background: #e0e7ff; color: var(--accent-indigo); }
-        .mobile .pillar-icon-wrapper { background: #d1fae5; color: var(--accent-emerald); }
-        .acap .pillar-icon-wrapper { background: #fef3c7; color: var(--accent-amber); }
-        .models .pillar-icon-wrapper { background: #fee2e2; color: var(--accent-rose); }
-        .modules .pillar-icon-wrapper { background: #f3e8ff; color: #9333ea; }
-        .rbac .pillar-icon-wrapper { background: #ccfbf1; color: #0d9488; }
-
-        .pillar-title {
-            font-size: 1.6rem;
-            font-weight: 800;
-            letter-spacing: -0.5px;
-            color: var(--text-primary);
-        }
-
-        .pillar-path {
-            font-family: 'Fira Code', monospace;
-            font-size: 0.85rem;
-            color: var(--text-muted);
-        }
-
-        .section-grid {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 2rem;
-            margin-bottom: 2rem;
-        }
-
-        @media (max-width: 900px) {
-            .section-grid { grid-template-columns: 1fr; }
-        }
-
-        .grid-3 {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
-            gap: 1.25rem;
-        }
-
-        .grid-card {
+        .data-table th {
             background: #f8fafc;
-            border: 1px solid var(--border-color);
-            border-radius: var(--radius-lg);
-            padding: 1.25rem;
-            transition: all 0.25s ease;
-        }
-
-        .grid-card:hover {
-            transform: translateY(-3px);
-            box-shadow: var(--shadow-md);
-            border-color: var(--border-highlight);
-        }
-
-        .card-badge {
-            font-size: 0.725rem;
-            font-family: 'Fira Code', monospace;
-            padding: 2px 8px;
-            border-radius: 4px;
             font-weight: 700;
-            display: inline-block;
-            margin-bottom: 8px;
-        }
-
-        .card-title {
-            font-size: 1.1rem;
-            font-weight: 800;
-            color: var(--text-primary);
-            margin-bottom: 6px;
-        }
-
-        .card-desc {
-            font-size: 0.85rem;
             color: var(--text-secondary);
-            line-height: 1.5;
+            font-size: 0.75rem;
+            text-transform: uppercase;
         }
 
-        .feature-list {
-            list-style: none;
-        }
-
-        .feature-item {
-            padding: 0.85rem 0;
-            border-bottom: 1px solid var(--border-color);
-            display: flex;
-            align-items: flex-start;
-            gap: 12px;
-        }
-
-        .feature-item:last-child { border-bottom: none; }
-
-        .check-icon {
-            width: 20px;
-            height: 20px;
-            color: var(--accent-emerald);
-            flex-shrink: 0;
-            margin-top: 2px;
-        }
-
-        .code-box {
-            background: #0f172a;
-            border: 1px solid #1e293b;
-            border-radius: 10px;
-            padding: 1.25rem;
-            font-family: 'Fira Code', monospace;
-            font-size: 0.85rem;
-            color: #38bdf8;
-            overflow-x: auto;
-            white-space: pre;
-            box-shadow: inset 0 2px 4px rgba(0,0,0,0.3);
-        }
-
-        /* Screenshot Gallery */
-        .gallery-header {
-            font-size: 1.1rem;
-            font-weight: 800;
-            color: var(--text-primary);
-            margin: 2rem 0 1rem;
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
-
-        .gallery-header svg {
-            width: 20px;
-            height: 20px;
-            color: var(--accent-blue);
-        }
-
-        .screenshot-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-            gap: 1.25rem;
-        }
-
-        .screenshot-card {
+        /* Accordion FAQ */
+        .faq-item {
             background: #ffffff;
-            border: 1px solid var(--border-color);
+            border: 1px solid var(--border-light);
             border-radius: var(--radius-lg);
+            margin-bottom: 1rem;
             overflow: hidden;
-            box-shadow: var(--shadow-sm);
-            transition: all 0.25s ease;
         }
 
-        .screenshot-card:hover {
-            transform: translateY(-3px);
-            box-shadow: var(--shadow-md);
-            border-color: var(--border-highlight);
-        }
-
-        .screenshot-img-wrapper {
-            width: 100%;
-            height: 210px;
-            background: #f1f5f9;
-            overflow: hidden;
-            border-bottom: 1px solid var(--border-color);
-        }
-
-        .screenshot-img {
-            width: 100%;
-            height: 100%;
-            object-fit: cover;
-            object-position: top center;
-            transition: transform 0.3s ease;
-        }
-
-        .screenshot-card:hover .screenshot-img {
-            transform: scale(1.03);
-        }
-
-        .screenshot-caption {
-            padding: 1rem;
-        }
-
-        .screenshot-title {
-            font-size: 0.925rem;
+        .faq-question {
+            padding: 1.25rem 1.5rem;
             font-weight: 700;
-            color: var(--text-primary);
-            margin-bottom: 4px;
+            cursor: pointer;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
         }
 
-        .screenshot-desc {
-            font-size: 0.825rem;
+        .faq-answer {
+            padding: 0 1.5rem 1.25rem;
             color: var(--text-secondary);
+            display: none;
         }
+
+        .faq-item.active .faq-answer { display: block; }
 
         footer {
-            text-align: center;
-            padding: 2.5rem 0;
-            color: var(--text-muted);
+            background: #090d16;
+            color: #64748b;
+            padding: 4rem 0 2rem;
+            border-top: 1px solid #1e293b;
             font-size: 0.85rem;
-            border-top: 1px solid var(--border-color);
-            margin-top: 3rem;
         }
+
+        .footer-grid {
+            display: grid;
+            grid-template-columns: 2fr repeat(4, 1fr);
+            gap: 2rem;
+            margin-bottom: 3rem;
+        }
+
+        @media (max-width: 800px) { .footer-grid { grid-template-columns: 1fr; } }
+
+        .footer-title {
+            color: #ffffff;
+            font-weight: 700;
+            margin-bottom: 1rem;
+            font-size: 0.9rem;
+        }
+
+        .footer-links { list-style: none; }
+        .footer-links li { margin-bottom: 8px; }
+        .footer-links a { color: #94a3b8; text-decoration: none; transition: color 0.2s; }
+        .footer-links a:hover { color: #ffffff; }
     </style>
 </head>
 <body>
 
-    <!-- Top Navigation Bar -->
-    <nav class="navbar">
+    <!-- 01. NAVIGATION -->
+    <nav class="navbar" id="navbar">
         <a href="#" class="brand-logo">
-            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
-                <path stroke-linecap="round" stroke-linejoin="round" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"/>
-            </svg>
-            <span>CamAI Enterprise</span>
-            <span class="badge-tag">Platform Overview</span>
+            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg>
+            <span>CamAI</span>
         </a>
-        <div class="nav-links">
-            <a href="#tree" class="nav-btn">Architecture Tree</a>
-            <a href="#ai-models" class="nav-btn">AI Models</a>
-            <a href="#modules-7" class="nav-btn">7 Analytics Modules</a>
-            <a href="#team-rbac" class="nav-btn">Team & RBAC</a>
-            <a href="#acap-edge" class="nav-btn primary">ACAP Native Edge Full</a>
-            <a href="#web-saas" class="nav-btn">Web SaaS</a>
-            <a href="#desktop-client" class="nav-btn">Desktop</a>
-            <a href="#mobile-app" class="nav-btn">Mobile</a>
+        <div class="nav-menu">
+            <a href="#overview" class="nav-link">Overview</a>
+            <a href="#ecosystem" class="nav-link">Platform</a>
+            <a href="#ai-engine" class="nav-link">AI Engine</a>
+            <a href="#modules" class="nav-link">Modules</a>
+            <a href="#surfaces" class="nav-link">Deployments</a>
+            <a href="#architecture" class="nav-link">Architecture</a>
+            <a href="#performance" class="nav-link">Performance</a>
+            <a href="#security" class="nav-link">Security</a>
+        </div>
+        <div class="nav-cta-group">
+            <a href="#documentation" class="btn-outline">Technical Overview</a>
+            <a href="#contact" class="btn-primary">Request Demo</a>
         </div>
     </nav>
 
-    <main class="container">
+    <!-- 02. HERO SECTION -->
+    <section class="hero-section" id="overview">
+        <div class="container hero-grid">
+            <div>
+                <div class="hero-badges">
+                    <span class="tag-pill">ENTERPRISE VIDEO AI</span>
+                    <span class="tag-pill">REAL-TIME ANALYTICS</span>
+                    <span class="tag-pill">MULTI-PLATFORM</span>
+                    <span class="tag-pill">EDGE-READY</span>
+                </div>
+                <h1 class="hero-headline">Turn Every Camera Into Intelligence.</h1>
+                <p class="hero-sub">
+                    CamAI is an enterprise video intelligence platform that transforms live camera streams into real-time AI analytics across Web, Desktop, Mobile, and Edge.
+                </p>
+                <div class="hero-actions" style="justify-content: flex-start;">
+                    <a href="#ecosystem" class="btn-primary" style="padding: 12px 24px; font-size: 0.95rem;">Explore CamAI</a>
+                    <a href="#documentation" class="btn-outline" style="background:transparent; color:#fff; border-color:#334155; padding: 12px 24px; font-size: 0.95rem;">Technical Overview</a>
+                </div>
+            </div>
+            <div>
+                <!-- Native SVG Live Architecture Diagram (No Images) -->
+                <div class="hero-viz-card">
+                    <div class="viz-header">
+                        <div style="display:flex; align-items:center; gap:8px;">
+                            <span class="status-dot"></span>
+                            <span class="font-mono" style="font-size:0.75rem; color:#10b981; font-weight:700;">SYSTEM OPERATIONAL</span>
+                        </div>
+                        <span class="font-mono" style="font-size:0.7rem; color:#64748b;">DEMO INTERFACE</span>
+                    </div>
+                    <svg viewBox="0 0 500 320" style="width:100%; height:auto;" fill="none" stroke="currentColor">
+                        <!-- Top Camera Node -->
+                        <rect x="200" y="20" width="100" height="36" rx="6" fill="#1f2937" stroke="#374151" stroke-width="1.5"/>
+                        <text x="250" y="42" fill="#f8fafc" font-size="11" font-weight="700" text-anchor="middle">CAMERAS (RTSP)</text>
 
-        <!-- Hero Header -->
-        <header class="hero">
-            <div class="hero-domain">camai.princesite.in/overview</div>
-            <h1 class="hero-title">CamAI Enterprise Platform Architecture</h1>
-            <p class="hero-desc">
-                Complete A-to-Z breakdown of CamAI AI Models, 7 Specialized Analytics Modules, Team RBAC Management, Web SaaS Portal, Desktop Client, Mobile App, and ACAP Native Edge C++ Application.
+                        <!-- Center Vision Engine -->
+                        <rect x="160" y="120" width="180" height="50" rx="8" fill="#1e3a8a" stroke="#3b82f6" stroke-width="2"/>
+                        <text x="250" y="150" fill="#ffffff" font-size="13" font-weight="900" text-anchor="middle">CAMAI VISION ENGINE</text>
+
+                        <!-- Bottom Surface Nodes -->
+                        <g transform="translate(20, 240)">
+                            <rect x="0" y="0" width="95" height="40" rx="6" fill="#1f2937" stroke="#38bdf8"/>
+                            <text x="47" y="24" fill="#38bdf8" font-size="11" font-weight="700" text-anchor="middle">WEB</text>
+                        </g>
+                        <g transform="translate(135, 240)">
+                            <rect x="0" y="0" width="95" height="40" rx="6" fill="#1f2937" stroke="#818cf8"/>
+                            <text x="47" y="24" fill="#818cf8" font-size="11" font-weight="700" text-anchor="middle">DESKTOP</text>
+                        </g>
+                        <g transform="translate(250, 240)">
+                            <rect x="0" y="0" width="95" height="40" rx="6" fill="#1f2937" stroke="#34d399"/>
+                            <text x="47" y="24" fill="#34d399" font-size="11" font-weight="700" text-anchor="middle">MOBILE</text>
+                        </g>
+                        <g transform="translate(365, 240)">
+                            <rect x="0" y="0" width="95" height="40" rx="6" fill="#1f2937" stroke="#fbbf24"/>
+                            <text x="47" y="24" fill="#fbbf24" font-size="11" font-weight="700" text-anchor="middle">EDGE / ACAP</text>
+                        </g>
+
+                        <!-- Animated Lines -->
+                        <path d="M250 56 V120" stroke="#3b82f6" stroke-width="2" stroke-dasharray="4 4"/>
+                        <path d="M250 170 V205 H67 V240" stroke="#38bdf8" stroke-width="1.5"/>
+                        <path d="M250 170 V205 H182 V240" stroke="#818cf8" stroke-width="1.5"/>
+                        <path d="M250 170 V205 H297 V240" stroke="#34d399" stroke-width="1.5"/>
+                        <path d="M250 170 V205 H412 V240" stroke="#fbbf24" stroke-width="1.5"/>
+                    </svg>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- 03. PLATFORM STATEMENT -->
+    <section class="section-padding">
+        <div class="container">
+            <div class="section-header">
+                <span class="section-badge">UNIFIED ARCHITECTURE</span>
+                <h2 class="section-title">One Vision Engine. Four Ways to Operate.</h2>
+                <p class="section-desc">
+                    CamAI separates the intelligence layer from the interface and deployment environment, allowing the same computer-vision capabilities to power control rooms, web operations, mobile workflows, and edge deployments.
+                </p>
+            </div>
+            <div class="statement-grid">
+                <div class="statement-card">
+                    <div class="statement-icon"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9"/></svg></div>
+                    <h3 style="font-weight:800; font-size:1.1rem; margin-bottom:4px;">WEB</h3>
+                    <div class="font-mono" style="font-size:0.75rem; color:var(--accent-blue); font-weight:700; margin-bottom:8px;">Operate</div>
+                    <p style="font-size:0.875rem; color:var(--text-secondary);">Distributed cloud administration, multi-tenant site management, live alerts, and user roles.</p>
+                </div>
+                <div class="statement-card">
+                    <div class="statement-icon" style="color:var(--accent-indigo); background:#e0e7ff;"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg></div>
+                    <h3 style="font-weight:800; font-size:1.1rem; margin-bottom:4px;">DESKTOP</h3>
+                    <div class="font-mono" style="font-size:0.75rem; color:var(--accent-indigo); font-weight:700; margin-bottom:8px;">Monitor</div>
+                    <p style="font-size:0.875rem; color:var(--text-secondary);">Zero-latency multi-camera grid station supervising local engine and DPAPI machine keys.</p>
+                </div>
+                <div class="statement-card">
+                    <div class="statement-icon" style="color:var(--accent-emerald); background:#d1fae5;"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z"/></svg></div>
+                    <h3 style="font-weight:800; font-size:1.1rem; margin-bottom:4px;">MOBILE</h3>
+                    <div class="font-mono" style="font-size:0.75rem; color:var(--accent-emerald); font-weight:700; margin-bottom:8px;">Respond</div>
+                    <p style="font-size:0.875rem; color:var(--text-secondary);">Instant push notifications, mobile touch ROI editing, and camera RTSP streaming.</p>
+                </div>
+                <div class="statement-card">
+                    <div class="statement-icon" style="color:var(--accent-amber); background:#fef3c7;"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z"/></svg></div>
+                    <h3 style="font-weight:800; font-size:1.1rem; margin-bottom:4px;">EDGE / ACAP</h3>
+                    <div class="font-mono" style="font-size:0.75rem; color:var(--accent-amber); font-weight:700; margin-bottom:8px;">Process</div>
+                    <p style="font-size:0.875rem; color:var(--text-secondary);">Native C++ app running 100% on-device AI inference on camera hardware NPUs.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- 04. CAMAI ECOSYSTEM (MASTER SVG DIAGRAM) -->
+    <section class="section-padding section-dark" id="ecosystem">
+        <div class="container">
+            <div class="section-header">
+                <span class="section-badge">ECOSYSTEM MAP</span>
+                <h2 class="section-title">The Complete CamAI Platform Architecture</h2>
+                <p class="section-desc">One centralized computer vision intelligence core distributing events, metadata, and analytics to every operational surface.</p>
+            </div>
+            <!-- Full SVG Ecosystem Diagram -->
+            <div style="background:#111827; border:1px solid #1f2937; border-radius:var(--radius-xl); padding:2rem; overflow-x:auto;">
+                <svg viewBox="0 0 1000 420" style="width:100%; min-width:800px; height:auto;" fill="none" stroke="currentColor">
+                    <!-- Left: Sources -->
+                    <rect x="20" y="160" width="140" height="100" rx="8" fill="#1f2937" stroke="#374151" stroke-width="2"/>
+                    <text x="90" y="195" fill="#f8fafc" font-size="12" font-weight="800" text-anchor="middle">CAMERA STREAMS</text>
+                    <text x="90" y="220" fill="#94a3b8" font-size="10" font-weight="600" text-anchor="middle">RTSP / ONVIF / H.264</text>
+
+                    <!-- Center: Core Engine -->
+                    <rect x="230" y="60" width="540" height="300" rx="12" fill="#1e3a8a" fill-opacity="0.2" stroke="#2563eb" stroke-width="2" stroke-dasharray="6 6"/>
+                    <text x="500" y="90" fill="#60a5fa" font-size="14" font-weight="900" text-anchor="middle">CAMAI VISION ENGINE (CORE INTELLIGENCE)</text>
+
+                    <!-- Sub Modules Inside Engine -->
+                    <g transform="translate(260, 120)">
+                        <rect x="0" y="0" width="130" height="60" rx="6" fill="#111827" stroke="#3b82f6"/>
+                        <text x="65" y="30" fill="#ffffff" font-size="11" font-weight="800" text-anchor="middle">AI MODELS</text>
+                        <text x="65" y="46" fill="#60a5fa" font-size="9" text-anchor="middle">YOLOX / OpenVINO</text>
+                    </g>
+                    <g transform="translate(435, 120)">
+                        <rect x="0" y="0" width="130" height="60" rx="6" fill="#111827" stroke="#3b82f6"/>
+                        <text x="65" y="30" fill="#ffffff" font-size="11" font-weight="800" text-anchor="middle">TRACKING</text>
+                        <text x="65" y="46" fill="#60a5fa" font-size="9" text-anchor="middle">C++ ByteTrack Kalman</text>
+                    </g>
+                    <g transform="translate(610, 120)">
+                        <rect x="0" y="0" width="130" height="60" rx="6" fill="#111827" stroke="#3b82f6"/>
+                        <text x="65" y="30" fill="#ffffff" font-size="11" font-weight="800" text-anchor="middle">7 AI MODULES</text>
+                        <text x="65" y="46" fill="#60a5fa" font-size="9" text-anchor="middle">Security, PPE, Traffic...</text>
+                    </g>
+
+                    <g transform="translate(345, 230)">
+                        <rect x="0" y="0" width="150" height="60" rx="6" fill="#111827" stroke="#10b981"/>
+                        <text x="75" y="30" fill="#ffffff" font-size="11" font-weight="800" text-anchor="middle">ANALYTICS & RULES</text>
+                        <text x="75" y="46" fill="#34d399" font-size="9" text-anchor="middle">ROI / Lines / Dwell</text>
+                    </g>
+
+                    <g transform="translate(525, 230)">
+                        <rect x="0" y="0" width="150" height="60" rx="6" fill="#111827" stroke="#10b981"/>
+                        <text x="75" y="30" fill="#ffffff" font-size="11" font-weight="800" text-anchor="middle">EVENT ENGINE</text>
+                        <text x="75" y="46" fill="#34d399" font-size="9" text-anchor="middle">Alerts & Metadata</text>
+                    </g>
+
+                    <!-- Right: 4 Surfaces -->
+                    <g transform="translate(830, 60)">
+                        <rect x="0" y="0" width="150" height="60" rx="6" fill="#1f2937" stroke="#38bdf8"/>
+                        <text x="75" y="35" fill="#38bdf8" font-size="11" font-weight="800" text-anchor="middle">WEB PORTAL</text>
+                    </g>
+                    <g transform="translate(830, 140)">
+                        <rect x="0" y="0" width="150" height="60" rx="6" fill="#1f2937" stroke="#818cf8"/>
+                        <text x="75" y="35" fill="#818cf8" font-size="11" font-weight="800" text-anchor="middle">DESKTOP CLIENT</text>
+                    </g>
+                    <g transform="translate(830, 220)">
+                        <rect x="0" y="0" width="150" height="60" rx="6" fill="#1f2937" stroke="#34d399"/>
+                        <text x="75" y="35" fill="#34d399" font-size="11" font-weight="800" text-anchor="middle">MOBILE APP</text>
+                    </g>
+                    <g transform="translate(830, 300)">
+                        <rect x="0" y="0" width="150" height="60" rx="6" fill="#1f2937" stroke="#fbbf24"/>
+                        <text x="75" y="35" fill="#fbbf24" font-size="11" font-weight="800" text-anchor="middle">EDGE / ACAP</text>
+                    </g>
+
+                    <!-- Connections -->
+                    <path d="M160 210 H230" stroke="#3b82f6" stroke-width="2"/>
+                    <path d="M770 210 H830" stroke="#10b981" stroke-width="2"/>
+                </svg>
+            </div>
+        </div>
+    </section>
+
+    <!-- 05. FOUR DEPLOYMENT SURFACES (NATIVE SIMULATIONS) -->
+    <section class="section-padding" id="surfaces">
+        <div class="container">
+            <div class="section-header">
+                <span class="section-badge">DEPLOYMENT SURFACES</span>
+                <h2 class="section-title">Built for Every Operational Environment</h2>
+                <p class="section-desc">Experience native interfaces engineered specifically for Web command centers, Desktop monitoring stations, Mobile responder teams, and Edge camera hardware.</p>
+            </div>
+
+            <!-- 13. WEB PLATFORM SIMULATION -->
+            <div style="margin-bottom:3rem;">
+                <div style="margin-bottom:1rem;">
+                    <span class="font-mono" style="color:var(--accent-blue); font-weight:700; font-size:0.8rem;">01 / WEB PLATFORM</span>
+                    <h3 style="font-size:1.5rem; font-weight:800;">Web Operations Command Center</h3>
+                </div>
+                <div class="simulated-ui-card">
+                    <div class="simulated-header">
+                        <div style="display:flex; gap:6px;">
+                            <span style="width:10px; height:10px; border-radius:50%; background:#ef4444;"></span>
+                            <span style="width:10px; height:10px; border-radius:50%; background:#f59e0b;"></span>
+                            <span style="width:10px; height:10px; border-radius:50%; background:#10b981;"></span>
+                        </div>
+                        <span class="font-mono" style="font-size:0.75rem; color:var(--text-muted);">camai-web-portal.internal</span>
+                        <span class="font-mono" style="font-size:0.7rem; color:var(--accent-blue);">LIVE DEMO</span>
+                    </div>
+                    <div class="simulated-body" style="display:grid; grid-template-columns: 200px 1fr 260px; gap:1rem; min-height:280px; background:#f8fafc;">
+                        <!-- Sidebar -->
+                        <div style="background:#ffffff; border:1px solid var(--border-light); border-radius:6px; padding:12px;">
+                            <div style="font-weight:800; font-size:0.8rem; margin-bottom:12px; color:var(--accent-blue);">CAMAI PORTAL</div>
+                            <div style="font-size:0.75rem; font-weight:700; padding:6px; background:#eff6ff; border-radius:4px; color:var(--accent-blue); margin-bottom:4px;">Dashboard</div>
+                            <div style="font-size:0.75rem; padding:6px; color:var(--text-secondary);">Cameras Fleet</div>
+                            <div style="font-size:0.75rem; padding:6px; color:var(--text-secondary);">Real-Time Alerts</div>
+                            <div style="font-size:0.75rem; padding:6px; color:var(--text-secondary);">Zone Studio</div>
+                            <div style="font-size:0.75rem; padding:6px; color:var(--text-secondary);">License Seats</div>
+                        </div>
+                        <!-- Main Content Grid -->
+                        <div style="display:flex; flex-direction:column; gap:12px;">
+                            <div style="display:grid; grid-template-columns:repeat(3, 1fr); gap:8px;">
+                                <div style="background:#fff; padding:10px; border:1px solid var(--border-light); border-radius:6px;">
+                                    <div style="font-size:0.65rem; color:var(--text-muted); font-weight:700;">ACTIVE CAMERAS</div>
+                                    <div style="font-size:1.2rem; font-weight:900;">24 / 24</div>
+                                </div>
+                                <div style="background:#fff; padding:10px; border:1px solid var(--border-light); border-radius:6px;">
+                                    <div style="font-size:0.65rem; color:var(--text-muted); font-weight:700;">ALERTS (24H)</div>
+                                    <div style="font-size:1.2rem; font-weight:900; color:var(--accent-rose);">14</div>
+                                </div>
+                                <div style="background:#fff; padding:10px; border:1px solid var(--border-light); border-radius:6px;">
+                                    <div style="font-size:0.65rem; color:var(--text-muted); font-weight:700;">ENGINE LATENCY</div>
+                                    <div style="font-size:1.2rem; font-weight:900; color:var(--accent-emerald);">12.4 ms</div>
+                                </div>
+                            </div>
+                            <!-- Mini Video Preview Grid -->
+                            <div style="background:#090d16; border-radius:6px; flex:1; padding:8px; display:grid; grid-template-columns:1fr 1fr; gap:6px;">
+                                <div style="background:#111827; border:1px solid #1f2937; border-radius:4px; position:relative; overflow:hidden;">
+                                    <span class="font-mono" style="position:absolute; top:4px; left:4px; font-size:0.6rem; color:#fff; background:rgba(0,0,0,0.6); padding:1px 4px;">CAM-01 [MAIN GATE]</span>
+                                </div>
+                                <div style="background:#111827; border:1px solid #1f2937; border-radius:4px; position:relative; overflow:hidden;">
+                                    <span class="font-mono" style="position:absolute; top:4px; left:4px; font-size:0.6rem; color:#fff; background:rgba(0,0,0,0.6); padding:1px 4px;">CAM-02 [PERIMETER]</span>
+                                </div>
+                            </div>
+                        </div>
+                        <!-- Right Panel Feed -->
+                        <div style="background:#ffffff; border:1px solid var(--border-light); border-radius:6px; padding:12px;">
+                            <div style="font-weight:700; font-size:0.75rem; border-bottom:1px solid var(--border-light); padding-bottom:6px; margin-bottom:8px;">REAL-TIME EVENT FEED</div>
+                            <div style="font-size:0.7rem; margin-bottom:8px;"><span class="font-mono" style="color:var(--accent-rose);">[10:48:12]</span> Intrusion - CAM-02</div>
+                            <div style="font-size:0.7rem; margin-bottom:8px;"><span class="font-mono" style="color:var(--accent-amber);">[10:45:04]</span> Line Cross - CAM-01</div>
+                            <div style="font-size:0.7rem; margin-bottom:8px;"><span class="font-mono" style="color:var(--accent-emerald);">[10:40:22]</span> Vehicle Count +1</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 14. DESKTOP PLATFORM SIMULATION -->
+            <div style="margin-bottom:3rem;">
+                <div style="margin-bottom:1rem;">
+                    <span class="font-mono" style="color:var(--accent-indigo); font-weight:700; font-size:0.8rem;">02 / DESKTOP PLATFORM</span>
+                    <h3 style="font-size:1.5rem; font-weight:800;">Windows Desktop Control Room (4×4 Multi-Grid)</h3>
+                </div>
+                <div class="simulated-ui-card" style="background:#090d16; color:#fff; border-color:#1e293b;">
+                    <div class="simulated-header" style="background:#111827; border-color:#1f2937;">
+                        <span style="font-weight:800; font-size:0.85rem; color:#818cf8;">CAMAI DESKTOP MONITORING STATION (DPAPI LOCKED)</span>
+                        <span class="font-mono" style="font-size:0.7rem; color:#10b981;">38.4 FPS AVERAGE</span>
+                    </div>
+                    <div class="simulated-body" style="display:grid; grid-template-columns: 180px 1fr; gap:12px;">
+                        <div style="background:#111827; border:1px solid #1f2937; border-radius:6px; padding:10px;">
+                            <div class="font-mono" style="font-size:0.65rem; color:#94a3b8; margin-bottom:8px;">CAMERA TREE</div>
+                            <div style="font-size:0.725rem; color:#38bdf8; margin-bottom:4px;">▼ Building A</div>
+                            <div style="font-size:0.7rem; color:#cbd5e1; padding-left:10px; margin-bottom:2px;">• Cam 01 North Gate</div>
+                            <div style="font-size:0.7rem; color:#cbd5e1; padding-left:10px; margin-bottom:2px;">• Cam 02 East Wall</div>
+                            <div style="font-size:0.725rem; color:#38bdf8; margin-bottom:4px; margin-top:6px;">▼ Factory Floor</div>
+                            <div style="font-size:0.7rem; color:#cbd5e1; padding-left:10px;">• Cam 03 Assembly Line</div>
+                        </div>
+                        <div style="display:grid; grid-template-columns:repeat(3, 1fr); gap:8px; height:240px;">
+                            <div style="background:#1f2937; border:1px solid #374151; border-radius:4px; position:relative;">
+                                <span class="font-mono" style="position:absolute; top:4px; left:4px; font-size:0.6rem; color:#10b981;">CAM-01 [30 FPS]</span>
+                            </div>
+                            <div style="background:#1f2937; border:1px solid #374151; border-radius:4px; position:relative;">
+                                <span class="font-mono" style="position:absolute; top:4px; left:4px; font-size:0.6rem; color:#10b981;">CAM-02 [30 FPS]</span>
+                            </div>
+                            <div style="background:#1f2937; border:1px solid #374151; border-radius:4px; position:relative;">
+                                <span class="font-mono" style="position:absolute; top:4px; left:4px; font-size:0.6rem; color:#10b981;">CAM-03 [30 FPS]</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 15. MOBILE PLATFORM SIMULATION -->
+            <div>
+                <div style="margin-bottom:1rem;">
+                    <span class="font-mono" style="color:var(--accent-emerald); font-weight:700; font-size:0.8rem;">03 / MOBILE PLATFORM</span>
+                    <h3 style="font-size:1.5rem; font-weight:800;">Mobile Incident Response App & Push Alerts</h3>
+                </div>
+                <div style="display:flex; justify-content:center;">
+                    <!-- Native CSS Phone Frame (No Images) -->
+                    <div style="width:280px; background:#0f172a; border:4px solid #334155; border-radius:32px; padding:12px; box-shadow:var(--shadow-lg);">
+                        <div style="width:80px; height:4px; background:#334155; border-radius:2px; margin:0 auto 12px;"></div>
+                        <div style="background:#ffffff; border-radius:20px; padding:12px; height:420px; display:flex; flex-direction:column; justify-space-between;">
+                            <div>
+                                <div style="font-weight:900; font-size:0.9rem; color:var(--text-primary); margin-bottom:12px;">CamAI Mobile</div>
+                                <div style="background:#fee2e2; border:1px solid #fca5a5; border-radius:8px; padding:8px; margin-bottom:10px;">
+                                    <div style="font-size:0.65rem; font-weight:800; color:#dc2626;">CRITICAL INTRUSION ALERT</div>
+                                    <div style="font-size:0.75rem; font-weight:700; color:#0f172a;">Zone A Violation - CAM-02</div>
+                                    <div style="font-size:0.65rem; color:var(--text-secondary);">2 mins ago • Person Detected</div>
+                                </div>
+                                <div style="background:#f1f5f9; border-radius:8px; padding:8px; font-size:0.7rem;">
+                                    <div style="font-weight:700; margin-bottom:4px;">Live Stream Connect</div>
+                                    <div style="color:var(--text-secondary);">Phone RTSP Camera active at http://192.168.1.50:8080</div>
+                                </div>
+                            </div>
+                            <div style="display:flex; justify-content:space-around; border-top:1px solid var(--border-light); padding-top:8px; font-size:0.65rem; font-weight:700; color:var(--text-muted);">
+                                <span>Alerts</span>
+                                <span style="color:var(--accent-blue);">Cameras</span>
+                                <span>Events</span>
+                                <span>Profile</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- 07. SEVEN SPECIALIZED AI MODULES -->
+    <section class="section-padding section-dark" id="modules">
+        <div class="container">
+            <div class="section-header">
+                <span class="section-badge">INTELLIGENCE MODULES</span>
+                <h2 class="section-title">Seven Specialized Computer Vision Modules</h2>
+                <p class="section-desc">Modular, high-performance analytics engines tailored for specific domain requirements across perimeter security, industrial compliance, traffic, and micro-motion.</p>
+            </div>
+            <div class="modules-grid">
+                <div class="module-card">
+                    <div class="module-num">01</div>
+                    <h3 class="module-title">Traffic & Vehicle Analytics</h3>
+                    <p style="font-size:0.875rem; color:var(--text-secondary);">Vehicle counting, speed estimation, illegal parking detection, lane occupation, and bi-directional traffic flow vector analysis.</p>
+                    <div class="module-tags"><span class="tag-pill">Vehicle Count</span><span class="tag-pill">Speed Estimation</span><span class="tag-pill">Line Cross</span></div>
+                </div>
+                <div class="module-card">
+                    <div class="module-num">02</div>
+                    <h3 class="module-title">Security & Perimeter Protection</h3>
+                    <p style="font-size:0.875rem; color:var(--text-secondary);">Person & vehicle intrusion detection, tripwire crossing, polygonal ROI boundary monitoring, and loitering threshold alerts.</p>
+                    <div class="module-tags"><span class="tag-pill">Intrusion</span><span class="tag-pill">Tripwire</span><span class="tag-pill">Loitering</span></div>
+                </div>
+                <div class="module-card">
+                    <div class="module-num">03</div>
+                    <h3 class="module-title">Factory PPE & Worker Safety</h3>
+                    <p style="font-size:0.875rem; color:var(--text-secondary);">Mandatory hardhat detection, high-visibility vest compliance, safety glove validation, and hazardous machinery entry monitoring.</p>
+                    <div class="module-tags"><span class="tag-pill">Hardhat</span><span class="tag-pill">Vest</span><span class="tag-pill">PPE Safety</span></div>
+                </div>
+                <div class="module-card">
+                    <div class="module-num">04</div>
+                    <h3 class="module-title">Retail Footfall & Dwell Intelligence</h3>
+                    <p style="font-size:0.875rem; color:var(--text-secondary);">Customer footfall counting, aisle dwell time measurement, queue length alerts, and spatial density heatmap generation.</p>
+                    <div class="module-tags"><span class="tag-pill">Footfall</span><span class="tag-pill">Dwell Time</span><span class="tag-pill">Heatmaps</span></div>
+                </div>
+                <div class="module-card">
+                    <div class="module-num">05</div>
+                    <h3 class="module-title">Smart City & Public Crowding</h3>
+                    <p style="font-size:0.875rem; color:var(--text-secondary);">Public space crowd density estimation, stampede risk warning, unattended bag detection, and civic infrastructure safety.</p>
+                    <div class="module-tags"><span class="tag-pill">Crowd Density</span><span class="tag-pill">Unattended Bag</span></div>
+                </div>
+                <div class="module-card">
+                    <div class="module-num">06</div>
+                    <h3 class="module-title">Micro-Motion & Anomaly Detection</h3>
+                    <p style="font-size:0.875rem; color:var(--text-secondary);">Sub-pixel motion analysis for industrial machinery vibration monitoring, conveyor belt jamming, and subtle structural movement.</p>
+                    <div class="module-tags"><span class="tag-pill">Optical Flow</span><span class="tag-pill">Vibration</span></div>
+                </div>
+                <div class="module-card" style="grid-column: span 1;">
+                    <div class="module-num">07</div>
+                    <h3 class="module-title">Custom AI & Trigger Engine</h3>
+                    <p style="font-size:0.875rem; color:var(--text-secondary);">Customer-specific model weight integration, custom object classes, and multi-condition logical rule trigger engines.</p>
+                    <div class="module-tags"><span class="tag-pill">Custom Weights</span><span class="tag-pill">IF-THEN Engine</span></div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- 08. LIVE COMPUTER VISION INTERACTIVE VIEWPORT -->
+    <section class="section-padding">
+        <div class="container">
+            <div class="section-header">
+                <span class="section-badge">LIVE COMPUTER VISION</span>
+                <h2 class="section-title">See Detection & Tracking in Real-Time</h2>
+                <p class="section-desc">Simulated viewport showing real-time object bounding boxes, confidence scores, Kalman track vectors, and active ROI tripwires.</p>
+            </div>
+            <div class="vision-viewport">
+                <!-- Top Status Bar -->
+                <div style="position:absolute; top:0; left:0; right:0; padding:10px 16px; background:rgba(15,23,42,0.85); display:flex; justify-content:space-between; align-items:center; z-index:10; border-bottom:1px solid rgba(255,255,255,0.1);">
+                    <div style="display:flex; align-items:center; gap:8px;">
+                        <span class="status-dot"></span>
+                        <span class="font-mono" style="font-size:0.75rem; color:#fff; font-weight:700;">LIVE CAM-04 [NORTH GATE]</span>
+                    </div>
+                    <div class="font-mono" style="font-size:0.75rem; color:#10b981;">1080P • 30.0 FPS • LATENCY: 11.2ms • SIMULATED INTERFACE</div>
+                </div>
+
+                <!-- Bounding Box 1: Person -->
+                <div class="vision-overlay-box" style="top:25%; left:30%; width:120px; height:200px;">
+                    <div class="vision-overlay-label">PERSON 98% #TRACK_042</div>
+                </div>
+
+                <!-- Bounding Box 2: Vehicle -->
+                <div class="vision-overlay-box" style="top:40%; left:60%; width:220px; height:140px; border-color:#38bdf8; background:rgba(56,189,248,0.1);">
+                    <div class="vision-overlay-label" style="background:#38bdf8;">VEHICLE 94% #TRACK_089</div>
+                </div>
+
+                <!-- ROI Polygon Line Overlay -->
+                <svg style="position:absolute; top:0; left:0; width:100%; height:100%; pointer-events:none;">
+                    <polyline points="100,300 400,280 700,320" fill="none" stroke="#ef4444" stroke-width="2" stroke-dasharray="6 4"/>
+                    <text x="410" y="275" fill="#ef4444" font-size="10" font-family="Fira Code" font-weight="700">TRIPWIRE LINE A [RESTRICTED ENTRY]</text>
+                </svg>
+            </div>
+        </div>
+    </section>
+
+    <!-- 16. EDGE / ACAP APPLICATION DETAILS -->
+    <section class="section-padding section-dark" id="acap-edge">
+        <div class="container">
+            <div class="section-header">
+                <span class="section-badge">EDGE RUNTIME</span>
+                <h2 class="section-title">ACAP Native Edge Application Architecture</h2>
+                <p class="section-desc">On-device C++ application running natively on camera edge hardware. Zero cloud latency, zero CPU frame copying, and full ONVIF event publishing.</p>
+            </div>
+            <div class="statement-grid">
+                <div class="statement-card" style="background:#111827; border-color:#1f2937; color:#fff;">
+                    <div class="font-mono" style="font-size:0.75rem; color:#fbbf24; font-weight:700; margin-bottom:6px;">VDO STREAM API</div>
+                    <h4 style="font-weight:800; font-size:1rem; margin-bottom:6px;">Zero-Copy ISP Buffer</h4>
+                    <p style="font-size:0.825rem; color:#94a3b8;">Direct NV12 frame buffer acquisition from camera ISP via `vdo-stream.h` without CPU memory copying.</p>
+                </div>
+                <div class="statement-card" style="background:#111827; border-color:#1f2937; color:#fff;">
+                    <div class="font-mono" style="font-size:0.75rem; color:#fbbf24; font-weight:700; margin-bottom:6px;">LAROD NPU API</div>
+                    <div class="font-mono" style="font-size:0.75rem; color:#fbbf24; font-weight:700; margin-bottom:6px;">Hardware NPU Acceleration</div>
+                    <p style="font-size:0.825rem; color:#94a3b8;">Direct `larod.h` tensor execution of 8-bit quantized YOLOX-Tiny models on camera DLPU NPU chips.</p>
+                </div>
+                <div class="statement-card" style="background:#111827; border-color:#1f2937; color:#fff;">
+                    <div class="font-mono" style="font-size:0.75rem; color:#fbbf24; font-weight:700; margin-bottom:6px;">AXEVENT & AXOVERLAY</div>
+                    <h4 style="font-weight:800; font-size:1rem; margin-bottom:6px;">ONVIF Events & Overlays</h4>
+                    <p style="font-size:0.825rem; color:#94a3b8;">Native XML ONVIF event producer for Milestone/Genetec VMS and hardware stream bounding box rendering.</p>
+                </div>
+                <div class="statement-card" style="background:#111827; border-color:#1f2937; color:#fff;">
+                    <div class="font-mono" style="font-size:0.75rem; color:#fbbf24; font-weight:700; margin-bottom:6px;">EAP PACKAGE</div>
+                    <h4 style="font-weight:800; font-size:1rem; margin-bottom:6px;">Standalone EAP Installer</h4>
+                    <p style="font-size:0.825rem; color:#94a3b8;">Bundled manifest, C++ binary, and models into `camai_acap_1_0_0_aarch64.eap` package for single-click installation.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- 25. ENTERPRISE OPERATIONS GRID -->
+    <section class="section-padding">
+        <div class="container">
+            <div class="section-header">
+                <span class="section-badge">ENTERPRISE READY</span>
+                <h2 class="section-title">Built for Mission-Critical Operations</h2>
+                <p class="section-desc">Designed to support multi-site enterprises, high-security infrastructure, and large camera fleets.</p>
+            </div>
+            <div class="statement-grid">
+                <div class="statement-card">
+                    <h4 style="font-weight:800; font-size:0.95rem; margin-bottom:4px;">Multi-Camera Fleet</h4>
+                    <p style="font-size:0.825rem; color:var(--text-secondary);">Centralized discovery, status telemetry, and sync for hundreds of RTSP streams.</p>
+                </div>
+                <div class="statement-card">
+                    <h4 style="font-weight:800; font-size:0.95rem; margin-bottom:4px;">Granular RBAC Roles</h4>
+                    <p style="font-size:0.825rem; color:var(--text-secondary);">4-tier role hierarchy (Org Admin, Operator, Site Manager, Compliance Auditor).</p>
+                </div>
+                <div class="statement-card">
+                    <h4 style="font-weight:800; font-size:0.95rem; margin-bottom:4px;">Encrypted DPAPI Locks</h4>
+                    <p style="font-size:0.825rem; color:var(--text-secondary);">Windows machine token encryption bound to MachineGUID, CPU ID, and TPM serials.</p>
+                </div>
+                <div class="statement-card">
+                    <h4 style="font-weight:800; font-size:0.95rem; margin-bottom:4px;">Tamper-Proof Audit Logs</h4>
+                    <p style="font-size:0.825rem; color:var(--text-secondary);">Immutable action history tracking operator triage, zone edits, and login events.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- 35. FAQ ACCORDION -->
+    <section class="section-padding" style="background:#f1f5f9;">
+        <div class="container" style="max-width:860px;">
+            <div class="section-header">
+                <span class="section-badge">FREQUENTLY ASKED QUESTIONS</span>
+                <h2 class="section-title">Technical FAQ</h2>
+            </div>
+
+            <div class="faq-item active">
+                <div class="faq-question" onclick="this.parentElement.classList.toggle('active')">
+                    <span>What is CamAI and how does it process video?</span>
+                    <span>+</span>
+                </div>
+                <div class="faq-answer">
+                    CamAI is an enterprise video intelligence platform that ingests live camera streams (RTSP/ONVIF), decodes NV12 frame buffers, runs AI inference via YOLOX/Larod NPU engines, tracks motion using C++ ByteTrack Kalman filters, and emits real-time security events to Web, Desktop, Mobile, and Edge.
+                </div>
+            </div>
+
+            <div class="faq-item">
+                <div class="faq-question" onclick="this.parentElement.classList.toggle('active')">
+                    <span>Are Web, Desktop, Mobile, and Edge separate products?</span>
+                    <span>+</span>
+                </div>
+                <div class="faq-answer">
+                    No. They are four deployment surfaces connected to ONE central CamAI computer vision intelligence ecosystem.
+                </div>
+            </div>
+
+            <div class="faq-item">
+                <div class="faq-question" onclick="this.parentElement.classList.toggle('active')">
+                    <span>What AI modules are included in CamAI?</span>
+                    <span>+</span>
+                </div>
+                <div class="faq-answer">
+                    CamAI includes 7 specialized modules: Traffic Analytics, Security & Perimeter Protection, Factory PPE Compliance, Retail Footfall & Dwell, Smart City Crowding, Micro-Motion Vibration Anomaly, and Custom Rules Engine.
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- 36. FINAL CTA -->
+    <section class="section-padding section-dark" id="contact" style="text-align:center;">
+        <div class="container" style="max-width:720px;">
+            <h2 style="font-size:2.5rem; font-weight:900; letter-spacing:-1px; margin-bottom:1rem; line-height:1.2;">
+                One Platform.<br>Every Camera.<br>Actionable Intelligence.
+            </h2>
+            <p style="font-size:1.1rem; color:#94a3b8; margin-bottom:2rem;">
+                From real-time detection to enterprise operations, CamAI connects computer vision with the tools teams use every day.
             </p>
-            <div class="hero-actions">
-                <a href="#acap-edge" class="nav-btn primary">Explore ACAP/ Full Breakdown</a>
-                <a href="#tree" class="nav-btn">Architecture Tree</a>
-                <a href="#ai-models" class="nav-btn">AI Model Zoo</a>
-                <a href="#modules-7" class="nav-btn">7 Core Modules</a>
+            <div style="display:flex; justify-content:center; gap:12px; flex-wrap:wrap;">
+                <a href="#" class="btn-primary" style="padding:12px 28px; font-size:0.95rem;">Explore CamAI</a>
+                <a href="#" class="btn-outline" style="background:transparent; color:#fff; border-color:#334155; padding:12px 28px; font-size:0.95rem;">Request Demo</a>
             </div>
-        </header>
-
-        <!-- System Architecture Hierarchy Tree -->
-        <section id="tree" class="tree-section">
-            <div class="section-header-title">
-                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"/></svg>
-                <span>CamAI System Architecture Hierarchy Tree</span>
+            <div class="font-mono" style="font-size:0.8rem; color:#64748b; margin-top:2rem;">
+                Web • Desktop • Mobile • Edge / ACAP
             </div>
-            <div class="tree-container">
-                <div class="tree-root-node">
-                    <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg>
-                    CamAI Enterprise AI Video Analytics Platform
-                </div>
-                <div class="tree-stem"></div>
-                <div class="tree-branch-connector"></div>
-                
-                <div class="tree-branches">
-                    <!-- Branch 1: Web SaaS -->
-                    <div class="tree-branch-card portal" onclick="document.getElementById('web-saas').scrollIntoView({behavior:'smooth'});">
-                        <div class="tree-branch-title">
-                            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" style="color:var(--accent-cyan);"><path stroke-linecap="round" stroke-linejoin="round" d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9"/></svg>
-                            Web SaaS Portal
-                        </div>
-                        <div class="tree-sub-tag">portal/ & supabase/</div>
-                        <ul class="tree-leaf-list">
-                            <li class="tree-leaf-item"><span class="tree-dot" style="background:var(--accent-cyan);"></span> PostgreSQL Row Level Security</li>
-                            <li class="tree-leaf-item"><span class="tree-dot" style="background:var(--accent-cyan);"></span> Interactive Zone Studio</li>
-                            <li class="tree-leaf-item"><span class="tree-dot" style="background:var(--accent-cyan);"></span> Multi-Tenant Org Desk</li>
-                            <li class="tree-leaf-item"><span class="tree-dot" style="background:var(--accent-cyan);"></span> Supabase Dispatched Alerts</li>
-                        </ul>
-                    </div>
+        </div>
+    </section>
 
-                    <!-- Branch 2: Desktop Client -->
-                    <div class="tree-branch-card desktop" onclick="document.getElementById('desktop-client').scrollIntoView({behavior:'smooth'});">
-                        <div class="tree-branch-title">
-                            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" style="color:var(--accent-indigo);"><path stroke-linecap="round" stroke-linejoin="round" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg>
-                            Desktop Client
-                        </div>
-                        <div class="tree-sub-tag">desktop/</div>
-                        <ul class="tree-leaf-list">
-                            <li class="tree-leaf-item"><span class="tree-dot" style="background:var(--accent-indigo);"></span> Encrypted DPAPI Lock</li>
-                            <li class="tree-leaf-item"><span class="tree-dot" style="background:var(--accent-indigo);"></span> Zero-Latency 30-40 FPS Grid</li>
-                            <li class="tree-leaf-item"><span class="tree-dot" style="background:var(--accent-indigo);"></span> Local FastAPI Engine Sync</li>
-                            <li class="tree-leaf-item"><span class="tree-dot" style="background:var(--accent-indigo);"></span> ONVIF & RTSP Discovery</li>
-                        </ul>
-                    </div>
-
-                    <!-- Branch 3: Mobile App -->
-                    <div class="tree-branch-card mobile" onclick="document.getElementById('mobile-app').scrollIntoView({behavior:'smooth'});">
-                        <div class="tree-branch-title">
-                            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" style="color:var(--accent-emerald);"><path stroke-linecap="round" stroke-linejoin="round" d="M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z"/></svg>
-                            Mobile Application
-                        </div>
-                        <div class="tree-sub-tag">mobile/</div>
-                        <ul class="tree-leaf-list">
-                            <li class="tree-leaf-item"><span class="tree-dot" style="background:var(--accent-emerald);"></span> Mobile Push Snapshot Alerts</li>
-                            <li class="tree-leaf-item"><span class="tree-dot" style="background:var(--accent-emerald);"></span> Phone Camera IP Streamer</li>
-                            <li class="tree-leaf-item"><span class="tree-dot" style="background:var(--accent-emerald);"></span> Touch Screen ROI Editor</li>
-                            <li class="tree-leaf-item"><span class="tree-dot" style="background:var(--accent-emerald);"></span> Telegram Bot Integration</li>
-                        </ul>
-                    </div>
-
-                    <!-- Branch 4: ACAP Native Edge -->
-                    <div class="tree-branch-card acap" onclick="document.getElementById('acap-edge').scrollIntoView({behavior:'smooth'});">
-                        <div class="tree-branch-title">
-                            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" style="color:var(--accent-amber);"><path stroke-linecap="round" stroke-linejoin="round" d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z"/></svg>
-                            ACAP Native Edge
-                        </div>
-                        <div class="tree-sub-tag">ACAP/</div>
-                        <ul class="tree-leaf-list">
-                            <li class="tree-leaf-item"><span class="tree-dot" style="background:var(--accent-amber);"></span> Hardware VDO Zero-Copy</li>
-                            <li class="tree-leaf-item"><span class="tree-dot" style="background:var(--accent-amber);"></span> Larod NPU Acceleration</li>
-                            <li class="tree-leaf-item"><span class="tree-dot" style="background:var(--accent-amber);"></span> Native C++ ByteTrack</li>
-                            <li class="tree-leaf-item"><span class="tree-dot" style="background:var(--accent-amber);"></span> axevent & axoverlay ONVIF</li>
-                        </ul>
-                    </div>
-                </div>
-            </div>
-        </section>
-
-        <!-- SECTION: ACAP Native Edge Application (FULL END-TO-END BREAKDOWN) -->
-        <section id="acap-edge" class="section-block acap">
-            <div class="pillar-header">
-                <div class="pillar-title-group">
-                    <div class="pillar-icon-wrapper">
-                        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z"/></svg>
-                    </div>
-                    <div>
-                        <h2 class="pillar-title">ACAP Native Edge Application (`ACAP/` Directory)</h2>
-                        <div class="pillar-path">C++ Native Codebase, Hardware SDK APIs, Packaging & Testing Suite</div>
-                    </div>
-                </div>
-            </div>
-
-            <div class="section-grid">
-                <div>
-                    <p class="branch-desc">
-                        `ACAP/` is a production-ready C++20 Native Edge Application compiled specifically for IP camera hardware platforms (ARTPEC-8 / ARTPEC-7). It executes 100% on-device AI analytics with sub-15ms latency, zero cloud dependency, zero CPU video copying, and full ONVIF event compliance.
-                    </p>
-                    <ul class="feature-list">
-                        <li class="feature-item">
-                            <svg class="check-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>
-                            <div><strong>VDO Stream API (`vdo_pipeline.cpp`):</strong> Zero-copy NV12 frame buffer acquisition directly from camera ISP hardware via `vdo-stream.h`.</div>
-                        </li>
-                        <li class="feature-item">
-                            <svg class="check-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>
-                            <div><strong>Larod NPU API (`inference.cpp`):</strong> Hardware NPU tensor acceleration for YOLOX-Tiny ONNX 8-bit models via `larod.h`.</div>
-                        </li>
-                        <li class="feature-item">
-                            <svg class="check-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>
-                            <div><strong>C++ ByteTrack Tracker (`tracking.cpp`):</strong> Kalman Filter motion state vectors & Hungarian matching for zero ID switches.</div>
-                        </li>
-                        <li class="feature-item">
-                            <svg class="check-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>
-                            <div><strong>axevent ONVIF Publisher (`events.cpp`):</strong> Native XML event producer publishing intrusion alarms to Milestone/Genetec VMS.</div>
-                        </li>
-                        <li class="feature-item">
-                            <svg class="check-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>
-                            <div><strong>axoverlay Bounding Box Renderer (`overlay.cpp`):</strong> Draws real-time hardware bounding boxes directly on camera H.264/H.265 streams.</div>
-                        </li>
-                    </ul>
-                </div>
-                <div>
-                    <div class="code-box">// ACAP/app/camai_engine.cpp
-void CamAIEngine::process_loop() {
-    while (is_running_) {
-        VideoFrame frame;
-        video_pipeline_.capture_frame(frame);
-        
-        // 1. Larod NPU AI Inference (8-bit YOLOX)
-        std::vector<BoundingBox> detections;
-        inference_engine_.run_inference(frame, detections, latency_ms);
-        
-        // 2. C++ ByteTrack Multi-Object Tracking
-        std::vector<BoundingBox> tracked;
-        tracker_.update(detections, tracked);
-        
-        // 3. Security ROI Intrusion Math & Event Emission
-        security_module_->process_frame(meta, alerts);
-        for (auto& alert : alerts) event_producer_.send_event(alert);
-        
-        // 4. axoverlay Stream Bounding Box Overlay
-        overlay_manager_.render(tracked, alerts);
-    }
-}</div>
-                </div>
-            </div>
-
-            <!-- ACAP File Hierarchy & Module Breakdown -->
-            <div class="gallery-header">
-                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V7M3 7l9 6 9-6"/></svg>
-                Complete `ACAP/` File Architecture & Component Matrix
-            </div>
-
-            <div class="grid-3">
-                <div class="grid-card">
-                    <span class="card-badge" style="background:#fef3c7; color:#d97706;">ACAP/manifest.json</span>
-                    <div class="card-title">Manifest Schema v2.0</div>
-                    <div class="card-desc">Defines app ID `camai_acap`, version `1.0.0`, `aarch64` target architecture, embedded web server endpoint, and hardware permissions.</div>
-                </div>
-
-                <div class="grid-card">
-                    <span class="card-badge" style="background:#fef3c7; color:#d97706;">ACAP/Dockerfile & Makefile</span>
-                    <div class="card-title">SDK Build Environment</div>
-                    <div class="card-desc">Containerized ACAP Native SDK cross-compilation toolchain targeting `arm64v8/gcc` with zero host dependency requirements.</div>
-                </div>
-
-                <div class="grid-card">
-                    <span class="card-badge" style="background:#fef3c7; color:#d97706;">ACAP/app/config.cpp</span>
-                    <div class="card-title">axparameter Config API</div>
-                    <div class="card-desc">VAPIX HTTP parameter manager for dynamic ROI threshold tuning, sensitivity adjustment, and zone persistence without app restart.</div>
-                </div>
-
-                <div class="grid-card">
-                    <span class="card-badge" style="background:#fef3c7; color:#d97706;">ACAP/app/diagnostics.cpp</span>
-                    <div class="card-title">ResourceGovernor Watchdog</div>
-                    <div class="card-desc">Real-time memory and CPU resource governor enforcing `DROP_OLDEST` frame queue policy when RAM usage exceeds 85%.</div>
-                </div>
-
-                <div class="grid-card">
-                    <span class="card-badge" style="background:#fef3c7; color:#d97706;">ACAP/build_eap_package.py</span>
-                    <div class="card-title">EAP Package Builder</div>
-                    <div class="card-desc">Automated packaging script that bundles manifest, model weights, C++ binary, and assets into `camai_acap_1_0_0_aarch64.eap`.</div>
-                </div>
-
-                <div class="grid-card">
-                    <span class="card-badge" style="background:#fef3c7; color:#d97706;">ACAP/real_usb_phone_live_acap.py</span>
-                    <div class="card-title">Real USB/IP Streamer</div>
-                    <div class="card-desc">Live camera connector streaming real-time USB or IP phone camera feed to AI detector running locally at `http://localhost:8080`.</div>
-                </div>
-            </div>
-        </section>
-
-        <!-- SECTION: AI Model Zoo & Detection Engines -->
-        <section id="ai-models" class="section-block models">
-            <div class="pillar-header">
-                <div class="pillar-title-group">
-                    <div class="pillar-icon-wrapper">
-                        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 01-2 2h-4a2 2 0 01-2-2v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/></svg>
-                    </div>
-                    <div>
-                        <h2 class="pillar-title">CamAI AI Model Zoo & Detection Engines</h2>
-                        <div class="pillar-path">Models, NPU Accelerators & ByteTrack Kalman Engine</div>
-                    </div>
-                </div>
-            </div>
-            <div class="grid-3">
-                <div class="grid-card">
-                    <span class="card-badge" style="background:#fee2e2; color:#ef4444;">YOLOX-Tiny ONNX</span>
-                    <div class="card-title">YOLOX-Tiny 8-Bit Quantized</div>
-                    <div class="card-desc">Apache 2.0 licensed real-time object detector optimized for ONNX Runtime and Larod NPU accelerators. Detects persons, vehicles, bags, and equipment with sub-15ms latency.</div>
-                </div>
-
-                <div class="grid-card">
-                    <span class="card-badge" style="background:#e0e7ff; color:#6366f1;">OpenVINO FP16/INT8</span>
-                    <div class="card-title">Intel OpenVINO Neural Engine</div>
-                    <div class="card-desc">Local CPU/GPU accelerated inference backend for Windows Desktop Client and Local Server Engine. Achieves 30-40 FPS multi-stream processing.</div>
-                </div>
-
-                <div class="grid-card">
-                    <span class="card-badge" style="background:#d1fae5; color:#10b981;">C++ ByteTrack</span>
-                    <div class="card-title">Kalman Filter Multi-Object Tracker</div>
-                    <div class="card-desc">State-vector motion tracking engine with Hungarian data association algorithm. Maintains zero ID switches across occlusions, crowds, and complex camera scenes.</div>
-                </div>
-
-                <div class="grid-card">
-                    <span class="card-badge" style="background:#fef3c7; color:#f59e0b;">Larod NPU Runtime</span>
-                    <div class="card-title">Hardware NPU Acceleration</div>
-                    <div class="card-desc">Direct interface to camera hardware DLPU / NPU chips via `larod.h` API for zero-CPU AI model execution directly on edge camera hardware.</div>
-                </div>
-
-                <div class="grid-card">
-                    <span class="card-badge" style="background:#e0f2fe; color:#0284c7;">PPE & Safety Weights</span>
-                    <div class="card-title">Hardhat & High-Vis Vest Weights</div>
-                    <div class="card-desc">Custom-trained weights for industrial personal protective equipment (PPE) compliance, helmet detection, and worker safety monitoring.</div>
-                </div>
-
-                <div class="grid-card">
-                    <span class="card-badge" style="background:#f3e8ff; color:#a855f7;">Micro-Motion Filter</span>
-                    <div class="card-title">Sub-Pixel Optical Anomaly Filter</div>
-                    <div class="card-desc">Frequency-domain optical flow analyzer detecting subtle micro-vibrations, machine anomalies, and thermal structural shifts in video streams.</div>
-                </div>
-            </div>
-        </section>
-
-        <!-- SECTION: All 7 Core Analytics Modules -->
-        <section id="modules-7" class="section-block modules">
-            <div class="pillar-header">
-                <div class="pillar-title-group">
-                    <div class="pillar-icon-wrapper">
-                        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"/></svg>
-                    </div>
-                    <div>
-                        <h2 class="pillar-title">All 7 Specialized Security & Analytics Modules</h2>
-                        <div class="pillar-path">ACAP/modules/ & server/app/ai/modules/</div>
-                    </div>
-                </div>
-            </div>
-            <div class="grid-3">
-                <div class="grid-card">
-                    <span class="card-badge" style="background:#e0f2fe; color:#0284c7;">Module 1</span>
-                    <div class="card-title">🛡️ Perimeter Security & Intrusion</div>
-                    <div class="card-desc">Perimeter boundary protection, line-crossing vector math, polygonal ROI intrusion detection, and loitering time threshold alerts.</div>
-                </div>
-
-                <div class="grid-card">
-                    <span class="card-badge" style="background:#e0e7ff; color:#4f46e5;">Module 2</span>
-                    <div class="card-title">🚘 Traffic & Vehicle Counting</div>
-                    <div class="card-desc">Bi-directional vehicle counter, speed estimation, illegal parking detection, and lane occupation analytics for traffic management.</div>
-                </div>
-
-                <div class="grid-card">
-                    <span class="card-badge" style="background:#d1fae5; color:#16a34a;">Module 3</span>
-                    <div class="card-title">🦺 PPE & Safety Compliance</div>
-                    <div class="card-desc">Construction site and factory worker safety monitoring: mandatory hardhats, high-visibility vests, safety gloves, and hazardous area entry.</div>
-                </div>
-
-                <div class="grid-card">
-                    <span class="card-badge" style="background:#fef3c7; color:#d97706;">Module 4</span>
-                    <div class="card-title">🛍️ Retail Analytics & Heatmaps</div>
-                    <div class="card-desc">Customer footfall counting, aisle dwell time measurement, queue length detection, and spatial density heatmap generation for retail stores.</div>
-                </div>
-
-                <div class="grid-card">
-                    <span class="card-badge" style="background:#fee2e2; color:#e11d48;">Module 5</span>
-                    <div class="card-title">🏙️ Smart City & Crowding</div>
-                    <div class="card-desc">Public square crowd density estimation, stampede warning alerts, unattended luggage detection, and civic safety compliance.</div>
-                </div>
-
-                <div class="grid-card">
-                    <span class="card-badge" style="background:#f3e8ff; color:#9333ea;">Module 6</span>
-                    <div class="card-title">🔬 Micro-Motion & Anomaly</div>
-                    <div class="card-desc">Sub-pixel motion analysis for industrial machinery vibration monitoring, conveyor belt jamming, and subtle structural movement detection.</div>
-                </div>
-
-                <div class="grid-card">
-                    <span class="card-badge" style="background:#ccfbf1; color:#0d9488;">Module 7</span>
-                    <div class="card-title">⚡ Custom Rules & Trigger Engine</div>
-                    <div class="card-desc">User-defined logic engine for combining multi-condition triggers (e.g., Person AND Vehicle AND Night Hours = High Severity Alert).</div>
-                </div>
-            </div>
-        </section>
-
-        <!-- SECTION: Team Management & Role-Based Access Control (RBAC) -->
-        <section id="team-rbac" class="section-block rbac">
-            <div class="pillar-header">
-                <div class="pillar-title-group">
-                    <div class="pillar-icon-wrapper">
-                        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z"/></svg>
-                    </div>
-                    <div>
-                        <h2 class="pillar-title">Team Management & Role-Based Access Control (RBAC)</h2>
-                        <div class="pillar-path">portal/src/pages/app/Users.tsx & Roles.tsx</div>
-                    </div>
-                </div>
-            </div>
-            <div class="section-grid">
-                <div>
-                    <p class="branch-desc">
-                        CamAI Enterprise includes a multi-tier team management system enabling organization administrators to invite team members, assign granular permissions, restrict site-level access, and audit operator actions.
-                    </p>
-                    <ul class="feature-list">
-                        <li class="feature-item">
-                            <svg class="check-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>
-                            <div><strong>Organization Admin:</strong> Full administrative control over organization settings, subscription billing, camera fleets, and team member invitations.</div>
-                        </li>
-                        <li class="feature-item">
-                            <svg class="check-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>
-                            <div><strong>Security Operator:</strong> Real-time CCTV grid monitoring, alert triage, incident desk management, and instant snapshot review.</div>
-                        </li>
-                        <li class="feature-item">
-                            <svg class="check-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>
-                            <div><strong>Site Manager:</strong> Location-based scope restricting access to assigned physical sites, camera groups, and local ROI drawing tools.</div>
-                        </li>
-                        <li class="feature-item">
-                            <svg class="check-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>
-                            <div><strong>Compliance Auditor:</strong> Read-only access to tamper-proof audit logs, event telemetry exports, and historical system reports.</div>
-                        </li>
-                    </ul>
-                </div>
-                <div>
-                    <div class="code-box">// Granular RBAC Permission Matrix
-export const RBAC_PERMISSIONS = {
-  'org.manage': 'Manage Organization & Billing',
-  'users.manage': 'Invite & Assign Roles',
-  'roles.manage': 'Custom Role Creation',
-  'cameras.manage': 'Add/Edit Cameras & Zones',
-  'ai.configure': 'AI Model Zoo Tuning',
-  'alerts.view': 'Alert Desk & Triage',
-  'reports.view': 'Export Analytics Reports',
-  'audit.view': 'Security Audit Trail'
-};</div>
-                </div>
-            </div>
-        </section>
-
-        <!-- Pillar 1: Web SaaS Portal -->
-        <section id="web-saas" class="section-block portal">
-            <div class="pillar-header">
-                <div class="pillar-title-group">
-                    <div class="pillar-icon-wrapper">
-                        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9"/></svg>
-                    </div>
-                    <div>
-                        <h2 class="pillar-title">Web SaaS Portal & Cloud Management</h2>
-                        <div class="pillar-path">portal/ & supabase/</div>
-                    </div>
-                </div>
-            </div>
-            <div class="section-grid">
-                <div>
-                    <p class="branch-desc">
-                        The central cloud administrative portal empowers enterprise organizations to manage camera fleets, configure line-crossing and ROI intrusion zones, assign license seats, and review security audit logs.
-                    </p>
-                    <ul class="feature-list">
-                        <li class="feature-item">
-                            <svg class="check-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>
-                            <div><strong>Multi-Tenant Data Isolation:</strong> Strict PostgreSQL Row-Level Security (RLS) ensures total privacy across organizations.</div>
-                        </li>
-                        <li class="feature-item">
-                            <svg class="check-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>
-                            <div><strong>Interactive Zone Studio:</strong> Visual web editor for defining custom polygonal ROI boundaries and crossing vectors.</div>
-                        </li>
-                        <li class="feature-item">
-                            <svg class="check-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>
-                            <div><strong>Realtime Alerts & Telegram Integration:</strong> Instant event webhooks dispatched automatically by Supabase Edge Functions.</div>
-                        </li>
-                    </ul>
-                </div>
-                <div>
-                    <div class="code-box">// portal/src/lib/supabaseClient.ts
-import { createClient } from '@supabase/supabase-js';
-
-export const supabase = createClient(
-  import.meta.env.VITE_SUPABASE_URL,
-  import.meta.env.VITE_SUPABASE_ANON_KEY
-);
-
-// Realtime Camera & ROI Configuration Sync
-supabase
-  .channel('camera-changes')
-  .on('postgres_changes', { event: '*', schema: 'public', table: 'cameras' }, payload => {
-    console.log('Realtime Camera Config Updated:', payload.new);
-  })
-  .subscribe();</div>
-                </div>
-            </div>
-
-            <!-- Web SaaS Screenshots -->
-            <div class="gallery-header">
-                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
-                Web SaaS Portal Screenshots
-            </div>
-            <div class="screenshot-grid">
-                <div class="screenshot-card">
-                    <div class="screenshot-img-wrapper">
-                        <img src="assets/welcome_dashboard.png" alt="Welcome Dashboard" class="screenshot-img">
-                    </div>
-                    <div class="screenshot-caption">
-                        <div class="screenshot-title">Welcome Dashboard & Analytics</div>
-                        <div class="screenshot-desc">High-level metrics overview, active camera count, system status, and alert summary.</div>
-                    </div>
-                </div>
-
-                <div class="screenshot-card">
-                    <div class="screenshot-img-wrapper">
-                        <img src="assets/zone_studio_editor.png" alt="Zone Studio Editor" class="screenshot-img">
-                    </div>
-                    <div class="screenshot-caption">
-                        <div class="screenshot-title">Interactive Zone Studio Editor</div>
-                        <div class="screenshot-desc">Visual ROI polygon editor for defining perimeter security lines and detection zones.</div>
-                    </div>
-                </div>
-
-                <div class="screenshot-card">
-                    <div class="screenshot-img-wrapper">
-                        <img src="assets/camera_workspace_live.png" alt="Camera Workspace Live" class="screenshot-img">
-                    </div>
-                    <div class="screenshot-caption">
-                        <div class="screenshot-title">Live Camera Workspace</div>
-                        <div class="screenshot-desc">Multi-stream CCTV grid view with real-time AI bounding boxes and detection overlays.</div>
-                    </div>
-                </div>
-
-                <div class="screenshot-card">
-                    <div class="screenshot-img-wrapper">
-                        <img src="assets/licenses_table.png" alt="License Management" class="screenshot-img">
-                    </div>
-                    <div class="screenshot-caption">
-                        <div class="screenshot-title">License Seat Management</div>
-                        <div class="screenshot-desc">Enterprise software license allocation, hardware machine key binding, and status tracking.</div>
-                    </div>
-                </div>
-            </div>
-        </section>
-
-        <!-- Pillar 2: Desktop Client -->
-        <section id="desktop-client" class="section-block desktop">
-            <div class="pillar-header">
-                <div class="pillar-title-group">
-                    <div class="pillar-icon-wrapper">
-                        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg>
-                    </div>
-                    <div>
-                        <h2 class="pillar-title">Windows Desktop Monitoring Client</h2>
-                        <div class="pillar-path">desktop/</div>
-                    </div>
-                </div>
-            </div>
-            <div class="section-grid">
-                <div>
-                    <p class="branch-desc">
-                        Supervises the local AI engine, manages encrypted DPAPI hardware binding, auto-discovers network cameras, and delivers zero-latency 30-40 FPS MJPEG monitoring grids.
-                    </p>
-                    <ul class="feature-list">
-                        <li class="feature-item">
-                            <svg class="check-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>
-                            <div><strong>DPAPI Machine Binding:</strong> Encrypts hardware session tokens using Windows MachineGUID, CPU ID, and TPM serials.</div>
-                        </li>
-                        <li class="feature-item">
-                            <svg class="check-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>
-                            <div><strong>High-FPS Monitoring Grid:</strong> 30-40 FPS local preview stream with decoupled background AI inference thread.</div>
-                        </li>
-                        <li class="feature-item">
-                            <svg class="check-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>
-                            <div><strong>Local RTSP & ONVIF Discovery:</strong> Auto-detects local IP cameras and handles connection failovers.</div>
-                        </li>
-                    </ul>
-                </div>
-                <div>
-                    <div class="code-box">// desktop/src/lib/localEngine.ts
-export async function syncCamerasToLocalEngine(cameras: any[]) {
-  const status = await getEngineAppStatus();
-  if (!status) return;
-
-  for (const cam of cameras) {
-    await fetch(`${ENGINE_BASE}/api/cameras/${cam.id}/config`, {
-      method: 'POST',
-      headers: await controlHeaders(),
-      body: JSON.stringify({
-        zones: cam.zones,
-        lines: cam.lines,
-        zone_profile: cam.zone_profile
-      })
-    });
-  }
-}</div>
-                </div>
-            </div>
-
-            <!-- Desktop Screenshots -->
-            <div class="gallery-header">
-                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
-                Desktop Client Screenshots
-            </div>
-            <div class="screenshot-grid">
-                <div class="screenshot-card">
-                    <div class="screenshot-img-wrapper">
-                        <img src="assets/camera_workspace_live.png" alt="Desktop Camera Grid" class="screenshot-img">
-                    </div>
-                    <div class="screenshot-caption">
-                        <div class="screenshot-title">High-FPS Desktop CCTV Grid</div>
-                        <div class="screenshot-desc">Zero-latency local MJPEG stream viewer with AI bounding box overlays.</div>
-                    </div>
-                </div>
-
-                <div class="screenshot-card">
-                    <div class="screenshot-img-wrapper">
-                        <img src="assets/downloads_screen.png" alt="Desktop App Downloads" class="screenshot-img">
-                    </div>
-                    <div class="screenshot-caption">
-                        <div class="screenshot-title">Downloads & Installer Desk</div>
-                        <div class="screenshot-desc">Windows Desktop installer download management with local version sync.</div>
-                    </div>
-                </div>
-
-                <div class="screenshot-card">
-                    <div class="screenshot-img-wrapper">
-                        <img src="assets/add_camera_rtsp_modal.png" alt="Add Camera RTSP Modal" class="screenshot-img">
-                    </div>
-                    <div class="screenshot-caption">
-                        <div class="screenshot-title">ONVIF / RTSP Camera Add Modal</div>
-                        <div class="screenshot-desc">Quick setup wizard for adding RTSP streams and IP cameras to the local monitoring engine.</div>
-                    </div>
-                </div>
-            </div>
-        </section>
-
-        <!-- Pillar 3: Mobile Application -->
-        <section id="mobile-app" class="section-block mobile">
-            <div class="pillar-header">
-                <div class="pillar-title-group">
-                    <div class="pillar-icon-wrapper">
-                        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z"/></svg>
-                    </div>
-                    <div>
-                        <h2 class="pillar-title">Mobile Application & RTSP Streamer</h2>
-                        <div class="pillar-path">mobile/</div>
-                    </div>
-                </div>
-            </div>
-            <div class="section-grid">
-                <div>
-                    <p class="branch-desc">
-                        Provides real-time mobile push notifications, live RTSP stream playback with bounding box overlays, mobile camera RTSP streaming, and Telegram bot alert routing.
-                    </p>
-                    <ul class="feature-list">
-                        <li class="feature-item">
-                            <svg class="check-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>
-                            <div><strong>Instant Alert Notifications:</strong> Snapshot preview push notifications dispatched to mobile devices via Telegram webhook.</div>
-                        </li>
-                        <li class="feature-item">
-                            <svg class="check-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>
-                            <div><strong>Mobile Camera IP Emulation:</strong> Transforms Android/iOS phone camera into an active RTSP source for CamAI detection.</div>
-                        </li>
-                        <li class="feature-item">
-                            <svg class="check-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>
-                            <div><strong>Mobile Touch ROI Editor:</strong> Intuitive touch interface for drawing security detection boundaries on mobile screens.</div>
-                        </li>
-                    </ul>
-                </div>
-                <div>
-                    <div class="code-box">// ACAP/phone_camera_connector.py
-import requests
-
-def connect_mobile_phone_stream(phone_ip="192.168.29.24", port=8080):
-    stream_url = f"http://{phone_ip}:{port}/video"
-    print(f"[*] Connecting Mobile Camera: {stream_url}")
-    # Streams raw video to CamAI Engine for real-time detection
-    return stream_url</div>
-                </div>
-            </div>
-
-            <!-- Mobile Screenshots -->
-            <div class="gallery-header">
-                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
-                Mobile Application Screenshots
-            </div>
-            <div class="screenshot-grid">
-                <div class="screenshot-card">
-                    <div class="screenshot-img-wrapper">
-                        <img src="assets/mobile_camera_live.png" alt="Mobile Camera Live" class="screenshot-img">
-                    </div>
-                    <div class="screenshot-caption">
-                        <div class="screenshot-title">Live Mobile Camera Stream</div>
-                        <div class="screenshot-desc">Mobile live camera view with real-time bounding box AI overlay detection.</div>
-                    </div>
-                </div>
-
-                <div class="screenshot-card">
-                    <div class="screenshot-img-wrapper">
-                        <img src="assets/mobile_roi_editor.png" alt="Mobile ROI Editor" class="screenshot-img">
-                    </div>
-                    <div class="screenshot-caption">
-                        <div class="screenshot-title">Touch ROI Polygon Editor</div>
-                        <div class="screenshot-desc">Mobile touch controls for setting up line crossing vectors and security zones.</div>
-                    </div>
-                </div>
-
-                <div class="screenshot-card">
-                    <div class="screenshot-img-wrapper">
-                        <img src="assets/mobile_alerts_timeline.png" alt="Mobile Alerts Timeline" class="screenshot-img">
-                    </div>
-                    <div class="screenshot-caption">
-                        <div class="screenshot-title">Mobile Alert Incident History</div>
-                        <div class="screenshot-desc">Scrollable security alert event timeline with snapshot playback on mobile.</div>
-                    </div>
-                </div>
-
-                <div class="screenshot-card">
-                    <div class="screenshot-img-wrapper">
-                        <img src="assets/telegram_bot_mobile.png" alt="Telegram Bot Mobile" class="screenshot-img">
-                    </div>
-                    <div class="screenshot-caption">
-                        <div class="screenshot-title">Telegram Security Bot Alerts</div>
-                        <div class="screenshot-desc">Instant Telegram push messages with annotated intrusion images and video links.</div>
-                    </div>
-                </div>
-            </div>
-        </section>
-
-    </main>
-
+    <!-- 37. FOOTER -->
     <footer>
         <div class="container">
-            <p>CamAI Enterprise CCTV AI Platform © 2026. Target Route: <code>camai.princesite.in/overview</code></p>
+            <div class="footer-grid">
+                <div>
+                    <div style="display:flex; align-items:center; gap:8px; font-weight:900; font-size:1.2rem; color:#fff; margin-bottom:1rem;">
+                        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2.5" style="width:24px; height:24px; color:var(--accent-blue);"><path stroke-linecap="round" stroke-linejoin="round" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg>
+                        CamAI
+                    </div>
+                    <p style="font-size:0.85rem; color:#94a3b8;">Enterprise Video Intelligence Platform transforming camera streams into real-time operational computer vision AI.</p>
+                </div>
+                <div>
+                    <div class="footer-title">Platform</div>
+                    <ul class="footer-links">
+                        <li><a href="#overview">Overview</a></li>
+                        <li><a href="#ecosystem">Ecosystem</a></li>
+                        <li><a href="#ai-engine">AI Engine</a></li>
+                    </ul>
+                </div>
+                <div>
+                    <div class="footer-title">Deployments</div>
+                    <ul class="footer-links">
+                        <li><a href="#surfaces">Web Portal</a></li>
+                        <li><a href="#surfaces">Desktop Client</a></li>
+                        <li><a href="#surfaces">Mobile App</a></li>
+                        <li><a href="#acap-edge">Edge / ACAP</a></li>
+                    </ul>
+                </div>
+                <div>
+                    <div class="footer-title">Modules</div>
+                    <ul class="footer-links">
+                        <li><a href="#modules">Security</a></li>
+                        <li><a href="#modules">Traffic</a></li>
+                        <li><a href="#modules">PPE Safety</a></li>
+                        <li><a href="#modules">Retail</a></li>
+                    </ul>
+                </div>
+                <div>
+                    <div class="footer-title">Enterprise</div>
+                    <ul class="footer-links">
+                        <li><a href="#security">Security</a></li>
+                        <li><a href="#performance">Performance</a></li>
+                        <li><a href="#contact">Request Demo</a></li>
+                    </ul>
+                </div>
+            </div>
+            <div style="border-top:1px solid #1e293b; padding-top:1.5rem; text-align:center; font-size:0.8rem; color:#64748b;">
+                © 2026 CamAI Enterprise. All rights reserved. Target Route: <code>camai.princesite.in/overview</code>
+            </div>
         </div>
     </footer>
+
 </body>
 </html>
