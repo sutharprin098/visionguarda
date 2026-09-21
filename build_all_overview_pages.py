@@ -497,10 +497,27 @@ ACAP_PAGE_HTML = """
     <p>Develop, compile, and deploy high-performance computer vision applications natively on-camera. Powered by C++20, zero-copy V4L2 buffer management, and hardware VPU acceleration.</p>
     <div class="hero-actions">
       <a href="#getting-started" class="nav-btn" style="padding: 0.75rem 1.75rem; font-size: 1rem;">Developer Quickstart</a>
+      <a href="/downloads/camai_acap_1_0_0_aarch64.eap" download class="nav-btn" style="background: #16a34a; color: #ffffff; padding: 0.75rem 1.75rem; font-size: 1rem; border: none; text-decoration: none; font-weight: 700;">⬇️ Download ACAP Package (.eap)</a>
     </div>
   </section>
 
   <div class="container">
+    <!-- OFFICIAL ACAP BINARY DOWNLOAD CARD -->
+    <div style="background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 12px; padding: 1.75rem 2rem; margin: 1.5rem 0 2.5rem 0; box-shadow: 0 4px 12px rgba(0,0,0,0.02);">
+      <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1.5rem;">
+        <div>
+          <div class="hero-badge" style="background: #dcfce7; color: #15803d; border: 1px solid #86efac; margin-bottom: 0.5rem;">Official ACAP Binary Package</div>
+          <h2 style="font-size: 1.5rem; font-weight: 800; color: #0f172a; margin-bottom: 0.25rem;">camai_acap_1_0_0_aarch64.eap</h2>
+          <p style="color: var(--text-muted); font-size: 0.95rem;">Target OS: AXIS OS 10.x / 11.x &bull; Architecture: ARM64 (aarch64) &bull; Package Size: 14.4 KB &bull; Hardware: ARTPEC-8 / DLPU</p>
+        </div>
+        <div>
+          <a href="/downloads/camai_acap_1_0_0_aarch64.eap" download style="background: #16a34a; color: #ffffff; padding: 0.85rem 1.85rem; border-radius: 8px; font-weight: 700; font-size: 1rem; display: inline-flex; align-items: center; gap: 0.5rem; text-decoration: none; box-shadow: 0 4px 10px rgba(22,163,74,0.3);">
+            <span>Download .eap Installer</span>
+          </a>
+        </div>
+      </div>
+    </div>
+
     <!-- Platform Architecture Overview -->
     <div style="text-align: center; margin-bottom: 2.5rem;">
       <h2 style="font-size: 2rem; font-weight: 800; color: #0f172a;">What is CamAI ACAP C++ Native?</h2>
