@@ -61,6 +61,69 @@ Thumbs.db
 server/.venv-build/
 server/build/
 kernel.errors.txt
+# ── Dependencies ────────────────────────────────────────────────
+node_modules/
+
+# ── Python ──────────────────────────────────────────────────────
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# ── Build output (regenerate with each workspace's build script) ─
+client/dist/
+portal/dist/
+desktop/dist/
+desktop/dist-electron/
+desktop/release/
+server/dist/
+
+# ── Model weights & exports (see server/export_models.py) ───────
+*.pt
+*.pth
+*.onnx
+*_openvino_model/
+# Upstream YOLOX checkout that export_models.py clones on demand.
+server/.yolox_upstream/
+
+# Retired AGPL-3.0 YOLO11/YOLOv8 weights, kept out of the working tree while
+# the swap to Apache-2.0 YOLOX beds in. Safe to delete outright — nothing
+# builds or ships from here. See LICENSING.md.
+_agpl_quarantine/
+
+# OpenVINO on-disk kernel cache (server/app/ai/backend.py CACHE_DIR) --
+# machine/driver-specific compiled artifacts, safe and fast to regenerate.
+ov_cache/
+
+# ── Runtime data — generated while the app runs, never source ───
+server/history/
+server/uploads/
+server/test-results/
+# Same runtime artifacts, but written at the repo root when the engine is
+# driven from here (recordings, snapshots, the history sqlite) rather than
+# from server/. Hundreds of MB of .mp4 — never source.
+dtest/
+test-history/
+
+# ── Logs / scratch / generated reports ──────────────────────────
+*.log
+server/kernel.errors.txt
+server/production_readiness_report.json
+
+# ── Secrets — only .env.example files are tracked ───────────────
+.env
+.env.local
+.env.*.local
+
+# ── Tooling ─────────────────────────────────────────────────────
+supabase/.temp/
+.DS_Store
+Thumbs.db
+
+# ── PyInstaller & Local Builds ──────────────────────────────────
+server/.venv-build/
+server/build/
+kernel.errors.txt
 
 # Large binaries & release installers — upload via GitHub Release, not git source
 *.exe
@@ -69,7 +132,6 @@ kernel.errors.txt
 *.zip
 *.mp4
 videos/
-overview_site/
 mobile/release/
 mobile/dist/
 mobile/dist-electron/

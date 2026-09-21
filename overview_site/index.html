@@ -1,2209 +1,751 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>CamAI — Enterprise AI Video Analytics Platform | Technology Overview</title>
-  <style>
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CamAI Enterprise — System Architecture & Pillar Overview (camai.princesite.in/overview)</title>
+    <meta name="description" content="Comprehensive Architecture Overview for CamAI Enterprise CCTV AI Platform covering Web SaaS Portal, Desktop Client, Mobile App, and AXIS ACAP Native Edge Application.">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=Fira+Code:wght@400;500;600&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-dark: #0b0f19;
+            --bg-card: #111827;
+            --bg-card-hover: #1f2937;
+            --border-color: #1f2937;
+            --border-highlight: #374151;
+            --text-primary: #f9fafb;
+            --text-secondary: #9ca3af;
+            --text-muted: #6b7280;
+            --accent-cyan: #38bdf8;
+            --accent-emerald: #34d399;
+            --accent-indigo: #818cf8;
+            --accent-amber: #fbbf24;
+            --accent-rose: #f43f5e;
+            --gradient-primary: linear-gradient(135deg, #0284c7, #6366f1);
+            --shadow-glow: 0 0 25px rgba(56, 189, 248, 0.15);
+        }
 
-    * { margin: 0; padding: 0; box-sizing: border-box; }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
 
-    
-    body {
-      font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-      background: #e2e8f0;
-      color: #0f172a;
-      font-size: 13px;
-      line-height: 1.6;
-      padding-top: 76px;
-      padding-bottom: 40px;
-    }
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            background-color: var(--bg-dark);
+            color: var(--text-primary);
+            line-height: 1.6;
+            padding-top: 70px;
+            overflow-x: hidden;
+        }
 
-    /* Clean Light Theme Fixed Top Navbar */
-    .top-nav-bar {
-      position: fixed;
-      top: 0;
-      left: 0;
-      right: 0;
-      height: 64px;
-      background: #ffffff;
-      border-bottom: 2px solid #cbd5e1;
-      z-index: 99999;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      padding: 0 28px;
-      box-shadow: 0 4px 15px rgba(0, 0, 0, 0.06);
-    }
+        /* Top Navigation Bar */
+        .navbar {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 70px;
+            background: rgba(11, 15, 25, 0.9);
+            backdrop-filter: blur(16px);
+            border-bottom: 1px solid var(--border-color);
+            z-index: 1000;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 2rem;
+        }
 
-    .nav-brand-title {
-      font-size: 15px;
-      font-weight: 800;
-      color: #1e3a8a;
-      text-transform: uppercase;
-      letter-spacing: -0.3px;
-      display: flex;
-      align-items: center;
-      gap: 6px;
-    }
+        .brand-logo {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            font-size: 1.25rem;
+            font-weight: 800;
+            letter-spacing: -0.5px;
+            color: #fff;
+            text-decoration: none;
+        }
 
-    .nav-brand-title span {
-      color: #0284c7;
-    }
+        .brand-logo .badge-tag {
+            font-size: 0.75rem;
+            background: rgba(56, 189, 248, 0.15);
+            color: var(--accent-cyan);
+            padding: 2px 8px;
+            border-radius: 20px;
+            border: 1px solid rgba(56, 189, 248, 0.3);
+        }
 
-    .nav-btn-group {
-      display: flex;
-      align-items: center;
-      gap: 4px;
-    }
+        .nav-pillars {
+            display: flex;
+            gap: 8px;
+        }
 
-    .nav-link-btn {
-      background: transparent;
-      border: 1px solid transparent;
-      color: #475569;
-      padding: 6px 14px;
-      border-radius: 4px;
-      font-size: 12px;
-      font-weight: 600;
-      cursor: pointer;
-      font-family: inherit;
-      transition: all 0.2s ease;
-    }
+        .pillar-tab {
+            padding: 8px 16px;
+            border-radius: 8px;
+            font-size: 0.875rem;
+            font-weight: 600;
+            color: var(--text-secondary);
+            background: transparent;
+            border: 1px solid transparent;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
 
-    .nav-link-btn:hover {
-      color: #0f172a;
-      background: #f1f5f9;
-      border-color: #cbd5e1;
-    }
+        .pillar-tab:hover {
+            color: #fff;
+            background: rgba(255, 255, 255, 0.05);
+            border-color: var(--border-highlight);
+        }
 
-    .nav-link-btn.active {
-      background: #1e3a8a;
-      color: #ffffff;
-      border-color: #1e3a8a;
-      font-weight: 700;
-      box-shadow: 0 2px 6px rgba(30, 58, 138, 0.25);
-    }
+        .pillar-tab.active {
+            color: #fff;
+            background: var(--gradient-primary);
+            border-color: transparent;
+            box-shadow: 0 4px 12px rgba(99, 102, 241, 0.3);
+        }
 
-    .auto-scroll-btn {
-      background: #16a34a;
-      color: #ffffff;
-      border: none;
-      padding: 7px 16px;
-      border-radius: 4px;
-      font-size: 12px;
-      font-weight: 700;
-      cursor: pointer;
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      transition: all 0.2s ease;
-    }
+        .container {
+            max-width: 1300px;
+            margin: 0 auto;
+            padding: 2rem;
+        }
 
-    .auto-scroll-btn:hover {
-      background: #15803d;
-      box-shadow: 0 2px 8px rgba(22, 163, 74, 0.3);
-    }
+        /* Hero Header */
+        .hero {
+            text-align: center;
+            padding: 3rem 1rem;
+            background: radial-gradient(circle at 50% 0%, rgba(99, 102, 241, 0.15), transparent 70%);
+            border-bottom: 1px solid var(--border-color);
+        }
 
-    .auto-scroll-btn.playing {
-      background: #dc2626;
-    }
-    
+        .hero-title {
+            font-size: 2.75rem;
+            font-weight: 900;
+            letter-spacing: -1px;
+            background: linear-gradient(135deg, #fff, var(--text-secondary));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            margin-bottom: 1rem;
+        }
 
-    .doc-container {
-      max-width: 920px;
-      margin: 0 auto;
-      background: #ffffff;
-      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.12);
-      border-radius: 4px;
-      overflow: hidden;
-    }
+        .hero-domain {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            background: rgba(17, 24, 39, 0.8);
+            border: 1px solid var(--border-highlight);
+            padding: 6px 16px;
+            border-radius: 30px;
+            font-family: 'Fira Code', monospace;
+            font-size: 0.9rem;
+            color: var(--accent-cyan);
+            margin-bottom: 1.5rem;
+        }
 
-    .page {
-      padding: 52px 60px;
-      border-bottom: 2px solid #cbd5e1;
-      position: relative;
-      background: #ffffff;
-    }
+        .hero-desc {
+            max-width: 800px;
+            margin: 0 auto 2rem;
+            font-size: 1.1rem;
+            color: var(--text-secondary);
+        }
 
-    .page:last-child {
-      border-bottom: none;
-    }
+        /* Branch Grid */
+        .branch-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 1.5rem;
+            margin: 2.5rem 0;
+        }
 
-    @media print {
-      body { background: none; padding: 0; }
-      .doc-container { box-shadow: none; max-width: 100%; border-radius: 0; }
-      .page { page-break-after: always; padding: 44px 52px; border-bottom: none; }
-      .page:last-child { page-break-after: avoid; }
-    }
+        .branch-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 16px;
+            padding: 1.5rem;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            cursor: pointer;
+            position: relative;
+            overflow: hidden;
+        }
 
-    /* Header */
-    .header {
-      display: flex;
-      justify-content: space-between;
-      align-items: flex-start;
-      border-bottom: 2px solid #1e3a8a;
-      padding-bottom: 20px;
-      margin-bottom: 30px;
-    }
-    .logo-block h1 {
-      font-size: 26px;
-      font-weight: 800;
-      color: #1e3a8a;
-      letter-spacing: -0.5px;
-      text-transform: uppercase;
-    }
-    .logo-block p {
-      font-size: 13px;
-      color: #475569;
-      margin-top: 3px;
-      font-weight: 600;
-    }
-    .meta-block {
-      text-align: right;
-    }
-    .doc-badge {
-      display: inline-block;
-      background: #0f172a;
-      color: #ffffff;
-      padding: 5px 14px;
-      border-radius: 3px;
-      font-size: 11px;
-      font-weight: 700;
-      letter-spacing: 0.8px;
-      text-transform: uppercase;
-    }
-    .doc-submeta {
-      font-size: 11px;
-      color: #64748b;
-      margin-top: 6px;
-      font-weight: 500;
-    }
+        .branch-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 3px;
+            background: var(--border-color);
+            transition: background 0.3s;
+        }
 
-    /* Headings */
-    h2.section-title {
-      font-size: 16px;
-      font-weight: 700;
-      text-transform: uppercase;
-      letter-spacing: 0.8px;
-      color: #1e3a8a;
-      margin-top: 24px;
-      margin-bottom: 14px;
-      padding-bottom: 6px;
-      border-bottom: 1px solid #e2e8f0;
-    }
+        .branch-card:hover {
+            transform: translateY(-5px);
+            border-color: var(--border-highlight);
+            box-shadow: var(--shadow-glow);
+        }
 
-    h3.sub-title {
-      font-size: 13px;
-      font-weight: 700;
-      color: #1e293b;
-      margin-top: 16px;
-      margin-bottom: 8px;
-      text-transform: uppercase;
-      letter-spacing: 0.4px;
-    }
+        .branch-card.portal::before { background: var(--accent-cyan); }
+        .branch-card.desktop::before { background: var(--accent-indigo); }
+        .branch-card.mobile::before { background: var(--accent-emerald); }
+        .branch-card.acap::before { background: var(--accent-amber); }
 
-    p {
-      margin-bottom: 12px;
-      color: #334155;
-    }
+        .branch-icon {
+            font-size: 2rem;
+            margin-bottom: 1rem;
+            display: inline-block;
+        }
 
-    /* Visual Diagram Boxes */
-    .architecture-diagram {
-      background: #f8fafc;
-      border: 1px solid #cbd5e1;
-      border-radius: 6px;
-      padding: 20px;
-      margin: 18px 0;
-    }
+        .branch-title {
+            font-size: 1.25rem;
+            font-weight: 700;
+            margin-bottom: 0.5rem;
+        }
 
-    .diagram-flow {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      gap: 8px;
-    }
+        .branch-subtitle {
+            font-size: 0.85rem;
+            color: var(--accent-cyan);
+            font-family: 'Fira Code', monospace;
+            margin-bottom: 0.75rem;
+        }
 
-    .diagram-node {
-      background: #ffffff;
-      border: 1px solid #94a3b8;
-      border-top: 3px solid #1e3a8a;
-      border-radius: 4px;
-      padding: 10px 12px;
-      text-align: center;
-      flex: 1;
-    }
-    .diagram-node .node-title {
-      font-size: 11px;
-      font-weight: 700;
-      color: #0f172a;
-      text-transform: uppercase;
-    }
-    .diagram-node .node-desc {
-      font-size: 10px;
-      color: #64748b;
-      margin-top: 3px;
-    }
-    .diagram-arrow {
-      font-size: 14px;
-      font-weight: 700;
-      color: #2563eb;
-    }
+        .branch-desc {
+            font-size: 0.9rem;
+            color: var(--text-secondary);
+            margin-bottom: 1rem;
+        }
 
-    /* Tables */
-    table {
-      width: 100%;
-      border-collapse: collapse;
-      margin-top: 12px;
-      margin-bottom: 18px;
-      font-size: 12px;
-    }
-    th, td {
-      padding: 10px 12px;
-      text-align: left;
-      border-bottom: 1px solid #e2e8f0;
-      vertical-align: top;
-    }
-    th {
-      background: #f1f5f9;
-      font-weight: 700;
-      color: #0f172a;
-      border-top: 1px solid #cbd5e1;
-      border-bottom: 2px solid #94a3b8;
-      font-size: 11px;
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
-    }
-    td.highlight {
-      font-weight: 600;
-      color: #0f172a;
-    }
-    td.verified { color: #16a34a; font-weight: 600; }
-    td.target { color: #d97706; font-weight: 600; }
+        .branch-tags {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+        }
 
-    /* Cards & Grids */
-    .card-grid-3 {
-      display: grid;
-      grid-template-columns: repeat(3, 1fr);
-      gap: 12px;
-      margin: 16px 0;
-    }
-    .card-grid-2 {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 16px;
-      margin: 16px 0;
-    }
-    .metric-card {
-      background: #f8fafc;
-      border: 1px solid #e2e8f0;
-      border-left: 4px solid #1e3a8a;
-      border-radius: 4px;
-      padding: 14px;
-    }
-    .metric-card .card-label {
-      font-size: 10px;
-      font-weight: 700;
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
-      color: #64748b;
-    }
-    .metric-card .card-value {
-      font-size: 19px;
-      font-weight: 800;
-      color: #0f172a;
-      margin-top: 4px;
-    }
-    .metric-card .card-sub {
-      font-size: 11px;
-      color: #475569;
-      margin-top: 2px;
-    }
+        .tag {
+            font-size: 0.75rem;
+            background: rgba(255, 255, 255, 0.05);
+            padding: 3px 8px;
+            border-radius: 4px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            color: var(--text-secondary);
+        }
 
-    /* Callouts */
-    .note-box {
-      background: #f8fafc;
-      border: 1px solid #e2e8f0;
-      border-left: 4px solid #2563eb;
-      padding: 12px 16px;
-      border-radius: 4px;
-      margin: 16px 0;
-      font-size: 12px;
-    }
-    .note-box.warning {
-      border-left-color: #d97706;
-      background: #fffbe6;
-      border-color: #fef08a;
-    }
-    .note-box.success {
-      border-left-color: #16a34a;
-      background: #f0fdf4;
-      border-color: #bbf7d0;
-    }
+        /* Section Headings */
+        .section-header {
+            margin: 3rem 0 1.5rem;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
 
-    /* Checklists */
-    .item-list {
-      list-style: none;
-      margin-bottom: 14px;
-    }
-    .item-list li {
-      padding: 6px 0;
-      border-bottom: 1px solid #f1f5f9;
-      display: flex;
-      align-items: flex-start;
-      font-size: 12px;
-    }
-    .bullet-tag {
-      font-weight: 700;
-      min-width: 22px;
-      color: #1e3a8a;
-    }
+        .section-title {
+            font-size: 1.75rem;
+            font-weight: 800;
+            letter-spacing: -0.5px;
+        }
 
-    /* UI Screenshot Showcases */
-    .ui-screenshot-card {
-      background: #f8fafc;
-      border: 1px solid #cbd5e1;
-      border-radius: 6px;
-      padding: 14px;
-      margin: 18px 0;
-      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
-    }
-    .ui-screenshot-card img {
-      width: 100%;
-      height: auto;
-      border-radius: 4px;
-      border: 1px solid #94a3b8;
-      box-shadow: 0 6px 16px rgba(0, 0, 0, 0.1);
-      display: block;
-    }
-    .ui-screenshot-caption {
-      font-size: 11px;
-      color: #334155;
-      font-weight: 600;
-      margin-top: 10px;
-      text-align: center;
-      line-height: 1.4;
-    }
-    .ui-screenshot-tag {
-      display: inline-block;
-      background: #1e3a8a;
-      color: #ffffff;
-      padding: 2px 8px;
-      border-radius: 3px;
-      font-size: 10px;
-      font-weight: 700;
-      text-transform: uppercase;
-      margin-right: 6px;
-    }
+        /* Interactive Detail Panels */
+        .panel {
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 16px;
+            padding: 2rem;
+            margin-bottom: 2rem;
+            display: none;
+        }
 
-    /* Footer */
-    .footer {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      margin-top: 36px;
-      padding-top: 14px;
-      border-top: 1px solid #e2e8f0;
-      font-size: 10px;
-      color: #94a3b8;
-    }
-  </style>
+        .panel.active {
+            display: block;
+            animation: fadeIn 0.3s ease;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .panel-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 2rem;
+        }
+
+        @media (max-width: 900px) {
+            .panel-grid { grid-template-columns: 1fr; }
+        }
+
+        .feature-list {
+            list-style: none;
+            margin-top: 1rem;
+        }
+
+        .feature-item {
+            padding: 0.75rem 0;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+            display: flex;
+            align-items: flex-start;
+            gap: 10px;
+        }
+
+        .feature-item:last-child { border-bottom: none; }
+
+        .bullet {
+            color: var(--accent-cyan);
+            font-weight: bold;
+        }
+
+        .code-box {
+            background: #090d16;
+            border: 1px solid var(--border-color);
+            border-radius: 10px;
+            padding: 1.25rem;
+            font-family: 'Fira Code', monospace;
+            font-size: 0.85rem;
+            color: var(--accent-emerald);
+            overflow-x: auto;
+            white-space: pre;
+        }
+
+        /* Matrix Table */
+        .matrix-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 1.5rem;
+            background: var(--bg-card);
+            border-radius: 12px;
+            overflow: hidden;
+            border: 1px solid var(--border-color);
+        }
+
+        .matrix-table th, .matrix-table td {
+            padding: 1rem 1.25rem;
+            text-align: left;
+            border-bottom: 1px solid var(--border-color);
+            font-size: 0.9rem;
+        }
+
+        .matrix-table th {
+            background: #161e2e;
+            font-weight: 700;
+            color: #fff;
+            text-transform: uppercase;
+            font-size: 0.75rem;
+            letter-spacing: 0.5px;
+        }
+
+        .matrix-table tr:hover {
+            background: var(--bg-card-hover);
+        }
+
+        .status-check {
+            color: var(--accent-emerald);
+            font-weight: bold;
+        }
+
+        /* Search Bar */
+        .search-bar {
+            width: 100%;
+            max-width: 400px;
+            padding: 10px 16px;
+            background: var(--bg-card);
+            border: 1px solid var(--border-highlight);
+            border-radius: 8px;
+            color: #fff;
+            font-size: 0.9rem;
+            outline: none;
+            transition: border-color 0.2s;
+        }
+
+        .search-bar:focus {
+            border-color: var(--accent-cyan);
+        }
+
+        footer {
+            text-align: center;
+            padding: 3rem 0 1.5rem;
+            border-top: 1px solid var(--border-color);
+            color: var(--text-muted);
+            font-size: 0.85rem;
+        }
+    </style>
 </head>
 <body>
 
-
-<!-- ===================================================
-     LIGHT THEME FIXED TOP NAVIGATION HEADER
-=================================================== -->
-<header class="top-nav-bar" id="mainNav">
-  <div class="nav-brand-title">
-    <span>CamAI</span> Enterprise Briefing
-  </div>
-
-  <nav class="nav-btn-group">
-    <button class="nav-link-btn active" data-target="sec-executive" onclick="scrollToSection('sec-executive')">Executive</button>
-    <button class="nav-link-btn" data-target="sec-revenue" onclick="scrollToSection('sec-revenue')">Revenue Model</button>
-    <button class="nav-link-btn" data-target="sec-accuracy" onclick="scrollToSection('sec-accuracy')">Accuracy &amp; 15-Day Test</button>
-    <button class="nav-link-btn" data-target="sec-website" onclick="scrollToSection('sec-website')">Website (Portal)</button>
-    <button class="nav-link-btn" data-target="sec-app" onclick="scrollToSection('sec-app')">Mobile App</button>
-    <button class="nav-link-btn" data-target="sec-software" onclick="scrollToSection('sec-software')">Desktop Software</button>
-    <button class="nav-link-btn" data-target="sec-techstack" onclick="scrollToSection('sec-techstack')">Tech Matrix</button>
-    <button class="nav-link-btn" data-target="sec-licensing" onclick="scrollToSection('sec-licensing')">Licensing & Security</button>
-    <button class="nav-link-btn" data-target="sec-gallery" onclick="scrollToSection('sec-gallery')">UI Gallery</button>
-  </nav>
-
-  <div>
-    <button id="autoScrollBtn" class="auto-scroll-btn" onclick="toggleAutoScroll()">
-      <span id="autoScrollIcon">▶</span> <span id="autoScrollText">Auto-Scroll</span>
-    </button>
-  </div>
-</header>
-
-
-<div class="doc-container">
-
-  <!-- ===================================================
-       PAGE 1: COVER & EXECUTIVE OVERVIEW
-  =================================================== -->
-  <div class="page" id="sec-executive">
-    <div class="header">
-      <div class="logo-block">
-        <h1>CamAI Enterprise</h1>
-        <p>Enterprise AI Video Analytics Platform</p>
-      </div>
-      <div class="meta-block">
-        <div class="doc-badge">Strategic Technology Briefing</div>
-        <div class="doc-submeta">Commercialization &amp; IP Opportunity</div>
-      </div>
-    </div>
-
-    <div style="margin: 20px 0; padding: 16px 20px; background: #ffffff; border: 2px solid #2563eb; border-radius: 8px; box-shadow: 0 4px 12px rgba(37,99,235,0.12); display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px;">
-      <div>
-        <div style="font-size: 14px; font-weight: 800; color: #0f172a;">⚡ CamAI Live Software Artifacts & Source Code</div>
-        <div style="font-size: 11px; color: #64748b; margin-top: 2px;">Download latest builds or access open GitHub source repository</div>
-      </div>
-      <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
-        <a href="https://github.com/sutharprin098/visionguarda" target="_blank" style="display: inline-flex; align-items: center; gap: 6px; background: #0f172a; color: #ffffff; padding: 8px 14px; border-radius: 6px; font-size: 12px; font-weight: 700; text-decoration: none; transition: all 0.2s;">
-          <svg height="14" width="14" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.28.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
-          GitHub Repository
+    <!-- Top Navigation Bar -->
+    <nav class="navbar">
+        <a href="#" class="brand-logo">
+            <span>📹 CamAI Enterprise</span>
+            <span class="badge-tag">v2.4 Production</span>
         </a>
-        <a href="https://github.com/sutharprin098/visionguarda/releases" target="_blank" style="display: inline-flex; align-items: center; gap: 6px; background: #2563eb; color: #ffffff; padding: 8px 14px; border-radius: 6px; font-size: 12px; font-weight: 700; text-decoration: none; transition: all 0.2s;">
-          💻 Download Desktop (.EXE)
-        </a>
-        <a href="https://github.com/sutharprin098/visionguarda/raw/main/mobile/CamAI-Mobile.apk" target="_blank" style="display: inline-flex; align-items: center; gap: 6px; background: #16a34a; color: #ffffff; padding: 8px 14px; border-radius: 6px; font-size: 12px; font-weight: 700; text-decoration: none; transition: all 0.2s;">
-          📱 Download Android (.APK)
-        </a>
-      </div>
-    </div>
-
-    <h2 class="section-title">1. Executive Overview</h2>
-    <p>
-      <strong>CamAI</strong> is a modular software platform engineered to deliver real-time artificial intelligence capabilities across video surveillance networks. The system bridges edge inference engines with cloud administration, providing end-to-end management for multi-camera deployments without requiring custom firmware modifications to underlying camera hardware.
-    </p>
-    <p>
-      The complete software asset is structured across four primary architectural layers:
-    </p>
-    <div class="card-grid-2">
-      <div class="metric-card">
-        <div class="card-label">Layer 1: Edge & Cloud AI Engines</div>
-        <div class="card-sub">Dual-mode YOLOX/OpenCV engine supporting on-premises local hardware (CPU/GPU) &amp; AWS EC2 Cloud GPU instance (13.203.71.14:8000) with 0% client desktop CPU/GPU load.</div>
-      </div>
-      <div class="metric-card">
-        <div class="card-label">Layer 2: Desktop Client Workstation</div>
-        <div class="card-sub">Electron + React workstation application providing live camera grids, interactive GIS floor plans, DPAPI license vault, and real-time engine mode synchronizers.</div>
-      </div>
-      <div class="metric-card">
-        <div class="card-label">Layer 3: Cloud Backend & RLS</div>
-        <div class="card-sub">Multi-tenant Supabase Postgres database with 44+ migration scripts, Row-Level Security, and 21 Deno/TypeScript Edge Functions.</div>
-      </div>
-      <div class="metric-card">
-        <div class="card-label">Layer 4: SaaS Web Admin Portal</div>
-        <div class="card-sub">Browser-based SaaS administration portal (React + Vite) for single-click runtime mode switching, camera groups, user role RLS, and license vault management.</div>
-      </div>
-    </div>
-
-    <div class="note-box">
-      <strong>Purpose of Document:</strong> This briefing provides corporate development, engineering leadership, product management, and technical M&amp;A teams with a clear structural overview of the CamAI codebase, implemented features, empirical performance benchmarks, and potential integration pathways.
-    </div>
-
-    <!-- UI Screenshot 1: Public Web Portal Landing Hero -->
-    <div class="ui-screenshot-card">
-      <img src="assets/landing_hero.png" alt="CamAI Enterprise Public Web Portal & Landing Interface" />
-      <div class="ui-screenshot-caption">
-        <span class="ui-screenshot-tag">Figure 1</span>
-        <strong>CamAI Enterprise SaaS Web Portal &amp; Landing Page:</strong> Zero-cloud egress architecture showcase featuring native RTSP/ONVIF integration, NVIDIA CUDA / TensorRT acceleration badges, and trial onboarding workflow.
-      </div>
-    </div>
-
-    <div class="footer">
-      <span>CamAI Enterprise — Strategic Technology Briefing</span>
-      <span>Page 1</span>
-    </div>
-  </div>
-
-  <!-- ===================================================
-       PAGE 2: WHAT IS CAMAI?
-  =================================================== -->
-  <div class="page" id="sec-definition">
-    <div class="header">
-      <div class="logo-block">
-        <h1>Product Definition &amp; Architecture</h1>
-        <p>Complete Application Stack vs. Standalone AI Models</p>
-      </div>
-      <div class="meta-block">
-        <div class="doc-badge">Section 2</div>
-      </div>
-    </div>
-
-    <h2 class="section-title">2. What is CamAI?</h2>
-    <p>
-      CamAI is not merely a standalone object detection model or a computer vision research script. It is a <strong>complete enterprise software application platform</strong> built around real-time inference pipelines. It encompasses device provisioning, multi-tenant isolation, real-time alert dispatching, workstation user interfaces, and administrative controls.
-    </p>
-
-    <div class="architecture-diagram">
-      <h3 class="sub-title" style="margin-top:0; text-align:center; margin-bottom:14px;">End-to-End Data &amp; Telemetry Pipeline</h3>
-      <div class="diagram-flow">
-        <div class="diagram-node">
-          <div class="node-title">Camera / NVR</div>
-          <div class="node-desc">RTSP / USB Streams</div>
+        <div class="nav-pillars">
+            <button class="pillar-tab active" onclick="switchTab('portal')">🌐 Web SaaS Portal</button>
+            <button class="pillar-tab" onclick="switchTab('desktop')">🖥️ Desktop Client</button>
+            <button class="pillar-tab" onclick="switchTab('mobile')">📱 Mobile App</button>
+            <button class="pillar-tab" onclick="switchTab('acap')">📹 AXIS ACAP Native</button>
+            <button class="pillar-tab" onclick="switchTab('matrix')">📊 Feature Matrix</button>
         </div>
-        <div class="diagram-arrow">→</div>
-        <div class="diagram-node">
-          <div class="node-title">AI Engine</div>
-          <div class="node-desc">YOLOX + Tracker</div>
+    </nav>
+
+    <!-- Hero Header -->
+    <header class="hero">
+        <div class="hero-domain">🌐 Target Route: camai.princesite.in/overview</div>
+        <h1 class="hero-title">CamAI Enterprise Platform Architecture</h1>
+        <p class="hero-desc">
+            A complete A-to-Z breakdown of CamAI's four core pillars: Cloud SaaS Management, Windows Desktop Client, Mobile Push App, and AXIS ACAP Native Edge Application.
+        </p>
+    </header>
+
+    <main class="container">
+
+        <!-- Pillar Branching Grid -->
+        <div class="branch-grid">
+            <div class="branch-card portal" onclick="switchTab('portal')">
+                <div class="branch-icon">🌐</div>
+                <div class="branch-title">Web SaaS Portal</div>
+                <div class="branch-subtitle">portal/ & supabase/</div>
+                <div class="branch-desc">Multi-tenant cloud management, camera registry, row-level security (RLS), alert triggers & subscription billing.</div>
+                <div class="branch-tags">
+                    <span class="tag">React</span>
+                    <span class="tag">Tailwind</span>
+                    <span class="tag">Supabase</span>
+                    <span class="tag">Edge Functions</span>
+                </div>
+            </div>
+
+            <div class="branch-card desktop" onclick="switchTab('desktop')">
+                <div class="branch-icon">🖥️</div>
+                <div class="branch-title">Desktop Client</div>
+                <div class="branch-subtitle">desktop/</div>
+                <div class="branch-desc">Windows monitoring station supervising local engine, DPAPI security, zero-latency MJPEG grid & device binding.</div>
+                <div class="branch-tags">
+                    <span class="tag">Electron</span>
+                    <span class="tag">TypeScript</span>
+                    <span class="tag">FastAPI Sync</span>
+                    <span class="tag">DPAPI</span>
+                </div>
+            </div>
+
+            <div class="branch-card mobile" onclick="switchTab('mobile')">
+                <div class="branch-icon">📱</div>
+                <div class="branch-title">Mobile Application</div>
+                <div class="branch-subtitle">mobile/</div>
+                <div class="branch-desc">Real-time mobile alerts, live stream viewer, mobile camera RTSP streaming & push notifications.</div>
+                <div class="branch-tags">
+                    <span class="tag">Android / iOS</span>
+                    <span class="tag">Capacitor</span>
+                    <span class="tag">Telegram Webhook</span>
+                    <span class="tag">Live RTSP</span>
+                </div>
+            </div>
+
+            <div class="branch-card acap" onclick="switchTab('acap')">
+                <div class="branch-icon">📹</div>
+                <div class="branch-title">AXIS ACAP Native</div>
+                <div class="branch-subtitle">ACAP/</div>
+                <div class="branch-desc">On-device edge AI for Axis cameras with ARTPEC-8 DLPU acceleration, VDO zero-copy pipeline, Larod & axevent.</div>
+                <div class="branch-tags">
+                    <span class="tag">C/C++20</span>
+                    <span class="tag">VDO API</span>
+                    <span class="tag">Larod NPU</span>
+                    <span class="tag">axevent / axoverlay</span>
+                </div>
+            </div>
         </div>
-        <div class="diagram-arrow">→</div>
-        <div class="diagram-node">
-          <div class="node-title">Desktop Client</div>
-          <div class="node-desc">Live View + GIS</div>
+
+        <!-- Detail Panel 1: Web SaaS Portal -->
+        <div id="panel-portal" class="panel active">
+            <div class="section-header">
+                <h2 class="section-title">🌐 Web SaaS Portal & Cloud Backend (`portal/` & `supabase/`)</h2>
+            </div>
+            <div class="panel-grid">
+                <div>
+                    <p class="branch-desc">
+                        The Cloud SaaS portal is the central administrative interface for managing organizations, camera fleets, license keys, user roles, and alert notifications.
+                    </p>
+                    <ul class="feature-list">
+                        <li class="feature-item">
+                            <span class="bullet">✓</span>
+                            <div><strong>Multi-Tenant Isolation:</strong> PostgreSQL Row Level Security (RLS) ensures absolute data privacy across organizations.</div>
+                        </li>
+                        <li class="feature-item">
+                            <span class="bullet">✓</span>
+                            <div><strong>Camera Management:</strong> Web-based zone creation, line crossing rules, and sensitivity thresholds.</div>
+                        </li>
+                        <li class="feature-item">
+                            <span class="bullet">✓</span>
+                            <div><strong>Supabase Edge Functions:</strong> Auto-dispatching Telegram, SMS, and email alerts on AI intrusion events.</div>
+                        </li>
+                    </ul>
+                </div>
+                <div>
+                    <div class="code-box">// portal/src/lib/supabaseClient.ts
+import { createClient } from '@supabase/supabase-js';
+
+export const supabase = createClient(
+  import.meta.env.VITE_SUPABASE_URL,
+  import.meta.env.VITE_SUPABASE_ANON_KEY
+);
+
+// Realtime Camera Config & Alert Synchronization
+supabase
+  .channel('camera-changes')
+  .on('postgres_changes', { event: '*', schema: 'public', table: 'cameras' }, payload => {
+    console.log('Realtime Camera Config Updated:', payload.new);
+  })
+  .subscribe();</div>
+                </div>
+            </div>
         </div>
-        <div class="diagram-arrow">→</div>
-        <div class="diagram-node">
-          <div class="node-title">Cloud Backend</div>
-          <div class="node-desc">Supabase + Edge</div>
-        </div>
-        <div class="diagram-arrow">→</div>
-        <div class="diagram-node">
-          <div class="node-title">Web Portal</div>
-          <div class="node-desc">SaaS Management</div>
-        </div>
-      </div>
-      <div style="text-align:center; margin-top:12px; font-size:11px; color:#64748b;">
-        * Edge alerts fan out asynchronously to Telegram channels &amp; email SMTP gateways via Edge Functions.
-      </div>
-    </div>
 
-    <h2 class="section-heading">3. Key Platform Components</h2>
-    <ul class="item-list">
-      <li><span class="bullet-tag">[1]</span><span><strong>Inference &amp; Tracking Engine:</strong> Real-time frame processing supporting concurrent object detection, multi-target trajectory association, and specialized analytical workers (ANPR, Speed, Helmet).</span></li>
-      <li><span class="bullet-tag">[2]</span><span><strong>Camera &amp; Stream Manager:</strong> Automatic stream recovery, RTSP reconnection handling, synthetic frame fallbacks, and connection string encryption.</span></li>
-      <li><span class="bullet-tag">[3]</span><span><strong>Rule &amp; Incident Engine:</strong> Configurable spatial polygon zones, tripwire line crossing, dwell time accumulation, and threshold-based alert triggers.</span></li>
-      <li><span class="bullet-tag">[4]</span><span><strong>Licensing &amp; Device Binding:</strong> Cryptographic license key management with hardware fingerprinting (CPU, motherboard, Windows MachineGuid) and DPAPI-encrypted token vaults.</span></li>
-      <li><span class="bullet-tag">[5]</span><span><strong>GIS Spatial Visualization:</strong> Real-time floor plan and outdoor map rendering using Leaflet canvas for spatial tracking of detected entities.</span></li>
-    </ul>
-
-    <!-- UI Screenshot 2: Telemetry & Edge Intelligence Command Center -->
-    <div class="ui-screenshot-card">
-      <img src="assets/welcome_dashboard.png" alt="CamAI Edge Telemetry & Video Intelligence Command Suite" />
-      <div class="ui-screenshot-caption">
-        <span class="ui-screenshot-tag">Figure 2</span>
-        <strong>Enterprise Command Suite — Video Telemetry &amp; Edge Intelligence Dashboard:</strong> Real-time system state monitoring showing active team personnel, camera nodes, connected desktop engines, license validity, 24h AI event metrics, and system load status.
-      </div>
-    </div>
-
-    <div class="footer">
-      <span>CamAI Enterprise — Strategic Technology Briefing</span>
-      <span>Page 2</span>
-    </div>
-  </div>
-
-  
-  <!-- ===================================================
-       PAGE 2B: WEB SAAS CLOUD PORTAL (DETAILED FEATURE SECTION)
-  =================================================== -->
-  <div class="page" id="sec-website">
-    <div class="header">
-      <div class="logo-block">
-        <h1>Web SaaS Cloud Admin Portal (`portal/`)</h1>
-        <p>Centralized Multi-Tenant Cloud Management, Fleet Controls &amp; Licensing</p>
-      </div>
-      <div class="meta-block">
-        <div class="doc-badge">Component Breakdown 1</div>
-      </div>
-    </div>
-
-    <h2 class="section-title">2A. SaaS Web Portal Architecture &amp; Key Features</h2>
-    <p>
-      The browser-based SaaS Web Portal (built with React 18, Vite, TypeScript, and Tailwind CSS) serves as the primary administrative command suite for enterprise organization owners, security teams, and system integrators.
-    </p>
-
-    <div class="card-grid-2">
-      <div class="metric-card" style="border-left-color: #2563eb;">
-        <div class="card-label">Multi-Tenant RBAC &amp; RLS Isolation</div>
-        <div class="card-sub" style="margin-top:6px;">
-          Row-Level Security (RLS) enforcement isolating organizations, users, cameras, and incident logs. Scoped access roles: Admin/Owner, Operator, and Read-Only Viewer.
-        </div>
-      </div>
-      <div class="metric-card" style="border-left-color: #0284c7;">
-        <div class="card-label">Global Camera Fleet Management</div>
-        <div class="card-sub" style="margin-top:6px;">
-          Provision, group, and configure RTSP, ONVIF, and IP streams across multiple locations with automated 15-second heartbeat status monitoring.
-        </div>
-      </div>
-      <div class="metric-card" style="border-left-color: #16a34a;">
-        <div class="card-label">Cryptographic Hardware Licensing Vault</div>
-        <div class="card-sub" style="margin-top:6px;">
-          Generate, manage, and remotely deactivate SHA-256 hardware-bound activation keys tied to motherboard, CPU, and Windows MachineGuid signatures.
-        </div>
-      </div>
-      <div class="metric-card" style="border-left-color: #7c3aed;">
-        <div class="card-label">OTA Installer &amp; Release Distribution Hub</div>
-        <div class="card-sub" style="margin-top:6px;">
-          Serves production setup binaries (`CamAI-Desktop-Setup-1.0.7.exe` and `CamAI-Mobile-v1.0.2.apk`) with cryptographically verified SHA-256 checksums.
-        </div>
-      </div>
-    </div>
-
-    <div class="ui-screenshot-card">
-      <img src="assets/landing_hero.png" alt="CamAI Web Portal Interface" />
-      <div class="ui-screenshot-caption">
-        <span class="ui-screenshot-tag">Web Portal</span>
-        <strong>Public Web Portal &amp; Cloud SaaS Command Interface:</strong> Unified camera onboarding workflow, zero-cloud egress option, and real-time fleet health dashboard.
-      </div>
-    </div>
-
-    <div class="ui-screenshot-card">
-      <img src="assets/add_camera_rtsp_modal.png" alt="CamAI Add Camera RTSP Stream Provisioning Modal" />
-      <div class="ui-screenshot-caption">
-        <span class="ui-screenshot-tag">Provisioning</span>
-        <strong>RTSP &amp; ONVIF Camera Stream Provisioning Modal:</strong> Instant network camera connection string verification, AES-256-GCM credential encryption, and GIS spatial location binding.
-      </div>
-    </div>
-
-    <div class="footer">
-      <span>CamAI Enterprise — Strategic Technology Briefing</span>
-      <span>Page 2B</span>
-    </div>
-  </div>
-
-  <!-- ===================================================
-       PAGE 2C: DEDICATED MOBILE SECURITY APP
-  =================================================== -->
-  <div class="page" id="sec-app">
-    <div class="header">
-      <div class="logo-block">
-        <h1>Dedicated Mobile Security Application (`mobile/`)</h1>
-        <p>100% AWS Cloud GPU Processing, App-Closed Push Alerts &amp; Mobile ROI Studio</p>
-      </div>
-      <div class="meta-block">
-        <div class="doc-badge">Component Breakdown 2</div>
-      </div>
-    </div>
-
-    <h2 class="section-title">2B. Mobile Security App Features &amp; Cloud GPU Offloading</h2>
-    <p>
-      Built for Android and iOS devices, the CamAI Mobile App provides real-time security monitoring, instant mobile push alerts, and direct camera control for operators on the move.
-    </p>
-
-    <div class="card-grid-2" style="margin: 16px 0;">
-      <div class="ui-screenshot-card">
-        <img src="assets/mobile_camera_live.png" alt="CamAI Mobile App Live Camera Stream" />
-        <div class="ui-screenshot-caption">
-          <span class="ui-screenshot-tag">Mobile Live Feed</span>
-          <strong>Live Mobile Camera Stream &amp; AWS GPU AI Overlay:</strong> Sub-second video playback with real-time detection bounding box canvas.
-        </div>
-      </div>
-      <div class="ui-screenshot-card">
-        <img src="assets/mobile_roi_editor.png" alt="CamAI Mobile App Polygon ROI Studio" />
-        <div class="ui-screenshot-caption">
-          <span class="ui-screenshot-tag">Mobile ROI Studio</span>
-          <strong>Touch Polygon ROI Canvas Editor:</strong> Touch-screen multi-vertex boundary drawer for tripwires &amp; intrusion detection.
-        </div>
-      </div>
-    </div>
-
-    <div class="card-grid-2" style="margin: 16px 0;">
-      <div class="ui-screenshot-card">
-        <img src="assets/mobile_alerts_timeline.png" alt="CamAI Mobile App Alert Incident Center" />
-        <div class="ui-screenshot-caption">
-          <span class="ui-screenshot-tag">Mobile Alerts</span>
-          <strong>Incident Center &amp; Evidence Timeline:</strong> Chronological emergency event history with snapshot preview crops.
-        </div>
-      </div>
-      <div class="ui-screenshot-card">
-        <img src="assets/mobile_app_settings.png" alt="CamAI Mobile App Settings & OTA Updates" />
-        <div class="ui-screenshot-caption">
-          <span class="ui-screenshot-tag">Mobile Settings</span>
-          <strong>AWS GPU Cloud Server &amp; 1-Click OTA Updates:</strong> In-app settings manager for updating engine endpoints and client versions.
-        </div>
-      </div>
-    </div>
-
-    <table>
-      <thead>
-        <tr>
-          <th>Mobile Feature Capability</th>
-          <th>Implementation Specification</th>
-          <th>User Experience Impact</th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr>
-          <td class="highlight">100% AWS Cloud GPU Offloading</td>
-          <td>Zero AI inference runs on the phone. All detection runs on AWS Cloud GPU Node (`13.203.71.14:8000`).</td>
-          <td class="verified">0% battery drain &amp; zero phone overheating during live viewing.</td>
-        </tr>
-        <tr>
-          <td class="highlight">WhatsApp-Style 24/7 Push Alerts</td>
-          <td>High-priority alert notification dispatch delivered even when app is killed or device is locked.</td>
-          <td class="verified">Instant emergency notification with visual snapshot evidence thumbnail.</td>
-        </tr>
-        <tr>
-          <td class="highlight">In-App LAN Camera Auto-Discovery</td>
-          <td>`+ Add Camera` modal scans local Wi-Fi / Ethernet subnet to discover ONVIF &amp; RTSP streams.</td>
-          <td class="verified">1-Tap camera setup directly from mobile device.</td>
-        </tr>
-        <tr>
-          <td class="highlight">Unified Security &amp; Analytics Mode</td>
-          <td>Toggle matrix covering Person, Vehicle (Car/Bike/Bus), Micro-Motion (Rodents), Pets, ANPR &amp; Face.</td>
-          <td class="verified">Custom target detection profiling per mobile camera tile.</td>
-        </tr>
-      </tbody>
-    </table>
-
-    <div class="footer">
-      <span>CamAI Enterprise — Strategic Technology Briefing</span>
-      <span>Page 2C</span>
-    </div>
-  </div>
-
-  <!-- ===================================================
-       PAGE 2D: DESKTOP MONITORING STUDIO & AI ENGINE
-  =================================================== -->
-  <div class="page" id="sec-software">
-    <div class="header">
-      <div class="logo-block">
-        <h1>Desktop Monitoring Studio &amp; Edge AI Engine (`desktop/` &amp; `server/`)</h1>
-        <p>Decoupled Multi-Threaded Ingestion, Intel OpenVINO / CUDA &amp; 4x4 Grid Canvas</p>
-      </div>
-      <div class="meta-block">
-        <div class="doc-badge">Component Breakdown 3</div>
-      </div>
-    </div>
-
-    <h2 class="section-title">2C. Desktop Software &amp; Local AI Server Engine</h2>
-    <p>
-      The desktop ecosystem pairs a high-speed Python AI FastAPI server (`server/`) with an Electron operator workstation (`desktop/`) engineered for multi-screen security control rooms.
-    </p>
-
-    <div class="card-grid-3">
-      <div class="metric-card">
-        <div class="card-label">Multi-Threaded Ingestion</div>
-        <div class="card-sub" style="margin-top:6px;">
-          `PipelineCoordinator` decouples RTSP, ONVIF, USB webcams, YouTube Live, and Desktop Screen Share capture from rendering loops.
-        </div>
-      </div>
-      <div class="metric-card">
-        <div class="card-label">Hardware Acceleration</div>
-        <div class="card-sub" style="margin-top:6px;">
-          Hardware-accelerated execution backends for Intel OpenVINO (CPU/iGPU), ONNX Runtime, and NVIDIA CUDA GPU.
-        </div>
-      </div>
-      <div class="metric-card">
-        <div class="card-label">Zero-DCE Night DCE</div>
-        <div class="card-sub" style="margin-top:6px;">
-          Luminance-gated automatic night vision enhancement curve brightening low-light camera video in real time.
-        </div>
-      </div>
-    </div>
-
-    <div class="ui-screenshot-card">
-      <img src="assets/camera_workspace_live.png" alt="CamAI Desktop Studio Grid" />
-      <div class="ui-screenshot-caption">
-        <span class="ui-screenshot-tag">Desktop Studio</span>
-        <strong>Live Camera Grid &amp; YOLOX Inference Overlay:</strong> Real-time 4x4 monitoring workspace with dynamic bounding box overlays, FPS telemetry, and speed calculation.
-      </div>
-    </div>
-
-    <div class="footer">
-      <span>CamAI Enterprise — Strategic Technology Briefing</span>
-      <span>Page 2D</span>
-    </div>
-  </div>
-
-
-  <!-- ===================================================
-       PAGE 3: TECHNOLOGY STACK & THIRD-PARTY LICENSES
-  =================================================== -->
-  <div class="page" id="sec-techstack">
-    <div class="header">
-      <div class="logo-block">
-        <h1>Technology Stack &amp; License Inventory</h1>
-        <p>Engineered Infrastructure &amp; Commercial Redistribution Rights</p>
-      </div>
-      <div class="meta-block">
-        <div class="doc-badge">Section 3</div>
-      </div>
-    </div>
-
-    <h2 class="section-title">4. Codebase &amp; Technology Stack</h2>
-    <table>
-      <thead>
-        <tr>
-          <th>Layer</th>
-          <th>Primary Technologies</th>
-          <th>Architectural Purpose</th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr>
-          <td class="highlight">AWS Cloud GPU Engine</td>
-          <td>AWS EC2 Cloud GPU (NVIDIA Accelerated), FastAPI, YOLOX, PyTorch</td>
-          <td>Offloaded 30+ FPS cloud inference with sub-second latency (&lt;45ms) and 0% client CPU/GPU resource utilization.</td>
-        </tr>
-        <tr>
-          <td class="highlight">Local Edge AI Server</td>
-          <td>Python 3.10+, FastAPI, PyTorch, OpenCV, OpenVINO, ONNX Runtime</td>
-          <td>High-throughput stream capture, frame decoding, Zero-DCE night vision, and synchronized MJPEG burn-in streaming.</td>
-        </tr>
-        <tr>
-          <td class="highlight">Algorithms &amp; Models</td>
-          <td>YOLOX, RT-DETR, YuNet ANPR, Micro-Motion Tracker, Zero-DCE</td>
-          <td>Multi-class detection, helmet compliance, license plate OCR, subtle rodent tracking, and low-light enhancement.</td>
-        </tr>
-        <tr>
-          <td class="highlight">Desktop Workstation</td>
-          <td>Electron, React 18, TypeScript, Vite, Tailwind CSS, Leaflet GIS</td>
-          <td>Cross-platform operator interface, DPAPI encrypted local vault, zero ghost-box eviction, and live telemetry sync.</td>
-        </tr>
-        <tr>
-          <td class="highlight">Cloud &amp; Database</td>
-          <td>Supabase, PostgreSQL 15, Row-Level Security, Deno Edge Functions</td>
-          <td>Multi-tenant data isolation, single-click runtime mode switching (Cloud vs Local), and automated Telegram alerts.</td>
-        </tr>
-      </tbody>
-    </table>
-
-    <h2 class="section-heading">5. Documented Third-Party License Inventory</h2>
-    <p>
-      Components utilized in the production runtime path were selected to ensure compatibility with commercial OEM bundling and software distribution.
-    </p>
-
-    <table>
-      <thead>
-        <tr>
-          <th>Component / Dependency</th>
-          <th>Declared Open-Source License</th>
-          <th>Distribution Compliance Status</th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr>
-          <td class="highlight">YOLOX Object Detector</td>
-          <td>Apache License 2.0</td>
-          <td>Permissive commercial license; no copyleft requirements.</td>
-        </tr>
-        <tr>
-          <td class="highlight">YuNet Plate &amp; Face Detector</td>
-          <td>MIT License</td>
-          <td>Permissive commercial license.</td>
-        </tr>
-        <tr>
-          <td class="highlight">CRNN License Plate OCR</td>
-          <td>Apache License 2.0</td>
-          <td>Permissive commercial license.</td>
-        </tr>
-        <tr>
-          <td class="highlight">RT-DETR Classifier Engine</td>
-          <td>Apache License 2.0</td>
-          <td>Permissive commercial license.</td>
-        </tr>
-        <tr>
-          <td class="highlight">FastAPI / OpenCV / OpenVINO</td>
-          <td>MIT / Apache 2.0 / BSD</td>
-          <td>Standard permissive industry open-source stack.</td>
-        </tr>
-        <tr>
-          <td class="highlight">ByteTrack-Style Tracker</td>
-          <td>Original Implementation Claim</td>
-          <td>Seller source-code implementation; subject to buyer IP verification.</td>
-        </tr>
-      </tbody>
-    </table>
-
-    <div class="note-box warning">
-      <strong>Due Diligence Requirement:</strong> The license inventory above reflects the documented state at listing. Buyers should perform an independent Software Bill of Materials (SBOM) and dependency tree scan during technical due diligence.
-    </div>
-
-    <div class="footer">
-      <span>CamAI Enterprise — Strategic Technology Briefing</span>
-      <span>Page 3</span>
-    </div>
-  </div>
-
-  <!-- ===================================================
-       PAGE 4: AI CAPABILITIES & ANALYTICAL MATRIX
-  =================================================== -->
-  <div class="page">
-    <div class="header">
-      <div class="logo-block">
-        <h1>AI Capabilities &amp; Analytics Matrix</h1>
-        <p>Implemented Computer Vision &amp; Analytical Features</p>
-      </div>
-      <div class="meta-block">
-        <div class="doc-badge">Section 4</div>
-      </div>
-    </div>
-
-    <h2 class="section-title">6. Detection, Tracking &amp; Analytical Capabilities</h2>
-    <p>
-      The platform features a multi-tiered computer vision pipeline capable of running concurrent analytical workers depending on hardware availability and active camera profile configuration.
-    </p>
-
-    <div class="card-grid-3">
-      <div class="metric-card">
-        <div class="card-label">Detection Classes</div>
-        <div class="card-sub" style="margin-top:6px;">
-          • Person &amp; Face Recognition<br/>
-          • Car, Bus, Truck, Motorcycle<br/>
-          • Bicycle &amp; Helmet Compliance<br/>
-          • License Plates (ANPR)<br/>
-          • Bags, Backpacks, Suitcases<br/>
-          • <strong>Custom Target Image Upload</strong>
-        </div>
-      </div>
-      <div class="metric-card">
-        <div class="card-label">Tracking Algorithms</div>
-        <div class="card-sub" style="margin-top:6px;">
-          • Multi-Target Vector Tracking<br/>
-          • Re-Identification (Re-ID) Gallery<br/>
-          • Occlusion Trajectory Recovery<br/>
-          • 8-Way Vector Heading<br/>
-          • Dwell &amp; Dwell Time Accumulator<br/>
-          • <strong>One-Shot Vector Feature Matching</strong>
-        </div>
-      </div>
-      <div class="metric-card">
-        <div class="card-label">Analytical Workers</div>
-        <div class="card-sub" style="margin-top:6px;">
-          • Homography Speed (km/h)<br/>
-          • ANPR OCR Engine<br/>
-          • 4×4 Crowd Density Grid<br/>
-          • Abandoned / Removed Object<br/>
-          • Motion Occupancy Heatmap<br/>
-          • <strong>Image-Based Target Matcher</strong>
-        </div>
-      </div>
-    </div>
-
-    <h2 class="section-heading">7. Analytical Feature Breakdown</h2>
-    <table>
-      <thead>
-        <tr>
-          <th>Feature Module</th>
-          <th>Implementation Description</th>
-          <th>Primary Analytical Output</th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr>
-          <td class="highlight" style="color:#2563eb;">🖼️ Custom Image Upload Target Matcher</td>
-          <td>User uploads any reference photo or crop (Face, Person, Vehicle, or Custom Object). Generates 512-d vector embeddings for real-time cross-camera matching &amp; tracking.</td>
-          <td>Instant target match confidence score (%), live location tracking, visual bounding box alert trigger.</td>
-        </tr>
-        <tr>
-          <td class="highlight">Homography Speed Engine</td>
-          <td>Calculates real-world speed (km/h) via 4-point ground-plane perspective matrix and Kalman smoothing.</td>
-          <td>Vehicle velocity measurement, over-speed alert triggers.</td>
-        </tr>
-        <tr>
-          <td class="highlight">ANPR Plate Pipeline</td>
-          <td>Combines YuNet localized text cropping with CRNN character extraction.</td>
-          <td>Alphanumeric license plate string, confidence score, crop image.</td>
-        </tr>
-        <tr>
-          <td class="highlight">Helmet Compliance Worker</td>
-          <td>Sub-crops two-wheeler riders and runs RT-DETR classification.</td>
-          <td>Helmet / No-Helmet status flag, violation evidence snapshot.</td>
-        </tr>
-        <tr>
-          <td class="highlight">Crowd Density Evaluator</td>
-          <td>Divides camera view into spatial cells and computes person headcount per region.</td>
-          <td>Density severity (Moderate, High, Critical), occupancy threshold alerts.</td>
-        </tr>
-        <tr>
-          <td class="highlight">Abandoned Object Worker</td>
-          <td>Monitors unassociated luggage items stationary for &gt;15 seconds.</td>
-          <td>Unattended object alarm, temporal bounding box overlay.</td>
-        </tr>
-      </tbody>
-    </table>
-
-    <!-- UI Screenshot 3: Real-Time AI Camera Workspace Overlay -->
-    <div class="ui-screenshot-card">
-      <img src="assets/camera_workspace_live.png" alt="CamAI Real-Time AI Camera Workspace & Multi-Class Inference Overlay" />
-      <div class="ui-screenshot-caption">
-        <span class="ui-screenshot-tag">Figure 3</span>
-        <strong>Real-Time AI Multi-Object Inference Overlay:</strong> Desktop operator workspace displaying live traffic camera inference with real-time class bounding boxes (`CAR #07 (77%)`, `CAR #03 (83%)`, `CAR #06 (78%)`), continuous frame-rate telemetry (10.5 FPS - GPU), and vehicle metrics count.
-      </div>
-    </div>
-
-    <div class="footer">
-      <span>CamAI Enterprise — Strategic Technology Briefing</span>
-      <span>Page 4</span>
-    </div>
-  </div>
-
-  <!-- ===================================================
-       PAGE 5: DEPLOYMENT ZONE PROFILES
-  =================================================== -->
-  <div class="page">
-    <div class="header">
-      <div class="logo-block">
-        <h1>Target Deployment Zone Profiles</h1>
-        <p>Configurable Camera AI Modes for Targeted Operational Environments</p>
-      </div>
-      <div class="meta-block">
-        <div class="doc-badge">Section 5</div>
-      </div>
-    </div>
-
-    <h2 class="section-title">8. Implemented Zone Profiles (AI Modes)</h2>
-    <p>
-      CamAI allows operators to assign specialized <strong>Zone Profiles</strong> on a per-camera basis. Assigning a profile narrows the active detection class set at the engine layer, optimizing GPU allocation and eliminating irrelevant telemetry.
-    </p>
-
-    <table>
-      <thead>
-        <tr>
-          <th>Zone Profile</th>
-          <th>Target Operational Environment</th>
-          <th>Active Analytical Features</th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr>
-          <td class="highlight" style="color:#1d4ed8;">🚦 Traffic Mode</td>
-          <td>Highways, urban intersections, toll plazas, arterial roads</td>
-          <td>Vehicle classification, ANPR plate reading, homography speed estimation, helmet compliance, lane counting, stop-line violations.</td>
-        </tr>
-        <tr>
-          <td class="highlight" style="color:#15803d;">🔒 Security Mode</td>
-          <td>Perimeters, corporate campuses, financial institutions, ATMs</td>
-          <td>Perimeter line-crossing, loitering detection, face detection, abandoned bag identification, crowd density evaluation.</td>
-        </tr>
-        <tr>
-          <td class="highlight" style="color:#b45309;">🏭 Factory &amp; Warehouse Mode</td>
-          <td>Manufacturing facilities, warehouses, hazardous industrial zones</td>
-          <td>Worker headcount, restricted zone intrusion, schedule-gated monitoring, privacy masking of non-work areas.</td>
-        </tr>
-        <tr>
-          <td class="highlight" style="color:#4f46e5;">🌙 Micro-Motion &amp; Night DCE Mode</td>
-          <td>Commercial warehouses, grain storage, low-light night perimeters</td>
-          <td>Subtle rodent/pest movement tracking, Zero-DCE automated low-light night enhancement, and temporal ghost-box eviction.</td>
-        </tr>
-        <tr>
-          <td class="highlight" style="color:#6b21a8;">⚙️ Custom Mode</td>
-          <td>Specialized commercial installations &amp; custom rules</td>
-          <td>User-defined polygon zones, custom tripwire rules, custom dwell time thresholds, multi-class COCO tracking.</td>
-        </tr>
-      </tbody>
-    </table>
-
-    <div class="note-box">
-      <strong>Target Deployment Framing:</strong> The profile configurations described above represent implemented software capabilities designed for these environments. Actual operational performance is subject to site-specific camera positioning, lighting, and hardware sizing.
-    </div>
-
-    <!-- UI Screenshot 4: Zone Studio Polygon Boundary & AI Profile Configuration -->
-    <div class="ui-screenshot-card">
-      <img src="assets/zone_studio_editor.png" alt="CamAI Zone Studio Interactive Polygon & AI Analytical Profiles Editor" />
-      <div class="ui-screenshot-caption">
-        <span class="ui-screenshot-tag">Figure 4</span>
-        <strong>CamAI Zone Studio — Interactive Polygon &amp; AI Profile Configuration Engine:</strong> Visual camera zone studio with interactive multi-vertex polygon drawing tool (Cyan active boundary over intersection), detection thresholds, Lane Detection toggle, Vehicle Classification (Car, Truck, Bus, Motorcycle, Bicycle, Van, Person), Multi-Object Tracking, Vehicle Counting, and version-controlled publish timeline.
-      </div>
-    </div>
-
-    <div class="footer">
-      <span>CamAI Enterprise — Strategic Technology Briefing</span>
-      <span>Page 5</span>
-    </div>
-  </div>
-
-  <!-- ===================================================
-       PAGE 6: ENTERPRISE USE CASES & INDUSTRY MATRIX
-  =================================================== -->
-  <div class="page">
-    <div class="header">
-      <div class="logo-block">
-        <h1>Enterprise Application Matrix</h1>
-        <p>Target Industry Opportunities &amp; Value Propositions</p>
-      </div>
-      <div class="meta-block">
-        <div class="doc-badge">Section 6</div>
-      </div>
-    </div>
-
-    <h2 class="section-title">9. Target Industry Opportunities</h2>
-
-    <table>
-      <thead>
-        <tr>
-          <th>Industry Segment</th>
-          <th>Operational Challenge</th>
-          <th>CamAI Target Capability</th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr>
-          <td class="highlight">Smart City &amp; Municipalities</td>
-          <td>Manual monitoring of city-wide CCTV networks; traffic congestion.</td>
-          <td>Traffic flow counting, ANPR plate logging, speed enforcement telemetry.</td>
-        </tr>
-        <tr>
-          <td class="highlight">Highways &amp; Toll Operators</td>
-          <td>Speed enforcement and toll lane compliance monitoring.</td>
-          <td>Homography speed gates, automated vehicle classification, plate recognition.</td>
-        </tr>
-        <tr>
-          <td class="highlight">Industrial &amp; Manufacturing</td>
-          <td>Worker safety compliance and restricted hazardous area monitoring.</td>
-          <td>Restricted zone intrusion alerts, worker headcount, schedule-gated rules.</td>
-        </tr>
-        <tr>
-          <td class="highlight">Financial &amp; Banking Premises</td>
-          <td>Perimeter security, ATM loitering, and branch crowd control.</td>
-          <td>Loitering detection, face detection, unattended object alerts.</td>
-        </tr>
-        <tr>
-          <td class="highlight">Parking Operators</td>
-          <td>Automated entry/exit tracking and lot fill occupancy.</td>
-          <td>Entry/Exit ANPR logging, visual slot occupancy scoring, GIS lot fill map.</td>
-        </tr>
-        <tr>
-          <td class="highlight">Security Systems OEMs</td>
-          <td>Lack of in-house AI software to bundle with camera hardware.</td>
-          <td>Full white-label branding, zero-cloud edge processing, rapid OEM integration.</td>
-        </tr>
-      </tbody>
-    </table>
-
-    <div class="footer">
-      <span>CamAI Enterprise — Strategic Technology Briefing</span>
-      <span>Page 6</span>
-    </div>
-  </div>
-
-  <!-- ===================================================
-       PAGE 7: PLATFORM VS MODEL
-  =================================================== -->
-  <div class="page">
-    <div class="header">
-      <div class="logo-block">
-        <h1>Integrated Platform Value</h1>
-        <p>Commercial Infrastructure Built Around AI Engines</p>
-      </div>
-      <div class="meta-block">
-        <div class="doc-badge">Section 7</div>
-      </div>
-    </div>
-
-    <h2 class="section-title">10. Why CamAI is a Platform, Not Just a Model</h2>
-    <p>
-      A common bottleneck in computer vision commercialization is the gap between a trained detection model and an enterprise-ready software product. CamAI fills this gap by delivering the complete application wrapper, database, licensing, and user management infrastructure required to operate a commercial product.
-    </p>
-
-    <div class="card-grid-2">
-      <div class="metric-card" style="border-left-color: #cbd5e1;">
-        <div class="card-label">Standalone AI Model (Research)</div>
-        <div class="card-sub" style="margin-top:6px;">
-          • Accepts video file input<br/>
-          • Outputs raw bounding box coordinates<br/>
-          • Requires manual Python scripts to run<br/>
-          • No user management or security<br/>
-          • No database or persistent storage<br/>
-          • No multi-camera management UI
-        </div>
-      </div>
-      <div class="metric-card" style="border-left-color: #16a34a;">
-        <div class="card-label">CamAI Enterprise Platform</div>
-        <div class="card-sub" style="margin-top:6px;">
-          • Multi-camera RTSP/NVR stream decoding<br/>
-          • Multi-tenant Postgres RLS database isolation<br/>
-          • Hardware-bound licensing &amp; DPAPI encryption<br/>
-          • Interactive Desktop &amp; Web Admin Portals<br/>
-          • Automated Telegram &amp; SMTP incident dispatch<br/>
-          • Append-only security audit logging
-        </div>
-      </div>
-    </div>
-
-    <div class="note-box success">
-      <strong>Engineering Takeaway:</strong> The commercial asset value of CamAI lies in its integrated application software, multi-tenant cloud architecture, database schema, and operational workflows—enabling immediate commercialization by an enterprise buyer.
-    </div>
-
-    <div class="footer">
-      <span>CamAI Enterprise — Strategic Technology Briefing</span>
-      <span>Page 7</span>
-    </div>
-  </div>
-
-  <!-- ===================================================
-       PAGE 8: DECOUPLED ARCHITECTURE
-  =================================================== -->
-  <div class="page">
-    <div class="header">
-      <div class="logo-block">
-        <h1>System Architecture &amp; Stream Decoupling</h1>
-        <p>High-Throughput Streaming &amp; Telemetry Synchronization</p>
-      </div>
-      <div class="meta-block">
-        <div class="doc-badge">Section 8</div>
-      </div>
-    </div>
-
-    <h2 class="section-title">11. Decoupled Video &amp; Telemetry Architecture</h2>
-    <p>
-      To prevent heavy AI model inference from degrading live video viewability, CamAI utilizes an architecturally <strong>decoupled streaming model</strong>.
-    </p>
-
-    <div class="note-box">
-      <strong>Architectural Principle:</strong> The live MJPEG video stream (running at the camera's native framerate) and the WebSocket AI telemetry stream (bounding boxes, analytical events) operate on separate asynchronous threads. If AI processing experiences transient load spikes, inference overlays adjust dynamically while the primary video stream remains uninterrupted.
-    </div>
-
-    <h2 class="section-heading">12. Four-Tier Software Structure</h2>
-    <table>
-      <thead>
-        <tr>
-          <th>Component</th>
-          <th>Location</th>
-          <th>Core Responsibility</th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr>
-          <td class="highlight">AI Inference Server</td>
-          <td><code>/server</code></td>
-          <td>Frame capture, YOLOX detection, ByteTrack tracking, worker analytics, WebSocket telemetry broadcast.</td>
-        </tr>
-        <tr>
-          <td class="highlight">Desktop Workstation</td>
-          <td><code>/desktop</code></td>
-          <td>Operator grid view, Leaflet GIS floorplan, incident center, local hardware DPAPI licensing vault.</td>
-        </tr>
-        <tr>
-          <td class="highlight">Cloud Backend</td>
-          <td><code>/supabase</code></td>
-          <td>Postgres 15 DB, Row-Level Security policies, 21 Edge Functions for license and alert management.</td>
-        </tr>
-        <tr>
-          <td class="highlight">Web Management Portal</td>
-          <td><code>/portal</code></td>
-          <td>SaaS dashboard for organization administration, camera provisioning, user role management, downloads.</td>
-        </tr>
-      </tbody>
-    </table>
-
-    <!-- UI Screenshot 5: Real-Time Alerts Hub & Telegram Integration -->
-    <div class="ui-screenshot-card">
-      <img src="assets/telegram_alerts_config.png" alt="CamAI Central Alerts Center & Telegram Bot Account Connection" />
-      <div class="ui-screenshot-caption">
-        <span class="ui-screenshot-tag">Figure 5</span>
-        <strong>Central Incident Center &amp; Telegram Bot Integration:</strong> Real-time incident stream with active Telegram Bot channel connection (`@Princesut097`), severity filtering (Critical, High, Medium, Low), multi-select bulk operations, and 1-click evidence export formats (CSV, JSON, PDF).
-      </div>
-    </div>
-
-    <div class="footer">
-      <span>CamAI Enterprise — Strategic Technology Briefing</span>
-      <span>Page 8</span>
-    </div>
-  </div>
-
-  <!-- ===================================================
-       PAGE 9: ENTERPRISE MANAGEMENT & LICENSING
-  =================================================== -->
-  <div class="page" id="sec-licensing">
-    <div class="header">
-      <div class="logo-block">
-        <h1>Enterprise Governance &amp; Licensing</h1>
-        <p>Multi-Tenancy, Role-Based Access Control, and License Security</p>
-      </div>
-      <div class="meta-block">
-        <div class="doc-badge">Section 9</div>
-      </div>
-    </div>
-
-    <h2 class="section-title">13. Multi-Tenant Organization Security</h2>
-    <p>
-      CamAI is designed as a true multi-tenant SaaS architecture. Customer data, cameras, alerts, and users are logically segregated at the PostgreSQL database layer using <strong>Row-Level Security (RLS)</strong> policies.
-    </p>
-
-    <div class="card-grid-2">
-      <div class="metric-card">
-        <div class="card-label">Role-Based Access Control (RBAC)</div>
-        <div class="card-sub" style="margin-top:6px;">
-          • <strong>Admin / Owner:</strong> Full org control, camera management, user invitations, licensing.<br/>
-          • <strong>Operator:</strong> Live monitoring, alert acknowledgment, camera configuration.<br/>
-          • <strong>Viewer:</strong> Read-only access to live streams and historical alerts.
-        </div>
-      </div>
-      <div class="metric-card">
-        <div class="card-label">Hardware Licensing Security</div>
-        <div class="card-sub" style="margin-top:6px;">
-          • SHA-256 hardware device fingerprinting (CPU, motherboard, Windows MachineGuid).<br/>
-          • DPAPI local token vault via Electron safeStorage.<br/>
-          • Remote device deactivation and instant configuration revocation.
-        </div>
-      </div>
-    </div>
-
-    <h2 class="section-heading">14. Cloud Edge Functions Suite (21 Modules)</h2>
-    <p>
-      The cloud backend incorporates <strong>21 production Deno / TypeScript Edge Functions</strong> handling asynchronous security, administration, camera provisioning, telemetry ingestion, and instant mobile alerting.
-    </p>
-
-    <table>
-      <thead>
-        <tr>
-          <th>Edge Function Name</th>
-          <th>Category Domain</th>
-          <th>Operational Role &amp; Execution Specification</th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr>
-          <td class="highlight"><code>activate-license</code></td>
-          <td>Licensing &amp; Security</td>
-          <td>SHA-256 hardware MachineGuid fingerprinting, cryptographic license activation &amp; DPAPI token vault creation.</td>
-        </tr>
-        <tr>
-          <td class="highlight"><code>add-camera</code></td>
-          <td>Camera Management</td>
-          <td>RTSP stream URL verification, AES-256-GCM credential encryption, and multi-tenant camera provisioning.</td>
-        </tr>
-        <tr>
-          <td class="highlight"><code>admin-users</code></td>
-          <td>Governance &amp; RBAC</td>
-          <td>Role-Based Access Control (RBAC) user administration, role assignments (Admin, Operator, Viewer).</td>
-        </tr>
-        <tr>
-          <td class="highlight"><code>decrypt-camera</code></td>
-          <td>Security &amp; Auth</td>
-          <td>Secure server-side decryption of camera RTSP passwords for authorized stream ingestion IPC.</td>
-        </tr>
-        <tr>
-          <td class="highlight"><code>delete-account</code></td>
-          <td>Privacy &amp; Compliance</td>
-          <td>GDPR-compliant organization data, camera zone profiles, and telemetry incident history purging.</td>
-        </tr>
-        <tr>
-          <td class="highlight"><code>desktop-sync</code></td>
-          <td>Client Telemetry</td>
-          <td>Bi-directional state synchronization between Electron desktop client and cloud PostgreSQL backend.</td>
-        </tr>
-        <tr>
-          <td class="highlight"><code>download-release</code></td>
-          <td>App Distribution</td>
-          <td>Cryptographically signed desktop installer release distributor with SHA-256 checksum verification.</td>
-        </tr>
-        <tr>
-          <td class="highlight"><code>github-releases</code></td>
-          <td>Auto-Updater API</td>
-          <td>Bridge connecting desktop clients to GitHub releases for seamless background binary updates.</td>
-        </tr>
-        <tr>
-          <td class="highlight"><code>invite-user</code></td>
-          <td>User Management</td>
-          <td>Enterprise team member invitation dispatch with secure access token generation and RBAC scoping.</td>
-        </tr>
-        <tr>
-          <td class="highlight"><code>my-keys</code></td>
-          <td>API Authorization</td>
-          <td>User API key generation, secret rotation, and scoped bearer token management for REST endpoints.</td>
-        </tr>
-        <tr>
-          <td class="highlight"><code>notify-telegram</code></td>
-          <td>Alert Router</td>
-          <td>High-throughput incident dispatcher routing overspeed &amp; tripwire alerts + visual evidence crops to Telegram.</td>
-        </tr>
-        <tr>
-          <td class="highlight"><code>publish-config</code></td>
-          <td>Zone Engine</td>
-          <td>Live camera analytical profile &amp; polygon boundary publisher to edge inference nodes.</td>
-        </tr>
-        <tr>
-          <td class="highlight"><code>report-camera-health</code></td>
-          <td>Telemetry Stream</td>
-          <td>Automated 15-second heartbeat telemetry receiver monitoring camera online/offline/degraded status.</td>
-        </tr>
-        <tr>
-          <td class="highlight"><code>report-events</code></td>
-          <td>Event Ingestion</td>
-          <td>High-throughput detection event ingestion pipeline for ANPR plates, speed telemetry &amp; tripwire logs.</td>
-        </tr>
-        <tr>
-          <td class="highlight"><code>rollback-config</code></td>
-          <td>Zone Engine</td>
-          <td>Version-controlled camera analytical profile rollback engine restoring previous polygon state.</td>
-        </tr>
-        <tr>
-          <td class="highlight"><code>send-email</code></td>
-          <td>Notifications</td>
-          <td>Transactional email gateway for security alert digests, password resets &amp; user invitations.</td>
-        </tr>
-        <tr>
-          <td class="highlight"><code>telegram-bot</code></td>
-          <td>Interactive Bot</td>
-          <td>Interactive Telegram Bot webhook listener handling <code>/status</code>, <code>/snapshot</code>, and <code>/alerts</code> commands.</td>
-        </tr>
-        <tr>
-          <td class="highlight"><code>telegram-link-code</code></td>
-          <td>Mobile Pairing</td>
-          <td>6-digit OTP account linking code generator for mobile Telegram bot account connection.</td>
-        </tr>
-        <tr>
-          <td class="highlight"><code>telegram-test</code></td>
-          <td>Preflight Diagnostics</td>
-          <td>Preflight test runner for validating Telegram Bot channel connection &amp; evidence snapshot dispatch.</td>
-        </tr>
-        <tr>
-          <td class="highlight"><code>test-camera</code></td>
-          <td>RTSP Preflight</td>
-          <td>RTSP connection &amp; latency probe verifying camera stream reachability before saving configuration.</td>
-        </tr>
-        <tr>
-          <td class="highlight"><code>update-camera</code></td>
-          <td>Camera Management</td>
-          <td>Dynamic RTSP parameters, encrypted credentials &amp; analytical zone settings updater.</td>
-        </tr>
-      </tbody>
-    </table>
-
-    <!-- UI Screenshot 6: Instant Mobile Alert Bot Dispatch -->
-    <div class="ui-screenshot-card" style="max-width: 480px; margin: 16px auto;">
-      <img src="assets/telegram_bot_mobile.png" alt="CamAI Telegram Bot Real-Time Incident & Evidence Snapshot Dispatch" />
-      <div class="ui-screenshot-caption">
-        <span class="ui-screenshot-tag">Figure 6</span>
-        <strong>Real-Time Mobile Incident Alert Dispatch (@CamAiAdmin_bot):</strong> Asynchronous edge alert delivery featuring automated vehicle overspeed alert (`OVERSPEED: Car #02 at 72.7 km/h`), camera ID metadata, live visual evidence crop, timestamp, and deep-link action buttons (`📷 Open Camera`, `📊 Open Dashboard`).
-      </div>
-    </div>
-
-    <!-- UI Screenshot 7: Licensing Management Table & Hardware Binding -->
-    <div class="ui-screenshot-card">
-      <img src="assets/licenses_table.png" alt="CamAI Hardware-Bound Cryptographic Licensing Suite" />
-      <div class="ui-screenshot-caption">
-        <span class="ui-screenshot-tag">Figure 7</span>
-        <strong>Enterprise Command Suite — Cryptographic License Security Vault:</strong> Central management table showing SHA-256 hashed license keys, assigned organization accounts, trial/commercial tier, device limits (0/1), active status, lifetime expiration, and instant remote revocation/reset controls.
-      </div>
-    </div>
-
-    <div class="footer">
-      <span>CamAI Enterprise — Strategic Technology Briefing</span>
-      <span>Page 9</span>
-    </div>
-  </div>
-
-  <!-- ===================================================
-       PAGE 10: PERFORMANCE EVIDENCE & BENCHMARKS
-  =================================================== -->
-  <div class="page">
-    <div class="header">
-      <div class="logo-block">
-        <h1>Empirical Performance Evidence</h1>
-        <p>Documented Hardware Benchmarks &amp; Testing Configuration Notes</p>
-      </div>
-      <div class="meta-block">
-        <div class="doc-badge">Section 10</div>
-      </div>
-    </div>
-
-    <h2 class="section-title">15. Documented Hardware Benchmarks</h2>
-    <p>
-      The performance figures below represent logged empirical measurements from test runs executed on defined hardware configurations.
-    </p>
-
-    <table>
-      <thead>
-        <tr>
-          <th>Hardware &amp; Execution Environment</th>
-          <th>Stream Concurrency</th>
-          <th>Measured Inference FPS</th>
-          <th>Pipeline Latency</th>
-          <th>Logged Errors</th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr>
-          <td class="highlight" style="color:#1d4ed8;">☁️ AWS EC2 Cloud GPU Node (Remote)</td>
-          <td>1 – 16 Streams</td>
-          <td class="verified">30+ FPS / stream</td>
-          <td>&lt; 45.0 ms</td>
-          <td class="verified">0% Client GPU/CPU Load</td>
-        </tr>
-        <tr>
-          <td class="highlight">OpenVINO GPU (Discrete GPU)</td>
-          <td>1 Stream</td>
-          <td class="verified">57 FPS</td>
-          <td>5.7 ms</td>
-          <td class="verified">0 Errors</td>
-        </tr>
-        <tr>
-          <td class="highlight">CPU-Only Execution Mode (x86_64)</td>
-          <td>1 Stream</td>
-          <td>31 FPS</td>
-          <td>131.0 ms</td>
-          <td class="verified">0 Errors</td>
-        </tr>
-        <tr>
-          <td class="highlight">Concurrent Multi-Stream GPU</td>
-          <td>4 Streams</td>
-          <td>4.0 – 4.5 FPS / stream</td>
-          <td>266.0 ms</td>
-          <td class="verified">0 Errors</td>
-        </tr>
-        <tr>
-          <td class="highlight">Intel UHD 620 iGPU (ANPR Stack)</td>
-          <td>1 Stream</td>
-          <td>9 – 11 FPS</td>
-          <td>Not Documented</td>
-          <td class="verified">0 Errors</td>
-        </tr>
-      </tbody>
-    </table>
-
-    <div class="note-box warning">
-      <strong>Benchmark Disclaimer:</strong> Performance varies based on camera resolution, active detection modules, hardware execution provider, stream count, and deployment conditions. These figures represent measured results from documented test configurations and should not be interpreted as a universal production guarantee.
-    </div>
-
-    <div class="footer">
-      <span>CamAI Enterprise — Strategic Technology Briefing</span>
-      <span>Page 10</span>
-    </div>
-  </div>
-
-  <!-- ===================================================
-       PAGE 11: ENGINEERING MATURITY
-  =================================================== -->
-  <div class="page">
-    <div class="header">
-      <div class="logo-block">
-        <h1>Engineering Maturity &amp; Codebase Scope</h1>
-        <p>Quantitative Codebase Indicators &amp; Architectural Assets</p>
-      </div>
-      <div class="meta-block">
-        <div class="doc-badge">Section 11</div>
-      </div>
-    </div>
-
-    <h2 class="section-title">16. Codebase Metrics</h2>
-    <div class="card-grid-3">
-      <div class="metric-card">
-        <div class="card-label">Source File Count</div>
-        <div class="card-value">384 Files</div>
-        <div class="card-sub">Tracked across 4 repositories</div>
-      </div>
-      <div class="metric-card">
-        <div class="card-label">Server Unit Tests</div>
-        <div class="card-value">283 Tests</div>
-        <div class="card-sub">100% pass across 19 modules</div>
-      </div>
-      <div class="metric-card">
-        <div class="card-label">Technical Documentation</div>
-        <div class="card-value">13+ Docs</div>
-        <div class="card-sub">Architectural &amp; API manuals</div>
-      </div>
-    </div>
-
-    <h2 class="section-heading">17. Implemented Operational Tools</h2>
-    <ul class="item-list">
-      <li><span class="bullet-tag">✓</span><span><strong>Automated Testing Harness:</strong> Automated PyTest suite covering pipeline initialization, tracker state, analytics rules, and API endpoints.</span></li>
-      <li><span class="bullet-tag">✓</span><span><strong>Database Migrations:</strong> 44+ versioned PostgreSQL SQL scripts defining tables, triggers, and RLS policies.</span></li>
-      <li><span class="bullet-tag">✓</span><span><strong>Deployment Automation:</strong> PowerShell deployment scripts (<code>deploy_supabase.ps1</code>) for edge function compilation and environment setup.</span></li>
-    </ul>
-
-    <div class="note-box">
-      <strong>Engineering Context:</strong> These indicators demonstrate the physical scope of the software asset built by the seller; they do not by themselves constitute customer adoption or market validation.
-    </div>
-
-    <!-- UI Screenshot 5: Desktop Installer Hub & Checksum Verification -->
-    <div class="ui-screenshot-card">
-      <img src="assets/downloads_screen.png" alt="CamAI Desktop Workstation Release Hub & Installer Download" />
-      <div class="ui-screenshot-caption">
-        <span class="ui-screenshot-tag">Figure 5</span>
-        <strong>Enterprise Command Suite — Desktop Release &amp; Offline Installer Hub:</strong> Workstation download manager providing direct Windows x64 v1.0.7 setup executable (<code>CamAI-Desktop-Setup-1.0.7.exe</code>, 356.7 MB), GitHub automated production releases pipeline, bundled offline/cloud engine toggles, and cryptographic SHA-256 checksum verification (<code>4dadbe61f...276427d3</code>).
-      </div>
-    </div>
-
-    <div class="footer">
-      <span>CamAI Enterprise — Strategic Technology Briefing</span>
-      <span>Page 11</span>
-    </div>
-  </div>
-
-  <!-- ===================================================
-       PAGE 12: SECURITY AND DATA PROTECTION
-  =================================================== -->
-  <div class="page" id="sec-security">
-    <div class="header">
-      <div class="logo-block">
-        <h1>Security Assessment &amp; Controls</h1>
-        <p>Internal Security Review &amp; Data Protection Mechanisms</p>
-      </div>
-      <div class="meta-block">
-        <div class="doc-badge">Section 12</div>
-      </div>
-    </div>
-
-    <h2 class="section-title">18. Internal Security Assessment</h2>
-    <p>
-      An internal security audit was conducted on July 25, 2026 covering 326 source files against OWASP Top 10 and ASVS guidelines. 33 of 38 identified findings were remediated during that pass.
-    </p>
-
-    <table>
-      <thead>
-        <tr>
-          <th>Assessment Domain</th>
-          <th>Baseline Score</th>
-          <th>Post-Remediation Score</th>
-          <th>Key Controls Applied</th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr>
-          <td class="highlight">Overall Security Score</td>
-          <td>41 / 100</td>
-          <td class="verified">82 / 100</td>
-          <td>Internal evaluation metric (not third-party certification).</td>
-        </tr>
-        <tr>
-          <td class="highlight">Authorization &amp; Multi-Tenancy</td>
-          <td>30 / 100</td>
-          <td class="verified">90 / 100</td>
-          <td>Postgres RLS policy hardening &amp; trigger lockouts.</td>
-        </tr>
-        <tr>
-          <td class="highlight">API &amp; Pipeline Security</td>
-          <td>62 / 100</td>
-          <td class="verified">84 / 100</td>
-          <td>Loopback bindings &amp; <code>X-CamAI-Token</code> header enforcement.</td>
-        </tr>
-        <tr>
-          <td class="highlight">Credential Encryption</td>
-          <td>72 / 100</td>
-          <td class="verified">78 / 100</td>
-          <td>AES-256-GCM encryption for camera connection strings.</td>
-        </tr>
-      </tbody>
-    </table>
-
-    <div class="note-box warning">
-      <strong>Audit Disclosure:</strong> The scores above reflect an internal engineering assessment and do not constitute an independent third-party penetration testing certification. Five open items remain documented for review during due diligence.
-    </div>
-
-    <div class="footer">
-      <span>CamAI Enterprise — Strategic Technology Briefing</span>
-      <span>Page 12</span>
-    </div>
-  </div>
-
-  <!-- ===================================================
-       PAGE 13: COMMERCIALIZATION OPPORTUNITIES
-  =================================================== -->
-  <div class="page">
-    <div class="header">
-      <div class="logo-block">
-        <h1>Commercialization Pathways</h1>
-        <p>Flexible Structures for Strategic Buyers &amp; Technology Partners</p>
-      </div>
-      <div class="meta-block">
-        <div class="doc-badge">Section 13</div>
-      </div>
-    </div>
-
-    <h2 class="section-title">19. Transaction &amp; Commercialization Models</h2>
-    <p>
-      CamAI is available for commercial transaction under flexible structures depending on the strategic objectives, distribution reach, and vertical focus of the acquiring party.
-    </p>
-
-    <table>
-      <thead>
-        <tr>
-          <th>Commercialization Pathway</th>
-          <th>Structure Description</th>
-          <th>Ideal Strategic Counterparty</th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr>
-          <td class="highlight">Full Technology Acquisition</td>
-          <td>Complete assignment of all intellectual property, source code, repositories, branding, and deployment assets.</td>
-          <td>Corporate buyers seeking full asset ownership and exclusive global control.</td>
-        </tr>
-        <tr>
-          <td class="highlight">Exclusive Regional / Vertical License</td>
-          <td>Exclusive commercial licensing rights granted for a specific geographic region (e.g., North America, Gulf) or industry vertical.</td>
-          <td>Established regional system integrators &amp; enterprise software distributors.</td>
-        </tr>
-        <tr>
-          <td class="highlight">OEM / White-Label Integration</td>
-          <td>License to rebrand, bundle, and distribute CamAI software embedded within hardware or camera products.</td>
-          <td>CCTV manufacturers, NVR OEMs, and physical security hardware vendors.</td>
-        </tr>
-        <tr>
-          <td class="highlight">Strategic Joint Venture / Partnership</td>
-          <td>Co-commercialization agreement pairing the CamAI platform with an partner's enterprise sales channel.</td>
-          <td>Managed security service providers &amp; government IT contractors.</td>
-        </tr>
-      </tbody>
-    </table>
-
-    <div class="footer">
-      <span>CamAI Enterprise — Strategic Technology Briefing</span>
-      <span>Page 13</span>
-    </div>
-  </div>
-
-  <!-- ===================================================
-       PAGE 14: TARGET BUYER CATEGORIES
-  =================================================== -->
-  <div class="page">
-    <div class="header">
-      <div class="logo-block">
-        <h1>Target Buyer Profile &amp; Value Alignment</h1>
-        <p>Strategic Categories Well-Positioned to Leverage CamAI</p>
-      </div>
-      <div class="meta-block">
-        <div class="doc-badge">Section 14</div>
-      </div>
-    </div>
-
-    <h2 class="section-title">20. Strategic Counterparty Profiles</h2>
-
-    <div class="card-grid-2">
-      <div class="metric-card">
-        <div class="card-label">CCTV &amp; NVR Hardware OEMs</div>
-        <div class="card-sub" style="margin-top:6px;">
-          Instantly add an in-house "AI Analytics" software suite to hardware camera lines without multi-year R&amp;D delays.
-        </div>
-      </div>
-      <div class="metric-card">
-        <div class="card-label">Video Management System (VMS) Vendors</div>
-        <div class="card-sub" style="margin-top:6px;">
-          Enhance existing VMS video recording platforms with edge analytics, speed detection, ANPR, and automated alerting.
-        </div>
-      </div>
-      <div class="metric-card">
-        <div class="card-label">Smart City &amp; Traffic System Integrators</div>
-        <div class="card-sub" style="margin-top:6px;">
-          Acquire a deployable software layer for municipal traffic enforcement, highway monitoring, and toll plaza projects.
-        </div>
-      </div>
-      <div class="metric-card">
-        <div class="card-label">Managed Security Service Providers (MSSP)</div>
-        <div class="card-sub" style="margin-top:6px;">
-          Deploy central multi-tenant camera monitoring services with remote Telegram incident dispatch for commercial clients.
-        </div>
-      </div>
-    </div>
-
-    <div class="footer">
-      <span>CamAI Enterprise — Strategic Technology Briefing</span>
-      <span>Page 14</span>
-    </div>
-  </div>
-
-  <!-- ===================================================
-       PAGE 15: COMMERCIAL INTEGRATION PATHWAYS
-  =================================================== -->
-  <div class="page">
-    <div class="header">
-      <div class="logo-block">
-        <h1>Integration &amp; Product Expansion</h1>
-        <p>Technical Pathways for Commercial Productization</p>
-      </div>
-      <div class="meta-block">
-        <div class="doc-badge">Section 15</div>
-      </div>
-    </div>
-
-    <h2 class="section-title">21. Product Expansion Opportunities</h2>
-    <p>
-      An acquiring strategic partner can commercialize or extend the CamAI platform through several documented software extension points:
-    </p>
-
-    <ul class="item-list">
-      <li><span class="bullet-tag">→</span><span><strong>Custom AI Model Ingestion:</strong> Replace or supplement YOLOX/YuNet with buyer-proprietary ONNX or TensorRT models via the standardized inference interface.</span></li>
-      <li><span class="bullet-tag">→</span><span><strong>VMS API Connector:</strong> Integrate telemetry WebSockets into existing enterprise VMS platforms (e.g., Milestone, Genetec) via standard REST webhooks.</span></li>
-      <li><span class="bullet-tag">→</span><span><strong>Custom Edge Hardware Bundling:</strong> Package the Python AI server onto dedicated Linux/Windows edge gateway devices (NVIDIA Jetson, Intel NUC).</span></li>
-      <li><span class="bullet-tag">→</span><span><strong>SaaS Billing Gateway:</strong> Connect the 21 Supabase Edge Functions to commercial billing platforms (Stripe/Chargebee) for automated monthly subscription management.</span></li>
-    </ul>
-
-    <div class="footer">
-      <span>CamAI Enterprise — Strategic Technology Briefing</span>
-      <span>Page 15</span>
-    </div>
-  </div>
-
-  <!-- ===================================================
-       PAGE 16: PROVEN VS REQUIRES VALIDATION
-  =================================================== -->
-  <div class="page">
-    <div class="header">
-      <div class="logo-block">
-        <h1>Validation &amp; Credibility Framework</h1>
-        <p>Transparent Boundaries Between Proven Assets &amp; Due Diligence Items</p>
-      </div>
-      <div class="meta-block">
-        <div class="doc-badge">Section 16</div>
-      </div>
-    </div>
-
-    <h2 class="section-title">22. Technical Credibility Matrix</h2>
-
-    <table>
-      <thead>
-        <tr>
-          <th>Verified &amp; Implemented Assets</th>
-          <th>Items Subject to Buyer Due Diligence</th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr>
-          <td class="verified">✓ 384 tracked source files across 4 codebases</td>
-          <td class="target">⚠ Multi-camera scale beyond 4 concurrent streams</td>
-        </tr>
-        <tr>
-          <td class="verified">✓ 283 passing unit and integration tests</td>
-          <td class="target">⚠ Historical commercial revenue &amp; customer adoption</td>
-        </tr>
-        <tr>
-          <td class="verified">✓ 57 FPS single-camera benchmark logged</td>
-          <td class="target">⚠ Independent third-party security certification</td>
-        </tr>
-        <tr>
-          <td class="verified">✓ 21 Supabase Edge Functions &amp; 44+ SQL migrations</td>
-          <td class="target">⚠ Third-party model weight provenance audit</td>
-        </tr>
-        <tr>
-          <td class="verified">✓ Hardware DPAPI license key binding vault</td>
-          <td class="target">⚠ Speed accuracy verification across extreme camera angles</td>
-        </tr>
-        <tr>
-          <td class="verified">✓ Real-time Leaflet GIS mapping &amp; Telegram bot</td>
-          <td class="target">⚠ Regulatory compliance for specific deployment jurisdictions</td>
-        </tr>
-      </tbody>
-    </table>
-
-    <div class="footer">
-      <span>CamAI Enterprise — Strategic Technology Briefing</span>
-      <span>Page 16</span>
-    </div>
-  </div>
-
-  <!-- ===================================================
-       PAGE 17: TECHNICAL DUE DILIGENCE CHECKLIST
-  =================================================== -->
-  <div class="page">
-    <div class="header">
-      <div class="logo-block">
-        <h1>Buyer Technical Due Diligence Framework</h1>
-        <p>Recommended Verification Checklist for Engineering &amp; Legal Teams</p>
-      </div>
-      <div class="meta-block">
-        <div class="doc-badge">Section 17</div>
-      </div>
-    </div>
-
-    <h2 class="section-title">23. Technical Due Diligence Checklist</h2>
-
-    <table>
-      <thead>
-        <tr>
-          <th>Audit Category</th>
-          <th>Recommended Buyer Review Tasks</th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr>
-          <td class="highlight">Codebase &amp; Testing</td>
-          <td>
-            □ Execute complete PyTest suite (283 server tests)<br/>
-            □ Run hardware benchmark script (<code>production_readiness_report.py</code>)<br/>
-            □ Build Electron desktop app and inspect DPAPI safeStorage integration
-          </td>
-        </tr>
-        <tr>
-          <td class="highlight">Security &amp; Architecture</td>
-          <td>
-            □ Inspect PostgreSQL Row-Level Security policies across 44+ migrations<br/>
-            □ Verify AES-256-GCM encryption for RTSP camera connection strings<br/>
-            □ Review loopback bindings for local AI server REST endpoints
-          </td>
-        </tr>
-        <tr>
-          <td class="highlight">Legal &amp; IP Inventory</td>
-          <td>
-            □ Perform Software Bill of Materials (SBOM) dependency scan<br/>
-            □ Verify open-source model weights (YOLOX, YuNet, RT-DETR)<br/>
-            □ Confirm assignment of contributor code rights and domain assets
-          </td>
-        </tr>
-      </tbody>
-    </table>
-
-    <div class="footer">
-      <span>CamAI Enterprise — Strategic Technology Briefing</span>
-      <span>Page 17</span>
-    </div>
-  </div>
-
-  <!-- ===================================================
-       PAGE 18: NEXT STEPS & CONFIDENTIALITY
-  =================================================== -->
-  <div class="page">
-    <div class="header">
-      <div class="logo-block">
-        <h1>Next Steps &amp; Confidential Evaluation</h1>
-        <p>Process for Qualified Corporate &amp; Strategic Counterparties</p>
-      </div>
-      <div class="meta-block">
-        <div class="doc-badge">Section 18</div>
-      </div>
-    </div>
-
-    <h2 class="section-title">24. Engagement Process</h2>
-    <p>
-      Qualified strategic counterparties, CCTV OEMs, and corporate development teams are invited to evaluate the CamAI platform through the following structured steps:
-    </p>
-
-    <ul class="item-list">
-      <li><span class="bullet-tag">Step 1</span><span><strong>Confidential Introduction:</strong> Initial discussion to review strategic fit and operational alignment.</span></li>
-      <li><span class="bullet-tag">Step 2</span><span><strong>Live Product Demonstration:</strong> Guided live demonstration of the AI Engine, Desktop Client, Cloud Portal, and Telegram Bot.</span></li>
-      <li><span class="bullet-tag">Step 3</span><span><strong>Architecture &amp; Code Review:</strong> Technical briefing with engineering leadership covering codebase structure and deployment options.</span></li>
-      <li><span class="bullet-tag">Step 4</span><span><strong>Technical Due Diligence:</strong> Access to test repository, benchmark scripts, and documentation for verification.</span></li>
-      <li><span class="bullet-tag">Step 5</span><span><strong>Commercial Alignment:</strong> Discussion of transaction structure (Full IP Acquisition, Licensing, or OEM Partnership).</span></li>
-    </ul>
-
-    <h2 class="section-heading">25. Confidentiality &amp; Legal Disclaimer</h2>
-    <div class="note-box">
-      <p style="font-size:11px; color:#475569; margin-bottom:0;">
-        <strong>Confidential Briefing Disclaimer:</strong> This document contains technical and architectural information describing the CamAI Enterprise software platform as of August 2026. This document is provided solely for technical evaluation and strategic discussion. Performance benchmarks represent empirical results from specific test configurations. Mention of potential enterprise use cases or market applications does not constitute historical customer revenue or production deployment claims. All IP rights, licensing, security posture, and legal terms remain subject to documentary verification and definitive agreements.
-      </p>
-    </div>
-
-    <div class="footer">
-      <span>CamAI Enterprise — Strategic Technology Briefing</span>
-      <span>Page 18</span>
-    </div>
-  </div>
-
-  <!-- ===================================================
-       PAGE 19: COMPREHENSIVE UI SHOWCASE GALLERY (PART 1)
-  =================================================== -->
-  
-  <!-- ===================================================
-       PAGE 19: COMPREHENSIVE UI SHOWCASE GALLERY (PART 1 - DESKTOP & WEB PORTAL)
-  =================================================== -->
-  <div class="page" id="sec-gallery">
-    <div class="header">
-      <div class="logo-block">
-        <h1>Visual Product Showcase &amp; User Interface Gallery (Part 1)</h1>
-        <p>Production Screenshots of Web Portal, Desktop Client &amp; Admin Suite</p>
-      </div>
-      <div class="meta-block">
-        <div class="doc-badge">Section 19</div>
-      </div>
-    </div>
-
-    <h2 class="section-title">26. Complete Software Interface Gallery</h2>
-    <p>
-      Below is a comprehensive visual compilation of live production screenshots across the Web Portal, Mobile App, Desktop Studio, Zone Editor, Telegram Dispatch, and Licensing Vault.
-    </p>
-
-    <div class="card-grid-2">
-      <div class="ui-screenshot-card" style="margin: 6px 0;">
-        <img src="assets/landing_hero.png" alt="CamAI Landing Page" />
-        <div class="ui-screenshot-caption">
-          <strong>1. Public SaaS Web Portal &amp; On-Prem Grid</strong>
-        </div>
-      </div>
-      <div class="ui-screenshot-card" style="margin: 6px 0;">
-        <img src="assets/welcome_dashboard.png" alt="CamAI Admin Dashboard" />
-        <div class="ui-screenshot-caption">
-          <strong>2. Edge Telemetry &amp; Video Intelligence Suite</strong>
-        </div>
-      </div>
-      <div class="ui-screenshot-card" style="margin: 6px 0;">
-        <img src="assets/camera_workspace_live.png" alt="CamAI Live Camera Feed & Detection Bounding Boxes" />
-        <div class="ui-screenshot-caption">
-          <strong>3. Live Desktop Camera Grid &amp; YOLOX Inference Overlay</strong>
-        </div>
-      </div>
-      <div class="ui-screenshot-card" style="margin: 6px 0;">
-        <img src="assets/zone_studio_editor.png" alt="CamAI Zone Studio Polygon Drawer" />
-        <div class="ui-screenshot-caption">
-          <strong>4. Zone Studio Polygon Boundary &amp; AI Analytical Profiles</strong>
-        </div>
-      </div>
-    </div>
-
-    <div class="footer">
-      <span>CamAI Enterprise — Strategic Technology Briefing</span>
-      <span>Page 19</span>
-    </div>
-  </div>
-
-  <!-- ===================================================
-       PAGE 20: COMPREHENSIVE UI SHOWCASE GALLERY (PART 2 - DEDICATED MOBILE SECURITY APP)
-  =================================================== -->
-  <div class="page">
-    <div class="header">
-      <div class="logo-block">
-        <h1>Visual Product Showcase &amp; User Interface Gallery (Part 2)</h1>
-        <p>Dedicated Mobile Security App Screenshots (iOS &amp; Android Production Client)</p>
-      </div>
-      <div class="meta-block">
-        <div class="doc-badge">Section 20</div>
-      </div>
-    </div>
-
-    <div class="card-grid-2">
-      <div class="ui-screenshot-card" style="margin: 6px 0;">
-        <img src="assets/mobile_camera_live.png" alt="CamAI Mobile Live Camera Stream" />
-        <div class="ui-screenshot-caption">
-          <strong>5. Mobile App — Live Camera Stream &amp; AWS GPU AI Overlay</strong>
-        </div>
-      </div>
-      <div class="ui-screenshot-card" style="margin: 6px 0;">
-        <img src="assets/mobile_roi_editor.png" alt="CamAI Mobile Polygon ROI Editor" />
-        <div class="ui-screenshot-caption">
-          <strong>6. Mobile App — Touch Polygon ROI Studio Canvas Editor</strong>
-        </div>
-      </div>
-      <div class="ui-screenshot-card" style="margin: 6px 0;">
-        <img src="assets/mobile_alerts_timeline.png" alt="CamAI Mobile Alerts Timeline" />
-        <div class="ui-screenshot-caption">
-          <strong>7. Mobile App — Incident Alerts Center &amp; Evidence Timeline</strong>
-        </div>
-      </div>
-      <div class="ui-screenshot-card" style="margin: 6px 0;">
-        <img src="assets/mobile_app_settings.png" alt="CamAI Mobile Settings & OTA Updates" />
-        <div class="ui-screenshot-caption">
-          <strong>8. Mobile App — Server Settings, GPU Bridge &amp; 1-Click OTA Updates</strong>
-        </div>
-      </div>
-    </div>
-
-    <div class="card-grid-2" style="margin-top: 10px;">
-      <div class="ui-screenshot-card" style="margin: 6px 0;">
-        <img src="assets/telegram_bot_mobile.png" alt="CamAI Mobile Telegram Bot" />
-        <div class="ui-screenshot-caption">
-          <strong>9. Live Mobile Telegram Incident Dispatch (@CamAiAdmin_bot)</strong>
-        </div>
-      </div>
-      <div class="ui-screenshot-card" style="margin: 6px 0;">
-        <img src="assets/telegram_alerts_config.png" alt="CamAI Telegram Alerts Config" />
-        <div class="ui-screenshot-caption">
-          <strong>10. Central Incident Stream &amp; Connected Telegram Bot</strong>
-        </div>
-      </div>
-      <div class="ui-screenshot-card" style="margin: 6px 0;">
-        <img src="assets/add_camera_rtsp_modal.png" alt="CamAI RTSP Provisioning Modal" />
-        <div class="ui-screenshot-caption">
-          <strong>11. RTSP Stream Provisioning &amp; GIS Spatial Binding</strong>
-        </div>
-      </div>
-      <div class="ui-screenshot-card" style="margin: 6px 0;">
-        <img src="assets/licenses_table.png" alt="CamAI Licensing Vault" />
-        <div class="ui-screenshot-caption">
-          <strong>12. Hardware Fingerprint &amp; SHA-256 License Security Vault</strong>
-        </div>
-      </div>
-    </div>
-
-    <div class="ui-screenshot-card" style="margin-top: 10px;">
-      <img src="assets/downloads_screen.png" alt="CamAI Desktop Installer Release Hub" />
-      <div class="ui-screenshot-caption">
-        <strong>13. Desktop Release Hub — Windows Setup Executable (CamAI-Desktop-Setup-1.0.7.exe) &amp; Checksum Verification</strong>
-      </div>
-    </div>
-
-    <div class="footer">
-      <span>CamAI Enterprise — Strategic Technology Briefing</span>
-      <span>Page 20</span>
-    </div>
-  </div>
-
-</div>
-
-<!-- ===================================================
-     INTERACTIVE AUTO-SCROLL & NAVIGATION SCRIPT
-=================================================== -->
-<script>
-function scrollToSection(id) {
-  const element = document.getElementById(id);
-  if (element) {
-    const navHeight = document.getElementById('mainNav').offsetHeight || 64;
-    const elementPosition = element.getBoundingClientRect().top + window.pageYOffset;
-    const offsetPosition = elementPosition - navHeight - 10;
-
-    window.scrollTo({
-      top: offsetPosition,
-      behavior: 'smooth'
+        <!-- Detail Panel 2: Desktop Monitoring Client -->
+        <div id="panel-desktop" class="panel">
+            <div class="section-header">
+                <h2 class="section-title">🖥️ Windows Desktop Client (`desktop/`)</h2>
+            </div>
+            <div class="panel-grid">
+                <div>
+                    <p class="branch-desc">
+                        Supervises the local FastAPI engine, manages encrypted DPAPI device binding, auto-discovers network cameras, and renders high-FPS grid views.
+                    </p>
+                    <ul class="feature-list">
+                        <li class="feature-item">
+                            <span class="bullet">✓</span>
+                            <div><strong>DPAPI Hardware Binding:</strong> Encrypts tokens using Windows MachineGUID, CPU ID, and TPM serials.</div>
+                        </li>
+                        <li class="feature-item">
+                            <span class="bullet">✓</span>
+                            <div><strong>Zero-Latency Grid:</strong> 30-40 FPS MJPEG preview stream with decoupled background AI inference.</div>
+                        </li>
+                        <li class="feature-item">
+                            <span class="bullet">✓</span>
+                            <div><strong>Camera Sync Engine:</strong> Auto-reconciles cloud camera rules with local engine endpoints.</div>
+                        </li>
+                    </ul>
+                </div>
+                <div>
+                    <div class="code-box">// desktop/src/lib/localEngine.ts
+export async function syncCamerasToLocalEngine(cameras: any[]) {
+  const status = await getEngineAppStatus();
+  if (!status) return;
+
+  for (const cam of cameras) {
+    await fetch(`${ENGINE_BASE}/api/cameras/${cam.id}/config`, {
+      method: 'POST',
+      headers: await controlHeaders(),
+      body: JSON.stringify({
+        zones: cam.zones,
+        lines: cam.lines,
+        zone_profile: cam.zone_profile
+      })
     });
   }
-}
+}</div>
+                </div>
+            </div>
+        </div>
 
-document.addEventListener('DOMContentLoaded', () => {
-  const sections = document.querySelectorAll('.page[id]');
-  const navBtns = document.querySelectorAll('.nav-link-btn');
+        <!-- Detail Panel 3: Mobile Application -->
+        <div id="panel-mobile" class="panel">
+            <div class="section-header">
+                <h2 class="section-title">📱 Mobile Application (`mobile/`)</h2>
+            </div>
+            <div class="panel-grid">
+                <div>
+                    <p class="branch-desc">
+                        Provides real-time mobile push notifications, live RTSP stream playback with bounding boxes, and mobile camera RTSP streaming.
+                    </p>
+                    <ul class="feature-list">
+                        <li class="feature-item">
+                            <span class="bullet">✓</span>
+                            <div><strong>Instant Push Alerts:</strong> Telegram & Webhook push notifications with event snapshot images.</div>
+                        </li>
+                        <li class="feature-item">
+                            <span class="bullet">✓</span>
+                            <div><strong>Live Mobile RTSP Stream:</strong> Turns mobile camera into an IP camera for CamAI edge detection.</div>
+                        </li>
+                        <li class="feature-item">
+                            <span class="bullet">✓</span>
+                            <div><strong>Zero-App Browser View:</strong> Live video viewer with bounding boxes in mobile web browser.</div>
+                        </li>
+                    </ul>
+                </div>
+                <div>
+                    <div class="code-box">// ACAP/phone_camera_connector.py
+import requests
 
-  const observerOptions = {
-    root: null,
-    rootMargin: '-70px 0px -40% 0px',
-    threshold: 0.1
-  };
+def connect_mobile_phone_stream(phone_ip="192.168.29.24", port=8080):
+    stream_url = f"http://{phone_ip}:{port}/video"
+    print(f"[*] Connecting Mobile Camera: {stream_url}")
+    # Streams raw video to CamAI Engine for real-time detection
+    return stream_url</div>
+                </div>
+            </div>
+        </div>
 
-  const observer = new IntersectionObserver((entries) => {
-    entries.forEach(entry => {
-      if (entry.isIntersecting) {
-        const id = entry.target.getAttribute('id');
-        navBtns.forEach(btn => {
-          if (btn.getAttribute('data-target') === id) {
-            btn.classList.add('active');
-          } else {
-            btn.classList.remove('active');
-          }
-        });
-      }
-    });
-  }, observerOptions);
+        <!-- Detail Panel 4: AXIS ACAP Native Application -->
+        <div id="panel-acap" class="panel">
+            <div class="section-header">
+                <h2 class="section-title">📹 AXIS ACAP Native Edge Application (`ACAP/`)</h2>
+            </div>
+            <div class="panel-grid">
+                <div>
+                    <p class="branch-desc">
+                        A C/C++ native application compiled for AXIS network cameras. Executes 100% on-device AI analytics using hardware NPU DLPU accelerators.
+                    </p>
+                    <ul class="feature-list">
+                        <li class="feature-item">
+                            <span class="bullet">✓</span>
+                            <div><strong>AXIS VDO API (`vdo-stream.h`):</strong> Zero-copy frame buffer acquisition directly from camera ISP.</div>
+                        </li>
+                        <li class="feature-item">
+                            <span class="bullet">✓</span>
+                            <div><strong>AXIS Larod API (`larod.h`):</strong> Hardware NPU acceleration for YOLOX-Tiny ONNX model.</div>
+                        </li>
+                        <li class="feature-item">
+                            <span class="bullet">✓</span>
+                            <div><strong>AXIS axevent & axoverlay:</strong> Native ONVIF event publishing and hardware stream bounding box rendering.</div>
+                        </li>
+                        <li class="feature-item">
+                            <span class="bullet">✓</span>
+                            <div><strong>ByteTrack C++ Tracker:</strong> Kalman Filter state vector + Hungarian matching algorithm for 0 ID switches.</div>
+                        </li>
+                    </ul>
+                </div>
+                <div>
+                    <div class="code-box">// ACAP/app/camai_engine.cpp
+void CamAIEngine::process_loop() {
+    while (is_running_) {
+        VideoFrame frame;
+        video_pipeline_.capture_frame(frame);
+        
+        // 1. Larod NPU AI Inference
+        std::vector<BoundingBox> detections;
+        inference_engine_.run_inference(frame, detections, latency_ms);
+        
+        // 2. C++ ByteTrack Multi-Object Tracking
+        std::vector<BoundingBox> tracked;
+        tracker_.update(detections, tracked);
+        
+        // 3. Security ROI Intrusion Math & Event Emission
+        security_module_->process_frame(meta, alerts);
+        for (auto& alert : alerts) event_producer_.send_event(alert);
+        
+        // 4. axoverlay Stream Bounding Box Overlay
+        overlay_manager_.render(tracked, alerts);
+    }
+}</div>
+                </div>
+            </div>
+        </div>
 
-  sections.forEach(section => observer.observe(section));
-});
+        <!-- Detail Panel 5: Feature Matrix Table -->
+        <div id="panel-matrix" class="panel">
+            <div class="section-header">
+                <h2 class="section-title">📊 A-to-Z Complete Feature Comparison Matrix</h2>
+                <input type="text" class="search-bar" id="matrixSearch" placeholder="Search features (e.g. tracking, RLS, VDO)..." onkeyup="filterMatrix()">
+            </div>
+            <table class="matrix-table" id="matrixTable">
+                <thead>
+                    <tr>
+                        <th>Feature Capability</th>
+                        <th>Web SaaS (`portal/`)</th>
+                        <th>Desktop Client (`desktop/`)</th>
+                        <th>Mobile App (`mobile/`)</th>
+                        <th>AXIS ACAP Native (`ACAP/`)</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><strong>AI Model Inference</strong></td>
+                        <td>Cloud Node Optional</td>
+                        <td>Local GPU / OpenVINO</td>
+                        <td>Cloud Streamed</td>
+                        <td><span class="status-check">✓ ARTPEC-8 DLPU (Larod)</span></td>
+                    </tr>
+                    <tr>
+                        <td><strong>Video Pipeline</strong></td>
+                        <td>WebRTC / HLS</td>
+                        <td>MJPEG Grid (30-40 FPS)</td>
+                        <td>RTSP / MJPEG Mobile</td>
+                        <td><span class="status-check">✓ AXIS VDO Zero-Copy</span></td>
+                    </tr>
+                    <tr>
+                        <td><strong>Multi-Object Tracking</strong></td>
+                        <td>Cloud Engine</td>
+                        <td>Python ByteTrack</td>
+                        <td>Cloud Streamed</td>
+                        <td><span class="status-check">✓ C++ ByteTrack (Kalman)</span></td>
+                    </tr>
+                    <tr>
+                        <td><strong>Event Publishing</strong></td>
+                        <td>Supabase Realtime</td>
+                        <td>Local Telemetry / WS</td>
+                        <td>Telegram / Push Alert</td>
+                        <td><span class="status-check">✓ AXIS axevent (ONVIF)</span></td>
+                    </tr>
+                    <tr>
+                        <td><strong>Stream Overlays</strong></td>
+                        <td>Canvas SVG Overlay</td>
+                        <td>Client Canvas Overlay</td>
+                        <td>Mobile Browser Overlay</td>
+                        <td><span class="status-check">✓ AXIS axoverlay (Hardware)</span></td>
+                    </tr>
+                    <tr>
+                        <td><strong>Configuration UI</strong></td>
+                        <td>Cloud Admin Studio</td>
+                        <td>Local Desktop Config</td>
+                        <td>Mobile App Settings</td>
+                        <td><span class="status-check">✓ AXIS axparameter (VAPIX)</span></td>
+                    </tr>
+                    <tr>
+                        <td><strong>Resource Watchdog</strong></td>
+                        <td>Cloud Health Monitor</td>
+                        <td>Supervisor Task</td>
+                        <td>Background Daemon</td>
+                        <td><span class="status-check">✓ ResourceGovernor (DROP_OLDEST)</span></td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
 
-let isAutoScrolling = false;
-let autoScrollInterval = null;
+    </main>
 
-function toggleAutoScroll() {
-  const btn = document.getElementById('autoScrollBtn');
-  const icon = document.getElementById('autoScrollIcon');
-  const text = document.getElementById('autoScrollText');
+    <footer>
+        <div class="container">
+            <p>CamAI Enterprise CCTV AI Platform © 2026. Target Route: <code>camai.princesite.in/overview</code></p>
+        </div>
+    </footer>
 
-  if (!isAutoScrolling) {
-    isAutoScrolling = true;
-    btn.classList.add('playing');
-    icon.textContent = '⏸';
-    text.textContent = 'Pause Scroll';
-    
-    autoScrollInterval = setInterval(() => {
-      if ((window.innerHeight + window.scrollY) >= document.body.offsetHeight - 25) {
-        window.scrollTo({ top: 0, behavior: 'smooth' });
-      } else {
-        window.scrollBy({ top: 2, behavior: 'smooth' });
-      }
-    }, 30);
-  } else {
-    stopAutoScroll();
-  }
-}
+    <script>
+        function switchTab(tabId) {
+            document.querySelectorAll('.pillar-tab').forEach(tab => tab.classList.remove('active'));
+            document.querySelectorAll('.panel').forEach(panel => panel.classList.remove('active'));
 
-function stopAutoScroll() {
-  isAutoScrolling = false;
-  const btn = document.getElementById('autoScrollBtn');
-  const icon = document.getElementById('autoScrollIcon');
-  const text = document.getElementById('autoScrollText');
-  if (btn) btn.classList.remove('playing');
-  if (icon) icon.textContent = '▶';
-  if (text) text.textContent = 'Auto-Scroll';
-  if (autoScrollInterval) {
-    clearInterval(autoScrollInterval);
-    autoScrollInterval = null;
-  }
-}
+            const selectedPanel = document.getElementById('panel-' + tabId);
+            if (selectedPanel) {
+                selectedPanel.classList.add('active');
+            }
 
-window.addEventListener('wheel', () => { if (isAutoScrolling) stopAutoScroll(); }, { passive: true });
-window.addEventListener('touchmove', () => { if (isAutoScrolling) stopAutoScroll(); }, { passive: true });
-</script>
+            const tabs = document.querySelectorAll('.pillar-tab');
+            tabs.forEach(tab => {
+                if (tab.getAttribute('onclick').includes(tabId)) {
+                    tab.classList.add('active');
+                }
+            });
+        }
+
+        function filterMatrix() {
+            const query = document.getElementById('matrixSearch').value.toLowerCase();
+            const rows = document.querySelectorAll('#matrixTable tbody tr');
+            rows.forEach(row => {
+                const text = row.innerText.toLowerCase();
+                row.style.display = text.includes(query) ? '' : 'none';
+            });
+        }
+    </script>
 </body>
 </html>
