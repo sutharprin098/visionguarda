@@ -1,4 +1,6 @@
-<!DOCTYPE html>
+import os
+
+html_code = """<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -1180,3 +1182,17 @@ void CamAIEngine::process_loop() {
     </script>
 </body>
 </html>
+"""
+
+paths = [
+    r"d:\camAI\overview_site\index.html",
+    r"d:\camAI\portal\public\overview\index.html",
+    r"d:\camAI\portal\public\overview.html"
+]
+
+for p in paths:
+    os.makedirs(os.path.dirname(p), exist_ok=True)
+    with open(p, "w", encoding="utf-8") as f:
+        f.write(html_code)
+
+print("Full webapp overview generated cleanly!")
