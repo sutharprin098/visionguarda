@@ -22,6 +22,7 @@ const SecurityPolicy = lazy(() => import("./pages/marketing/SecurityPolicy"));
 const SignUp = lazy(() => import("./pages/SignUp"));
 const ForgotPassword = lazy(() => import("./pages/ForgotPassword"));
 const ResetPassword = lazy(() => import("./pages/ResetPassword"));
+const OverviewPage = lazy(() => import("./pages/OverviewPage"));
 const Dashboard = lazy(() => import("./pages/app/Dashboard"));
 const OrganizationsPage = lazy(() => import("./pages/app/Organizations"));
 const UsersPage = lazy(() => import("./pages/app/Users"));
@@ -75,6 +76,7 @@ export default function App() {
         <Route path="/signup" element={<SignUp />} />
         <Route path="/forgot-password" element={<ForgotPassword />} />
         <Route path="/reset-password" element={<ResetPassword />} />
+        <Route path="/overview" element={<OverviewPage />} />
         <Route path="/app" element={<Protected><AppShell /></Protected>}>
           <Route index element={<Dashboard />} />
           <Route path="organizations" element={<PermissionGuard perm="org.manage" moduleName="Organizations"><OrganizationsPage /></PermissionGuard>} />

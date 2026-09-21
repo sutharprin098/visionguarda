@@ -39,7 +39,7 @@
   "redirects": [],
   "rewrites": [
     {
-      "source": "/((?!downloads/).*)",
+      "source": "/((?!downloads/|overview).*)",
       "destination": "/index.html"
     }
   ]
