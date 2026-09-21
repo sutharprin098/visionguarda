@@ -11,26 +11,27 @@ def make_dirs():
         os.makedirs(os.path.join(base, "modules"), exist_ok=True)
         os.makedirs(os.path.join(base, "deployments"), exist_ok=True)
 
+# FULL LIGHT ENTERPRISE THEME STYLES
 CSS_STYLES = """
 :root {
-  --bg-dark: #090d16;
-  --bg-card: #111827;
-  --bg-card-hover: #1f2937;
-  --text-main: #f8fafc;
-  --text-muted: #94a3b8;
-  --border-color: #1e293b;
+  --bg-main: #f8fafc;
+  --bg-card: #ffffff;
+  --bg-card-hover: #f1f5f9;
+  --text-main: #0f172a;
+  --text-muted: #475569;
+  --border-color: #e2e8f0;
   --primary-blue: #2563eb;
   --primary-hover: #1d4ed8;
-  --accent-cyan: #06b6d4;
-  --accent-green: #10b981;
-  --accent-amber: #f59e0b;
-  --accent-purple: #8b5cf6;
-  --accent-rose: #f43f5e;
+  --accent-cyan: #0284c7;
+  --accent-green: #16a34a;
+  --accent-amber: #d97706;
+  --accent-purple: #9333ea;
+  --accent-rose: #e11d48;
 }
 * { margin: 0; padding: 0; box-sizing: border-box; }
 body {
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-  background-color: var(--bg-dark);
+  background-color: var(--bg-main);
   color: var(--text-main);
   line-height: 1.6;
 }
@@ -38,33 +39,34 @@ a { color: inherit; text-decoration: none; }
 
 header {
   position: sticky; top: 0; z-index: 1000;
-  background: rgba(15, 23, 42, 0.95);
+  background: rgba(255, 255, 255, 0.95);
   backdrop-filter: blur(12px);
   border-bottom: 1px solid var(--border-color);
   padding: 1rem 2rem;
   display: flex; justify-content: space-between; align-items: center;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.05);
 }
-.logo-area { display: flex; align-items: center; gap: 0.75rem; font-weight: 800; font-size: 1.35rem; color: #fff; }
+.logo-area { display: flex; align-items: center; gap: 0.75rem; font-weight: 800; font-size: 1.35rem; color: #0f172a; }
 .logo-icon { width: 28px; height: 28px; fill: var(--primary-blue); }
 nav { display: flex; gap: 1.25rem; align-items: center; }
 nav a { font-size: 0.875rem; font-weight: 500; color: var(--text-muted); transition: color 0.2s; }
-nav a:hover, nav a.active { color: #fff; }
+nav a:hover, nav a.active { color: var(--primary-blue); font-weight: 600; }
 
 .dropdown { position: relative; display: inline-block; }
 .dropdown-content {
   display: none; position: absolute; top: 100%; left: 0;
-  background-color: var(--bg-card); min-width: 240px;
-  box-shadow: 0 10px 25px rgba(0,0,0,0.5); border: 1px solid var(--border-color);
+  background-color: #ffffff; min-width: 240px;
+  box-shadow: 0 10px 25px rgba(0,0,0,0.08); border: 1px solid var(--border-color);
   border-radius: 8px; padding: 0.5rem 0; z-index: 100;
 }
 .dropdown:hover .dropdown-content { display: block; }
 .dropdown-content a {
   padding: 0.6rem 1.2rem; display: block; color: var(--text-muted); font-size: 0.85rem;
 }
-.dropdown-content a:hover { background: var(--bg-card-hover); color: #fff; }
+.dropdown-content a:hover { background: var(--bg-card-hover); color: var(--primary-blue); }
 
 .nav-btn {
-  background: var(--primary-blue); color: #fff; padding: 0.5rem 1.2rem;
+  background: var(--primary-blue); color: #fff !important; padding: 0.5rem 1.2rem;
   border-radius: 6px; font-weight: 600; font-size: 0.85rem; transition: background 0.2s;
 }
 .nav-btn:hover { background: var(--primary-hover); }
@@ -72,14 +74,14 @@ nav a:hover, nav a.active { color: #fff; }
 .container { max-width: 1200px; margin: 0 auto; padding: 3rem 1.5rem; }
 .hero-page {
   text-align: center; padding: 4rem 1rem; border-bottom: 1px solid var(--border-color);
-  background: radial-gradient(circle at top, rgba(37,99,235,0.12) 0%, rgba(9,13,22,0) 70%);
+  background: radial-gradient(circle at top, rgba(37,99,235,0.08) 0%, rgba(248,250,252,0) 70%);
 }
 .hero-badge {
-  display: inline-flex; align-items: center; gap: 0.5rem; background: rgba(37,99,235,0.15);
-  border: 1px solid rgba(37,99,235,0.3); color: #60a5fa; padding: 0.35rem 1rem;
-  border-radius: 9999px; font-size: 0.8rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 1.5rem;
+  display: inline-flex; align-items: center; gap: 0.5rem; background: rgba(37,99,235,0.1);
+  border: 1px solid rgba(37,99,235,0.25); color: var(--primary-blue); padding: 0.35rem 1rem;
+  border-radius: 9999px; font-size: 0.8rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 1.5rem;
 }
-.hero-page h1 { font-size: 2.75rem; font-weight: 800; margin-bottom: 1rem; color: #fff; }
+.hero-page h1 { font-size: 2.75rem; font-weight: 800; margin-bottom: 1rem; color: #0f172a; }
 .hero-page p { font-size: 1.15rem; color: var(--text-muted); max-width: 750px; margin: 0 auto 2rem auto; }
 .hero-actions { display: flex; justify-content: center; gap: 1rem; }
 
@@ -89,34 +91,35 @@ nav a:hover, nav a.active { color: #fff; }
 
 .card {
   background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 12px;
-  padding: 1.75rem; transition: transform 0.2s, border-color 0.2s;
+  padding: 1.75rem; transition: transform 0.2s, border-color 0.2s, box-shadow 0.2s;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.03);
 }
-.card:hover { transform: translateY(-3px); border-color: rgba(37,99,235,0.4); }
-.card-icon { width: 42px; height: 42px; border-radius: 8px; background: rgba(37,99,235,0.15); display: flex; align-items: center; justify-content: center; margin-bottom: 1rem; color: #60a5fa; font-weight:700; }
-.card h3 { font-size: 1.25rem; font-weight: 700; color: #fff; margin-bottom: 0.5rem; }
+.card:hover { transform: translateY(-3px); border-color: rgba(37,99,235,0.4); box-shadow: 0 8px 20px rgba(0,0,0,0.06); }
+.card-icon { width: 42px; height: 42px; border-radius: 8px; background: rgba(37,99,235,0.1); display: flex; align-items: center; justify-content: center; margin-bottom: 1rem; color: var(--primary-blue); font-weight:800; }
+.card h3 { font-size: 1.25rem; font-weight: 700; color: #0f172a; margin-bottom: 0.5rem; }
 .card p { font-size: 0.9rem; color: var(--text-muted); }
-.card-link { display: inline-flex; align-items: center; gap: 0.4rem; color: #60a5fa; font-weight: 600; font-size: 0.85rem; margin-top: 1rem; }
+.card-link { display: inline-flex; align-items: center; gap: 0.4rem; color: var(--primary-blue); font-weight: 600; font-size: 0.85rem; margin-top: 1rem; }
 
 .tech-box {
-  background: #090d16; border: 1px solid var(--border-color); border-radius: 8px;
+  background: #0f172a; border: 1px solid #1e293b; border-radius: 8px;
   padding: 1.25rem; font-family: monospace; font-size: 0.85rem; color: #38bdf8; overflow-x: auto; margin: 1rem 0; line-height: 1.5;
 }
-.stat-pill { display: inline-block; background: #1e293b; color: #94a3b8; font-size: 0.75rem; padding: 0.25rem 0.6rem; border-radius: 4px; font-weight: 600; margin-right: 0.5rem; margin-top: 0.5rem; }
+.stat-pill { display: inline-block; background: #e2e8f0; color: #334155; font-size: 0.75rem; padding: 0.25rem 0.6rem; border-radius: 4px; font-weight: 600; margin-right: 0.5rem; margin-top: 0.5rem; }
 
 .svg-frame {
   background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 12px;
-  padding: 1.5rem; margin: 2rem 0; text-align: center;
+  padding: 1.5rem; margin: 2rem 0; text-align: center; box-shadow: 0 1px 3px rgba(0,0,0,0.03);
 }
 
 footer {
-  background: #070a10; border-top: 1px solid var(--border-color); padding: 4rem 2rem 2rem 2rem; margin-top: 4rem;
+  background: #f1f5f9; border-top: 1px solid var(--border-color); padding: 4rem 2rem 2rem 2rem; margin-top: 4rem;
 }
 .footer-grid { max-width: 1200px; margin: 0 auto; display: grid; grid-template-columns: 2fr repeat(4, 1fr); gap: 2.5rem; }
-.footer-col h4 { font-size: 0.9rem; font-weight: 700; color: #fff; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 1.25rem; }
+.footer-col h4 { font-size: 0.9rem; font-weight: 700; color: #0f172a; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 1.25rem; }
 .footer-col ul { list-style: none; }
 .footer-col ul li { margin-bottom: 0.75rem; }
 .footer-col ul li a { color: var(--text-muted); font-size: 0.85rem; transition: color 0.2s; }
-.footer-col ul li a:hover { color: #fff; }
+.footer-col ul li a:hover { color: var(--primary-blue); }
 .footer-bottom { max-width: 1200px; margin: 3rem auto 0 auto; padding-top: 2rem; border-top: 1px solid var(--border-color); display: flex; justify-content: space-between; align-items: center; color: var(--text-muted); font-size: 0.8rem; }
 """
 
@@ -243,7 +246,7 @@ def render_footer(current_path=""):
 
 PAGES = {}
 
-# 1. Index Page
+# 1. Index Page (Light Theme Headings)
 PAGES["index.html"] = """
 <!DOCTYPE html>
 <html lang="en">
@@ -262,13 +265,13 @@ PAGES["index.html"] = """
     <p>From real-time camera stream processing to enterprise-wide security, industrial compliance, traffic management, and structural health monitoring.</p>
     <div class="hero-actions">
       <a href="ecosystem.html" class="nav-btn" style="padding: 0.75rem 1.75rem; font-size: 1rem;">Explore Platform Ecosystem</a>
-      <a href="architecture.html" style="background: var(--bg-card); border: 1px solid var(--border-color); color: #fff; padding: 0.75rem 1.75rem; border-radius: 6px; font-weight: 600; font-size: 1rem;">System Architecture</a>
+      <a href="architecture.html" style="background: #ffffff; border: 1px solid var(--border-color); color: #0f172a; padding: 0.75rem 1.75rem; border-radius: 6px; font-weight: 600; font-size: 1rem; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">System Architecture</a>
     </div>
   </section>
 
   <div class="container">
     <div style="text-align: center; margin-bottom: 2rem;">
-      <h2 style="font-size: 2rem; font-weight: 800; color: #fff;">All 7 Core AI Analytics Modules</h2>
+      <h2 style="font-size: 2rem; font-weight: 800; color: #0f172a;">All 7 Core AI Analytics Modules</h2>
       <p style="color: var(--text-muted);">Explore dedicated technical specifications for each production-ready AI module.</p>
     </div>
 
@@ -332,7 +335,7 @@ PAGES["index.html"] = """
 
     <div style="margin-top: 5rem; border-top: 1px solid var(--border-color); padding-top: 3rem;">
       <div style="text-align: center; margin-bottom: 2rem;">
-        <h2 style="font-size: 2rem; font-weight: 800; color: #fff;">4 Native Deployment Surfaces</h2>
+        <h2 style="font-size: 2rem; font-weight: 800; color: #0f172a;">4 Native Deployment Surfaces</h2>
         <p style="color: var(--text-muted);">Unified video intelligence running natively across all client and edge platforms.</p>
       </div>
 
@@ -386,12 +389,12 @@ PAGES["modules/security.html"] = """
   <div class="container">
     <div class="grid-2">
       <div>
-        <h2 style="font-size: 1.5rem; font-weight: 700; color: #fff; margin-bottom: 1rem;">Core Capabilities</h2>
+        <h2 style="font-size: 1.5rem; font-weight: 700; color: #0f172a; margin-bottom: 1rem;">Core Capabilities</h2>
         <ul style="color: var(--text-muted); font-size: 0.95rem; margin-left: 1.25rem; line-height: 1.8;">
-          <li><strong style="color:#fff;">Virtual Tripwire Line Crossing:</strong> Detect vehicles or pedestrians crossing user-drawn vector lines in specified direction.</li>
-          <li><strong style="color:#fff;">Polygon Intrusion Zones:</strong> Define arbitrary multi-point geometric zones with immediate intrusion trigger alerts.</li>
-          <li><strong style="color:#fff;">Loitering Time Threshold:</strong> Monitor object dwell time inside restricted areas; trigger alarm upon exceeding dynamic time limits.</li>
-          <li><strong style="color:#fff;">Directional Vector Tracking:</strong> Optical vector analysis ensuring objects moving in approved directions do not generate false positives.</li>
+          <li><strong style="color:#0f172a;">Virtual Tripwire Line Crossing:</strong> Detect vehicles or pedestrians crossing user-drawn vector lines in specified direction.</li>
+          <li><strong style="color:#0f172a;">Polygon Intrusion Zones:</strong> Define arbitrary multi-point geometric zones with immediate intrusion trigger alerts.</li>
+          <li><strong style="color:#0f172a;">Loitering Time Threshold:</strong> Monitor object dwell time inside restricted areas; trigger alarm upon exceeding dynamic time limits.</li>
+          <li><strong style="color:#0f172a;">Directional Vector Tracking:</strong> Optical vector analysis ensuring objects moving in approved directions do not generate false positives.</li>
         </ul>
       </div>
 
@@ -411,18 +414,18 @@ Hardware Acceleration: TensorRT FP16 / ACAP Edge VPU
     </div>
 
     <div class="svg-frame">
-      <h3 style="color:#fff; margin-bottom: 1rem;">Interactive SVG Perimeter Pipeline Simulation</h3>
+      <h3 style="color:#0f172a; margin-bottom: 1rem;">Interactive SVG Perimeter Pipeline Simulation</h3>
       <svg width="100%" height="280" viewBox="0 0 800 280" fill="none">
-        <rect width="800" height="280" rx="8" fill="#0b1120"/>
+        <rect width="800" height="280" rx="8" fill="#f1f5f9" stroke="#e2e8f0"/>
         <polygon points="100,50 400,50 350,220 50,220" fill="rgba(239, 68, 68, 0.15)" stroke="#ef4444" stroke-width="2" stroke-dasharray="6,4"/>
-        <text x="70" y="80" fill="#ef4444" font-weight="700" font-size="12">RESTRICTED ZONE A</text>
-        <line x1="500" y1="30" x2="500" y2="250" stroke="#f59e0b" stroke-width="3"/>
-        <text x="510" y="50" fill="#f59e0b" font-weight="700" font-size="12">TRIPWIRE LINE #1</text>
+        <text x="70" y="80" fill="#dc2626" font-weight="700" font-size="12">RESTRICTED ZONE A</text>
+        <line x1="500" y1="30" x2="500" y2="250" stroke="#d97706" stroke-width="3"/>
+        <text x="510" y="50" fill="#d97706" font-weight="700" font-size="12">TRIPWIRE LINE #1</text>
         <rect x="180" y="100" width="60" height="90" fill="none" stroke="#ef4444" stroke-width="2"/>
         <rect x="180" y="82" width="90" height="18" fill="#ef4444"/>
         <text x="184" y="94" fill="#fff" font-size="10" font-weight="700">INTRUDER 99.1%</text>
-        <rect x="520" y="120" width="70" height="100" fill="none" stroke="#10b981" stroke-width="2"/>
-        <rect x="520" y="102" width="100" height="18" fill="#10b981"/>
+        <rect x="520" y="120" width="70" height="100" fill="none" stroke="#16a34a" stroke-width="2"/>
+        <rect x="520" y="102" width="100" height="18" fill="#16a34a"/>
         <text x="524" y="114" fill="#fff" font-size="10" font-weight="700">AUTHORIZED 98.4%</text>
       </svg>
     </div>
@@ -452,11 +455,11 @@ PAGES["modules/traffic.html"] = """
   <div class="container">
     <div class="grid-2">
       <div>
-        <h2 style="font-size: 1.5rem; font-weight: 700; color: #fff; margin-bottom: 1rem;">Core Features</h2>
+        <h2 style="font-size: 1.5rem; font-weight: 700; color: #0f172a; margin-bottom: 1rem;">Core Features</h2>
         <ul style="color: var(--text-muted); font-size: 0.95rem; margin-left: 1.25rem; line-height: 1.8;">
-          <li><strong style="color:#fff;">License Plate OCR Engine:</strong> Deep optical character recognition supporting international license plate layouts and multi-row text.</li>
-          <li><strong style="color:#fff;">Homography Speed Calculator:</strong> Camera perspective calibration mapping image pixels to physical road distance for precision speed radar.</li>
-          <li><strong style="color:#fff;">Vehicle Classification:</strong> Multi-head classifier distinguishing Sedans, SUVs, Light Trucks, Heavy Haulers, Buses, and Motorcycles.</li>
+          <li><strong style="color:#0f172a;">License Plate OCR Engine:</strong> Deep optical character recognition supporting international license plate layouts and multi-row text.</li>
+          <li><strong style="color:#0f172a;">Homography Speed Calculator:</strong> Camera perspective calibration mapping image pixels to physical road distance for precision speed radar.</li>
+          <li><strong style="color:#0f172a;">Vehicle Classification:</strong> Multi-head classifier distinguishing Sedans, SUVs, Light Trucks, Heavy Haulers, Buses, and Motorcycles.</li>
         </ul>
       </div>
 
@@ -497,11 +500,11 @@ PAGES["modules/ppe.html"] = """
   <div class="container">
     <div class="grid-2">
       <div>
-        <h2 style="font-size: 1.5rem; font-weight: 700; color: #fff; margin-bottom: 1rem;">Safety Enforcement Features</h2>
+        <h2 style="font-size: 1.5rem; font-weight: 700; color: #0f172a; margin-bottom: 1rem;">Safety Enforcement Features</h2>
         <ul style="color: var(--text-muted); font-size: 0.95rem; margin-left: 1.25rem; line-height: 1.8;">
-          <li><strong style="color:#fff;">Hardhat & Vest Verification:</strong> Real-time detection of personal protective equipment on personnel entering operational zones.</li>
-          <li><strong style="color:#fff;">Fall & Spill Hazard Alert:</strong> Pose estimation model detecting sudden human falls or prolonged immobility on plant floors.</li>
-          <li><strong style="color:#fff;">Machine Danger Perimeter:</strong> Dynamic perimeter safety halo surrounding heavy robotic machinery with instant shutdown trigger output.</li>
+          <li><strong style="color:#0f172a;">Hardhat & Vest Verification:</strong> Real-time detection of personal protective equipment on personnel entering operational zones.</li>
+          <li><strong style="color:#0f172a;">Fall & Spill Hazard Alert:</strong> Pose estimation model detecting sudden human falls or prolonged immobility on plant floors.</li>
+          <li><strong style="color:#0f172a;">Machine Danger Perimeter:</strong> Dynamic perimeter safety halo surrounding heavy robotic machinery with instant shutdown trigger output.</li>
         </ul>
       </div>
 
@@ -541,11 +544,11 @@ PAGES["modules/retail.html"] = """
   <div class="container">
     <div class="grid-2">
       <div>
-        <h2 style="font-size: 1.5rem; font-weight: 700; color: #fff; margin-bottom: 1rem;">Retail Intelligence Capabilities</h2>
+        <h2 style="font-size: 1.5rem; font-weight: 700; color: #0f172a; margin-bottom: 1rem;">Retail Intelligence Capabilities</h2>
         <ul style="color: var(--text-muted); font-size: 0.95rem; margin-left: 1.25rem; line-height: 1.8;">
-          <li><strong style="color:#fff;">Entrance Footfall Counter:</strong> Bi-directional counting of store traffic with hourly conversion analytics.</li>
-          <li><strong style="color:#fff;">Multi-Camera Re-ID:</strong> Non-biometric appearance tracking correlating customer movement across store zones.</li>
-          <li><strong style="color:#fff;">Queue Depth & Wait Times:</strong> Checkout lane congestion monitoring alerting staff to open additional registers.</li>
+          <li><strong style="color:#0f172a;">Entrance Footfall Counter:</strong> Bi-directional counting of store traffic with hourly conversion analytics.</li>
+          <li><strong style="color:#0f172a;">Multi-Camera Re-ID:</strong> Non-biometric appearance tracking correlating customer movement across store zones.</li>
+          <li><strong style="color:#0f172a;">Queue Depth & Wait Times:</strong> Checkout lane congestion monitoring alerting staff to open additional registers.</li>
         </ul>
       </div>
 
@@ -585,11 +588,11 @@ PAGES["modules/smartcity.html"] = """
   <div class="container">
     <div class="grid-2">
       <div>
-        <h2 style="font-size: 1.5rem; font-weight: 700; color: #fff; margin-bottom: 1rem;">Urban Intelligence Features</h2>
+        <h2 style="font-size: 1.5rem; font-weight: 700; color: #0f172a; margin-bottom: 1rem;">Urban Intelligence Features</h2>
         <ul style="color: var(--text-muted); font-size: 0.95rem; margin-left: 1.25rem; line-height: 1.8;">
-          <li><strong style="color:#fff;">Public Density Estimation:</strong> Neural crowd counter estimating person-per-square-meter density in plazas and transit hubs.</li>
-          <li><strong style="color:#fff;">Illegal Waste Dumping:</strong> Detect vehicle stops and object drops in non-designated municipal zones.</li>
-          <li><strong style="color:#fff;">Street Flood Gauge Reading:</strong> Optical reading of water level markers during severe weather events.</li>
+          <li><strong style="color:#0f172a;">Public Density Estimation:</strong> Neural crowd counter estimating person-per-square-meter density in plazas and transit hubs.</li>
+          <li><strong style="color:#0f172a;">Illegal Waste Dumping:</strong> Detect vehicle stops and object drops in non-designated municipal zones.</li>
+          <li><strong style="color:#0f172a;">Street Flood Gauge Reading:</strong> Optical reading of water level markers during severe weather events.</li>
         </ul>
       </div>
 
@@ -629,11 +632,11 @@ PAGES["modules/micromotion.html"] = """
   <div class="container">
     <div class="grid-2">
       <div>
-        <h2 style="font-size: 1.5rem; font-weight: 700; color: #fff; margin-bottom: 1rem;">Structural Health Features</h2>
+        <h2 style="font-size: 1.5rem; font-weight: 700; color: #0f172a; margin-bottom: 1rem;">Structural Health Features</h2>
         <ul style="color: var(--text-muted); font-size: 0.95rem; margin-left: 1.25rem; line-height: 1.8;">
-          <li><strong style="color:#fff;">Sub-pixel Displacement Tracking:</strong> Measure micro-movements as small as 0.05 millimeters from standard 4K video streams.</li>
-          <li><strong style="color:#fff;">FFT Vibration Spectrum:</strong> Extract natural oscillation frequencies of bridges, crane cables, and industrial turbines.</li>
-          <li><strong style="color:#fff;">Structural Strain Warning:</strong> Continuous structural health scoring highlighting abnormal resonant frequencies.</li>
+          <li><strong style="color:#0f172a;">Sub-pixel Displacement Tracking:</strong> Measure micro-movements as small as 0.05 millimeters from standard 4K video streams.</li>
+          <li><strong style="color:#0f172a;">FFT Vibration Spectrum:</strong> Extract natural oscillation frequencies of bridges, crane cables, and industrial turbines.</li>
+          <li><strong style="color:#0f172a;">Structural Strain Warning:</strong> Continuous structural health scoring highlighting abnormal resonant frequencies.</li>
         </ul>
       </div>
 
@@ -673,11 +676,11 @@ PAGES["modules/custom.html"] = """
   <div class="container">
     <div class="grid-2">
       <div>
-        <h2 style="font-size: 1.5rem; font-weight: 700; color: #fff; margin-bottom: 1rem;">Custom Engine Capabilities</h2>
+        <h2 style="font-size: 1.5rem; font-weight: 700; color: #0f172a; margin-bottom: 1rem;">Custom Engine Capabilities</h2>
         <ul style="color: var(--text-muted); font-size: 0.95rem; margin-left: 1.25rem; line-height: 1.8;">
-          <li><strong style="color:#fff;">BYOM Model Importer:</strong> Upload custom ONNX, PyTorch, or TensorRT model weights directly to edge cameras and server gateways.</li>
-          <li><strong style="color:#fff;">Zero-Code Rule Builder:</strong> Visual node-based graph editor connecting AI detections to custom Webhook, MQTT, and GPIO outputs.</li>
-          <li><strong style="color:#fff;">Synthetic Data Generator:</strong> Augment edge training datasets with synthetic noise and lighting transformations.</li>
+          <li><strong style="color:#0f172a;">BYOM Model Importer:</strong> Upload custom ONNX, PyTorch, or TensorRT model weights directly to edge cameras and server gateways.</li>
+          <li><strong style="color:#0f172a;">Zero-Code Rule Builder:</strong> Visual node-based graph editor connecting AI detections to custom Webhook, MQTT, and GPIO outputs.</li>
+          <li><strong style="color:#0f172a;">Synthetic Data Generator:</strong> Augment edge training datasets with synthetic noise and lighting transformations.</li>
         </ul>
       </div>
 
@@ -849,11 +852,11 @@ PAGES["deployments/acap.html"] = """
   <div class="container">
     <div class="grid-2">
       <div>
-        <h2 style="font-size: 1.5rem; font-weight: 700; color: #fff; margin-bottom: 1rem;">Embedded Architecture</h2>
+        <h2 style="font-size: 1.5rem; font-weight: 700; color: #0f172a; margin-bottom: 1rem;">Embedded Architecture</h2>
         <ul style="color: var(--text-muted); font-size: 0.95rem; margin-left: 1.25rem; line-height: 1.8;">
-          <li><strong style="color:#fff;">Zero-Copy Buffer Pipeline:</strong> Direct V4L2 YUV420 frame memory sharing between camera ISP and AI accelerator.</li>
-          <li><strong style="color:#fff;">Dual-Engine Fallback:</strong> Seamless execution across Deep Learning VPU (ARTPEC-8) and ARM Cortex CPU fallback.</li>
-          <li><strong style="color:#fff;">On-Camera Event Bus:</strong> Direct MQTT metadata publishing over local network without requiring server gateway.</li>
+          <li><strong style="color:#0f172a;">Zero-Copy Buffer Pipeline:</strong> Direct V4L2 YUV420 frame memory sharing between camera ISP and AI accelerator.</li>
+          <li><strong style="color:#0f172a;">Dual-Engine Fallback:</strong> Seamless execution across Deep Learning VPU (ARTPEC-8) and ARM Cortex CPU fallback.</li>
+          <li><strong style="color:#0f172a;">On-Camera Event Bus:</strong> Direct MQTT metadata publishing over local network without requiring server gateway.</li>
         </ul>
       </div>
 
@@ -1106,7 +1109,7 @@ engine.process_frame(yuv_buffer, width, height);
 
 def generate_all():
     make_dirs()
-    print("Generating all 18 dedicated HTML pages across overview_site and portal/public/overview...")
+    print("Generating all 18 dedicated HTML pages with FULL LIGHT ENTERPRISE THEME...")
     for path, content in PAGES.items():
         header_html = render_header(path)
         footer_html = render_footer(path)
@@ -1118,7 +1121,7 @@ def generate_all():
                 f.write(full_html)
             print(f"Generated: {out_path}")
             
-    # Also write overview.html to portal/public/ for backup single route compatibility
+    # Backup single route overview.html
     overview_single = os.path.join(r"d:\camAI\portal\public", "overview.html")
     with open(overview_single, "w", encoding="utf-8") as f:
         f.write(PAGES["index.html"].replace("{HEADER}", render_header("index.html")).replace("{FOOTER}", render_footer("index.html")))
