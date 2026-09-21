@@ -1,0 +1,49 @@
+{
+  "schemaVersion": "2.0",
+  "acapPackageConf": {
+    "setup": {
+      "appName": "camai_acap",
+      "appId": "com.camai.acap.analytics",
+      "version": "1.0.0",
+      "vendor": "CamAI Enterprise",
+      "vendorUrl": "https://camai.enterprise",
+      "embeddedSdkVersion": "3.0",
+      "architecture": "aarch64",
+      "runMode": "respawn"
+    },
+    "configuration": {
+      "setting": [
+        {
+          "name": "EnableSecurityModule",
+          "type": "bool",
+          "default": "true"
+        },
+        {
+          "name": "ConfidenceThreshold",
+          "type": "string",
+          "default": "0.45"
+        },
+        {
+          "name": "EnableOverlay",
+          "type": "bool",
+          "default": "true"
+        },
+        {
+          "name": "MaxProcessingFPS",
+          "type": "int",
+          "default": "15"
+        },
+        {
+          "name": "IntrusionROICoords",
+          "type": "string",
+          "default": "100,100;500,100;500,400;100,400"
+        },
+        {
+          "name": "TripwireCoords",
+          "type": "string",
+          "default": "200,300;600,300"
+        }
+      ]
+    }
+  }
+}
