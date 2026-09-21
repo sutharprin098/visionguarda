@@ -49,6 +49,20 @@ export function mjpegStreamUrl(cameraId: string): string {
 }
 
 /**
+ * Returns direct RTSP stream URL for AXIS Network Cameras running CamAI ACAP
+ */
+export function axisRtspStreamUrl(cameraIp: string, username = "root"): string {
+  return `rtsp://${username}@${cameraIp}/axis-media/media.amp?videocodec=h264`;
+}
+
+/**
+ * Returns direct MJPEG stream URL with CamAI ACAP overlays for live browser viewer
+ */
+export function axisAcapMjpegStreamUrl(cameraIp: string): string {
+  return `http://${cameraIp}/mjpg/video.mjpg?resolution=1920x1080&fps=15`;
+}
+
+/**
  * Set the MJPEG preview encode size for one camera. Display only — it never
  * touches capture, inference or recording resolution (see
  * PipelineCoordinator.update_display_config).
