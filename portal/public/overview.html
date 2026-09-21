@@ -3,8 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>CamAI Enterprise — System Architecture & Pillar Overview</title>
-    <meta name="description" content="Comprehensive Web Application Architecture Overview for CamAI Enterprise CCTV AI Platform covering Web SaaS Portal, Desktop Client, Mobile App, and ACAP Native Edge Application with full UI screenshots and smooth scrolling.">
+    <title>CamAI Enterprise — System Architecture, AI Models, 7 Modules & Team Management</title>
+    <meta name="description" content="Comprehensive Web Application Architecture Overview for CamAI Enterprise CCTV AI Platform covering AI Models, 7 Security Analytics Modules, Team Management RBAC, Web SaaS Portal, Desktop Client, Mobile App, and ACAP Native Edge Application.">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=Fira+Code:wght@400;500;600&display=swap" rel="stylesheet">
@@ -92,13 +92,13 @@
         .nav-links {
             display: flex;
             align-items: center;
-            gap: 8px;
+            gap: 6px;
         }
 
         .nav-btn {
-            padding: 8px 14px;
+            padding: 7px 12px;
             border-radius: 8px;
-            font-size: 0.85rem;
+            font-size: 0.825rem;
             font-weight: 600;
             color: var(--text-secondary);
             background: transparent;
@@ -108,12 +108,12 @@
             text-decoration: none;
             display: flex;
             align-items: center;
-            gap: 6px;
+            gap: 5px;
         }
 
         .nav-btn svg {
-            width: 16px;
-            height: 16px;
+            width: 15px;
+            height: 15px;
         }
 
         .nav-btn:hover {
@@ -174,9 +174,9 @@
         }
 
         .hero-desc {
-            max-width: 840px;
+            max-width: 860px;
             margin: 0 auto 2rem;
-            font-size: 1.1rem;
+            font-size: 1.05rem;
             color: var(--text-secondary);
         }
 
@@ -184,6 +184,7 @@
             display: flex;
             justify-content: center;
             gap: 12px;
+            flex-wrap: wrap;
         }
 
         /* System Architecture Tree Styling */
@@ -386,6 +387,9 @@
         .desktop .pillar-icon-wrapper { background: #e0e7ff; color: var(--accent-indigo); }
         .mobile .pillar-icon-wrapper { background: #d1fae5; color: var(--accent-emerald); }
         .acap .pillar-icon-wrapper { background: #fef3c7; color: var(--accent-amber); }
+        .models .pillar-icon-wrapper { background: #fee2e2; color: var(--accent-rose); }
+        .modules .pillar-icon-wrapper { background: #f3e8ff; color: #9333ea; }
+        .rbac .pillar-icon-wrapper { background: #ccfbf1; color: #0d9488; }
 
         .pillar-title {
             font-size: 1.6rem;
@@ -409,6 +413,49 @@
 
         @media (max-width: 900px) {
             .section-grid { grid-template-columns: 1fr; }
+        }
+
+        .grid-3 {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+            gap: 1.25rem;
+        }
+
+        .grid-card {
+            background: #f8fafc;
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-lg);
+            padding: 1.25rem;
+            transition: all 0.25s ease;
+        }
+
+        .grid-card:hover {
+            transform: translateY(-3px);
+            box-shadow: var(--shadow-md);
+            border-color: var(--border-highlight);
+        }
+
+        .card-badge {
+            font-size: 0.725rem;
+            font-family: 'Fira Code', monospace;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-weight: 700;
+            display: inline-block;
+            margin-bottom: 8px;
+        }
+
+        .card-title {
+            font-size: 1.1rem;
+            font-weight: 800;
+            color: var(--text-primary);
+            margin-bottom: 6px;
+        }
+
+        .card-desc {
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+            line-height: 1.5;
         }
 
         .feature-list {
@@ -542,26 +589,14 @@
             <span class="badge-tag">Platform Overview</span>
         </a>
         <div class="nav-links">
-            <a href="#tree" class="nav-btn">
-                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V7M3 7l9 6 9-6"/></svg>
-                Architecture Tree
-            </a>
-            <a href="#web-saas" class="nav-btn">
-                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9"/></svg>
-                Web SaaS
-            </a>
-            <a href="#desktop-client" class="nav-btn">
-                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg>
-                Desktop Client
-            </a>
-            <a href="#mobile-app" class="nav-btn">
-                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z"/></svg>
-                Mobile App
-            </a>
-            <a href="#acap-edge" class="nav-btn primary">
-                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z"/></svg>
-                ACAP Native Edge
-            </a>
+            <a href="#tree" class="nav-btn">Architecture Tree</a>
+            <a href="#ai-models" class="nav-btn">AI Models</a>
+            <a href="#modules-7" class="nav-btn">7 Analytics Modules</a>
+            <a href="#team-rbac" class="nav-btn">Team & RBAC</a>
+            <a href="#web-saas" class="nav-btn">Web SaaS</a>
+            <a href="#desktop-client" class="nav-btn">Desktop</a>
+            <a href="#mobile-app" class="nav-btn">Mobile</a>
+            <a href="#acap-edge" class="nav-btn primary">ACAP Native Edge</a>
         </div>
     </nav>
 
@@ -572,11 +607,13 @@
             <div class="hero-domain">camai.princesite.in/overview</div>
             <h1 class="hero-title">CamAI Enterprise Platform Architecture</h1>
             <p class="hero-desc">
-                An end-to-end breakdown of CamAI's four core pillars: Cloud SaaS Management, Windows Desktop Client, Mobile Push App, and ACAP Native Edge Analytics with full UI screenshots.
+                Complete A-to-Z breakdown of CamAI AI Models, 7 Specialized Analytics Modules, Team RBAC Management, Web SaaS Portal, Desktop Client, Mobile App, and ACAP Native Edge.
             </p>
             <div class="hero-actions">
                 <a href="#tree" class="nav-btn primary">Explore Architecture Tree</a>
-                <a href="#web-saas" class="nav-btn">Explore Web SaaS</a>
+                <a href="#ai-models" class="nav-btn">AI Model Zoo</a>
+                <a href="#modules-7" class="nav-btn">7 Core Modules</a>
+                <a href="#team-rbac" class="nav-btn">Team Management</a>
             </div>
         </header>
 
@@ -654,6 +691,169 @@
                             <li class="tree-leaf-item"><span class="tree-dot" style="background:var(--accent-amber);"></span> axevent & axoverlay ONVIF</li>
                         </ul>
                     </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- SECTION: AI Model Zoo & Detection Engines -->
+        <section id="ai-models" class="section-block models">
+            <div class="pillar-header">
+                <div class="pillar-title-group">
+                    <div class="pillar-icon-wrapper">
+                        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 01-2 2h-4a2 2 0 01-2-2v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/></svg>
+                    </div>
+                    <div>
+                        <h2 class="pillar-title">CamAI AI Model Zoo & Detection Engines</h2>
+                        <div class="pillar-path">Models, NPU Accelerators & ByteTrack Kalman Engine</div>
+                    </div>
+                </div>
+            </div>
+            <div class="grid-3">
+                <div class="grid-card">
+                    <span class="card-badge" style="background:#fee2e2; color:#ef4444;">YOLOX-Tiny ONNX</span>
+                    <div class="card-title">YOLOX-Tiny 8-Bit Quantized</div>
+                    <div class="card-desc">Apache 2.0 licensed real-time object detector optimized for ONNX Runtime and Larod NPU accelerators. Detects persons, vehicles, bags, and equipment with sub-15ms latency.</div>
+                </div>
+
+                <div class="grid-card">
+                    <span class="card-badge" style="background:#e0e7ff; color:#6366f1;">OpenVINO FP16/INT8</span>
+                    <div class="card-title">Intel OpenVINO Neural Engine</div>
+                    <div class="card-desc">Local CPU/GPU accelerated inference backend for Windows Desktop Client and Local Server Engine. Achieves 30-40 FPS multi-stream processing.</div>
+                </div>
+
+                <div class="grid-card">
+                    <span class="card-badge" style="background:#d1fae5; color:#10b981;">C++ ByteTrack</span>
+                    <div class="card-title">Kalman Filter Multi-Object Tracker</div>
+                    <div class="card-desc">State-vector motion tracking engine with Hungarian data association algorithm. Maintains zero ID switches across occlusions, crowds, and complex camera scenes.</div>
+                </div>
+
+                <div class="grid-card">
+                    <span class="card-badge" style="background:#fef3c7; color:#f59e0b;">Larod NPU Runtime</span>
+                    <div class="card-title">Hardware NPU Acceleration</div>
+                    <div class="card-desc">Direct interface to camera hardware DLPU / NPU chips via `larod.h` API for zero-CPU AI model execution directly on edge camera hardware.</div>
+                </div>
+
+                <div class="grid-card">
+                    <span class="card-badge" style="background:#e0f2fe; color:#0284c7;">PPE & Safety Weights</span>
+                    <div class="card-title">Hardhat & High-Vis Vest Weights</div>
+                    <div class="card-desc">Custom-trained weights for industrial personal protective equipment (PPE) compliance, helmet detection, and worker safety monitoring.</div>
+                </div>
+
+                <div class="grid-card">
+                    <span class="card-badge" style="background:#f3e8ff; color:#a855f7;">Micro-Motion Filter</span>
+                    <div class="card-title">Sub-Pixel Optical Anomaly Filter</div>
+                    <div class="card-desc">Frequency-domain optical flow analyzer detecting subtle micro-vibrations, machine anomalies, and thermal structural shifts in video streams.</div>
+                </div>
+            </div>
+        </section>
+
+        <!-- SECTION: All 7 Core Analytics Modules -->
+        <section id="modules-7" class="section-block modules">
+            <div class="pillar-header">
+                <div class="pillar-title-group">
+                    <div class="pillar-icon-wrapper">
+                        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"/></svg>
+                    </div>
+                    <div>
+                        <h2 class="pillar-title">All 7 Specialized Security & Analytics Modules</h2>
+                        <div class="pillar-path">ACAP/modules/ & server/app/ai/modules/</div>
+                    </div>
+                </div>
+            </div>
+            <div class="grid-3">
+                <div class="grid-card">
+                    <span class="card-badge" style="background:#e0f2fe; color:#0284c7;">Module 1</span>
+                    <div class="card-title">🛡️ Perimeter Security & Intrusion</div>
+                    <div class="card-desc">Perimeter boundary protection, line-crossing vector math, polygonal ROI intrusion detection, and loitering time threshold alerts.</div>
+                </div>
+
+                <div class="grid-card">
+                    <span class="card-badge" style="background:#e0e7ff; color:#4f46e5;">Module 2</span>
+                    <div class="card-title">🚘 Traffic & Vehicle Counting</div>
+                    <div class="card-desc">Bi-directional vehicle counter, speed estimation, illegal parking detection, and lane occupation analytics for traffic management.</div>
+                </div>
+
+                <div class="grid-card">
+                    <span class="card-badge" style="background:#d1fae5; color:#16a34a;">Module 3</span>
+                    <div class="card-title">🦺 PPE & Safety Compliance</div>
+                    <div class="card-desc">Construction site and factory worker safety monitoring: mandatory hardhats, high-visibility vests, safety gloves, and hazardous area entry.</div>
+                </div>
+
+                <div class="grid-card">
+                    <span class="card-badge" style="background:#fef3c7; color:#d97706;">Module 4</span>
+                    <div class="card-title">🛍️ Retail Analytics & Heatmaps</div>
+                    <div class="card-desc">Customer footfall counting, aisle dwell time measurement, queue length detection, and spatial density heatmap generation for retail stores.</div>
+                </div>
+
+                <div class="grid-card">
+                    <span class="card-badge" style="background:#fee2e2; color:#e11d48;">Module 5</span>
+                    <div class="card-title">🏙️ Smart City & Crowding</div>
+                    <div class="card-desc">Public square crowd density estimation, stampede warning alerts, unattended luggage detection, and civic safety compliance.</div>
+                </div>
+
+                <div class="grid-card">
+                    <span class="card-badge" style="background:#f3e8ff; color:#9333ea;">Module 6</span>
+                    <div class="card-title">🔬 Micro-Motion & Anomaly</div>
+                    <div class="card-desc">Sub-pixel motion analysis for industrial machinery vibration monitoring, conveyor belt jamming, and subtle structural movement detection.</div>
+                </div>
+
+                <div class="grid-card" style="grid-column: span 1;">
+                    <span class="card-badge" style="background:#ccfbf1; color:#0d9488;">Module 7</span>
+                    <div class="card-title">⚡ Custom Rules & Trigger Engine</div>
+                    <div class="card-desc">User-defined logic engine for combining multi-condition triggers (e.g., Person AND Vehicle AND Night Hours = High Severity Alert).</div>
+                </div>
+            </div>
+        </section>
+
+        <!-- SECTION: Team Management & Role-Based Access Control (RBAC) -->
+        <section id="team-rbac" class="section-block rbac">
+            <div class="pillar-header">
+                <div class="pillar-title-group">
+                    <div class="pillar-icon-wrapper">
+                        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z"/></svg>
+                    </div>
+                    <div>
+                        <h2 class="pillar-title">Team Management & Role-Based Access Control (RBAC)</h2>
+                        <div class="pillar-path">portal/src/pages/app/Users.tsx & Roles.tsx</div>
+                    </div>
+                </div>
+            </div>
+            <div class="section-grid">
+                <div>
+                    <p class="branch-desc">
+                        CamAI Enterprise includes a multi-tier team management system enabling organization administrators to invite team members, assign granular permissions, restrict site-level access, and audit operator actions.
+                    </p>
+                    <ul class="feature-list">
+                        <li class="feature-item">
+                            <svg class="check-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>
+                            <div><strong>Organization Admin:</strong> Full administrative control over organization settings, subscription billing, camera fleets, and team member invitations.</div>
+                        </li>
+                        <li class="feature-item">
+                            <svg class="check-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>
+                            <div><strong>Security Operator:</strong> Real-time CCTV grid monitoring, alert triage, incident desk management, and instant snapshot review.</div>
+                        </li>
+                        <li class="feature-item">
+                            <svg class="check-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>
+                            <div><strong>Site Manager:</strong> Location-based scope restricting access to assigned physical sites, camera groups, and local ROI drawing tools.</div>
+                        </li>
+                        <li class="feature-item">
+                            <svg class="check-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>
+                            <div><strong>Compliance Auditor:</strong> Read-only access to tamper-proof audit logs, event telemetry exports, and historical system reports.</div>
+                        </li>
+                    </ul>
+                </div>
+                <div>
+                    <div class="code-box">// Granular RBAC Permission Matrix
+export const RBAC_PERMISSIONS = {
+  'org.manage': 'Manage Organization & Billing',
+  'users.manage': 'Invite & Assign Roles',
+  'roles.manage': 'Custom Role Creation',
+  'cameras.manage': 'Add/Edit Cameras & Zones',
+  'ai.configure': 'AI Model Zoo Tuning',
+  'alerts.view': 'Alert Desk & Triage',
+  'reports.view': 'Export Analytics Reports',
+  'audit.view': 'Security Audit Trail'
+};</div>
                 </div>
             </div>
         </section>
