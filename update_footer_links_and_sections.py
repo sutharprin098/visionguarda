@@ -1,4 +1,6 @@
-<!DOCTYPE html>
+import os
+
+master_html = """<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -1143,3 +1145,17 @@
 
 </body>
 </html>
+"""
+
+paths = [
+    r"d:\camAI\overview_site\index.html",
+    r"d:\camAI\portal\public\overview\index.html",
+    r"d:\camAI\portal\public\overview.html"
+]
+
+for p in paths:
+    os.makedirs(os.path.dirname(p), exist_ok=True)
+    with open(p, "w", encoding="utf-8") as f:
+        f.write(master_html)
+
+print("Updated footer links with all 7 modules and functional smooth scrolling anchors!")
