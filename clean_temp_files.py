@@ -47,14 +47,21 @@ def cleanup_workspace():
             except Exception as e:
                 print(f"[!] Could not remove {item}: {e}")
 
-    # Remove temporary test_cameras.py in ACAP if exists
-    acap_test_cam = os.path.join(root_dir, "ACAP", "test_cameras.py")
-    if os.path.exists(acap_test_cam):
-        try:
-            os.remove(acap_test_cam)
-            print("[CLEANED FILE] ACAP/test_cameras.py")
-        except Exception:
-            pass
+    # Remove temporary test files and mp4 recordings in ACAP directory
+    acap_dir = os.path.join(root_dir, "ACAP")
+    if os.path.exists(acap_dir):
+        for f in os.listdir(acap_dir):
+            if f.endswith(('.mp4', '.avi', '.mkv')) or f.startswith(('run_acap_live_', 'record_acap_', 'real_acap_', 'test_yt')):
+                fpath = os.path.join(acap_dir, f)
+                try:
+                    if os.path.isfile(fpath):
+                        sz = os.path.getsize(fpath)
+                        freed_bytes += sz
+                        os.remove(fpath)
+                        print(f"[CLEANED ACAP FILE] ACAP/{f} ({sz / (1024*1024):.2f} MB)")
+                        deleted_count += 1
+                except Exception as e:
+                    print(f"[!] Could not remove ACAP/{f}: {e}")
 
     freed_mb = freed_bytes / (1024 * 1024)
     print("\n==================================================")
