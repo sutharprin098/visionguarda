@@ -100,24 +100,8 @@ bool InferenceEngine::run_inference(const VideoFrame& frame, std::vector<Boundin
     // (Pre-processed RGB input tensor -> Output tensor decoding)
     // For production YOLOX-Tiny, decode [1, 3549, 85] tensor.
 #else
-    // Synthetic inference generation for testing & benchmark baseline
-    uint64_t step = frame.frame_index;
-    float pos_x = 0.2f + 0.005f * (step % 100);
-    float pos_y = 0.3f + 0.002f * (step % 50);
-
-    BoundingBox person_box;
-    person_box.x = pos_x;
-    person_box.y = pos_y;
-    person_box.w = 0.08f;
-    person_box.h = 0.22f;
-    person_box.class_id = 0; // Person
-    person_box.confidence = 0.88f;
-    person_box.track_id = -1;
-    person_box.label = "Person";
-
-    if (person_box.confidence >= confidence_threshold_) {
-        out_detections.push_back(person_box);
-    }
+    // Host execution mode: detections must originate from real models/bridge.
+    // Zero-fake policy: do not emit synthetic bounding boxes.
 #endif
 
     nms_boxes(out_detections, 0.45f);

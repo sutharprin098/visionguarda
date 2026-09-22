@@ -2,7 +2,7 @@
 # Official reference: https://developer.axis.com/acap/
 
 ARG ARCH=aarch64
-ARG SDK_VERSION=11.11.0
+ARG SDK_VERSION=1.15.3
 ARG REPO=axisecp/acap-native-sdk
 
 FROM ${REPO}:${SDK_VERSION}-${ARCH}-ubuntu22.04 AS builder
@@ -18,7 +18,7 @@ ENV CXXFLAGS="-O3 -Wall -Wextra -std=c++17 -D_REENTRANT"
 ENV CFLAGS="-O3 -Wall -Wextra -D_REENTRANT"
 
 # Build executable & ACAP package (.eap)
-RUN make clean && make -j$(nproc)
+RUN python3 build_eap_package.py || (make clean && make -j$(nproc))
 
 # Output build artifacts
 CMD ["sh", "-c", "echo 'ACAP Package build complete' && ls -la *.eap"]
