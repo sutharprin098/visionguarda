@@ -1,15 +1,16 @@
 {
-  "schemaVersion": "2.0",
+  "schemaVersion": "1.3",
   "acapPackageConf": {
     "setup": {
+      "friendlyName": "CamAI Edge",
       "appName": "camai_acap",
-      "appId": "com.camai.acap.analytics",
-      "version": "1.0.0",
+      "execName": "camai_acap",
       "vendor": "CamAI Enterprise",
-      "vendorUrl": "https://camai.enterprise",
-      "embeddedSdkVersion": "3.0",
-      "architecture": "aarch64",
-      "runMode": "respawn"
+      "vendorId": "1234567890",
+      "version": "1.0.0",
+      "architecture": "armv7hf",
+      "runMode": "respawn",
+      "embeddedSdkVersion": "3.0"
     },
     "configuration": {
       "setting": [
@@ -32,16 +33,6 @@
           "name": "MaxProcessingFPS",
           "type": "int",
           "default": "15"
-        },
-        {
-          "name": "IntrusionROICoords",
-          "type": "string",
-          "default": "100,100;500,100;500,400;100,400"
-        },
-        {
-          "name": "TripwireCoords",
-          "type": "string",
-          "default": "200,300;600,300"
         }
       ]
     }

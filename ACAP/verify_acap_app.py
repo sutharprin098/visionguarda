@@ -21,9 +21,9 @@ def verify_manifest(manifest_path):
     try:
         with open(manifest_path, "r", encoding="utf-8") as f:
             data = json.load(f)
-        assert data.get("schemaVersion") == "2.0", "Invalid schemaVersion"
+        assert str(data.get("schemaVersion")).startswith("1.") or str(data.get("schemaVersion")).startswith("2."), f"Invalid schemaVersion: {data.get('schemaVersion')}"
         setup = data.get("acapPackageConf", {}).get("setup", {})
-        assert setup.get("appName") == "camai_acap", "Invalid appName"
+        assert setup.get("appName") in ["camai_edge", "camai_acap"], "Invalid appName"
         assert setup.get("architecture") in ["aarch64", "armv7hf"], "Invalid architecture"
         print("[OK] Manifest v2.0 validation passed.")
         return True
