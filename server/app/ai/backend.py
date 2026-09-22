@@ -681,6 +681,18 @@ class EngineBackend:
                   + ".", flush=True)
 
         t_infer = (time.time() - t0) * 1000
+        try:
+            from app.ai.model_registry import model_registry
+            m_key = "yolox_tiny"
+            if getattr(self, "is_visdrone", False):
+                m_key = "yolov8_visdrone"
+            elif "yolox_m" in getattr(self, "model_name", ""):
+                m_key = "yolox_m"
+            elif "yolox_s" in getattr(self, "model_name", ""):
+                m_key = "yolox_s"
+            model_registry.record_execution(m_key, t_infer, detections=1)
+        except Exception:
+            pass
         return (output0, output1), t_infer
 
     def run_inference_ns(self, img_tensor, enable_layer_profiling=False):
