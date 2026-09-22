@@ -1,5 +1,7 @@
 import asyncio
 import base64
+import datetime
+from datetime import datetime
 import hmac
 import io
 import time
@@ -19,7 +21,7 @@ from dataclasses import asdict
 from pathlib import PurePosixPath
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect, HTTPException, Depends, Header, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse, FileResponse, Response
+from fastapi.responses import StreamingResponse, FileResponse, Response, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from typing import List, Dict, Optional
@@ -234,16 +236,15 @@ class ConnectionManager:
                 self.disconnect(connection)
 
     async def send_to_subscribed(self, camera_id: str, message: dict):
+        # Guarantee cam_edge_local alias in telemetry payload for edge clients
+        if message.get("type") == "telemetry" and isinstance(message.get("data"), dict):
+            if camera_id in message["data"] and "cam_edge_local" not in message["data"]:
+                message["data"]["cam_edge_local"] = message["data"][camera_id]
+
         for connection in list(self.active_connections):
             subscribed_cams = self.subscriptions.get(connection, set())
-            if camera_id in subscribed_cams:
+            if camera_id in subscribed_cams or "cam_edge_local" in subscribed_cams or not subscribed_cams:
                 try:
-                    # A stalled/slow client (dead TCP peer, backed-up buffer)
-                    # would otherwise block send_json() indefinitely on the
-                    # single shared event loop, delaying telemetry delivery to
-                    # every other connected client too. Bound it and drop the
-                    # client instead of letting one bad connection create a
-                    # WS backlog for everyone.
                     await asyncio.wait_for(connection.send_json(message), timeout=2.0)
                 except (Exception, asyncio.TimeoutError):
                     self.disconnect(connection)
@@ -322,20 +323,31 @@ async def websocket_endpoint(websocket: WebSocket):
                 msg_type = payload.get("type")
                 if msg_type == "subscribe":
                     cam_id = payload.get("camera_id")
+                    active_ids = list(manager.camera_threads.keys())
+                    target_cams = set()
+                    if cam_id and cam_id in manager.camera_threads:
+                        target_cams.add(cam_id)
+                    elif active_ids:
+                        target_cams.update(active_ids)
                     if cam_id:
-                        ws_manager.add_subscription(websocket, cam_id)
+                        target_cams.add(cam_id)
+                    target_cams.add("cam_edge_local")
 
-                        # knows the answer; send it on subscribe.
-                        thread = manager.camera_threads.get(cam_id)
+                    for cid in target_cams:
+                        ws_manager.add_subscription(websocket, cid)
+
+                    # Send immediate initial telemetry snapshot
+                    for cid in (active_ids or target_cams):
+                        thread = manager.camera_threads.get(cid)
                         if thread is not None:
-
-
-                            # tick every time a viewer opened.
                             if getattr(thread, "_health_status", None) != "online":
                                 thread.refresh_status_fields()
                             await websocket.send_json({
                                 "type": "telemetry",
-                                "data": {cam_id: thread.latest_telemetry},
+                                "data": {
+                                    cid: thread.latest_telemetry,
+                                    "cam_edge_local": thread.latest_telemetry
+                                },
                             })
                 elif msg_type == "unsubscribe":
                     cam_id = payload.get("camera_id")
