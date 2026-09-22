@@ -217,7 +217,13 @@ class FaceDetector:
                     "confidence": score,
                     "bbox": {"x1": ax1, "y1": ay1, "x2": ax2, "y2": ay2},
                 })
-        return self._nms(out)
+        res = self._nms(out)
+        try:
+            from app.ai.model_registry import model_registry
+            model_registry.record_execution("yunet_face", 15.0, detections=len(res))
+        except Exception:
+            pass
+        return res
 
 
 _INSTANCE: Optional[FaceDetector] = None
