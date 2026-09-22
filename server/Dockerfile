@@ -12,16 +12,19 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     && rm -rf /var/lib/apt/lists/*
 
+# Install PyTorch CPU-only version first to avoid downloading 3.5GB+ CUDA dependencies
+RUN pip install --no-cache-dir torch torchvision --index-url https://download.pytorch.org/whl/cpu
+
 # Copy python dependencies
 COPY server-requirements.txt .
 
 # Install python dependencies
-RUN pip install --no-cache-dir -r server-requirements.txt || \
-    pip install --no-cache-dir fastapi uvicorn opencv-python-headless numpy pillow python-multipart scipy imageio-ffmpeg yt-dlp psutil onnxruntime openvino
+RUN pip install --no-cache-dir -r server-requirements.txt
 
-# Copy application files
+# Copy application files and models
 COPY app/ app/
 COPY models/ models/
+COPY yolox_* ./
 COPY run_engine.py .
 
 # Expose HTTP API and WebSocket engine port
