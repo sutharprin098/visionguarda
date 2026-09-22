@@ -47,7 +47,8 @@ def build_eap(app='camai_acap', arch='armv7hf', ver='1.0.0', vendor='CamAI Enter
                 'settingPage':        'index.html'
             },
             'licensing': {
-                'licenseType':        'free'
+                'licenseType':        'free',
+                'licensePage':        'none'
             }
         }
     }, indent=2).encode('utf-8')
@@ -75,6 +76,7 @@ def build_eap(app='camai_acap', arch='armv7hf', ver='1.0.0', vendor='CamAI Enter
         'RUNMODE="respawn"',
         'LICENSETYPE="free"',
         'LICENSEPAGE="none"',
+        'LICENSE="none"',
         'SETTINGSPAGEFILE="index.html"',
         'SETTINGPAGE="index.html"',
         'APPURL="index.html"',
@@ -109,7 +111,9 @@ def build_eap(app='camai_acap', arch='armv7hf', ver='1.0.0', vendor='CamAI Enter
         ('package.conf',            pkgconf_bytes,  0o644),
         ('param.conf',              param_bytes,    0o644),
         ('LICENSE',                 license_bytes,  0o644),
-        (f'{app}_LICENSE.txt',      license_bytes,  0o644),
+        ('LICENSE.txt',             license_bytes,  0o644),
+        ('camai_acap_LICENSE.txt',  license_bytes,  0o644),
+        ('camai_edge_LICENSE.txt',  license_bytes,  0o644),
         (app,                       daemon_script,  0o755),
     ]
 
