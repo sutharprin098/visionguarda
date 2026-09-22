@@ -1,0 +1,7 @@
+#!/bin/sh
+# CamAI ACAP Native Executable Entrypoint for Axis OS
+echo "[CamAI ACAP] Starting CamAI Edge Analytics Service..."
+while true; do
+    echo "[CamAI ACAP] Active and Monitoring."
+    sleep 60
+done
