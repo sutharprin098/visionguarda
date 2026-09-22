@@ -94,12 +94,26 @@ def health():
 def models():
     """Active model + the built-in selectable set. The desktop Model Manager
     layers downloaded/assigned models on top of this via Supabase."""
+    from app.ai.model_registry import model_registry
+    summary = model_registry.get_summary()
     return {
         "active": manager.selected_model_name,
         "loaded": manager.yolo_model is not None,
         "builtin": ["yolox_tiny", "yolox_s", "yolox_m"],
         "device": _device(),
+        "total_models": summary["total_models"],
+        "ready_count": summary["ready_count"],
+        "running_count": summary["running_count"],
+        "error_count": summary["error_count"],
     }
+
+
+@router.get("/api/models/status")
+@router.get("/models/status")
+def models_status():
+    """Real-time health, operational status, latency, FPS and detections count for all 19 models."""
+    from app.ai.model_registry import model_registry
+    return model_registry.get_summary()
 
 
 @router.get("/cameras")
