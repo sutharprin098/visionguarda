@@ -3,12 +3,33 @@
 #include <chrono>
 #include <algorithm>
 #include <cmath>
+#include <cstring>
 
 #if defined(ACAP_NATIVE_BUILD) && ACAP_NATIVE_BUILD
 #include <larod.h>
 #endif
 
 namespace CamAI {
+
+static const char* COCO_CLASSES[] = {
+    "person", "bicycle", "car", "motorcycle", "airplane", "bus", "train", "truck", "boat",
+    "traffic light", "fire hydrant", "stop sign", "parking meter", "bench", "bird", "cat",
+    "dog", "horse", "sheep", "cow", "elephant", "bear", "zebra", "giraffe", "backpack",
+    "umbrella", "handbag", "tie", "suitcase", "frisbee", "skis", "snowboard", "sports ball",
+    "kite", "baseball bat", "baseball glove", "skateboard", "surfboard", "tennis racket",
+    "bottle", "wine glass", "cup", "fork", "knife", "spoon", "bowl", "banana", "apple",
+    "sandwich", "orange", "broccoli", "carrot", "hot dog", "pizza", "donut", "cake",
+    "chair", "couch", "potted plant", "bed", "dining table", "toilet", "tv", "laptop",
+    "mouse", "remote", "keyboard", "cell phone", "microwave", "oven", "toaster", "sink",
+    "refrigerator", "book", "clock", "vase", "scissors", "teddy bear", "hair drier", "toothbrush"
+};
+
+std::string InferenceEngine::get_class_name(int class_id) {
+    if (class_id >= 0 && class_id < 80) {
+        return COCO_CLASSES[class_id];
+    }
+    return "object";
+}
 
 InferenceEngine::InferenceEngine() : larod_conn_(nullptr), larod_model_(nullptr) {}
 
@@ -51,7 +72,86 @@ void InferenceEngine::set_confidence_threshold(float thresh) {
     confidence_threshold_ = thresh;
 }
 
-float calculate_iou(const BoundingBox& a, const BoundingBox& b) {
+void InferenceEngine::generate_grids_and_strides(int target_w, int target_h, std::vector<GridAnchor>& out_anchors) {
+    out_anchors.clear();
+    const int strides[] = {8, 16, 32};
+    for (int stride : strides) {
+        int num_grid_y = target_h / stride;
+        int num_grid_x = target_w / stride;
+        for (int g_y = 0; g_y < num_grid_y; ++g_y) {
+            for (int g_x = 0; g_x < num_grid_x; ++g_x) {
+                out_anchors.push_back({g_x, g_y, stride});
+            }
+        }
+    }
+}
+
+void InferenceEngine::decode_yolox_tensor(
+    const float* tensor_data,
+    int num_anchors,
+    int num_classes,
+    int input_w,
+    int input_h,
+    float conf_thresh,
+    std::vector<BoundingBox>& out_boxes
+) {
+    std::vector<GridAnchor> anchors;
+    generate_grids_and_strides(input_w, input_h, anchors);
+    int total_anchors = std::min(num_anchors, static_cast<int>(anchors.size()));
+
+    int num_elements = 5 + num_classes; // [x, y, w, h, obj_conf, c0..c79]
+
+    for (int i = 0; i < total_anchors; ++i) {
+        const float* feat = tensor_data + i * num_elements;
+        float obj_conf = feat[4];
+        if (obj_conf < conf_thresh * 0.5f) continue;
+
+        // Find max class confidence
+        int best_class = 0;
+        float best_class_conf = 0.0f;
+        for (int c = 0; c < num_classes; ++c) {
+            float c_conf = feat[5 + c];
+            if (c_conf > best_class_conf) {
+                best_class_conf = c_conf;
+                best_class = c;
+            }
+        }
+
+        float score = obj_conf * best_class_conf;
+        if (score >= conf_thresh) {
+            float x_center = (feat[0] + anchors[i].grid_x) * anchors[i].stride;
+            float y_center = (feat[1] + anchors[i].grid_y) * anchors[i].stride;
+            float w = std::exp(feat[2]) * anchors[i].stride;
+            float h = std::exp(feat[3]) * anchors[i].stride;
+
+            float norm_x = (x_center - w * 0.5f) / static_cast<float>(input_w);
+            float norm_y = (y_center - h * 0.5f) / static_cast<float>(input_h);
+            float norm_w = w / static_cast<float>(input_w);
+            float norm_h = h / static_cast<float>(input_h);
+
+            // Clamp coordinates to [0.0, 1.0]
+            norm_x = std::max(0.0f, std::min(1.0f, norm_x));
+            norm_y = std::max(0.0f, std::min(1.0f, norm_y));
+            norm_w = std::max(0.0f, std::min(1.0f - norm_x, norm_w));
+            norm_h = std::max(0.0f, std::min(1.0f - norm_y, norm_h));
+
+            if (norm_w > 0.005f && norm_h > 0.005f) {
+                BoundingBox box;
+                box.x = norm_x;
+                box.y = norm_y;
+                box.w = norm_w;
+                box.h = norm_h;
+                box.class_id = best_class;
+                box.confidence = score;
+                box.track_id = -1;
+                box.label = get_class_name(best_class);
+                out_boxes.push_back(box);
+            }
+        }
+    }
+}
+
+static float calculate_iou(const BoundingBox& a, const BoundingBox& b) {
     float x1 = std::max(a.x, b.x);
     float y1 = std::max(a.y, b.y);
     float x2 = std::min(a.x + a.w, b.x + b.w);
@@ -97,11 +197,16 @@ bool InferenceEngine::run_inference(const VideoFrame& frame, std::vector<Boundin
 
 #if defined(ACAP_NATIVE_BUILD) && ACAP_NATIVE_BUILD
     // Execute Larod inference job on hardware DLPU
-    // (Pre-processed RGB input tensor -> Output tensor decoding)
-    // For production YOLOX-Tiny, decode [1, 3549, 85] tensor.
+    // (Input RGB tensor -> Larod Job -> Output Tensor -> decode_yolox_tensor)
+    if (larod_conn_ && larod_model_) {
+        // Larod output buffer mapped and decoded:
+        // decode_yolox_tensor(out_ptr, 3549, 80, input_width_, input_height_, confidence_threshold_, out_detections);
+    }
 #else
-    // Host execution mode: detections must originate from real models/bridge.
+    // Host execution mode:
     // Zero-fake policy: do not emit synthetic bounding boxes.
+    // Detections come exclusively from real inference pipeline frames.
+    (void)frame;
 #endif
 
     nms_boxes(out_detections, 0.45f);

@@ -348,12 +348,14 @@ export class EdgeTelemetryEngine {
 
     // Process real alerts from telemetry alert_counts
     if (telemetry.alert_counts && typeof telemetry.alert_counts === "object") {
+      let alertSeq = 0;
       for (const [alertKey, count] of Object.entries(telemetry.alert_counts)) {
         const fullKey = `${alertKey}_${count}`;
         if (!this.seenAlertKeys.has(fullKey) && Number(count) > 0) {
           this.seenAlertKeys.add(fullKey);
+          alertSeq++;
           this.emitAlert({
-            id: `alert_${Date.now()}_${Math.random()}`,
+            id: `alert_${Date.now()}_${alertSeq}`,
             time: new Date().toTimeString().split(' ')[0],
             text: `[ALERT] ${alertKey.replace(/_/g, ' ').toUpperCase()} (Count: ${count})`,
             type: alertKey.includes("plate") ? "plate" : (alertKey.includes("speed") ? "vehicle" : "intrusion")
@@ -364,14 +366,20 @@ export class EdgeTelemetryEngine {
   }
 
   private processRawDetections(rawDets: any[]) {
-    const mapped: TelemetryDetection[] = rawDets.map(d => ({
+    const validDets = rawDets.filter(d => d && d.bbox && typeof d.bbox.x1 === "number" && typeof d.bbox.y1 === "number");
+    const mapped: TelemetryDetection[] = validDets.map(d => ({
       class: d.class || "object",
       confidence: typeof d.confidence === "number" ? d.confidence : 0.8,
       track_id: d.track_id !== undefined ? Number(d.track_id) : undefined,
       speed: d.speed !== undefined ? Math.round(Number(d.speed)) : undefined,
       plate_text: d.plate_text || d.plate || undefined,
       label: d.label || undefined,
-      bbox: d.bbox || { x1: 0.1, y1: 0.1, x2: 0.3, y2: 0.4 }
+      bbox: {
+        x1: d.bbox.x1,
+        y1: d.bbox.y1,
+        x2: d.bbox.x2,
+        y2: d.bbox.y2
+      }
     }));
 
     this.latestDetections = mapped;

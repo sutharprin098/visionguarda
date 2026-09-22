@@ -30,7 +30,11 @@ bool CamAIEngine::initialize(const std::string& model_path) {
         return false;
     }
 
-    float conf_thresh = std::stof(config_manager_.get_value("ConfidenceThreshold", "0.45"));
+    float conf_thresh = 0.45f;
+    try {
+        conf_thresh = std::stof(config_manager_.get_value("ConfidenceThreshold", "0.45"));
+    } catch (...) {}
+
     if (!inference_engine_.load_model(model_path, conf_thresh)) {
         std::cerr << "[CamAIEngine] InferenceEngine model load failed: " << model_path << std::endl;
         return false;
@@ -46,16 +50,36 @@ bool CamAIEngine::initialize(const std::string& model_path) {
         return false;
     }
 
-    // Initialize Reference Security Module
+    // 1. Initialize Security Module
     security_module_ = std::make_unique<SecurityModule>();
     security_module_->initialize("");
     security_module_->update_config("IntrusionROICoords", config_manager_.get_value("IntrusionROICoords"));
     security_module_->update_config("TripwireCoords", config_manager_.get_value("TripwireCoords"));
 
+    // 2. Initialize PPE Safety Module
+    ppe_module_ = std::make_unique<PPEModule>();
+    ppe_module_->initialize("");
+
+    // 3. Initialize Traffic & Speed Module
+    traffic_module_ = std::make_unique<TrafficModule>();
+    traffic_module_->initialize("");
+
+    // 4. Initialize Face Module
+    face_module_ = std::make_unique<FaceModule>();
+    face_module_->initialize("");
+
+    // 5. Initialize Micro Motion Module
+    micro_motion_module_ = std::make_unique<MicroMotionModule>();
+    micro_motion_module_->initialize("");
+
     active_modules_.clear();
     active_modules_.push_back(security_module_.get());
+    active_modules_.push_back(ppe_module_.get());
+    active_modules_.push_back(traffic_module_.get());
+    active_modules_.push_back(face_module_.get());
+    active_modules_.push_back(micro_motion_module_.get());
 
-    std::cout << "[CamAIEngine] CamAI ACAP Engine initialized successfully" << std::endl;
+    std::cout << "[CamAIEngine] CamAI ACAP Engine initialized with 5 native analytics modules" << std::endl;
     return true;
 }
 
@@ -107,7 +131,7 @@ void CamAIEngine::process_loop() {
         float inference_ms = 0.0f;
         inference_engine_.run_inference(frame, raw_dets, inference_ms);
 
-        // 2. Multi-object tracking update
+        // 2. Multi-object tracking update (ByteTrack association)
         std::vector<BoundingBox> tracked_dets;
         tracker_.update(raw_dets, tracked_dets);
 
@@ -119,6 +143,7 @@ void CamAIEngine::process_loop() {
         meta.height = frame.height;
         meta.detections = tracked_dets;
         meta.inference_latency_ms = inference_ms;
+        meta.total_fps = resource_governor_.get_diagnostics().current_fps;
 
         // 4. Run active analytics modules
         std::vector<EventAlert> alerts;

@@ -10,6 +10,10 @@
 #include "diagnostics.hpp"
 #include "../modules/module_interface.hpp"
 #include "../modules/security/security_module.hpp"
+#include "../modules/ppe/ppe_module.hpp"
+#include "../modules/traffic/traffic_module.hpp"
+#include "../modules/face/face_module.hpp"
+#include "../modules/micro_motion/micro_motion_module.hpp"
 
 #include <memory>
 #include <thread>
@@ -43,6 +47,11 @@ private:
     ResourceGovernor resource_governor_;
 
     std::unique_ptr<SecurityModule> security_module_;
+    std::unique_ptr<PPEModule> ppe_module_;
+    std::unique_ptr<TrafficModule> traffic_module_;
+    std::unique_ptr<FaceModule> face_module_;
+    std::unique_ptr<MicroMotionModule> micro_motion_module_;
+
     std::vector<ICamAIModule*> active_modules_;
 
     void process_loop();

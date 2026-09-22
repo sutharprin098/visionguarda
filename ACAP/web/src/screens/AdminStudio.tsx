@@ -126,10 +126,8 @@ export const AdminStudio: React.FC<AdminStudioProps> = ({ onBackToWorkspace }) =
   }, [features]);
 
   useEffect(() => {
-    const interval = setInterval(() => {
-      setFps((29.7 + Math.random() * 0.4).toFixed(1));
-    }, 2000);
-    return () => clearInterval(interval);
+    // Zero mock - initialize cleanly without synthetic fluctuations
+    setFps('0.0');
   }, []);
 
   const pushHistory = (currentShapes: EditableShape[]) => {

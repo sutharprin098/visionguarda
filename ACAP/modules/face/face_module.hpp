@@ -8,21 +8,13 @@
 
 namespace CamAI {
 
-struct FaceLandmarks {
-    float right_eye_x, right_eye_y;
-    float left_eye_x, left_eye_y;
-    float nose_tip_x, nose_tip_y;
-    float mouth_right_x, mouth_right_y;
-    float mouth_left_x, mouth_left_y;
-};
-
 struct DetectedFace {
     int track_id;
     float bbox_x, bbox_y, bbox_w, bbox_h;
     float confidence;
-    FaceLandmarks landmarks;
     std::string recognized_name;
     float match_score;
+    uint64_t last_seen_ms;
 };
 
 class FaceModule : public ICamAIModule {
@@ -31,38 +23,44 @@ public:
     ~FaceModule() override = default;
 
     bool initialize(const std::string& config_params) override {
+        (void)config_params;
         enabled_ = true;
         min_confidence_ = 0.50f;
         recognition_threshold_ = 0.65f;
+        tracked_faces_.clear();
         return true;
     }
 
     bool process_frame(const FrameMetadata& frame_meta, std::vector<EventAlert>& out_alerts) override {
         if (!enabled_) return true;
 
-        for (const auto& obj : frame_meta.detected_objects) {
-            // Check for Face / Head / Person detections
-            if (obj.class_name == "face" || obj.class_name == "person" || obj.class_id == 0) {
+        for (const auto& det : frame_meta.detections) {
+            // Check for Face / Person detections
+            if (det.label == "face" || det.class_id == 0 || det.label == "person") {
                 DetectedFace face{};
-                face.track_id = obj.track_id;
-                face.bbox_x = obj.bbox_x;
-                face.bbox_y = obj.bbox_y;
-                face.bbox_w = obj.bbox_w;
-                face.bbox_h = obj.bbox_h;
-                face.confidence = obj.confidence;
-                face.recognized_name = "Person_" + std::to_string(obj.track_id);
+                face.track_id = det.track_id;
+                face.bbox_x = det.x;
+                face.bbox_y = det.y;
+                face.bbox_w = det.w;
+                face.bbox_h = det.h;
+                face.confidence = det.confidence;
+                face.recognized_name = (det.track_id >= 0) ? ("Person_" + std::to_string(det.track_id)) : "Unassigned";
+                face.last_seen_ms = frame_meta.timestamp_ms;
 
-                tracked_faces_[obj.track_id] = face;
+                if (det.track_id >= 0) {
+                    tracked_faces_[det.track_id] = face;
+                }
 
-                // Emit Face Event Alert if newly tracked
-                if (obj.confidence >= min_confidence_) {
+                // Emit Face Event Alert if newly tracked with high confidence
+                if (det.confidence >= min_confidence_) {
                     EventAlert alert{};
                     alert.event_type = "FACE_DETECTED";
-                    alert.track_id = obj.track_id;
-                    alert.label = "Face Detected (#" + std::to_string(obj.track_id) + ")";
-                    alert.confidence = obj.confidence;
+                    alert.module_name = "face";
+                    alert.track_id = det.track_id;
+                    alert.bbox = det;
+                    alert.confidence = det.confidence;
                     alert.timestamp_ms = frame_meta.timestamp_ms;
-                    alert.roi_name = "Face_Tracker_Zone";
+                    alert.details = "Face / Subject located: " + face.recognized_name + " (Track #" + std::to_string(det.track_id) + ")";
                     out_alerts.push_back(alert);
                 }
             }
@@ -76,7 +74,7 @@ public:
         if (key == "EnableFaceTracking") {
             enabled_ = (value == "true" || value == "1");
         } else if (key == "FaceConfidenceThreshold") {
-            min_confidence_ = std::stof(value);
+            try { min_confidence_ = std::stof(value); } catch (...) {}
         }
     }
 

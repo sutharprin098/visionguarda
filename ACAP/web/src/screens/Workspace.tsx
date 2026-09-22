@@ -188,13 +188,16 @@ export const Workspace: React.FC<WorkspaceProps> = ({ onOpenAdminStudio }) => {
     return () => window.removeEventListener('camai:local_config_published', onConfigPublished);
   }, []);
 
-  // Frame rate monitoring
+  // Frame rate monitoring bound to real telemetry
   useEffect(() => {
-    const timer = setInterval(() => {
-      setFps((29.6 + Math.random() * 0.6).toFixed(1));
-    }, 2500);
-    return () => clearInterval(timer);
-  }, []);
+    const running = modelsSummary.models.filter(m => m.status === 'running' || m.fps > 0);
+    if (running.length > 0) {
+      const avgFps = running.reduce((acc, m) => acc + m.fps, 0) / running.length;
+      setFps(avgFps > 0 ? avgFps.toFixed(1) : '0.0');
+    } else if (connStatus === 'offline') {
+      setFps('0.0');
+    }
+  }, [modelsSummary, connStatus]);
 
   // Render user drawn zones on top of live video feed
   const drawConfiguredZones = () => {

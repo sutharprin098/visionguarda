@@ -13,9 +13,9 @@ import json
 
 def check_docker():
     try:
-        res = subprocess.run(["docker", "--version"], capture_output=True, text=True)
+        res = subprocess.run(["docker", "info"], capture_output=True, text=True, timeout=3)
         return res.returncode == 0
-    except FileNotFoundError:
+    except (FileNotFoundError, subprocess.TimeoutExpired, Exception):
         return False
 
 def check_compiler():
@@ -91,7 +91,9 @@ def run_emulated_cpp_tests():
     print(f"  - Dropped Frames:       0")
 
     # Generate benchmarks/benchmark_results.json
-    os.makedirs("benchmarks", exist_ok=True)
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    bench_dir = os.path.join(script_dir, "benchmarks")
+    os.makedirs(bench_dir, exist_ok=True)
     results = {
         "application": "camai_acap",
         "version": "1.0.0",
@@ -105,10 +107,11 @@ def run_emulated_cpp_tests():
         "status": "PASS"
     }
 
-    with open("benchmarks/benchmark_results.json", "w", encoding="utf-8") as f:
+    report_file = os.path.join(bench_dir, "benchmark_results.json")
+    with open(report_file, "w", encoding="utf-8") as f:
         json.dump(results, f, indent=2)
 
-    print(f"[+] Benchmark report saved to benchmarks/benchmark_results.json")
+    print(f"[+] Benchmark report saved to {report_file}")
     print("\n[ALL TESTS & BENCHMARKS PASSED SUCCESSFULLY]")
 
 def main():
