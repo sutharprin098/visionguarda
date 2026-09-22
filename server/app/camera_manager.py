@@ -117,6 +117,13 @@ class CameraManager:
                 except Exception as e:
                     print(f"[CameraManager] Zero-DCE setup notice: {e}", flush=True)
 
+                # Initialize Model Registry across all 19 models in background
+                try:
+                    from app.ai.model_registry import model_registry
+                    threading.Thread(target=model_registry.initialize_and_validate_all, name="model-registry-init", daemon=True).start()
+                except Exception as e:
+                    print(f"[CameraManager] Model registry init error: {e}", flush=True)
+
                 self.startup_status = "ready"
             except Exception as e:
                 self.startup_status = "failed"
