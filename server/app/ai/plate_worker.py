@@ -185,9 +185,14 @@ class AnprWorker:
 
         with self._results_lock:
             self._results = dets
-            self._results_at = now
         self.passes += 1
         self.last_pass_ms = (time.perf_counter() - t0) * 1000
+        try:
+            from app.ai.model_registry import model_registry
+            model_registry.record_execution("lpd_yunet", self.last_pass_ms * 0.6, detections=len(dets))
+            model_registry.record_execution("crnn_ocr", self.last_pass_ms * 0.4, detections=len(dets))
+        except Exception:
+            pass
 
     # -- telemetry ----------------------------------------------------------
     def stats(self) -> Dict[str, Any]:
