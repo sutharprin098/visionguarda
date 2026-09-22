@@ -153,6 +153,12 @@ class HelmetWorker:
 
         self.passes += 1
         self.last_pass_ms = (time.perf_counter() - t0) * 1000.0
+        try:
+            from app.ai.model_registry import model_registry
+            m_key = "rtdetr_helmet" if getattr(hd, "is_rtdetr", True) else "yolov8_helmet"
+            model_registry.record_execution(m_key, self.last_pass_ms, detections=len(dets))
+        except Exception:
+            pass
         with self._results_lock:
             self._results = dets
             self._results_at = time.time()
