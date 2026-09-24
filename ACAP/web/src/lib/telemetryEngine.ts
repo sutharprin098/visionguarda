@@ -828,41 +828,20 @@ export class EdgeTelemetryEngine {
   }
 
   private startModelsPolling() {
-    const isAxisOnCamera = typeof window !== "undefined" && (window.location.pathname.includes("/local/") || window.location.port === "41093");
+    const isAxisOnCamera = typeof window !== "undefined" && (window.location.pathname.includes("/local/") || window.location.port === "41093" || window.location.port === "42093");
     const host = typeof window !== "undefined" ? (window.location.hostname || "127.0.0.1") : "127.0.0.1";
     const isLocalhost = host === "127.0.0.1" || host === "localhost";
     const isHttps = typeof window !== "undefined" && window.location.protocol === "https:";
 
-    if (isAxisOnCamera) {
-      // On Axis camera: report the on-device ACAP models as running
-      this.modelsSummary = {
-        total_models: 8,
-        ready_count: 8,
-        running_count: 8,
-        error_count: 0,
-        models: [
-          { key: "yolox_tiny", name: "YOLOX-Tiny AXIS DLPU", category: "object_detection", backend: "larod_tflite", status: "running", weight_path: "yolox_tiny.tflite", inference_count: 100, last_inference_timestamp: new Date().toISOString(), inference_latency_ms: 22, fps: 30, detections_count: 1, errors_count: 0, last_error: null },
-          { key: "bytetrack", name: "ByteTrack Multi-Object Tracker", category: "tracking", backend: "cpp_native", status: "running", weight_path: null, inference_count: 100, last_inference_timestamp: new Date().toISOString(), inference_latency_ms: 2, fps: 30, detections_count: 1, errors_count: 0, last_error: null },
-          { key: "axevent", name: "AXIS Native ONVIF Producer", category: "events", backend: "axevent_native", status: "running", weight_path: null, inference_count: 100, last_inference_timestamp: new Date().toISOString(), inference_latency_ms: 1, fps: 30, detections_count: 1, errors_count: 0, last_error: null }
-        ]
-      };
-      for (const listener of this.modelsStatusListeners) {
-        try { listener(this.modelsSummary); } catch {}
-      }
-      return;
-    }
-
-    // On HTTPS non-localhost deployments, avoid Mixed Content — skip polling remote HTTP
-    if (isHttps && !isLocalhost) {
-      return;
-    }
-
-    // Localhost dev: poll local cloud node
-    const statusUrls = [
+    const statusUrls = isAxisOnCamera ? [
+      `/local/camai_acap/telemetry.json`,
+      `/local/camai_acap/models_status.json`,
+      `/api/models/status`
+    ] : (isLocalhost ? [
       `http://127.0.0.1:8099/api/models/status`,
       `http://127.0.0.1:8000/api/models/status`,
-      `http://localhost:8099/api/models/status`,
-    ];
+      `http://localhost:8000/api/models/status`
+    ] : []);
 
     const fetchStatus = async () => {
       for (const url of statusUrls) {

@@ -12,8 +12,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     && rm -rf /var/lib/apt/lists/*
 
-# Install PyTorch CPU-only version first to avoid downloading 3.5GB+ CUDA dependencies
+# Install PyTorch CPU-only version first
 RUN pip install --no-cache-dir torch torchvision --index-url https://download.pytorch.org/whl/cpu
+
+# Install ONNX Runtime (CPU + GPU providers — GPU will be auto-selected when CUDA available)
+RUN pip install --no-cache-dir onnxruntime
 
 # Copy python dependencies
 COPY server-requirements.txt .
@@ -24,19 +27,24 @@ RUN pip install --no-cache-dir -r server-requirements.txt
 # Copy application files and models
 COPY app/ app/
 COPY models/ models/
-COPY yolox_* ./
-COPY run_engine.py .
+COPY yolox_tiny.onnx ./
+COPY yolox_s.onnx ./
+COPY run_cloud_node.py .
 
-# Expose HTTP API and WebSocket engine port
+# Expose the AWS Cloud Node port and main engine port
+EXPOSE 8099
 EXPOSE 8000
 
-# Set environment variables
+# Set environment variables (override at runtime via docker run -e / docker-compose env_file)
 ENV PYTHONUNBUFFERED=1
 ENV CAMAI_ENV=production
+ENV CAMAI_MODEL_NAME=yolox_tiny
+ENV CAMAI_PORT=8099
+ENV CAMAI_HOST=0.0.0.0
 
-# Health check probe
-HEALTHCHECK --interval=10s --timeout=5s --start-period=10s --retries=3 \
-  CMD curl -f http://localhost:8000/api/health || exit 1
+# Health check probe for the real-time cloud node
+HEALTHCHECK --interval=10s --timeout=5s --start-period=20s --retries=3 \
+  CMD curl -f http://localhost:8099/health || exit 1
 
-# Start FastAPI / engine process
-CMD ["python", "run_engine.py", "--port", "8000", "--host", "0.0.0.0"]
+# Start the AWS Real-Time Cloud Inference Node
+CMD ["python", "run_cloud_node.py", "--port", "8099", "--host", "0.0.0.0"]

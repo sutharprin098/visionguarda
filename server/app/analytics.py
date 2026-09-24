@@ -81,7 +81,7 @@ FEATURE_CLASSES = {
     "vandalism_detection": {"person"},
     "crowd_gathering": {"person"},
     "spill_detection": {"person"},
-    "vehicle_detection": set(PRODUCIBLE_VEHICLE_CLASSES) | {"person", "van", "auto", "rickshaw", "vehicle"},
+    "vehicle_detection": set(PRODUCIBLE_VEHICLE_CLASSES),
     "vehicle_classification": set(PRODUCIBLE_VEHICLE_CLASSES),
     "vehicle_counting": set(PRODUCIBLE_VEHICLE_CLASSES),
     "wrong_way_driving": set(PRODUCIBLE_VEHICLE_CLASSES),

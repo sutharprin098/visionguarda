@@ -1125,11 +1125,13 @@ def update_camera_analytics(camera_id: str, payload: CameraAnalyticsPayload):
     cam = get_camera(camera_id)
     if not cam:
         if camera_id in ("cam_edge_local", "cam_default", "cam_1"):
+            default_source = os.environ.get("CAMAI_CAMERA_SOURCE") or os.environ.get("CAMAI_RTSP_URL") or "/axis-cgi/mjpg/video.cgi"
+            default_type = "rtsp" if default_source.startswith("rtsp://") else "axis"
             save_camera(
                 camera_id,
                 "CamAI Live Stream",
-                "youtube",
-                "https://www.youtube.com/watch?v=1EiC9bvVGnk",
+                default_type,
+                default_source,
                 1,
                 payload.zones,
                 payload.lines,

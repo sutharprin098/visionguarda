@@ -38,12 +38,11 @@ class ZeroDCEEnhancer:
     def load_model(self, model_path: str):
         """Loads ONNX weights for Zero-DCE neural network."""
         try:
-            import onnxruntime as ort
-            providers = ['CUDAExecutionProvider', 'CPUExecutionProvider']
-            self.onnx_session = ort.InferenceSession(model_path, providers=providers)
+            from app.ai.accelerator import load_accelerated_onnx_session
+            self.onnx_session = load_accelerated_onnx_session(model_path)
             self.model_path = model_path
             self.is_loaded = True
-            print(f"[Zero-DCE] Loaded neural curve estimation model from {model_path}", flush=True)
+            print(f"[Zero-DCE] Loaded neural curve estimation model from {model_path} via {self.onnx_session.get_providers()[0]}", flush=True)
         except Exception as e:
             print(f"[Zero-DCE] ONNX load notice ({e}); using fast adaptive Zero-DCE curve solver fallback.", flush=True)
             self.is_loaded = False

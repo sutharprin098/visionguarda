@@ -7,32 +7,88 @@
       "execName": "camai_acap",
       "vendor": "CamAI Enterprise",
       "vendorId": "1234567890",
-      "version": "1.0.0",
-      "architecture": "armv7hf",
+      "version": "1.1.0",
+      "architecture": "aarch64",
       "runMode": "respawn",
       "embeddedSdkVersion": "3.0"
     },
+    "resources": {
+      "device": [
+        {
+          "type": "larod-inference-server",
+          "name": "larod",
+          "required": false
+        }
+      ]
+    },
     "configuration": {
+      "settingPage": "index.html",
       "setting": [
+        {
+          "name": "AwsApiUrl",
+          "type": "string",
+          "default": "http://13.203.71.14:8000/api/detect",
+          "description": "AWS Cloud Inference API endpoint. Format: http://HOST:PORT/api/detect"
+        },
+        {
+          "name": "ActiveModule",
+          "type": "string",
+          "default": "security",
+          "description": "Active AI module: security, traffic, factory, smart_city, retail"
+        },
         {
           "name": "EnableSecurityModule",
           "type": "bool",
-          "default": "true"
+          "default": "true",
+          "description": "Enable intrusion/tripwire zone analytics"
+        },
+        {
+          "name": "EnablePPEModule",
+          "type": "bool",
+          "default": "false",
+          "description": "Enable PPE / helmet detection"
+        },
+        {
+          "name": "PPEStrictEnforcement",
+          "type": "bool",
+          "default": "true",
+          "description": "Alert on every person without detected helmet"
+        },
+        {
+          "name": "EnableTrafficModule",
+          "type": "bool",
+          "default": "true",
+          "description": "Enable vehicle detection and speed estimation"
+        },
+        {
+          "name": "EnableFaceModule",
+          "type": "bool",
+          "default": "false",
+          "description": "Enable person/face detection"
         },
         {
           "name": "ConfidenceThreshold",
           "type": "string",
-          "default": "0.45"
+          "default": "0.30",
+          "description": "Detection confidence threshold (0.0-1.0). AWS uses 0.30 minimum."
+        },
+        {
+          "name": "MaxInferenceFPS",
+          "type": "string",
+          "default": "5",
+          "description": "Max AI inference requests per second sent to AWS cloud (1-15)"
         },
         {
           "name": "EnableOverlay",
           "type": "bool",
-          "default": "true"
+          "default": "true",
+          "description": "Show bounding boxes in frontend overlay"
         },
         {
-          "name": "MaxProcessingFPS",
-          "type": "int",
-          "default": "15"
+          "name": "MetersPerPixel",
+          "type": "string",
+          "default": "0.0",
+          "description": "Speed estimation calibration (m/px). 0.0 = uncalibrated."
         }
       ]
     }

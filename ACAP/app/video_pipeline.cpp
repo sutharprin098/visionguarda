@@ -34,17 +34,17 @@ bool VideoPipeline::initialize(int target_width, int target_height, int target_f
     g_object_unref(settings);
 
     if (!vdo_stream_handle_ || error != NULL) {
-        std::cerr << "[VideoPipeline] Failed to create VDO stream: " 
+        std::cerr << "[VDO] FAILED to create VDO stream: " 
                   << (error ? error->message : "unknown") << std::endl;
         if (error) g_error_free(error);
         camera_connected_ = false;
         return false;
     }
-    std::cout << "[VideoPipeline] AXIS VDO Stream initialized: " 
-              << width_ << "x" << height_ << "@" << target_fps_ << "FPS" << std::endl;
+    std::cout << "[VDO] stream opened: " 
+              << width_ << "x" << height_ << " @" << target_fps_ << "FPS" << std::endl;
 #else
-    std::cout << "[VideoPipeline] Host execution mode initialized: "
-              << width_ << "x" << height_ << "@" << target_fps_ << "FPS" << std::endl;
+    std::cout << "[VDO] Host execution mode initialized: "
+              << width_ << "x" << height_ << " @" << target_fps_ << "FPS" << std::endl;
 #endif
 
     return true;
@@ -59,13 +59,14 @@ bool VideoPipeline::start() {
     if (vdo_stream_handle_) {
         GError* error = NULL;
         if (!vdo_stream_start(VDO_STREAM(vdo_stream_handle_), &error)) {
-            std::cerr << "[VideoPipeline] Failed to start VDO stream: " 
+            std::cerr << "[VDO] FAILED to start VDO stream: " 
                       << (error ? error->message : "unknown") << std::endl;
             if (error) g_error_free(error);
             running_ = false;
             camera_connected_ = false;
             return false;
         }
+        std::cout << "[VDO] stream started successfully" << std::endl;
     }
 #endif
     return running_;
@@ -85,6 +86,7 @@ bool VideoPipeline::capture_frame(VideoFrame& out_frame) {
         GError* error = NULL;
         VdoFrame* vdo_frame = vdo_stream_get_frame(VDO_STREAM(vdo_stream_handle_), &error);
         if (!vdo_frame || error != NULL) {
+            std::cerr << "[VDO] FAILED get_frame: " << (error ? error->message : "null frame") << std::endl;
             if (error) g_error_free(error);
             dropped_frames_++;
             camera_connected_ = false;
@@ -96,15 +98,35 @@ bool VideoPipeline::capture_frame(VideoFrame& out_frame) {
         camera_connected_ = true;
 
         uint8_t* buffer_data = (uint8_t*)vdo_frame_get_buffer(vdo_frame);
-        size_t buffer_size = vdo_frame_get_size(vdo_frame);
+        size_t   buffer_size = vdo_frame_get_size(vdo_frame);
 
-        out_frame.frame_index = frame_counter_;
-        out_frame.timestamp_ms = now_ms;
-        out_frame.width = width_;
-        out_frame.height = height_;
-        out_frame.stride = width_;
-        out_frame.buffer.assign(buffer_data, buffer_data + buffer_size);
-        out_frame.native_vdo_frame_ptr = (void*)vdo_frame;
+        // VDO delivers NV12 on all current ARTPEC hardware.
+        // NV12 size = W*H (Y-plane) + W*H/2 (interleaved UV) = W*H*3/2.
+        const size_t expected_nv12 = static_cast<size_t>(width_ * height_ * 3 / 2);
+        if (buffer_size < expected_nv12) {
+            std::cerr << "[VDO] FAILED buffer too small: "
+                      << buffer_size << " < " << expected_nv12
+                      << " (frame " << frame_counter_ << ")" << std::endl;
+            vdo_stream_release_frame(VDO_STREAM(vdo_stream_handle_), vdo_frame);
+            dropped_frames_++;
+            return false;
+        }
+
+        out_frame.frame_index           = frame_counter_;
+        out_frame.timestamp_ms          = now_ms;
+        out_frame.width                 = width_;
+        out_frame.height                = height_;
+        out_frame.stride                = width_;        // NV12 stride = width
+        out_frame.pixel_format          = VideoPixelFormat::NV12;
+        out_frame.buffer.assign(buffer_data, buffer_data + expected_nv12);
+        out_frame.native_vdo_frame_ptr  = (void*)vdo_frame;
+
+        if (frame_counter_ % 30 == 1) {
+            std::cout << "[VDO] frame received id=" << frame_counter_
+                      << " resolution=" << width_ << "x" << height_
+                      << " timestamp=" << now_ms
+                      << " fps=" << target_fps_ << std::endl;
+        }
         return true;
     }
 #endif
@@ -113,13 +135,23 @@ bool VideoPipeline::capture_frame(VideoFrame& out_frame) {
     last_frame_timestamp_ = now_ms;
     camera_connected_ = true;
 
-    out_frame.frame_index = frame_counter_;
-    out_frame.timestamp_ms = now_ms;
-    out_frame.width = width_;
-    out_frame.height = height_;
-    out_frame.stride = width_;
-    out_frame.native_vdo_frame_ptr = nullptr;
+    out_frame.frame_index           = frame_counter_;
+    out_frame.timestamp_ms          = now_ms;
+    out_frame.width                 = width_;
+    out_frame.height                = height_;
+    out_frame.stride                = width_;
+    out_frame.pixel_format          = VideoPixelFormat::BGR_HOST; // host / test mode
+    out_frame.buffer.clear();                                      // no pixel data in host mode
+    out_frame.native_vdo_frame_ptr  = nullptr;
 
+    if (frame_counter_ % 30 == 1) {
+        std::cout << "[VDO] frame received id=" << frame_counter_
+                  << " resolution=" << width_ << "x" << height_
+                  << " timestamp=" << now_ms
+                  << " fps=" << target_fps_ << std::endl;
+    }
+
+    // Pace the host-mode loop to the configured target FPS
     std::this_thread::sleep_for(std::chrono::milliseconds(1000 / target_fps_));
     return true;
 }

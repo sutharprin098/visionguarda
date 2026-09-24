@@ -25,33 +25,48 @@ def add_file(tf, name, data, mode=0o644):
 def build_eap(app='camai_acap', arch='armv7hf', ver='1.0.0', vendor='CamAI Enterprise', vid='1234567890'):
     major, minor, micro = ver.split('.')
 
-    # Manifest Schema (compatible with AXIS OS 10.x & 11.x)
-    manifest_data = json.dumps({
-        'schemaVersion': '1.3',
-        'acapPackageConf': {
-            'setup': {
-                'friendlyName':       'CamAI Edge',
-                'appName':            app,
-                'execName':           app,
-                'vendor':             vendor,
-                'vendorId':           vid,
-                'version':            ver,
-                'majorVersion':       major,
-                'minorVersion':       minor,
-                'microVersion':       micro,
-                'architecture':       arch,
-                'runMode':            'respawn',
-                'embeddedSdkVersion': '3.0'
-            },
-            'configuration': {
-                'settingPage':        'index.html'
-            },
-            'licensing': {
-                'licenseType':        'free',
-                'licensePage':        'none'
+    # Load manifest.json from workspace if present, override architecture and version
+    manifest_path = os.path.join(BASE_DIR, 'manifest.json')
+    if os.path.isfile(manifest_path):
+        with open(manifest_path, 'r', encoding='utf-8') as mf:
+            m_dict = json.load(mf)
+        setup = m_dict.get('acapPackageConf', {}).get('setup', {})
+        setup['appName'] = app
+        setup['execName'] = app
+        setup['architecture'] = arch
+        setup['version'] = ver
+        setup['majorVersion'] = major
+        setup['minorVersion'] = minor
+        setup['microVersion'] = micro
+        manifest_data = json.dumps(m_dict, indent=2).encode('utf-8')
+    else:
+        # Fallback Manifest Schema
+        manifest_data = json.dumps({
+            'schemaVersion': '1.3',
+            'acapPackageConf': {
+                'setup': {
+                    'friendlyName':       'CamAI Edge',
+                    'appName':            app,
+                    'execName':           app,
+                    'vendor':             vendor,
+                    'vendorId':           vid,
+                    'version':            ver,
+                    'majorVersion':       major,
+                    'minorVersion':       minor,
+                    'microVersion':       micro,
+                    'architecture':       arch,
+                    'runMode':            'respawn',
+                    'embeddedSdkVersion': '3.0'
+                },
+                'configuration': {
+                    'settingPage':        'index.html'
+                },
+                'licensing': {
+                    'licenseType':        'free',
+                    'licensePage':        'none'
+                }
             }
-        }
-    }, indent=2).encode('utf-8')
+        }, indent=2).encode('utf-8')
 
     pkgconf_lines = [
         f'PACKAGENAME="{app}"',

@@ -21,6 +21,8 @@ bool ConfigManager::initialize() {
     local_cache_["MaxProcessingFPS"] = "15";
     local_cache_["IntrusionROICoords"] = "100,100;500,100;500,400;100,400";
     local_cache_["TripwireCoords"] = "200,300;600,300";
+    local_cache_["AwsApiUrl"] = "http://13.203.71.14:8000/api/detect";
+    local_cache_["AwsApiKey"] = "";
 
 #if defined(ACAP_NATIVE_BUILD) && ACAP_NATIVE_BUILD
     GError* error = NULL;

@@ -138,6 +138,110 @@ def is_gpu_device(device: str | None) -> bool:
     return any(k in d for k in ("CUDA", "TENSORRT", "TRT", "DIRECTML", "DML", "GPU", "ROCM"))
 
 
+class OpenVINOOrtWrapper:
+    """An ONNX Runtime InferenceSession compatible wrapper powered by OpenVINO.
+
+    Allows any model loaded via standard ORT `.run(None, {input_name: tensor})`
+    to run directly on OpenVINO GPU (or CPU) without requiring `onnxruntime-openvino`
+    or `onnxruntime-directml` packages.
+    """
+
+    def __init__(self, model_path: str, device: str = "GPU"):
+        import openvino as ov
+        from app.ai.backend import get_ov_core
+        core = get_ov_core() or ov.Core()
+        model = core.read_model(model_path)
+        self.compiled = core.compile_model(model, device)
+        self.active_provider = f"openvino:{device}"
+
+        class InputMeta:
+            def __init__(self, node):
+                self.name = node.any_name
+                ps = node.partial_shape
+                self.shape = ps.to_shape() if ps.is_static else list(ps)
+                self.type = str(node.element_type)
+
+        class OutputMeta:
+            def __init__(self, node):
+                self.name = node.any_name
+                ps = node.partial_shape
+                self.shape = ps.to_shape() if ps.is_static else list(ps)
+                self.type = str(node.element_type)
+
+        self._inputs = [InputMeta(i) for i in self.compiled.inputs]
+        self._outputs = [OutputMeta(o) for o in self.compiled.outputs]
+
+    def get_inputs(self):
+        return self._inputs
+
+    def get_outputs(self):
+        return self._outputs
+
+    def get_providers(self):
+        return [self.active_provider]
+
+    def run(self, output_names, input_feed):
+        res = self.compiled(input_feed)
+        return [res[o] for o in self.compiled.outputs]
+
+
+def load_accelerated_onnx_session(
+    model_path: str,
+    sess_options=None,
+    provider_pref: list[str] | None = None,
+):
+    """Loads an ONNX model with maximum available hardware acceleration.
+
+    Priority order:
+    1. Genuine GPU Execution Providers in ONNX Runtime (TensorRT, CUDA, OpenVINO, DirectML, ROCm).
+    2. OpenVINO native GPU backend (`openvino:GPU`) when ORT has no GPU EPs installed.
+    3. Standard CPU fallback.
+    """
+    providers = ort_providers()
+
+    ordered_gpu_eps = [
+        "TensorrtExecutionProvider",
+        "CUDAExecutionProvider",
+        "OpenVINOExecutionProvider",
+        "DmlExecutionProvider",
+        "ROCMExecutionProvider",
+    ]
+    if provider_pref:
+        ordered_gpu_eps = [p for p in provider_pref if p in GPU_ORT_PROVIDERS] + [
+            p for p in ordered_gpu_eps if p not in provider_pref
+        ]
+
+    chosen_ort_gpu = next((p for p in ordered_gpu_eps if p in providers), None)
+
+    if chosen_ort_gpu:
+        import onnxruntime as ort
+        if sess_options is None:
+            sess_options = ort.SessionOptions()
+            sess_options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
+            sess_options.intra_op_num_threads = max(1, min(4, (os.cpu_count() or 2)))
+            sess_options.log_severity_level = 3
+        return ort.InferenceSession(
+            model_path, sess_options=sess_options, providers=[chosen_ort_gpu, "CPUExecutionProvider"]
+        )
+
+    if openvino_has_gpu():
+        try:
+            return OpenVINOOrtWrapper(model_path, device="GPU")
+        except Exception as e:
+            print(f"[Accelerator] Warning: OpenVINO GPU loading for {model_path} failed ({e}); falling back to ORT CPU.", flush=True)
+
+    import onnxruntime as ort
+    if sess_options is None:
+        sess_options = ort.SessionOptions()
+        sess_options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
+        sess_options.intra_op_num_threads = max(1, min(4, (os.cpu_count() or 2)))
+        sess_options.log_severity_level = 3
+    return ort.InferenceSession(
+        model_path, sess_options=sess_options, providers=["CPUExecutionProvider"]
+    )
+
+
+
 def guard_cpu_fallback(component: str, device: str | None, *, log=print) -> None:
     """Fail-loud when `component` ended up on CPU.
 

@@ -54,13 +54,13 @@ const STORAGE_KEYS = {
 
 // Stream URL: on Axis camera this resolves to the camera's real MJPEG feed
 export function getCameraStreamUrl(): string {
-  if (typeof window === 'undefined') return '/axis-cgi/mjpg/video.cgi';
-  return `${window.location.origin}/axis-cgi/mjpg/video.cgi`;
+  if (typeof window === 'undefined') return '/axis-cgi/mjpg/video.cgi?resolution=1280x720&compression=30&fps=15';
+  return `${window.location.origin}/axis-cgi/mjpg/video.cgi?resolution=1280x720&compression=30&fps=15`;
 }
 
 export function getCameraSnapshotUrl(): string {
-  if (typeof window === 'undefined') return '/axis-cgi/jpg/image.cgi';
-  return `${window.location.origin}/axis-cgi/jpg/image.cgi`;
+  if (typeof window === 'undefined') return '/axis-cgi/jpg/image.cgi?resolution=1280x720&compression=30';
+  return `${window.location.origin}/axis-cgi/jpg/image.cgi?resolution=1280x720&compression=30`;
 }
 
 // Full Unlocked Enterprise Edge License (No License Restrictions)
@@ -222,7 +222,7 @@ export async function publishConfigLocally(
   try {
     if (typeof window !== 'undefined') {
       const payload = JSON.stringify(compiled);
-      fetch('/axis-cgi/param.cgi?action=update&root.CamAI.ActiveConfig=1', {
+      fetch('/local/camai_acap/config.cgi', {
         method: 'POST',
         body: payload,
       }).catch(() => { /* offline / embedded sandbox safe */ });

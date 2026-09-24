@@ -1,19 +1,53 @@
 version: '3.8'
 
 services:
+  camai-cloud-node:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: camai-cloud-node
+    restart: unless-stopped
+    ports:
+      - "${CAMAI_PORT:-8099}:8099"
+    env_file:
+      - .env
+    environment:
+      - PYTHONUNBUFFERED=1
+      - CAMAI_ENV=production
+      - CAMAI_HOST=0.0.0.0
+      - CAMAI_MODEL_NAME=${CAMAI_MODEL_NAME:-yolox_tiny}
+      - CAMAI_CONF_THRESH=${CAMAI_CONF_THRESH:-0.40}
+      - OPENCV_FFMPEG_CAPTURE_OPTIONS=rtsp_transport;tcp
+    volumes:
+      - ./uploads:/app/uploads
+      - ./models:/app/models
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8099/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
+
   camai-engine:
     build:
       context: .
       dockerfile: Dockerfile
     container_name: camai-engine
     restart: unless-stopped
+    command: ["python", "run_engine.py", "--port", "8000", "--host", "0.0.0.0"]
     ports:
       - "8000:8000"
+    env_file:
+      - .env
     environment:
       - PYTHONUNBUFFERED=1
       - CAMAI_ENV=production
       - CAMAI_HOST=0.0.0.0
-      - OPENCV_FFMPEG_CAPTURE_OPTIONS=rtsp_transport;tcp
     volumes:
       - ./uploads:/app/uploads
       - ./models:/app/models
@@ -22,6 +56,11 @@ services:
       interval: 10s
       timeout: 5s
       retries: 3
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
 
 networks:
   default:
