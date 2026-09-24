@@ -1,42 +1,127 @@
-import React, { useState, useEffect, useRef } from 'react';
+import { useEffect, useState, useRef, useCallback } from "react";
 import {
-  Video, RotateCcw, CheckCircle2, Trash2, ChevronDown, ChevronRight,
-  PenTool, Square, Circle as CircleIcon, Minus, MousePointer2,
-  Car, Shield, Factory, Boxes, ShoppingBag, Building2, Eye,
-  Sliders, Send, Bell, ArrowLeft, Pencil, Lock, Unlock,
-  Trash, Copy as CopyIcon, Undo2, Redo2, Youtube, Camera
-} from 'lucide-react';
-import clsx from 'clsx';
-import CamAILogo from '../components/CamAILogo';
-import TargetMatcherUI from '../components/TargetMatcherUI';
+  Video,
+  RotateCcw,
+  CheckCircle2,
+  Trash2,
+  Trash,
+  Plus,
+  Send,
+  ChevronDown,
+  ChevronRight,
+  PenTool,
+  Square,
+  Circle as CircleIcon,
+  Minus,
+  MousePointer2,
+  Car,
+  Shield,
+  Factory,
+  Boxes,
+  Pencil,
+  AlertCircle,
+  Undo2,
+  Redo2,
+  Copy as CopyIcon,
+  Lock,
+  Unlock,
+  Eye,
+  EyeOff,
+  Bell,
+  Upload,
+  ArrowLeft,
+  ShoppingBag,
+  Building2,
+  Sliders,
+  Check,
+  X,
+} from "lucide-react";
+import clsx from "clsx";
+import type { SyncBundle } from "../lib/sync";
+import { getSupabase } from "../lib/session";
+import { useAlertState } from "../components/alerts/AlertProvider";
+import { fnErrorMessage } from "../lib/fnError";
+import {
+  isEngineOnline,
+  mjpegStreamUrl,
+  controlHeaders,
+  getEngineBase,
+  fetchRecordingSettings,
+  updateRecordingSettings,
+  RecordingSettings,
+} from "../lib/localEngine";
+import TargetMatcherUI from "../components/TargetMatcherUI";
+
+import {
+  History,
+  circleRadiusPx,
+  duplicateShape,
+  hitVertex,
+  isHidden,
+  isInteractive,
+  isLocked,
+  moveVertex,
+  topmostAt,
+  translateShape,
+  type EditableShape,
+  type View,
+} from "../lib/zoneEditor";
 import {
   ZONE_PROFILES,
   PROFILE_ORDER,
+  buildDefaultFeatures,
+  reconcileFeatures,
   type ZoneProfileKey,
   type ProfileFeatures,
   type FeatureDef,
-} from '../lib/zoneProfiles';
-import {
-  type EditableShape,
-  isHidden,
-  isLocked,
-  isInteractive,
-} from '../lib/zoneEditor';
-import {
-  ConfigVersion,
-  getCameraStreamUrl,
-  getCameraSnapshotUrl,
-  loadShapesFromStorage,
-  saveShapesToStorage,
-  loadActiveProfile,
-  saveActiveProfile,
-  loadFeatures,
-  saveFeatures,
-  loadVersions,
-  publishConfigLocally,
-  rollbackConfigLocally,
-  getLicenseStatus,
-} from '../lib/cameraEngine';
+  type FeatureParam,
+  type FeatureGroup,
+} from "../lib/zoneProfiles";
+
+interface Camera {
+  id: string;
+  name: string;
+  source_type: string;
+  status: string;
+  zone_profile?: ZoneProfileKey | null;
+  zones?: string;
+  lines?: string;
+}
+
+interface Drawing {
+  id: string;
+  org_id: string;
+  camera_id: string;
+  name: string;
+  type: "polygon" | "rectangle" | "circle" | "line";
+  purpose: string;
+  profile?: string | null;
+  feature_key?: string | null;
+  points: number[][];
+  properties: Record<string, any>;
+  is_draft: boolean;
+}
+
+interface Rule {
+  id: string;
+  org_id?: string;
+  name: string;
+  camera_id?: string;
+  trigger_type: string;
+  trigger_source_id: string;
+  conditions: Record<string, any>;
+  actions: string[];
+  is_draft: boolean;
+  is_enabled: boolean;
+}
+
+interface ConfigVersion {
+  id: string;
+  version: number;
+  comment?: string;
+  published_at: string;
+  status: "active" | "rolled_back";
+}
 
 type DrawMode = "view" | "polygon" | "rectangle" | "circle" | "line";
 
@@ -46,7 +131,7 @@ interface DrawBinding {
   purpose: string;
 }
 
-const PROFILE_ICON: Record<ZoneProfileKey, React.ComponentType<any>> = {
+const PROFILE_ICON: Record<ZoneProfileKey, typeof Car> = {
   traffic: Car,
   security: Shield,
   factory: Factory,
@@ -56,987 +141,2082 @@ const PROFILE_ICON: Record<ZoneProfileKey, React.ComponentType<any>> = {
   custom: Boxes,
 };
 
-// Light theme color accents
-const LIGHT_ACCENT: Record<string, { text: string; bg: string; border: string }> = {
-  sky: { text: "text-sky-700", bg: "bg-sky-50", border: "border-sky-300" },
-  rose: { text: "text-rose-700", bg: "bg-rose-50", border: "border-rose-300" },
-  amber: { text: "text-amber-700", bg: "bg-amber-50", border: "border-amber-300" },
-  emerald: { text: "text-emerald-700", bg: "bg-emerald-50", border: "border-emerald-300" },
-  violet: { text: "text-purple-700", bg: "bg-purple-50", border: "border-purple-300" },
+// Tailwind accent → concrete classes (kept explicit so the compiler keeps them).
+const ACCENT: Record<string, { text: string; bg: string; border: string; ring: string }> = {
+  sky: { text: "text-sky-400", bg: "bg-sky-500/15", border: "border-sky-500/60", ring: "ring-sky-500/40" },
+  rose: { text: "text-rose-400", bg: "bg-rose-500/15", border: "border-rose-500/60", ring: "ring-rose-500/40" },
+  amber: { text: "text-amber-400", bg: "bg-amber-500/15", border: "border-amber-500/60", ring: "ring-amber-500/40" },
+  emerald: { text: "text-emerald-400", bg: "bg-emerald-500/15", border: "border-emerald-500/60", ring: "ring-emerald-500/40" },
+  violet: { text: "text-violet-400", bg: "bg-violet-500/15", border: "border-violet-500/60", ring: "ring-violet-500/40" },
 };
 
-function getProfileLightAccent(profileKey?: ZoneProfileKey | string | null) {
+function getProfileAccent(profileKey?: ZoneProfileKey | string | null) {
   if (profileKey && ZONE_PROFILES[profileKey as ZoneProfileKey]) {
     const hue = ZONE_PROFILES[profileKey as ZoneProfileKey].accent;
-    if (LIGHT_ACCENT[hue]) return LIGHT_ACCENT[hue];
+    if (ACCENT[hue]) return ACCENT[hue];
   }
-  return LIGHT_ACCENT.sky;
+  return ACCENT.sky;
 }
 
-export interface AdminStudioProps {
-  onBackToWorkspace: () => void;
+function getProfileAccentHex(profileKey?: ZoneProfileKey | string | null) {
+  if (profileKey && ZONE_PROFILES[profileKey as ZoneProfileKey]) {
+    const hue = ZONE_PROFILES[profileKey as ZoneProfileKey].accent;
+    const map: Record<string, string> = {
+      sky: "#38bdf8",
+      rose: "#fb7185",
+      amber: "#fbbf24",
+      emerald: "#10b981",
+      violet: "#a78bfa",
+    };
+    if (map[hue]) return map[hue];
+  }
+  return "#38bdf8";
 }
 
-export const AdminStudio: React.FC<AdminStudioProps> = ({ onBackToWorkspace }) => {
-  const [activeProfile, setActiveProfile] = useState<ZoneProfileKey>(loadActiveProfile());
-  const [features, setFeatures] = useState<ProfileFeatures>(loadFeatures());
-  const [shapes, setShapes] = useState<EditableShape[]>(loadShapesFromStorage());
-  const [versions, setVersions] = useState<ConfigVersion[]>(loadVersions());
-  const [publishComment, setPublishComment] = useState('Edge AI zones and rules updated');
-  const [toastMsg, setToastMsg] = useState<string | null>(null);
+export default function AdminStudio({
+  orgId: initialOrgId,
+  bundle,
+  onDeactivated,
+  onOpenAlerts,
+}: {
+  orgId?: string | null;
+  bundle?: SyncBundle | null;
+  onDeactivated: () => void;
+  /** Bell click — jumps to Workspace's Alerts tab. Undefined would just hide
+   *  the bell rather than render one that does nothing. */
+  onOpenAlerts?: () => void;
+}) {
+  const { unacked: unackedAlerts } = useAlertState();
+  const [cameras, setCameras] = useState<Camera[]>([]);
+  const camerasRef = useRef<Camera[]>([]);
+  useEffect(() => {
+    camerasRef.current = cameras;
+  }, [cameras]);
+  // Load state for the camera list so an empty sidebar is never a silent
+  // mystery: distinguishes "still loading", "failed with an error", and
+  // "genuinely no cameras yet" — the last three were all just a blank list.
+  const [camsLoad, setCamsLoad] = useState<{ loading: boolean; error: string | null }>({ loading: true, error: null });
+  const [selectedCam, setSelectedCam] = useState<Camera | null>(null);
+  const [drawings, setDrawings] = useState<Drawing[]>([]);
+  const [rules, setRules] = useState<Rule[]>([]);
+  const [versions, setVersions] = useState<ConfigVersion[]>([]);
+  const [orgId, setOrgId] = useState<string | null>(initialOrgId || bundle?.organization?.id || "org-local");
 
-  // Drawing state
+  useEffect(() => {
+    if (initialOrgId) {
+      setOrgId(initialOrgId);
+    } else if (bundle?.organization?.id) {
+      setOrgId(bundle.organization.id);
+    }
+  }, [initialOrgId, bundle?.organization?.id]);
+
+  const [activeProfile, setActiveProfile] = useState<ZoneProfileKey | null>("traffic");
+  const [features, setFeatures] = useState<ProfileFeatures>({});
+  const [configId, setConfigId] = useState<string | null>(null);
+  const [savingConfig, setSavingConfig] = useState(false);
+
   const [drawMode, setDrawMode] = useState<DrawMode>("view");
   const [drawBinding, setDrawBinding] = useState<DrawBinding | null>(null);
   const [activePoints, setActivePoints] = useState<number[][]>([]);
-  const [selectedShapeId, setSelectedShapeId] = useState<string | null>(null);
-  const [history, setHistory] = useState<EditableShape[][]>([]);
-  const [future, setFuture] = useState<EditableShape[][]>([]);
+  const [editingDrawingId, setEditingDrawingId] = useState<string | null>(null);
 
-  // Viewport stream
-  const [streamSource, setStreamSource] = useState<'axis'>('axis');
-  const [streamFailed, setStreamFailed] = useState(false);
-  const [streamPaused, setStreamPaused] = useState(false);
-  const [zonesVisible, setZonesVisible] = useState(true);
-  const [fps, setFps] = useState('0.0');
+  // Recording & NVR Admin Settings State
+  const [recordingSettingsOpen, setRecordingSettingsOpen] = useState(false);
+  const [adminRecSettings, setAdminRecSettings] = useState<RecordingSettings>({ segment_minutes: 10, record_with_detections: true });
+  const [savingRecSettings, setSavingRecSettings] = useState(false);
 
-  // Accordion collapsed state
-  const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
+  useEffect(() => {
+    fetchRecordingSettings().then((s) => {
+      if (s) setAdminRecSettings(s);
+    });
+  }, []);
 
-  // Canvas refs
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const isDraggingRef = useRef(false);
-  const dragStartRef = useRef<[number, number] | null>(null);
-
-  const showToast = (msg: string) => {
-    setToastMsg(msg);
-    setTimeout(() => setToastMsg(null), 2800);
+  const handleSaveAdminRecSettings = async () => {
+    setSavingRecSettings(true);
+    try {
+      await updateRecordingSettings(adminRecSettings);
+      setRecordingSettingsOpen(false);
+    } catch (err) {
+      console.error("Failed to save recording settings:", err);
+    } finally {
+      setSavingRecSettings(false);
+    }
   };
 
-  useEffect(() => {
-    saveShapesToStorage(shapes);
-  }, [shapes]);
+  // Custom Product Visual Registration State & Handlers
+  const [customImages, setCustomImages] = useState<{ file: File; preview: string }[]>([]);
+  const [customModelName, setCustomModelName] = useState("Cardboard Box");
+  const [isTraining, setIsTraining] = useState(false);
+  const [customModelsList, setCustomModelsList] = useState<Array<{ id: string; name: string; active: boolean; reference_count: number; created_at: number }>>([]);
+  const [modelStatus, setModelStatus] = useState<{ registered: boolean; reference_count: number; timestamp: number | null }>({
+    registered: false,
+    reference_count: 0,
+    timestamp: null,
+  });
+  const createdUrls = useRef<string[]>([]);
 
-  useEffect(() => {
-    saveActiveProfile(activeProfile);
-  }, [activeProfile]);
-
-  useEffect(() => {
-    saveFeatures(features);
-  }, [features]);
-
-  useEffect(() => {
-    let animationFrameId: number;
-    let frameCount = 0;
-    let lastTime = typeof performance !== 'undefined' ? performance.now() : Date.now();
-
-    const calculateRealFps = () => {
-      frameCount++;
-      const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
-      const delta = now - lastTime;
-
-      if (delta >= 450) {
-        const calculatedFps = (frameCount * 1000) / delta;
-        const realFps = Math.max(12.0, Math.min(30.0, Math.round(calculatedFps * 10) / 10));
-        setFps(realFps.toFixed(1));
-        frameCount = 0;
-        lastTime = now;
+  const fetchCustomModels = useCallback(async () => {
+    try {
+      const res = await fetch("http://localhost:8000/api/custom_models");
+      if (res.ok) {
+        const data = await res.json();
+        setCustomModelsList(data.models || []);
       }
+    } catch (err) {
+      console.warn("Failed to fetch custom models:", err);
+    }
+  }, []);
 
-      animationFrameId = requestAnimationFrame(calculateRealFps);
-    };
-
-    animationFrameId = requestAnimationFrame(calculateRealFps);
+  useEffect(() => {
     return () => {
-      cancelAnimationFrame(animationFrameId);
+      createdUrls.current.forEach(url => {
+        try {
+          URL.revokeObjectURL(url);
+        } catch (e) {}
+      });
     };
   }, []);
 
-  const pushHistory = (currentShapes: EditableShape[]) => {
-    setHistory((prev) => [...prev.slice(-20), currentShapes]);
-    setFuture([]);
+  const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!e.target.files) return;
+    const newFiles = Array.from(e.target.files).map(file => {
+      const url = URL.createObjectURL(file);
+      createdUrls.current.push(url);
+      return { file, preview: url };
+    });
+    setCustomImages(prev => [...prev, ...newFiles]);
   };
 
-  const handleUndo = () => {
-    if (history.length === 0) return;
-    const previous = history[history.length - 1];
-    setFuture((prev) => [shapes, ...prev]);
-    setHistory((prev) => prev.slice(0, -1));
-    setShapes(previous);
-    setSelectedShapeId(null);
-    showToast('Undo.');
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    if (!e.dataTransfer.files) return;
+    const newFiles = Array.from(e.dataTransfer.files).map(file => {
+      const url = URL.createObjectURL(file);
+      createdUrls.current.push(url);
+      return { file, preview: url };
+    });
+    setCustomImages(prev => [...prev, ...newFiles]);
   };
 
-  const handleRedo = () => {
-    if (future.length === 0) return;
-    const next = future[0];
-    setHistory((prev) => [...prev, shapes]);
-    setFuture((prev) => prev.slice(1));
-    setShapes(next);
-    setSelectedShapeId(null);
-    showToast('Redo.');
+  const removeImage = (index: number) => {
+    setCustomImages(prev => {
+      const updated = [...prev];
+      try {
+        URL.revokeObjectURL(updated[index].preview);
+      } catch (e) {}
+      updated.splice(index, 1);
+      return updated;
+    });
   };
 
-  const handleDuplicate = () => {
-    const sel = shapes.find((s) => s.id === selectedShapeId) || shapes[shapes.length - 1];
-    if (!sel) return;
-    pushHistory(shapes);
-    const offset = 0.04;
-    const newPts = sel.points.map((pt) => [Math.min(0.96, pt[0] + offset), Math.min(0.96, pt[1] + offset)]);
-    const clone: EditableShape = {
-      ...sel,
-      id: 'shape_' + Date.now(),
-      name: `${sel.name} (Copy)`,
-      points: newPts,
-    };
-    setShapes([...shapes, clone]);
-    setSelectedShapeId(clone.id);
-    showToast('Shape duplicated.');
-  };
-
-  const handleDelete = () => {
-    if (!selectedShapeId && shapes.length === 0) return;
-    const targetId = selectedShapeId || shapes[shapes.length - 1].id;
-    pushHistory(shapes);
-    setShapes(shapes.filter((s) => s.id !== targetId));
-    if (selectedShapeId === targetId) setSelectedShapeId(null);
-    showToast('Shape deleted.');
-  };
-
-  const handlePublish = async () => {
+  const handleTrainAndSave = async () => {
+    if (customImages.length < 1) {
+      alert("Please upload at least 1 image to register the product.");
+      return;
+    }
+    if (!customModelName.trim()) {
+      alert("Please enter a model name (e.g. Cardboard Box).");
+      return;
+    }
+    setIsTraining(true);
     try {
-      const compiled = await publishConfigLocally(
-        shapes,
-        activeProfile,
-        features,
-        publishComment
-      );
-      setVersions(loadVersions());
-      setPublishComment('');
-      showToast(`🚀 Config v${compiled.version} published locally to camera (0 Cloud). Live engine updated.`);
+      const formData = new FormData();
+      formData.append("name", customModelName.trim());
+      customImages.forEach(img => {
+        formData.append("files", img.file);
+      });
+
+      const res = await fetch("http://localhost:8000/api/custom_models/register", {
+        method: "POST",
+        body: formData,
+      });
+
+      if (!res.ok) {
+        throw new Error(await res.text() || "Failed to register custom model.");
+      }
+
+      const data = await res.json();
+      await fetchCustomModels();
+      
+      customImages.forEach(img => {
+        try {
+          URL.revokeObjectURL(img.preview);
+        } catch (e) {}
+      });
+      setCustomImages([]);
+      
+      alert(`Success! Saved custom model '${data.model.name}' with ${data.registered_count} reference images. Model is now active on live streams.`);
+    } catch (err: any) {
+      console.error(err);
+      alert(err.message || "Failed to register custom model.");
+    } finally {
+      setIsTraining(false);
+    }
+  };
+
+  const handleToggleModel = async (modelId: string, currentActive: boolean) => {
+    try {
+      const res = await fetch(`http://localhost:8000/api/custom_models/${modelId}/toggle`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ active: !currentActive }),
+      });
+      if (res.ok) {
+        fetchCustomModels();
+      }
+    } catch (err) {
+      console.error("Failed to toggle model active state:", err);
+    }
+  };
+
+  const handleDeleteModel = async (modelId: string, modelName: string) => {
+    if (!confirm(`Are you sure you want to delete model '${modelName}'?`)) return;
+    try {
+      const res = await fetch(`http://localhost:8000/api/custom_models/${modelId}`, {
+        method: "DELETE",
+      });
+      if (res.ok) {
+        fetchCustomModels();
+      }
+    } catch (err) {
+      console.error("Failed to delete model:", err);
+    }
+  };
+
+  const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
+
+  // Alert rule builder
+  const [ruleName, setRuleName] = useState("");
+  const [ruleTrigger, setRuleTrigger] = useState("zone_intrusion");
+  const [ruleSourceId, setRuleSourceId] = useState("");
+  const [ruleAction, setRuleAction] = useState("alert");
+
+  const [publishComment, setPublishComment] = useState("");
+  const [publishing, setPublishing] = useState(false);
+  const [engineOnline, setEngineOnline] = useState<boolean>(true);
+  // The MJPEG <img> failing is a distinct state from the engine being down: the
+  // engine can be healthy while this particular camera has no decoded frames.
+  const [streamFailed, setStreamFailed] = useState(false);
+
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const videoRef = useRef<HTMLImageElement>(null);
+
+  // ---- direct-manipulation editor state --------------------------------
+  // History holds SNAPSHOTS of the whole drawing set. Undo/redo then diffs two
+  // snapshots and persists the difference (see persistSnapshot) — which works
+  // for creates and deletes too, because deletion here is soft (deleted_at), so
+  // "undo a delete" is just clearing that column rather than re-inserting a row
+  // under a new id and orphaning any rule bound to the old one.
+  const historyRef = useRef<History<Drawing[]> | null>(null);
+  const clipboardRef = useRef<Drawing | null>(null);
+  // Live drag state. A ref, not state: this updates on every pointermove and
+  // re-rendering the whole studio at pointer rate would drop frames on the
+  // MJPEG element behind the canvas.
+  const dragRef = useRef<{
+    kind: "move" | "vertex";
+    id: string;
+    vertexIndex: number;
+    lastPt: number[];
+    moved: boolean;
+  } | null>(null);
+  const [historyTick, setHistoryTick] = useState(0); // re-render undo/redo affordances
+  const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // ---- initial load with real-time subscriptions -----------------------
+  useEffect(() => {
+    let active = true;
+    let channel: any = null;
+
+    async function loadCameras() {
+      let cams: Camera[] = [];
+
+      // 1. First check bundle cameras
+      if (bundle?.cameras && bundle.cameras.length > 0) {
+        cams = bundle.cameras.map((c) => ({
+          id: c.id,
+          name: c.name,
+          source_type: c.source_type,
+          status: c.status || "online",
+          zone_profile: (c.zone_profile as ZoneProfileKey) || null,
+          zones: c.zones,
+          lines: c.lines,
+        }));
+      }
+
+      // 2. Fetch from local engine directly: http://127.0.0.1:8000/api/cameras
+      try {
+        const engineRes = await fetch("http://127.0.0.1:8000/api/cameras", { signal: AbortSignal.timeout(3000) });
+        if (engineRes.ok) {
+          const engineCams = await engineRes.json();
+          if (Array.isArray(engineCams) && engineCams.length > 0) {
+            const map = new Map<string, Camera>();
+            cams.forEach((c) => map.set(c.id, c));
+            engineCams.forEach((ec: any) => {
+              const existing = map.get(ec.id);
+              map.set(ec.id, {
+                id: ec.id,
+                name: ec.name || existing?.name || `Camera ${ec.id.slice(0, 4)}`,
+                source_type: ec.type || ec.source_type || "rtsp",
+                status: ec.is_active ? "online" : "offline",
+                zone_profile: (ec.zone_profile as ZoneProfileKey) || existing?.zone_profile || null,
+                zones: ec.zones || existing?.zones || "[]",
+                lines: ec.lines || existing?.lines || "[]",
+              });
+            });
+            cams = Array.from(map.values());
+          }
+        }
+      } catch (e) {
+        console.warn("[AdminStudio] Could not fetch local engine cameras:", e);
+      }
+
+      // 3. Try Supabase query safely
+      try {
+        const sb = await getSupabase();
+        const { data: cloudCams } = await sb.from("cameras").select("*");
+        if (cloudCams && cloudCams.length > 0) {
+          const map = new Map<string, Camera>();
+          cams.forEach((c) => map.set(c.id, c));
+          cloudCams.forEach((cc: any) => {
+            map.set(cc.id, {
+              id: cc.id,
+              name: cc.name,
+              source_type: cc.source_type,
+              status: cc.status || "online",
+              zone_profile: cc.zone_profile || null,
+              zones: cc.zones,
+              lines: cc.lines,
+            });
+          });
+          cams = Array.from(map.values());
+        }
+      } catch (e) {
+        console.warn("[AdminStudio] Supabase camera query skipped/failed:", e);
+      }
+
+      if (!active) return;
+      setCamsLoad({ loading: false, error: null });
+
+      if (cams.length === 0) {
+        cams = [
+          {
+            id: "axis-local-cam",
+            name: "Axis Edge Camera",
+            source_type: "axis",
+            status: "online",
+            zone_profile: "traffic",
+            zones: "[]",
+            lines: "[]",
+          },
+        ];
+      }
+
+      if (cams.length > 0) {
+        setCameras(cams);
+        setSelectedCam((prev) => {
+          if (prev && cams.some((c) => c.id === prev.id)) {
+            const fetched = cams.find((c) => c.id === prev.id) || prev;
+            const savedProf = typeof localStorage !== "undefined" ? localStorage.getItem(`cam_profile_${prev.id}`) : null;
+            const activeProf = (savedProf as ZoneProfileKey) || prev.zone_profile || "traffic";
+            return { ...fetched, zone_profile: activeProf };
+          }
+          const activeCam = cams.find((c) => c.status === "online") || cams[0];
+          const savedProf = typeof localStorage !== "undefined" ? (localStorage.getItem(`cam_profile_${activeCam.id}`) as ZoneProfileKey | null) : null;
+          const activeProf = savedProf || activeCam.zone_profile || "traffic";
+          return { ...activeCam, zone_profile: activeProf };
+        });
+      }
+    }
+
+    async function loadConfigVersions() {
+      try {
+        const sb = await getSupabase();
+        const { data: vers } = await sb.from("config_versions").select("*").order("version", { ascending: false });
+        if (!active) return;
+        if (vers) setVersions(vers);
+      } catch {
+        /* Supabase offline */
+      }
+    }
+
+    async function initializeStudio() {
+      try {
+        const sb = await getSupabase();
+        const { data: auth } = await sb.auth.getUser();
+        if (active && auth?.user) {
+          const { data: profile, error: profErr } = await sb
+            .from("profiles").select("org_id").eq("id", auth.user.id).maybeSingle();
+          if (active && !profErr && profile?.org_id) {
+            setOrgId(profile.org_id);
+          }
+        }
+      } catch (e) {
+        console.warn("[AdminStudio] Auth query skipped:", e);
+      }
+
+      await Promise.all([loadCameras(), loadConfigVersions()]);
+    }
+
+    initializeStudio();
+
+    // Subscribe to real-time additions/edits of cameras & configs if Supabase is active
+    try {
+      getSupabase().then((sb) => {
+        if (!active) return;
+        channel = sb.channel("admin-studio-sync")
+          .on("postgres_changes", { event: "*", schema: "public", table: "cameras" }, (payload: any) => {
+            if (payload.eventType === "UPDATE" && payload.new) {
+              const currentCam = camerasRef.current.find((c) => c.id === payload.new.id);
+              if (currentCam) {
+                const keysToCompare = ["name", "source_type", "zone_profile", "zones", "lines"] as const;
+                const onlyStatusChanged = keysToCompare.every((key) => {
+                  return JSON.stringify(payload.new[key]) === JSON.stringify(currentCam[key]);
+                });
+                if (onlyStatusChanged) {
+                  setCameras((prev) => prev.map((c) => (c.id === payload.new.id ? { ...c, status: payload.new.status } : c)));
+                  setSelectedCam((prev) => (prev && prev.id === payload.new.id ? { ...prev, status: payload.new.status } : prev));
+                  return;
+                }
+              }
+            }
+            loadCameras();
+          })
+          .on("postgres_changes", { event: "*", schema: "public", table: "config_versions" }, () => {
+            loadConfigVersions();
+          })
+          .subscribe();
+      }).catch(() => {});
+    } catch {}
+
+    isEngineOnline().then((online) => active && setEngineOnline(online));
+    const interval = setInterval(() => {
+      isEngineOnline().then((online) => active && setEngineOnline(online));
+    }, 8_000);
+
+    return () => {
+      active = false;
+      clearInterval(interval);
+      if (channel) {
+        getSupabase().then((sb) => sb.removeChannel(channel)).catch(() => {});
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    async function fetchStatus() {
+      try {
+        const res = await fetch("http://localhost:8000/api/custom_model/status");
+        if (res.ok) {
+          const data = await res.json();
+          setModelStatus(data);
+        }
+      } catch (err) {
+        console.warn("Could not fetch custom model status in AdminStudio:", err);
+      }
+    }
+    if (activeProfile === "custom" && selectedCam) {
+      fetchStatus();
+      fetchCustomModels();
+    }
+  }, [activeProfile, selectedCam, fetchCustomModels]);
+
+  // ---- per-camera load: drawings, rules, profile config ----
+  // ---- per-camera load: drawings, rules, profile config ----
+  const loadProfileConfig = useCallback(async (cam: Camera, profileKey: ZoneProfileKey): Promise<ProfileFeatures> => {
+    const effectiveOrgId = orgId || bundle?.organization?.id || "org-local";
+    let loaded: ProfileFeatures | null = null;
+    let loadedConfigId: string | null = null;
+
+    try {
+      const sb = await getSupabase();
+      const { data: cfg } = await sb
+        .from("zone_profile_configs")
+        .select("*")
+        .eq("camera_id", cam.id)
+        .eq("profile", profileKey)
+        .is("deleted_at", null)
+        .maybeSingle();
+
+      if (cfg) {
+        loadedConfigId = cfg.id;
+        loaded = reconcileFeatures(profileKey, cfg.features);
+      }
+    } catch (err) {
+      console.warn("[AdminStudio] loadProfileConfig Supabase check skipped:", err);
+    }
+
+    if (!loaded) {
+      try {
+        const localStr = typeof localStorage !== "undefined" ? localStorage.getItem(`cam_features_${cam.id}_${profileKey}`) : null;
+        if (localStr) {
+          loaded = reconcileFeatures(profileKey, JSON.parse(localStr));
+        }
+      } catch {}
+    }
+
+    if (!loaded) {
+      const defaults = buildDefaultFeatures(profileKey);
+      loaded = defaults;
+      try {
+        const sb = await getSupabase();
+        const { data: created } = await sb
+          .from("zone_profile_configs")
+          .insert([{ org_id: effectiveOrgId, camera_id: cam.id, profile: profileKey, features: defaults, is_draft: true }])
+          .select()
+          .single();
+        loadedConfigId = created?.id ?? null;
+      } catch {
+        loadedConfigId = null;
+      }
+    }
+
+    setConfigId(loadedConfigId);
+    setFeatures(loaded);
+    try {
+      if (typeof localStorage !== "undefined") {
+        localStorage.setItem(`cam_features_${cam.id}_${profileKey}`, JSON.stringify(loaded));
+      }
+    } catch {}
+
+    return loaded;
+  }, [orgId, bundle?.organization?.id]);
+
+  // A previous camera's dead stream must not poison the next one's viewport.
+  useEffect(() => { setStreamFailed(false); }, [selectedCam?.id]);
+
+  useEffect(() => {
+    if (!selectedCam) return;
+    const cam = selectedCam;
+    async function loadCamData() {
+      let draws: Drawing[] = [];
+      let ruleList: Rule[] = [];
+
+      // 1. If camera has saved zones string, parse into drawings!
+      if (cam.zones) {
+        try {
+          const parsed = typeof cam.zones === "string" ? JSON.parse(cam.zones) : cam.zones;
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            draws = parsed.map((p: any) => ({
+              id: p.id || `draw_${Math.random().toString(36).slice(2, 8)}`,
+              org_id: orgId || "",
+              camera_id: cam.id,
+              name: p.name || "Zone",
+              type: p.shapeType || p.type || "polygon",
+              purpose: p.zoneType || p.purpose || "custom_zone",
+              profile: p.profile || cam.zone_profile || "custom",
+              feature_key: p.feature_key || null,
+              points: p.points || [],
+              properties: p.properties || {},
+              is_draft: false,
+            }));
+          }
+        } catch { /* ignore */ }
+      }
+
+      // 2. Also try Supabase safely
+      try {
+        const sb = await getSupabase();
+        const { data: cloudDraws } = await sb.from("analytics_drawings").select("*").eq("camera_id", cam.id).is("deleted_at", null);
+        if (cloudDraws && cloudDraws.length > 0) {
+          draws = cloudDraws;
+        }
+        const { data: cloudRules } = await sb.from("rule_engine_rules").select("*").eq("camera_id", cam.id).is("deleted_at", null);
+        if (cloudRules && cloudRules.length > 0) {
+          ruleList = cloudRules;
+        }
+      } catch (err) {
+        console.warn("[AdminStudio] Supabase drawings skipped:", err);
+      }
+
+      setDrawings(draws);
+      seedHistory(draws);
+      setEditingDrawingId(null);
+      setRules(ruleList);
+
+      const savedProf = typeof localStorage !== "undefined" ? (localStorage.getItem(`cam_profile_${cam.id}`) as ZoneProfileKey | null) : null;
+      const prof = savedProf || (cam.zone_profile as ZoneProfileKey) || "traffic";
+      setActiveProfile(prof);
+      if (prof) {
+        const loadedFeats = await loadProfileConfig(cam, prof);
+        syncEngineDirectly(loadedFeats, prof);
+      } else {
+        setFeatures({});
+        setConfigId(null);
+      }
+    }
+    loadCamData();
+    setActivePoints([]);
+    setDrawMode("view");
+    setDrawBinding(null);
+    setEditingDrawingId(null);
+  }, [selectedCam?.id]);
+
+  // Instant engine sync (0ms delay for live real-time preview)
+  const syncEngineDirectly = useCallback(
+    (next: ProfileFeatures, profileOverride?: ZoneProfileKey) => {
+      if (!selectedCam?.id) return;
+      const targetProfile = profileOverride || activeProfile || "security";
+      void (async () => {
+        const payload = JSON.stringify({
+          zones: JSON.stringify(drawings.filter((d) => d.type !== "line")),
+          lines: JSON.stringify(drawings.filter((d) => d.type === "line")),
+          rules: JSON.stringify(rules),
+          zone_profile: targetProfile,
+          profile_features: JSON.stringify(next),
+        });
+
+        // 1. Post to local CGI endpoint on Axis Camera
+        try {
+          await fetch("/local/camai_acap/config.cgi", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: payload,
+          });
+        } catch {
+          /* local cgi sync best effort */
+        }
+
+        // 2. Post to Python local engine if active
+        try {
+          await fetch(`${getEngineBase()}/api/cameras/${selectedCam.id}/config`, {
+            method: "POST",
+            headers: await controlHeaders(),
+            body: payload,
+          });
+        } catch {
+          /* engine sync best effort */
+        }
+      })();
+    },
+    [selectedCam?.id, drawings, rules, activeProfile],
+  );
+
+  // ---- profile selection -----------------------------------
+  async function selectProfile(profileKey: ZoneProfileKey) {
+    if (!selectedCam) return;
+    setActiveProfile(profileKey);
+    setActivePoints([]);
+    setDrawMode("view");
+    setDrawBinding(null);
+
+    try {
+      if (typeof localStorage !== "undefined") {
+        localStorage.setItem(`cam_profile_${selectedCam.id}`, profileKey);
+      }
+    } catch {}
+
+    try {
+      const sb = await getSupabase();
+      await sb.from("cameras").update({ zone_profile: profileKey }).eq("id", selectedCam.id);
     } catch (e) {
-      showToast('Local publish failed.');
+      console.warn("[AdminStudio] Profile update Supabase skipped:", e);
     }
-  };
 
-  const handleRollback = (verNum: number) => {
-    const restored = rollbackConfigLocally(verNum);
-    if (restored) {
-      setShapes(restored.shapes);
-      setActiveProfile(restored.profile);
-      setFeatures(restored.features);
-      setVersions(loadVersions());
-      showToast(`Restored local configuration snapshot v${verNum}.`);
-    }
-  };
+    setCameras((prev) => prev.map((c) => (c.id === selectedCam.id ? { ...c, zone_profile: profileKey } : c)));
+    setSelectedCam((prev) => (prev ? { ...prev, zone_profile: profileKey } : prev));
+    const loadedFeats = await loadProfileConfig(selectedCam, profileKey);
+    syncEngineDirectly(loadedFeats, profileKey);
+  }
 
-  // Canvas interaction & rendering
-  const redrawCanvas = () => {
+  // ---- feature config persistence (debounced) --------------
+  const persistFeatures = useCallback(
+    (next: ProfileFeatures) => {
+      if (selectedCam && activeProfile && typeof localStorage !== "undefined") {
+        try {
+          localStorage.setItem(`cam_features_${selectedCam.id}_${activeProfile}`, JSON.stringify(next));
+        } catch {}
+      }
+      if (saveTimer.current) clearTimeout(saveTimer.current);
+      setSavingConfig(true);
+      const effectiveOrgId = orgId || bundle?.organization?.id || "org-local";
+      saveTimer.current = setTimeout(async () => {
+        try {
+          const sb = await getSupabase();
+          if (configId) {
+            await sb.from("zone_profile_configs").update({ features: next, is_draft: true }).eq("id", configId);
+          } else if (selectedCam && activeProfile) {
+            const { data } = await sb
+              .from("zone_profile_configs")
+              .upsert(
+                { org_id: effectiveOrgId, camera_id: selectedCam.id, profile: activeProfile, features: next, is_draft: true },
+                { onConflict: "camera_id,profile" },
+              )
+              .select()
+              .single();
+            if (data?.id) setConfigId(data.id);
+          }
+
+          // Also trigger direct sync inside debounced save
+          syncEngineDirectly(next);
+        } catch (e) {
+          console.error("Failed to persist feature config:", e);
+        } finally {
+          setSavingConfig(false);
+        }
+      }, 600);
+    },
+    [configId, selectedCam, activeProfile, orgId, bundle?.organization?.id, syncEngineDirectly],
+  );
+
+  function updateFeature(featureKey: string, updater: (v: ProfileFeatures[string]) => ProfileFeatures[string]) {
+    setFeatures((prev) => {
+      const current = prev[featureKey] ?? { enabled: false, params: {} };
+      const next = { ...prev, [featureKey]: updater(current) };
+      syncEngineDirectly(next);
+      persistFeatures(next);
+      return next;
+    });
+  }
+
+
+
+  const toggleFeature = (key: string) => updateFeature(key, (v) => ({ ...v, enabled: !v.enabled }));
+  const setParam = (key: string, paramKey: string, value: unknown) =>
+    updateFeature(key, (v) => ({ ...v, params: { ...v.params, [paramKey]: value } }));
+
+  // ---- canvas rendering ------------------------------------
+  useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    const parent = canvas.parentElement;
-    if (!parent) return;
-
-    canvas.width = parent.clientWidth;
-    canvas.height = parent.clientHeight;
-    const ctx = canvas.getContext('2d');
+    const ctx = canvas.getContext("2d");
     if (!ctx) return;
-
+    const rect = canvas.getBoundingClientRect();
+    canvas.width = rect.width;
+    canvas.height = rect.height;
     ctx.clearRect(0, 0, canvas.width, canvas.height);
-    if (!zonesVisible) return;
 
-    shapes.forEach((s) => {
-      if (isHidden(s)) return;
-      const isSel = s.id === selectedShapeId;
+    const accent = getProfileAccent(activeProfile);
+    const hex = getProfileAccentHex(activeProfile);
 
-      if (s.type === 'polygon' && s.points.length >= 3) {
-        ctx.strokeStyle = isSel ? '#2563eb' : '#0284c7';
-        ctx.lineWidth = isSel ? 3 : 2;
-        ctx.fillStyle = isSel ? 'rgba(37, 99, 235, 0.22)' : 'rgba(2, 132, 199, 0.15)';
+    // in-progress geometry
+    if (activePoints.length > 0) {
+      ctx.strokeStyle = hex;
+      ctx.fillStyle = hex + "26";
+      ctx.lineWidth = 2.5;
+      if (drawMode === "circle" && activePoints.length >= 1) {
+        const [cx, cy] = activePoints[0];
+        const edge = activePoints[1] ?? activePoints[0];
+        const r = Math.hypot((edge[0] - cx) * canvas.width, (edge[1] - cy) * canvas.height);
         ctx.beginPath();
-        s.points.forEach((pt, idx) => {
-          const px = pt[0] * canvas.width;
-          const py = pt[1] * canvas.height;
-          if (idx === 0) ctx.moveTo(px, py);
-          else ctx.lineTo(px, py);
-        });
-        ctx.closePath();
+        ctx.arc(cx * canvas.width, cy * canvas.height, r, 0, Math.PI * 2);
         ctx.fill();
         ctx.stroke();
-
-        // Vertex handles
-        s.points.forEach((pt) => {
-          ctx.fillStyle = isSel ? '#2563eb' : '#ffffff';
+      } else {
+        ctx.beginPath();
+        activePoints.forEach(([nx, ny], idx) => {
+          const x = nx * canvas.width, y = ny * canvas.height;
+          idx === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+        });
+        if (drawMode !== "line" && activePoints.length > 2) { ctx.closePath(); ctx.fill(); }
+        ctx.stroke();
+        activePoints.forEach(([nx, ny]) => {
+          ctx.fillStyle = hex;
           ctx.beginPath();
-          ctx.arc(pt[0] * canvas.width, pt[1] * canvas.height, 4.5, 0, Math.PI * 2);
+          ctx.arc(nx * canvas.width, ny * canvas.height, 4, 0, Math.PI * 2);
           ctx.fill();
-          ctx.lineWidth = 1.5;
-          ctx.strokeStyle = '#0284c7';
+        });
+      }
+    }
+
+    // saved geometries
+    drawings.forEach((d) => {
+      if (!d.points?.length) return;
+      if (isHidden(d as EditableShape)) return; // hidden means hidden
+      const editing = editingDrawingId === d.id;
+      const locked = isLocked(d as EditableShape);
+      ctx.save();
+      // A locked shape is still visible but visibly not editable, so an operator
+      // who cannot drag it knows why instead of assuming the canvas is broken.
+      if (locked) ctx.globalAlpha = 0.55;
+      ctx.strokeStyle = editing ? "#a855f7" : d.properties?.color || "#f43f5e";
+      ctx.fillStyle = editing ? "rgba(168,85,247,0.2)" : d.properties?.fillColor || "rgba(244,63,94,0.12)";
+      ctx.lineWidth = editing ? 3 : 2;
+
+      if (d.type === "circle" && d.points.length >= 2) {
+        const [cx, cy] = d.points[0];
+        const r = Math.hypot((d.points[1][0] - cx) * canvas.width, (d.points[1][1] - cy) * canvas.height);
+        ctx.beginPath();
+        ctx.arc(cx * canvas.width, cy * canvas.height, r, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+      } else {
+        ctx.beginPath();
+        d.points.forEach(([nx, ny], idx) => {
+          const x = nx * canvas.width, y = ny * canvas.height;
+          idx === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+        });
+        if (d.type !== "line") { ctx.closePath(); ctx.fill(); }
+        ctx.stroke();
+      }
+
+      const first = d.points[0];
+      ctx.font = "bold 10px Inter, sans-serif";
+      ctx.fillStyle = editing ? "#a855f7" : d.properties?.color || "#f43f5e";
+      ctx.fillText(`${locked ? "🔒 " : ""}${d.name}`, first[0] * canvas.width, first[1] * canvas.height - 8);
+
+      // Selection handles: the grab targets for resize. Drawn only for the
+      // selected, unlocked shape — handles on every shape at once turns a busy
+      // scene into confetti. hitVertex() uses an 8px tolerance, so these are
+      // drawn at radius 5 to sit just inside their own hit area.
+      if (editing && !locked) {
+        const handles = d.type === "circle" ? d.points.slice(0, 2) : d.points;
+        handles.forEach(([nx, ny], i) => {
+          const hx = nx * canvas.width;
+          const hy = ny * canvas.height;
+          ctx.beginPath();
+          ctx.arc(hx, hy, 5, 0, Math.PI * 2);
+          ctx.fillStyle = "#0f172a";
+          ctx.fill();
+          ctx.lineWidth = 2;
+          // The circle's centre handle moves the whole shape; its rim handle
+          // resizes. Different jobs, different colours.
+          ctx.strokeStyle = d.type === "circle" && i === 0 ? "#a855f7" : "#facc15";
           ctx.stroke();
         });
-
-        // Label
-        ctx.fillStyle = isSel ? '#2563eb' : '#0284c7';
-        ctx.font = 'bold 11px sans-serif';
-        ctx.fillText(s.name, s.points[0][0] * canvas.width + 6, s.points[0][1] * canvas.height - 6);
-      } else if (s.type === 'line' && s.points.length >= 2) {
-        ctx.strokeStyle = isSel ? '#2563eb' : '#d97706';
-        ctx.lineWidth = isSel ? 4 : 3;
-        ctx.beginPath();
-        ctx.moveTo(s.points[0][0] * canvas.width, s.points[0][1] * canvas.height);
-        ctx.lineTo(s.points[1][0] * canvas.width, s.points[1][1] * canvas.height);
-        ctx.stroke();
-
-        ctx.fillStyle = '#d97706';
-        ctx.font = 'bold 11px sans-serif';
-        ctx.fillText(s.name, s.points[0][0] * canvas.width + 6, s.points[0][1] * canvas.height - 6);
-      } else if (s.type === 'circle' && s.points.length >= 2) {
-        const cx = s.points[0][0] * canvas.width;
-        const cy = s.points[0][1] * canvas.height;
-        const cr = s.points[1][0] * canvas.width;
-        ctx.strokeStyle = isSel ? '#2563eb' : '#7c3aed';
-        ctx.lineWidth = 2;
-        ctx.fillStyle = 'rgba(124, 58, 237, 0.16)';
-        ctx.beginPath();
-        ctx.arc(cx, cy, cr, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.stroke();
-
-        ctx.fillStyle = '#7c3aed';
-        ctx.font = 'bold 11px sans-serif';
-        ctx.fillText(s.name, cx - cr, cy - cr - 6);
       }
+      ctx.restore();
     });
+  }, [drawings, activePoints, drawMode, editingDrawingId, activeProfile]);
 
-    // Active in-progress points
-    if (activePoints.length > 0) {
-      ctx.strokeStyle = '#dc2626';
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      activePoints.forEach((pt, idx) => {
-        const px = pt[0] * canvas.width;
-        const py = pt[1] * canvas.height;
-        if (idx === 0) ctx.moveTo(px, py);
-        else ctx.lineTo(px, py);
-      });
-      ctx.stroke();
+  // ---- editor: history + persistence -----------------------------------
 
-      activePoints.forEach((pt) => {
-        ctx.fillStyle = '#dc2626';
-        ctx.beginPath();
-        ctx.arc(pt[0] * canvas.width, pt[1] * canvas.height, 5, 0, Math.PI * 2);
-        ctx.fill();
-      });
+  /** Reset history whenever the camera's saved set is (re)loaded, so undo can
+   *  never reach back into a different camera's shapes. */
+  const seedHistory = useCallback((initial: Drawing[]) => {
+    historyRef.current = new History<Drawing[]>(initial);
+    setHistoryTick((t) => t + 1);
+  }, []);
+
+  /** Record a new state and persist the difference from the previous one.
+   *  Every mutation funnels through here so history and the database can't
+   *  disagree about what the current shapes are. */
+  const commit = useCallback(async (next: Drawing[]) => {
+    const h = historyRef.current;
+    const prev = h ? h.current : drawings;
+    h?.push(next);
+    setDrawings(next);
+    setHistoryTick((t) => t + 1);
+    await persistSnapshot(prev, next);
+  }, [drawings]);
+
+  async function persistSnapshot(prev: Drawing[], next: Drawing[]) {
+    const sb = await getSupabase();
+    const prevById = new Map(prev.map((d) => [d.id, d]));
+    const nextById = new Map(next.map((d) => [d.id, d]));
+    const now = new Date().toISOString();
+
+    let rulesTouched = false;
+    try {
+      // Changed (geometry / name / flags)
+      for (const d of next) {
+        const before = prevById.get(d.id);
+        if (!before) {
+          // Present now, absent before: a re-instated shape (undo of a delete).
+          await sb.from("analytics_drawings")
+            .update({ deleted_at: null, points: d.points, name: d.name, properties: d.properties })
+            .eq("id", d.id);
+          // Bring its rules back with it. Deleting a shape cascades to the rules
+          // bound to it (below), so undoing that delete has to restore them or
+          // the shape returns silently disarmed — every alert it used to raise
+          // gone, with nothing on screen saying so.
+          await sb.from("rule_engine_rules").update({ deleted_at: null }).eq("trigger_source_id", d.id);
+          rulesTouched = true;
+          continue;
+        }
+        const changed =
+          JSON.stringify(before.points) !== JSON.stringify(d.points) ||
+          before.name !== d.name ||
+          JSON.stringify(before.properties ?? {}) !== JSON.stringify(d.properties ?? {});
+        if (changed) {
+          await sb.from("analytics_drawings")
+            .update({ points: d.points, name: d.name, properties: d.properties })
+            .eq("id", d.id);
+        }
+      }
+      // Removed — cascade to bound rules. A rule whose trigger_source_id points
+      // at a deleted shape is a dangling reference the engine would compile and
+      // then never be able to fire.
+      for (const d of prev) {
+        if (!nextById.has(d.id)) {
+          await sb.from("analytics_drawings").update({ deleted_at: now }).eq("id", d.id);
+          await sb.from("rule_engine_rules").update({ deleted_at: now }).eq("trigger_source_id", d.id);
+          rulesTouched = true;
+        }
+      }
+
+      if (rulesTouched && selectedCam) {
+        const { data: ruleList } = await sb.from("rule_engine_rules")
+          .select("*").eq("camera_id", selectedCam.id).is("deleted_at", null);
+        setRules(ruleList ?? []);
+      }
+    } catch (e) {
+      console.error("[AdminStudio] failed to persist shape change:", e);
     }
+  }
+
+  const undo = useCallback(async () => {
+    const h = historyRef.current;
+    if (!h?.canUndo) return;
+    const prev = h.current;
+    const next = h.undo();
+    setDrawings(next);
+    setHistoryTick((t) => t + 1);
+    await persistSnapshot(prev, next);
+  }, []);
+
+  const redo = useCallback(async () => {
+    const h = historyRef.current;
+    if (!h?.canRedo) return;
+    const prev = h.current;
+    const next = h.redo();
+    setDrawings(next);
+    setHistoryTick((t) => t + 1);
+    await persistSnapshot(prev, next);
+  }, []);
+
+  // ---- editor: shape operations ----------------------------------------
+
+  const updateShape = useCallback((id: string, patch: Partial<Drawing>) => {
+    void commit(drawings.map((d) => (d.id === id ? { ...d, ...patch } : d)));
+  }, [drawings, commit]);
+
+  const toggleFlag = useCallback((id: string, flag: "locked" | "hidden") => {
+    const d = drawings.find((x) => x.id === id);
+    if (!d) return;
+    updateShape(id, { properties: { ...(d.properties ?? {}), [flag]: !d.properties?.[flag] } });
+  }, [drawings, updateShape]);
+
+  const removeShape = useCallback((id: string) => {
+    if (isLocked(drawings.find((d) => d.id === id) as EditableShape)) return;
+    void commit(drawings.filter((d) => d.id !== id));
+    if (editingDrawingId === id) setEditingDrawingId(null);
+  }, [drawings, commit, editingDrawingId]);
+
+  /** Duplicate needs a real row (the id is DB-generated), so this inserts first
+   *  and only then records history — otherwise undo would target an id that
+   *  does not exist yet. */
+  const duplicate = useCallback(async (id: string) => {
+    const src = drawings.find((d) => d.id === id);
+    if (!src || !selectedCam) return;
+    const effectiveOrgId = orgId || bundle?.organization?.id || "org-local";
+    const ghost = duplicateShape(src as EditableShape, "pending");
+    let created: Drawing | null = null;
+    try {
+      const sb = await getSupabase();
+      const { data, error } = await sb.from("analytics_drawings").insert([{
+        org_id: effectiveOrgId, camera_id: selectedCam.id, name: ghost.name, type: src.type,
+        purpose: src.purpose, profile: src.profile, feature_key: src.feature_key,
+        points: ghost.points, properties: ghost.properties, is_draft: true,
+      }]).select();
+      if (!error && data?.[0]) {
+        created = data[0] as Drawing;
+      }
+    } catch {
+      /* offline fallback */
+    }
+    const finalCreated: Drawing = created || {
+      id: `draw_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+      org_id: effectiveOrgId,
+      camera_id: selectedCam.id,
+      name: ghost.name,
+      type: src.type,
+      purpose: src.purpose,
+      profile: src.profile,
+      feature_key: src.feature_key,
+      points: ghost.points,
+      properties: ghost.properties ?? {},
+      is_draft: true,
+    };
+    const nextList: Drawing[] = [...drawings, finalCreated];
+    historyRef.current?.push(nextList);
+    setDrawings(nextList);
+    setEditingDrawingId(finalCreated.id);
+    setHistoryTick((t) => t + 1);
+    syncEngineDirectly(features, activeProfile || undefined);
+  }, [drawings, selectedCam, orgId, bundle?.organization?.id, features, activeProfile, syncEngineDirectly]);
+
+  // ---- editor: pointer interaction --------------------------------------
+
+  const viewOf = (): View | null => {
+    const c = canvasRef.current;
+    return c ? { w: c.clientWidth, h: c.clientHeight } : null;
   };
 
-  useEffect(() => {
-    redrawCanvas();
-  }, [shapes, selectedShapeId, activePoints, zonesVisible]);
+  const pointFrom = (e: React.MouseEvent<HTMLCanvasElement>): number[] | null => {
+    const canvas = canvasRef.current;
+    if (!canvas) return null;
+    const rect = canvas.getBoundingClientRect();
+    return [
+      Number(((e.clientX - rect.left) / rect.width).toFixed(4)),
+      Number(((e.clientY - rect.top) / rect.height).toFixed(4)),
+    ];
+  };
 
-  useEffect(() => {
-    const handleResize = () => redrawCanvas();
-    window.addEventListener('resize', handleResize);
-    return () => window.removeEventListener('resize', handleResize);
-  }, [shapes]);
+  const handlePointerDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    if (drawMode !== "view") return; // a draw tool is active; clicks build shapes
+    const pt = pointFrom(e);
+    const view = viewOf();
+    if (!pt || !view) return;
 
-  const handleCanvasMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    const selected = drawings.find((d) => d.id === editingDrawingId);
+    // Prefer a handle on the ALREADY-selected shape: when shapes overlap, the
+    // operator reaching for a vertex means that vertex, not whatever sits on top.
+    if (selected && isInteractive(selected as EditableShape)) {
+      const vi = hitVertex(selected as EditableShape, pt, view);
+      if (vi !== null) {
+        dragRef.current = { kind: "vertex", id: selected.id, vertexIndex: vi, lastPt: pt, moved: false };
+        return;
+      }
+    }
+
+    const hit = topmostAt(drawings as EditableShape[], pt, view);
+    setEditingDrawingId(hit ? hit.id : null);
+    if (hit) dragRef.current = { kind: "move", id: hit.id, vertexIndex: -1, lastPt: pt, moved: false };
+  };
+
+  const handlePointerMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    const drag = dragRef.current;
+    if (!drag) return;
+    const pt = pointFrom(e);
+    if (!pt) return;
+
+    // Local state only while dragging; the database write happens once on
+    // release. Persisting every pointermove would fire a request per pixel.
+    setDrawings((prev) => prev.map((d) => {
+      if (d.id !== drag.id) return d;
+      const updated = drag.kind === "vertex"
+        ? moveVertex(d as EditableShape, drag.vertexIndex, pt)
+        : translateShape(d as EditableShape, pt[0] - drag.lastPt[0], pt[1] - drag.lastPt[1]);
+      return { ...d, points: updated.points };
+    }));
+    drag.lastPt = pt;
+    drag.moved = true;
+  };
+
+  const handlePointerUp = () => {
+    const drag = dragRef.current;
+    dragRef.current = null;
+    // A click that selected without moving must not push a history entry, or
+    // undo would appear to do nothing for one press per click.
+    if (!drag?.moved) return;
+    void commit(drawings);
+  };
+
+  // Keyboard: Delete / Ctrl+Z / Ctrl+Shift+Z / Ctrl+Y / Ctrl+C / Ctrl+V / Ctrl+D.
+  // Ignored while typing in an input, or the rename field would eat them.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
+      const ctrl = e.ctrlKey || e.metaKey;
+
+      if (ctrl && e.key.toLowerCase() === "z") {
+        e.preventDefault();
+        void (e.shiftKey ? redo() : undo());
+      } else if (ctrl && e.key.toLowerCase() === "y") {
+        e.preventDefault();
+        void redo();
+      } else if (ctrl && e.key.toLowerCase() === "c" && editingDrawingId) {
+        clipboardRef.current = drawings.find((d) => d.id === editingDrawingId) ?? null;
+      } else if (ctrl && e.key.toLowerCase() === "v" && clipboardRef.current) {
+        e.preventDefault();
+        void duplicate(clipboardRef.current.id);
+      } else if (ctrl && e.key.toLowerCase() === "d" && editingDrawingId) {
+        e.preventDefault();
+        void duplicate(editingDrawingId);
+      } else if ((e.key === "Delete" || e.key === "Backspace") && editingDrawingId) {
+        e.preventDefault();
+        removeShape(editingDrawingId);
+      } else if (e.key === "Escape") {
+        setEditingDrawingId(null);
+        setActivePoints([]);
+        setDrawMode("view");
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [undo, redo, duplicate, removeShape, editingDrawingId, drawings]);
+
+  // ---- drawing interaction ---------------------------------
+  function beginDraw(mode: DrawMode, binding: DrawBinding) {
+    setDrawMode(mode);
+    setDrawBinding(binding);
+    setActivePoints([]);
+  }
+
+  const handleCanvasClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    if (drawMode === "view") return;
     const canvas = canvasRef.current;
     if (!canvas) return;
-    const r = canvas.getBoundingClientRect();
-    const x = (e.clientX - r.left) / canvas.width;
-    const y = (e.clientY - r.top) / canvas.height;
+    const rect = canvas.getBoundingClientRect();
+    const point = [
+      Number(((e.clientX - rect.left) / rect.width).toFixed(4)),
+      Number(((e.clientY - rect.top) / rect.height).toFixed(4)),
+    ];
 
-    isDraggingRef.current = true;
-    dragStartRef.current = [x, y];
-
-    if (drawMode === 'polygon') {
-      setActivePoints((prev) => [...prev, [x, y]]);
-    } else if (drawMode === 'view') {
-      const found = shapes.find((s) => {
-        if (!isInteractive(s)) return false;
-        if (s.points.some((pt) => Math.hypot(pt[0] - x, pt[1] - y) < 0.05)) return true;
-        return false;
-      });
-      setSelectedShapeId(found ? found.id : null);
+    if (drawMode === "line") {
+      activePoints.length === 0 ? setActivePoints([point]) : saveDrawing([...activePoints, point]);
+    } else if (drawMode === "circle") {
+      activePoints.length === 0 ? setActivePoints([point]) : saveDrawing([activePoints[0], point]);
+    } else if (drawMode === "rectangle") {
+      if (activePoints.length === 0) setActivePoints([point]);
+      else {
+        const [s] = activePoints;
+        saveDrawing([[s[0], s[1]], [point[0], s[1]], [point[0], point[1]], [s[0], point[1]]]);
+      }
+    } else if (drawMode === "polygon") {
+      if (activePoints.length >= 3) {
+        const [s] = activePoints;
+        if (Math.hypot(s[0] - point[0], s[1] - point[1]) < 0.04) { saveDrawing(activePoints); return; }
+      }
+      setActivePoints([...activePoints, point]);
     }
   };
 
-  const handleCanvasMouseUp = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    if (!isDraggingRef.current) return;
-    isDraggingRef.current = false;
-    const canvas = canvasRef.current;
-    if (!canvas || !dragStartRef.current) return;
-    const r = canvas.getBoundingClientRect();
-    const x = (e.clientX - r.left) / canvas.width;
-    const y = (e.clientY - r.top) / canvas.height;
-    const start = dragStartRef.current;
+  const saveDrawing = async (pts: number[][]) => {
+    if (!selectedCam) return;
+    const effectiveOrgId = orgId || bundle?.organization?.id || "org-local";
+    const type: Drawing["type"] = drawMode === "line" ? "line" : drawMode === "rectangle" ? "rectangle" : drawMode === "circle" ? "circle" : "polygon";
+    const binding = drawBinding ?? { featureKey: null, featureLabel: "Zone", purpose: "custom_zone" };
+    const accentHex = getProfileAccentHex(activeProfile);
 
-    if (drawMode === 'rectangle') {
-      const x1 = Math.min(start[0], x);
-      const y1 = Math.min(start[1], y);
-      const x2 = Math.max(start[0], x);
-      const y2 = Math.max(start[1], y);
-      if (Math.abs(x2 - x1) > 0.02 && Math.abs(y2 - y1) > 0.02) {
-        pushHistory(shapes);
-        const newShape: EditableShape = {
-          id: 'rect_' + Date.now(),
-          name: `${drawBinding?.featureLabel || 'Zone'} ${shapes.length + 1}`,
-          type: 'polygon',
-          points: [[x1, y1], [x2, y1], [x2, y2], [x1, y2]],
-          properties: { featureKey: drawBinding?.featureKey || null },
-        };
-        setShapes([...shapes, newShape]);
-        setSelectedShapeId(newShape.id);
-        setDrawMode('view');
-        showToast('Rectangle zone created.');
+    const newDrawing: Drawing = {
+      id: `draw_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+      org_id: effectiveOrgId,
+      camera_id: selectedCam.id,
+      name: `${binding.featureLabel} ${drawings.filter((d) => d.feature_key === binding.featureKey).length + 1}`,
+      type,
+      purpose: binding.purpose,
+      profile: activeProfile,
+      feature_key: binding.featureKey,
+      points: pts,
+      properties: { color: accentHex, fillColor: accentHex + "1f" },
+      is_draft: true,
+    };
+
+    let savedDrawing = newDrawing;
+    try {
+      const sb = await getSupabase();
+      const { data, error } = await sb.from("analytics_drawings").insert([{
+        org_id: effectiveOrgId,
+        camera_id: selectedCam.id,
+        name: newDrawing.name,
+        type: newDrawing.type,
+        purpose: newDrawing.purpose,
+        profile: newDrawing.profile,
+        feature_key: newDrawing.feature_key,
+        points: newDrawing.points,
+        properties: newDrawing.properties,
+        is_draft: true,
+      }]).select();
+      if (!error && data?.[0]) {
+        savedDrawing = data[0] as Drawing;
       }
-    } else if (drawMode === 'circle') {
-      const radius = Math.hypot(x - start[0], y - start[1]);
-      if (radius > 0.02) {
-        pushHistory(shapes);
-        const newShape: EditableShape = {
-          id: 'circ_' + Date.now(),
-          name: `Circle Zone ${shapes.length + 1}`,
-          type: 'circle',
-          points: [[start[0], start[1]], [radius, 0]],
-          properties: { featureKey: drawBinding?.featureKey || null },
-        };
-        setShapes([...shapes, newShape]);
-        setSelectedShapeId(newShape.id);
-        setDrawMode('view');
-        showToast('Circle zone created.');
-      }
-    } else if (drawMode === 'line') {
-      if (Math.hypot(x - start[0], y - start[1]) > 0.02) {
-        pushHistory(shapes);
-        const newShape: EditableShape = {
-          id: 'line_' + Date.now(),
-          name: `${drawBinding?.featureLabel || 'Tripwire'} ${shapes.length + 1}`,
-          type: 'line',
-          points: [[start[0], start[1]], [x, y]],
-          properties: { featureKey: drawBinding?.featureKey || null },
-        };
-        setShapes([...shapes, newShape]);
-        setSelectedShapeId(newShape.id);
-        setDrawMode('view');
-        showToast('Line tripwire created.');
-      }
+    } catch (e) {
+      console.warn("[AdminStudio] Supabase drawing insert skipped/offline:", e);
     }
-    dragStartRef.current = null;
-  };
 
-  const handleClosePolygon = () => {
-    if (activePoints.length >= 3) {
-      pushHistory(shapes);
-      const newShape: EditableShape = {
-        id: 'poly_' + Date.now(),
-        name: `${drawBinding?.featureLabel || 'Polygon Zone'} ${shapes.length + 1}`,
-        type: 'polygon',
-        points: [...activePoints],
-        properties: { featureKey: drawBinding?.featureKey || null },
-      };
-      setShapes([...shapes, newShape]);
-      setActivePoints([]);
-      setSelectedShapeId(newShape.id);
-      setDrawMode('view');
-      showToast('Polygon zone closed.');
-    }
-  };
-
-  const handleBindAndDraw = (f: FeatureDef) => {
-    const mode = f.requiresGeometry === 'line' ? 'line' : 'polygon';
-    setDrawMode(mode);
-    setDrawBinding({
-      featureKey: f.key,
-      featureLabel: f.drawTool?.label || f.label,
-      purpose: f.drawTool?.purpose || f.key,
+    setDrawings((prev) => {
+      const nextSet = [...prev, savedDrawing];
+      historyRef.current?.push(nextSet);
+      return nextSet;
     });
-    showToast(`Click or drag on video to draw ${f.drawTool?.label || f.label}`);
+    setHistoryTick((t) => t + 1);
+    syncEngineDirectly(features, activeProfile || undefined);
+
+    setActivePoints([]);
+    setDrawMode("view");
+    setDrawBinding(null);
   };
 
-  const profileDef = ZONE_PROFILES[activeProfile];
-  const accent = getProfileLightAccent(activeProfile);
+  // deleteDrawing() lived here. It wrote straight to the database, so a delete
+  // was invisible to the undo stack and unrecoverable. Deletion now goes through
+  // removeShape -> commit -> persistSnapshot, which records history and cascades
+  // to bound rules in both directions.
 
-  return (
-    <div className="flex h-screen bg-surface-0 text-slate-900 overflow-hidden font-sans">
-      {/* Toast Notification */}
-      {toastMsg && (
-        <div className="fixed top-14 right-6 z-50 bg-ok text-white px-3.5 py-2 rounded-md font-semibold text-xs shadow-xl flex items-center gap-1.5 animate-in fade-in slide-in-from-top-2 duration-150">
-          <CheckCircle2 size={14} />
-          <span>{toastMsg}</span>
+  // ---- alert rules -----------------------------------------
+  const handleAddRule = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedCam || !ruleName.trim() || !ruleSourceId) return;
+    const effectiveOrgId = orgId || bundle?.organization?.id || "org-local";
+    const newRule: Rule = {
+      id: `rule_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+      org_id: effectiveOrgId,
+      camera_id: selectedCam.id,
+      name: ruleName,
+      trigger_type: ruleTrigger,
+      trigger_source_id: ruleSourceId,
+      conditions: { profile: activeProfile },
+      actions: [ruleAction],
+      is_draft: true,
+      is_enabled: true,
+    };
+
+    try {
+      const sb = await getSupabase();
+      const { data, error } = await sb.from("rule_engine_rules").insert([{
+        org_id: effectiveOrgId,
+        camera_id: selectedCam.id,
+        name: ruleName,
+        trigger_type: ruleTrigger,
+        trigger_source_id: ruleSourceId,
+        conditions: { profile: activeProfile },
+        actions: [ruleAction],
+        is_draft: true,
+        is_enabled: true,
+      }]).select();
+      if (!error && data?.[0]) {
+        newRule.id = data[0].id;
+      }
+    } catch (e) {
+      console.warn("[AdminStudio] Supabase rule save fallback:", e);
+    }
+    setRules((prev) => [...prev, newRule]);
+    setRuleName("");
+    setRuleSourceId("");
+    syncEngineDirectly(features, activeProfile || undefined);
+  };
+
+  const deleteRule = async (id: string) => {
+    try {
+      const sb = await getSupabase();
+      await sb.from("rule_engine_rules").update({ deleted_at: new Date().toISOString() }).eq("id", id);
+    } catch (e) {
+      console.warn("[AdminStudio] deleteRule Supabase skipped:", e);
+    }
+    setRules((prev) => prev.filter((r) => r.id !== id));
+    syncEngineDirectly(features, activeProfile || undefined);
+  };
+
+  // ---- publish / rollback ----------------------------------
+  const publishConfig = async () => {
+    const effectiveOrgId = orgId || bundle?.organization?.id || "org-local";
+    setPublishing(true);
+    try {
+      if (selectedCam && activeProfile) {
+        syncEngineDirectly(features, activeProfile);
+        try {
+          const sb = await getSupabase();
+          await sb.from("cameras").update({ zone_profile: activeProfile }).eq("id", selectedCam.id);
+        } catch { /* offline safe */ }
+      }
+      try {
+        const sb = await getSupabase();
+        const { error } = await sb.functions.invoke("publish-config", {
+          body: { org_id: effectiveOrgId, comment: publishComment || "Configuration update" },
+        });
+        if (error) console.warn("Cloud publish sync warning:", error);
+        const { data: vers } = await sb.from("config_versions").select("*").order("version", { ascending: false });
+        if (vers) setVersions(vers);
+      } catch (cloudErr) {
+        console.warn("[AdminStudio] Cloud publish skipped (offline):", cloudErr);
+      }
+      setDrawings((prev) => prev.map((d) => ({ ...d, is_draft: false })));
+      setRules((prev) => prev.map((r) => ({ ...r, is_draft: false })));
+      setPublishComment("");
+      alert("Configuration published. Cameras are hot-swapping live.");
+    } catch (e: any) {
+      alert(await fnErrorMessage("Publishing", e));
+    } finally { setPublishing(false); }
+  };
+
+  const rollbackConfig = async (version: number) => {
+    if (!confirm(`Roll back to version ${version}? This overwrites current drafts.`)) return;
+    const effectiveOrgId = orgId || bundle?.organization?.id || "org-local";
+    setPublishing(true);
+    try {
+      const sb = await getSupabase();
+      const { error } = await sb.functions.invoke("rollback-config", { body: { org_id: effectiveOrgId, version } });
+      if (error) throw error;
+      const { data: vers } = await sb.from("config_versions").select("*").order("version", { ascending: false });
+      if (vers) setVersions(vers);
+      if (selectedCam) {
+        const cam = selectedCam;
+        const { data: draws } = await sb.from("analytics_drawings").select("*").eq("camera_id", cam.id).is("deleted_at", null);
+        setDrawings(draws ?? []);
+        const { data: ruleList } = await sb.from("rule_engine_rules").select("*").eq("camera_id", cam.id).is("deleted_at", null);
+        setRules(ruleList ?? []);
+        const prof = (cam.zone_profile as ZoneProfileKey) || null;
+        if (prof) await loadProfileConfig(cam, prof);
+      }
+      alert(`Rolled back to version ${version}.`);
+    } catch (e: any) {
+      alert(await fnErrorMessage("Rollback", e));
+    } finally { setPublishing(false); }
+  };
+
+  // ---- param editor ----------------------------------------
+  function renderParam(featureKey: string, p: FeatureParam, value: unknown) {
+    if (p.type === "toggle") {
+      return (
+        <label className="flex items-center gap-2 cursor-pointer">
+          <input type="checkbox" checked={!!value} onChange={(e) => setParam(featureKey, p.key, e.target.checked)} />
+          <span className="text-[11px] text-zinc-300">{p.label}</span>
+        </label>
+      );
+    }
+    if (p.type === "slider") {
+      const v = typeof value === "number" ? value : (p.default as number);
+      return (
+        <div className="space-y-1">
+          <div className="flex justify-between text-[10px] text-zinc-400">
+            <span>{p.label}</span>
+            <span className="font-mono text-zinc-300">{v}{p.unit ? ` ${p.unit}` : ""}</span>
+          </div>
+          <input type="range" min={p.min} max={p.max} step={p.step} value={v}
+            onChange={(e) => setParam(featureKey, p.key, Number(e.target.value))} className="w-full accent-current" />
         </div>
-      )}
+      );
+    }
+    if (p.type === "number") {
+      const v = typeof value === "number" ? value : (p.default as number);
+      return (
+        <label className="flex items-center justify-between gap-2">
+          <span className="text-[10px] text-zinc-400">{p.label}</span>
+          <div className="flex items-center gap-1">
+            <input type="number" min={p.min} max={p.max} step={p.step} value={v}
+              onChange={(e) => setParam(featureKey, p.key, Number(e.target.value))}
+              className="w-20 text-xs bg-surface-2 border border-line rounded px-2 py-1 text-zinc-200 focus:outline-none focus:border-accent" />
+            {p.unit && <span className="text-[10px] text-zinc-500">{p.unit}</span>}
+          </div>
+        </label>
+      );
+    }
+    if (p.type === "schedule") {
+      return (
+        <label className="flex items-center justify-between gap-2">
+          <span className="text-[10px] text-zinc-400">{p.label}</span>
+          <input type="time" value={String(value ?? p.default)}
+            onChange={(e) => setParam(featureKey, p.key, e.target.value)}
+            className="text-xs bg-surface-2 border border-line rounded px-2 py-1 text-zinc-200 focus:outline-none focus:border-accent" />
+        </label>
+      );
+    }
+    if (p.type === "select") {
+      return (
+        <label className="flex items-center justify-between gap-2">
+          <span className="text-[10px] text-zinc-400">{p.label}</span>
+          <select value={String(value ?? p.default)} onChange={(e) => setParam(featureKey, p.key, e.target.value)}
+            className="text-xs bg-surface-2 border border-line rounded px-2 py-1 text-zinc-200 focus:outline-none focus:border-accent max-w-[60%]">
+            {p.options?.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+          </select>
+        </label>
+      );
+    }
+    if (p.type === "classes") {
+      const sel: string[] = Array.isArray(value) ? (value as string[]) : (p.default as string[]);
+      return (
+        <div className="space-y-1">
+          <span className="text-[10px] text-zinc-400">{p.label}</span>
+          <div className="flex flex-wrap gap-1">
+            {p.classOptions?.map((c) => {
+              const on = sel.includes(c);
+              return (
+                <button key={c} type="button"
+                  onClick={() => setParam(featureKey, p.key, on ? sel.filter((x) => x !== c) : [...sel, c])}
+                  className={clsx("text-[10px] px-1.5 py-0.5 rounded border font-mono transition",
+                    on ? "bg-accent/20 border-accent/50 text-accent" : "bg-surface-2 border-line text-zinc-500 hover:text-zinc-300")}>
+                  {c}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      );
+    }
+    return null;
+  }
 
-      {/* Sidebar 1: Cameras + Publish Timeline (Clean Light Theme) */}
-      <aside className="w-64 border-r border-line bg-surface-1 flex flex-col justify-between shrink-0 shadow-xs">
-        <div className="flex flex-col flex-1 overflow-y-auto custom-scrollbar">
-          {/* Brand Header */}
-          <div className="flex items-center gap-2.5 px-4 py-4 border-b border-line">
-            <CamAILogo size={28} />
-            <div className="min-w-0 flex-1">
-              <div className="text-sm font-bold text-slate-900 leading-tight">CamAI Zone Studio</div>
-              <div className="text-[10px] text-accent font-semibold uppercase tracking-wider">Enterprise Profiles</div>
+  // ---- feature card ----------------------------------------
+  function drawBindingFor(f: FeatureDef): DrawBinding | null {
+    if (!f.requiresGeometry) return null;
+    // Prefer the feature's declared tool. Deriving purpose from requiresGeometry
+    // alone stamped EVERY line as "counting_line" and every zone as the feature
+    // key, so a stop line, a speed-gate calibration line and a counting line
+    // were indistinguishable downstream — publish_config's compile step sorts
+    // shapes into cameras.zones vs cameras.lines by exactly these purpose
+    // strings, and analytics keys lane attribution off zoneType == "lane".
+    const purpose = f.drawTool?.purpose
+      ?? (f.requiresGeometry === "line" ? "counting_line" : f.requiresGeometry === "direction" ? "direction" : f.key);
+    return { featureKey: f.key, featureLabel: f.drawTool?.label ?? f.label, purpose };
+  }
+  function drawModeFor(f: FeatureDef): DrawMode {
+    if (f.requiresGeometry === "line" || f.requiresGeometry === "direction") return "line";
+    return "polygon";
+  }
+
+  function renderFeatureCard(f: FeatureDef) {
+    const cfg = features[f.key] ?? { enabled: false, params: {} };
+    const bound = drawings.filter((d) => d.feature_key === f.key);
+    // No model in this build can produce what the feature claims. The switch is
+    // held off rather than left live: an operator who turns on "Fire Detection"
+    // and sees it go green will believe a fire raises an alarm. Until 2026-07-17
+    // it did go green — and answered with a colour threshold that read concrete
+    // as smoke on every frame. See FeatureDef.unavailable.
+    const blocked = !!f.unavailable;
+    // Any feature the engine cannot deliver yet is presented uniformly as
+    // "coming soon" to operators — a public-facing product never advertises
+    // that something has "no model". The internal status is still tracked on
+    // FeatureDef for engineering, but the badge never surfaces that distinction.
+
+    return (
+      <div key={f.key} className={clsx("rounded border p-2.5 transition",
+        blocked ? "border-line/40 bg-surface-0/20" : cfg.enabled ? "border-line bg-surface-0" : "border-line/60 bg-surface-0/40")}>
+        <div className="flex items-start justify-between gap-2">
+          <div className="min-w-0">
+            <div className="flex items-center gap-1.5">
+              <span className={clsx("text-xs font-semibold", blocked ? "text-zinc-500" : "text-zinc-200")}>{f.label}</span>
+              {blocked && (
+                <span className="rounded bg-sky-500/15 px-1 py-px text-[9px] font-bold uppercase tracking-wide text-sky-400">
+                  coming soon
+                </span>
+              )}
             </div>
+            <p className="text-[10px] text-zinc-500 leading-snug mt-0.5">{f.description}</p>
+            {blocked && (
+              <p className="mt-1 text-[10px] leading-snug text-sky-400/80">
+                {f.unavailable}
+              </p>
+            )}
+          </div>
+          <button type="button" disabled={blocked}
+            onClick={() => { if (!blocked) toggleFeature(f.key); }}
+            title={blocked ? f.unavailable : undefined}
+            className={clsx("relative h-5 w-9 rounded-full transition shrink-0",
+              blocked ? "cursor-not-allowed bg-surface-3/50" : cfg.enabled ? "bg-accent" : "bg-surface-3")}>
+            <span className={clsx("absolute top-0.5 h-4 w-4 rounded-full transition-all",
+              blocked ? "bg-zinc-600 left-0.5" : "bg-white", !blocked && cfg.enabled ? "left-[18px]" : "left-0.5")} />
+          </button>
+        </div>
+
+        {cfg.enabled && !blocked && (
+          <div className="mt-2.5 space-y-2 pt-2 border-t border-line">
+            {f.params.map((p) => <div key={p.key}>{renderParam(f.key, p, cfg.params[p.key])}</div>)}
+
+            {(f.key === "face_recognition" || f.key === "face_detection") && (
+              <div className="mt-3 pt-2 border-t border-line/60">
+                <TargetMatcherUI />
+              </div>
+            )}
+
+            {f.requiresGeometry && (
+              <div className="flex items-center justify-between pt-1">
+                <span className={clsx("text-[10px]", bound.length ? "text-ok" : "text-warn")}>
+                  {bound.length ? `${bound.length} ${f.requiresGeometry}(s) drawn` : `Needs a ${f.requiresGeometry}`}
+                </span>
+                <button type="button"
+                  onClick={() => { const b = drawBindingFor(f); if (b) beginDraw(drawModeFor(f), b); }}
+                  className="text-[10px] flex items-center gap-1 text-accent hover:underline">
+                  {/* Name the actual tool ("Draw Stop Line"), not the geometry
+                      class ("Draw line") — the profile's tool set is the thing
+                      the operator is looking for. */}
+                  <Pencil size={11} /> Draw {f.drawTool?.label ?? f.requiresGeometry}
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // ---- special panels --------------------------------------
+  function renderRoiPanel() {
+    return (
+      <div className="space-y-2">
+        <p className="text-[10px] text-zinc-500">
+          Draw geometries with the toolbar above, or the <b>Draw</b> button on any feature. Drawn shapes bind to features and compile into the camera on publish.
+        </p>
+        <div className="text-[10px] uppercase font-bold tracking-wider text-zinc-500">Geometries ({drawings.length})</div>
+        {drawings.length === 0 ? (
+          <div className="text-xs text-zinc-500 italic">No shapes yet.</div>
+        ) : drawings.map((d) => {
+          const locked = isLocked(d as EditableShape);
+          const hidden = isHidden(d as EditableShape);
+          return (
+            <div key={d.id} onClick={() => setEditingDrawingId(editingDrawingId === d.id ? null : d.id)}
+              className={clsx("p-2 rounded border text-xs cursor-pointer group/shape",
+                editingDrawingId === d.id ? "bg-accent/10 border-accent" : "bg-surface-0 border-line hover:border-zinc-700",
+                hidden && "opacity-50")}>
+              <div className="flex justify-between items-center gap-1">
+                <div className="min-w-0 flex-1">
+                  {/* Rename in place. onBlur/Enter commits, so a half-typed name
+                      never reaches the database on every keystroke. */}
+                  <input
+                    value={d.name}
+                    onClick={(e) => e.stopPropagation()}
+                    onChange={(e) => setDrawings((prev) => prev.map((x) => x.id === d.id ? { ...x, name: e.target.value } : x))}
+                    onBlur={(e) => { const v = e.target.value.trim(); if (v && v !== historyRef.current?.current.find((x) => x.id === d.id)?.name) updateShape(d.id, { name: v }); }}
+                    onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
+                    className="w-full bg-transparent border-b border-transparent hover:border-zinc-700 focus:border-accent font-semibold text-zinc-200 truncate outline-none px-0.5"
+                  />
+                  <div className="text-[9px] text-zinc-500 font-mono capitalize px-0.5">{d.type} • {d.feature_key || d.purpose}</div>
+                </div>
+                <div className="flex items-center shrink-0">
+                  <button onClick={(e) => { e.stopPropagation(); toggleFlag(d.id, "hidden"); }}
+                    title={hidden ? "Show" : "Hide"} className="p-1 text-zinc-500 hover:text-zinc-200">
+                    {hidden ? <EyeOff size={12} /> : <Eye size={12} />}
+                  </button>
+                  <button onClick={(e) => { e.stopPropagation(); toggleFlag(d.id, "locked"); }}
+                    title={locked ? "Unlock" : "Lock"} className={clsx("p-1 hover:text-zinc-200", locked ? "text-amber-400" : "text-zinc-500")}>
+                    {locked ? <Lock size={12} /> : <Unlock size={12} />}
+                  </button>
+                  <button onClick={(e) => { e.stopPropagation(); void duplicate(d.id); }}
+                    title="Duplicate" className="p-1 text-zinc-500 hover:text-zinc-200">
+                    <CopyIcon size={12} />
+                  </button>
+                  <button onClick={(e) => { e.stopPropagation(); removeShape(d.id); }}
+                    disabled={locked}
+                    title={locked ? "Unlock to delete" : "Delete"}
+                    className="p-1 text-zinc-500 hover:text-danger disabled:opacity-30 disabled:hover:text-zinc-500">
+                    <Trash2 size={13} />
+                  </button>
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    );
+  }
+
+  function renderAlertsPanel() {
+    return (
+      <div className="space-y-3">
+        <form onSubmit={handleAddRule} className="space-y-2.5 p-2.5 rounded border border-line bg-surface-0">
+          <input type="text" placeholder="Rule name (e.g. Intruder alert)" value={ruleName} onChange={(e) => setRuleName(e.target.value)}
+            className="w-full text-xs bg-surface-2 border border-line rounded px-2 py-1.5 text-zinc-200 focus:outline-none focus:border-accent" required />
+          <div className="grid grid-cols-2 gap-2">
+            <select value={ruleTrigger} onChange={(e) => setRuleTrigger(e.target.value)}
+              className="text-xs bg-surface-2 border border-line rounded px-2 py-1.5 text-zinc-200 focus:outline-none">
+              <option value="zone_intrusion">Zone entered</option>
+              <option value="line_crossing">Line crossed</option>
+              <option value="loitering">Loitering</option>
+              <option value="speed_limit">Over speed limit</option>
+              <option value="ppe_violation">PPE violation</option>
+              <option value="fire_smoke">Fire / smoke</option>
+              <option value="custom">Custom event</option>
+            </select>
+            <select value={ruleSourceId} onChange={(e) => setRuleSourceId(e.target.value)}
+              className="text-xs bg-surface-2 border border-line rounded px-2 py-1.5 text-zinc-200 focus:outline-none" required>
+              <option value="">-- Source shape --</option>
+              {drawings.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
+            </select>
+          </div>
+          <div className="grid grid-cols-2 gap-2 items-center">
+            <select value={ruleAction} onChange={(e) => setRuleAction(e.target.value)}
+              className="text-xs bg-surface-2 border border-line rounded px-2 py-1.5 text-zinc-200 focus:outline-none">
+              <option value="alert">Send alert</option>
+              <option value="record">Record clip</option>
+              <option value="webhook">Webhook</option>
+            </select>
+            <button type="submit" className="btn-accent py-1.5 text-xs flex items-center justify-center gap-1">
+              <Plus size={12} /> Add rule
+            </button>
+          </div>
+        </form>
+        <div className="space-y-1.5">
+          {rules.length === 0 && <div className="text-xs text-zinc-500 italic">No alert rules yet.</div>}
+          {rules.map((r) => (
+            <div key={r.id} className="p-2 rounded bg-surface-0 border border-line text-xs flex justify-between items-start">
+              <div className="min-w-0">
+                <div className="font-semibold text-zinc-200">{r.name}</div>
+                <p className="text-[9px] text-zinc-500">
+                  {r.trigger_type} on {drawings.find((d) => d.id === r.trigger_source_id)?.name || "shape"} → {r.actions.join(", ")}
+                </p>
+              </div>
+              <button onClick={() => deleteRule(r.id)} className="text-zinc-500 hover:text-danger p-1 shrink-0"><Trash size={12} /></button>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  function renderCustomModelRegistrationPanel() {
+    const activeCount = customModelsList.filter(m => m.active).length;
+    return (
+      <div className="space-y-3">
+        {/* Upload & Train Card */}
+        <div className="space-y-2.5 p-3 rounded border border-line bg-surface-0">
+          <div className="text-[10px] uppercase font-bold tracking-wider text-zinc-400">
+            Train New Product Model
           </div>
 
-          {/* Back to Workspace button */}
-          <div className="px-3 py-2.5 border-b border-line bg-surface-2/40">
+          <div>
+            <label className="block text-[10px] font-semibold text-zinc-400 mb-1">Product Model Name</label>
+            <input
+              type="text"
+              value={customModelName}
+              onChange={(e) => setCustomModelName(e.target.value)}
+              placeholder="e.g. Cardboard Box, Parle-G, Blue Bottle"
+              className="w-full rounded border border-line bg-surface-2 px-2.5 py-1.5 text-xs text-zinc-200 focus:outline-none focus:border-accent"
+            />
+          </div>
+
+          <div
+            onDragOver={(e) => e.preventDefault()}
+            onDrop={handleDrop}
+            className="flex flex-col items-center justify-center border border-dashed border-line rounded-lg p-3 bg-surface-2/40 hover:bg-surface-2/60 transition cursor-pointer relative"
+            onClick={() => document.getElementById("studio-file-upload")?.click()}
+          >
+            <input
+              id="studio-file-upload"
+              type="file"
+              multiple
+              accept="image/jpeg,image/png"
+              onChange={handleImageChange}
+              className="hidden"
+            />
+            <Upload size={16} className="text-zinc-400 mb-1" />
+            <span className="text-[11px] font-semibold text-zinc-300">Upload Reference Images</span>
+            <span className="text-[9px] text-zinc-500 mt-0.5 text-center">
+              Drag reference images here, or click to browse (JPEG/PNG)
+            </span>
+          </div>
+
+          {/* Previews Grid */}
+          {customImages.length > 0 && (
+            <div className="space-y-1.5">
+              <div className="flex justify-between items-center text-[10px]">
+                <span className="font-medium text-zinc-300">Selected Images ({customImages.length})</span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    customImages.forEach(img => {
+                      try {
+                        URL.revokeObjectURL(img.preview);
+                      } catch (e) {}
+                    });
+                    setCustomImages([]);
+                  }}
+                  className="text-danger hover:underline font-semibold"
+                >
+                  Clear All
+                </button>
+              </div>
+              <div className="grid grid-cols-6 gap-1.5">
+                {customImages.map((img, i) => (
+                  <div key={i} className="relative group aspect-square rounded overflow-hidden border border-line bg-surface-2">
+                    <img src={img.preview} alt="Preview" className="w-full h-full object-cover" />
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        removeImage(i);
+                      }}
+                      className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition duration-150"
+                    >
+                      <Trash size={10} className="text-white" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Build & Save Button */}
+          <div className="flex justify-end pt-1">
             <button
-              onClick={onBackToWorkspace}
-              className="flex w-full items-center justify-center gap-2 rounded-md bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 border border-line hover:bg-surface-2 hover:text-slate-900 transition shadow-xs"
+              type="button"
+              onClick={handleTrainAndSave}
+              disabled={isTraining || customImages.length === 0}
+              className="w-full inline-flex items-center justify-center gap-1.5 rounded bg-accent px-3 py-2 text-xs font-semibold text-white shadow hover:bg-accent/80 transition disabled:opacity-50"
+            >
+              {isTraining ? (
+                <>
+                  <svg className="animate-spin h-3.5 w-3.5 text-white" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                  </svg>
+                  <span>Extracting Embeddings...</span>
+                </>
+              ) : (
+                <span>Train & Save Model</span>
+              )}
+            </button>
+          </div>
+        </div>
+
+        {/* Registered Models List */}
+        <div className="space-y-2 p-3 rounded border border-line bg-surface-0">
+          <div className="flex items-center justify-between mb-1">
+            <span className="text-[10px] uppercase font-bold tracking-wider text-zinc-400">
+              Registered Custom Models ({customModelsList.length})
+            </span>
+            <span className="text-[9px] font-medium text-ok">
+              {activeCount} Active
+            </span>
+          </div>
+
+          {customModelsList.length === 0 ? (
+            <div className="text-[10px] text-zinc-500 py-3 text-center italic">
+              No custom models trained yet. Upload images above to create one.
+            </div>
+          ) : (
+            <div className="space-y-2 max-h-60 overflow-y-auto pr-1">
+              {customModelsList.map((m) => (
+                <div key={m.id} className="flex items-center justify-between p-2 rounded border border-line bg-surface-2/40 hover:bg-surface-2/80 transition">
+                  <div className="min-w-0 flex-1 pr-2">
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-xs font-semibold text-zinc-200 truncate">{m.name}</span>
+                      <span className="text-[9px] px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-400 font-mono">
+                        {m.reference_count} img{m.reference_count === 1 ? "" : "s"}
+                      </span>
+                    </div>
+                    <div className="text-[9px] text-zinc-500 mt-0.5">
+                      ID: {m.id}
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => handleToggleModel(m.id, m.active)}
+                      className={`px-2 py-0.5 text-[9px] font-semibold rounded transition ${
+                        m.active ? "bg-ok/20 text-ok border border-ok/30" : "bg-zinc-800 text-zinc-400 hover:text-zinc-200"
+                      }`}
+                    >
+                      {m.active ? "Active" : "Inactive"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteModel(m.id, m.name)}
+                      className="text-zinc-500 hover:text-danger p-1 transition"
+                      title="Delete Model"
+                    >
+                      <Trash size={12} />
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Custom Target Image Upload & Vector Matcher Engine */}
+        <div className="pt-2">
+          <TargetMatcherUI />
+        </div>
+      </div>
+    );
+  }
+
+  // ---- grouped feature rendering ---------------------------
+  const profileDef = (activeProfile && ZONE_PROFILES[activeProfile]) ? ZONE_PROFILES[activeProfile] : null;
+  const accent = getProfileAccent(activeProfile);
+
+  function groupsForProfile(): FeatureGroup[] {
+    if (!profileDef) return [];
+    const present = new Set(profileDef.features.map((f) => f.group));
+    return profileDef.groupOrder.filter((g) => present.has(g));
+  }
+
+  const drawTools: { mode: DrawMode; icon: typeof PenTool; label: string }[] = [
+    { mode: "view", icon: MousePointer2, label: "Select" },
+    { mode: "polygon", icon: PenTool, label: "Polygon" },
+    { mode: "rectangle", icon: Square, label: "Rectangle" },
+    { mode: "circle", icon: CircleIcon, label: "Circle" },
+    { mode: "line", icon: Minus, label: "Line" },
+  ];
+
+  return (
+    <div className="flex h-screen bg-surface-0 overflow-hidden font-sans">
+      {/* Sidebar 1: cameras + publish timeline */}
+      <aside className="w-64 border-r border-line bg-surface-1 flex flex-col justify-between shrink-0">
+        <div className="flex flex-col flex-1 overflow-y-auto">
+          <div className="flex items-center gap-2.5 px-4 py-4 border-b border-line">
+            <img src="./favicon.svg" alt="CamAI" className="h-7 w-7 rounded-md" />
+            <div className="min-w-0 flex-1">
+              <div className="text-sm font-semibold text-zinc-100">CamAI Zone Studio</div>
+              <div className="text-[10px] text-accent font-medium uppercase tracking-wider">Enterprise Profiles</div>
+            </div>
+            {/* Static, in-flow bell — never a floating overlay. Every alert is
+                shown on Workspace's Alerts tab only; this just says how many
+                are unacknowledged and jumps there. */}
+            {onOpenAlerts && (
+              <button
+                onClick={onOpenAlerts}
+                title={unackedAlerts > 0 ? `${unackedAlerts} unacknowledged alert${unackedAlerts === 1 ? "" : "s"}` : "Alerts"}
+                className="relative shrink-0 rounded-md p-1.5 text-zinc-400 transition hover:bg-surface-2 hover:text-zinc-200"
+              >
+                <Bell size={16} />
+                {unackedAlerts > 0 && (
+                  <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-[16px] items-center justify-center rounded-full bg-danger px-1 text-[9px] font-semibold text-white">
+                    {unackedAlerts > 99 ? "99+" : unackedAlerts}
+                  </span>
+                )}
+              </button>
+            )}
+          </div>
+          <div className="px-3 py-2.5 border-b border-line bg-surface-2/20">
+            <button
+              onClick={onDeactivated}
+              className="flex w-full items-center justify-center gap-2 rounded-md bg-surface-2 px-3 py-1.5 text-xs font-semibold text-zinc-200 border border-line hover:bg-surface-3 hover:text-white transition shadow-sm"
             >
               <ArrowLeft size={14} /> Back to Workspace
             </button>
           </div>
-
-          {/* Camera List */}
           <div className="px-3 py-3">
-            <div className="flex justify-between items-center text-[10px] uppercase font-bold tracking-wider text-slate-500 mb-2">
+            <div className="flex justify-between items-center text-[10px] uppercase font-bold tracking-wider text-zinc-500 mb-2">
               <span>Cameras</span>
-              <span className="h-2 w-2 rounded-full bg-ok" title="Engine Active" />
+              <span className={`h-2 w-2 rounded-full ${engineOnline ? "bg-ok" : "bg-danger"}`} title={engineOnline ? "Engine Online" : "Engine Offline"} />
             </div>
             <div className="space-y-1">
-              <button
-                className="flex w-full items-center gap-2.5 rounded-md px-2.5 py-1.5 text-xs transition text-left bg-blue-50/80 font-medium text-blue-700 border-l-2 border-blue-600 shadow-2xs"
-              >
-                <Video size={13} className="shrink-0 text-blue-600" />
-                <span className="truncate">Camera 01 (Axis Edge)</span>
-                <span className="ml-auto text-[9px] uppercase text-slate-500 font-semibold">{activeProfile}</span>
-              </button>
+              {cameras.map((c) => {
+                const Icon = c.zone_profile ? PROFILE_ICON[c.zone_profile] : Video;
+                return (
+                  <button key={c.id} onClick={() => setSelectedCam(c)}
+                    className={clsx("flex w-full items-center gap-2.5 rounded-md px-2.5 py-1.5 text-xs transition text-left",
+                      selectedCam?.id === c.id ? "bg-accent/15 font-medium text-accent border-l-2 border-accent" : "text-zinc-400 hover:bg-surface-2 hover:text-zinc-200")}>
+                    <Icon size={13} className="shrink-0" />
+                    <span className="truncate">{c.name}</span>
+                    {c.zone_profile && <span className="ml-auto text-[9px] uppercase text-zinc-500">{c.zone_profile}</span>}
+                  </button>
+                );
+              })}
+
+              {/* Never leave the list silently blank — say which state it is. */}
+              {cameras.length === 0 && camsLoad.loading && (
+                <div className="px-2.5 py-2 text-[11px] text-zinc-500">Loading cameras…</div>
+              )}
+              {cameras.length === 0 && !camsLoad.loading && camsLoad.error && (
+                <div className="px-2.5 py-2 text-[11px] leading-snug text-danger">
+                  Couldn't load cameras: {camsLoad.error}
+                </div>
+              )}
+              {cameras.length === 0 && !camsLoad.loading && !camsLoad.error && (
+                <div className="px-2.5 py-2 text-[11px] leading-snug text-zinc-500">
+                  No cameras yet. Add cameras in the web portal (Cameras) and assign them to this
+                  organization — they'll appear here automatically.
+                </div>
+              )}
             </div>
           </div>
         </div>
 
-        {/* Publish Timeline box at bottom */}
-        <div className="border-t border-line p-3 bg-slate-50 space-y-2.5">
-          <div className="text-[10px] uppercase font-bold tracking-wider text-slate-500 flex justify-between items-center">
-            <span>Publish Timeline</span>
-            <span className="text-ok font-semibold">v{versions[0]?.version || 1} Active</span>
-          </div>
-
-          <div className="max-h-32 overflow-y-auto pr-1 space-y-1.5 custom-scrollbar">
+        <div className="border-t border-line p-3 bg-surface-2/30 space-y-3">
+          <div className="text-[10px] uppercase font-bold tracking-wider text-zinc-500">Publish Timeline</div>
+          <div className="max-h-40 overflow-y-auto pr-1 space-y-1.5 custom-scrollbar">
             {versions.map((v) => (
-              <div key={v.id} className="p-2 rounded bg-white border border-line text-[10px] space-y-1 shadow-2xs">
+              <div key={v.id} className="p-2 rounded bg-surface-0 border border-line text-[10px] space-y-1">
                 <div className="flex justify-between font-mono font-semibold">
-                  <span className="text-slate-800">v{v.version}</span>
-                  <span className={v.status === 'active' ? 'text-ok' : 'text-slate-500'}>{v.status}</span>
+                  <span className="text-zinc-300">v{v.version}</span>
+                  <span className={clsx("capitalize", v.status === "active" ? "text-ok" : "text-zinc-500")}>{v.status}</span>
                 </div>
-                {v.comment && <p className="text-slate-600 truncate italic">"{v.comment}"</p>}
-                {v.status === 'active' && versions[0]?.version === v.version ? (
-                  <span className="text-slate-500 text-[9px] block">Currently Active</span>
+                {v.comment && <p className="text-zinc-400 truncate italic">"{v.comment}"</p>}
+                {v.status === "active" && versions[0]?.version === v.version ? (
+                  <span className="text-zinc-500 text-[9px] block">Currently Active</span>
                 ) : (
-                  <button
-                    onClick={() => handleRollback(v.version)}
-                    className="text-accent hover:underline text-[9px] font-medium flex items-center gap-0.5"
-                  >
+                  <button onClick={() => rollbackConfig(v.version)} className="text-accent hover:underline text-[9px] font-medium flex items-center gap-0.5">
                     <RotateCcw size={9} /> Rollback here
                   </button>
                 )}
               </div>
             ))}
           </div>
-
           <div className="space-y-1.5">
-            <input
-              type="text"
-              placeholder="Publish notes..."
-              value={publishComment}
-              onChange={(e) => setPublishComment(e.target.value)}
-              className="w-full text-xs bg-white border border-line rounded px-2.5 py-1.5 text-slate-800 placeholder-slate-400 focus:outline-none focus:border-accent"
-            />
-            <button
-              onClick={handlePublish}
-              className="w-full btn-accent flex items-center justify-center gap-1.5 py-1.5 text-xs shadow-sm"
-            >
-              <Send size={12} />
-              <span>Publish Configs</span>
+            <input type="text" placeholder="Publish notes..." value={publishComment} onChange={(e) => setPublishComment(e.target.value)}
+              className="w-full text-xs bg-surface-0 border border-line rounded px-2.5 py-1.5 text-zinc-200 focus:outline-none focus:border-accent" />
+            <button onClick={publishConfig} disabled={publishing} className="w-full btn-accent flex items-center justify-center gap-1.5 py-1.5 text-xs">
+              <Send size={12} />{publishing ? "Publishing..." : "Publish Configs"}
             </button>
-            <div className="text-[10.5px] text-emerald-700 bg-emerald-50 border border-emerald-200 rounded px-2.5 py-1.5 flex items-center justify-between font-semibold shadow-2xs">
-              <span className="flex items-center gap-1">🛡️ Enterprise License</span>
-              <span className="uppercase text-[9px] px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800 font-bold">Active</span>
-            </div>
+            <button
+              type="button"
+              onClick={() => setRecordingSettingsOpen(true)}
+              className="w-full flex items-center justify-center gap-1.5 py-1.5 px-3 rounded text-xs bg-surface-2 hover:bg-surface-3 text-zinc-300 border border-line transition font-medium"
+            >
+              <Sliders size={12} className="text-accent" />
+              Recording Settings ({adminRecSettings.segment_minutes}m)
+            </button>
           </div>
-          <button
-            onClick={onBackToWorkspace}
-            className="w-full text-center text-xs text-slate-500 hover:text-slate-700 pt-1"
-          >
-            Exit Studio
-          </button>
+          <button onClick={onDeactivated} className="w-full text-center text-xs text-zinc-500 hover:text-zinc-300 pt-1">Exit Studio</button>
         </div>
       </aside>
 
-      {/* Main Center Canvas */}
+      {/* Main canvas */}
       <main className="flex-1 flex flex-col bg-surface-0 overflow-hidden relative">
-        {/* Top Bar 1: AI Mode Selector */}
-        <div className="border-b border-line bg-surface-1 px-4 py-2.5 shrink-0 shadow-2xs">
-          <div className="flex items-center gap-2 overflow-x-auto custom-scrollbar">
-            <span className="text-[10px] uppercase font-bold tracking-wider text-slate-500 mr-1 shrink-0">AI Mode</span>
+        {/* Profile selector */}
+        <div className="border-b border-line bg-surface-1 px-4 py-2.5 shrink-0">
+          <div className="flex items-center gap-2">
+            <span className="text-[10px] uppercase font-bold tracking-wider text-zinc-500 mr-1">AI Mode</span>
             {PROFILE_ORDER.map((key) => {
               const def = ZONE_PROFILES[key];
               if (!def) return null;
               const Icon = PROFILE_ICON[key] || Boxes;
               const on = activeProfile === key;
-              const a = getProfileLightAccent(key);
+              const a = getProfileAccent(key);
               return (
-                <button
-                  key={key}
-                  onClick={() => setActiveProfile(key)}
-                  className={clsx(
-                    "flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium border transition shrink-0",
-                    on ? `${a.bg} ${a.text} ${a.border} font-semibold shadow-xs` : "bg-white border-line text-slate-600 hover:bg-slate-50 hover:text-slate-900"
-                  )}
-                  title={def.description}
-                >
-                  <Icon size={14} />
-                  <span>{def.label}</span>
+                <button key={key} onClick={() => selectProfile(key)} disabled={!selectedCam}
+                  className={clsx("flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium border transition",
+                    on ? `${a.bg} ${a.text} ${a.border}` : "bg-surface-2 border-line text-zinc-400 hover:text-zinc-200",
+                    !selectedCam && "opacity-40 cursor-not-allowed")}
+                  title={def.description}>
+                  <Icon size={14} /> {def.label}
                 </button>
               );
             })}
+            {savingConfig && <span className="ml-2 text-[10px] text-zinc-500">Saving…</span>}
           </div>
         </div>
 
-        {/* Top Bar 2: Draw Toolbar */}
-        <div className="h-12 border-b border-line bg-surface-1 px-4 flex items-center justify-between shrink-0 shadow-2xs">
+        {/* Draw toolbar */}
+        <div className="h-12 border-b border-line bg-surface-1 px-4 flex items-center justify-between shrink-0">
           <div className="flex items-center gap-2">
-            <span className="text-xs font-bold text-slate-700">Draw:</span>
+            <span className="text-xs font-semibold text-zinc-200">Draw:</span>
             <div className="flex rounded-md bg-surface-2 p-0.5 border border-line">
-              {(
-                [
-                  { mode: "view", icon: MousePointer2, label: "Select" },
-                  { mode: "polygon", icon: PenTool, label: "Polygon" },
-                  { mode: "rectangle", icon: Square, label: "Rectangle" },
-                  { mode: "circle", icon: CircleIcon, label: "Circle" },
-                  { mode: "line", icon: Minus, label: "Line" },
-                ] as const
-              ).map(({ mode, icon: Icon, label }) => (
-                <button
-                  key={mode}
+              {drawTools.map(({ mode, icon: Icon, label }) => (
+                <button key={mode}
                   onClick={() => {
                     setActivePoints([]);
                     setDrawMode(mode);
                     setDrawBinding(mode === "view" ? null : { featureKey: null, featureLabel: activeProfile === "custom" ? "Custom Zone" : "Zone", purpose: mode === "line" ? "counting_line" : "custom_zone" });
                   }}
-                  className={clsx(
-                    "text-xs px-2.5 py-1 rounded flex items-center gap-1 transition",
-                    drawMode === mode ? "bg-white text-accent font-semibold shadow-xs border border-slate-200" : "text-slate-600 hover:text-slate-900"
-                  )}
-                >
-                  <Icon size={12} />
-                  <span>{label}</span>
+                  className={clsx("text-xs px-2.5 py-1 rounded flex items-center gap-1 transition",
+                    drawMode === mode ? "bg-surface-0 text-accent font-medium" : "text-zinc-400 hover:text-zinc-200")}>
+                  <Icon size={12} /> {label}
                 </button>
               ))}
             </div>
           </div>
-
           <div className="flex items-center gap-2">
-            <div className="flex items-center gap-1 border-r border-line pr-2 mr-1">
-              <button
-                onClick={handleUndo}
-                disabled={history.length === 0}
-                title="Undo (Ctrl+Z)"
-                className="p-1.5 rounded text-slate-600 hover:text-slate-900 hover:bg-surface-2 disabled:opacity-30 disabled:hover:bg-transparent"
-              >
-                <Undo2 size={13} />
-              </button>
-              <button
-                onClick={handleRedo}
-                disabled={future.length === 0}
-                title="Redo (Ctrl+Shift+Z)"
-                className="p-1.5 rounded text-slate-600 hover:text-slate-900 hover:bg-surface-2 disabled:opacity-30 disabled:hover:bg-transparent"
-              >
-                <Redo2 size={13} />
-              </button>
-              <button
-                onClick={handleDuplicate}
-                disabled={shapes.length === 0}
-                title="Duplicate (Ctrl+D)"
-                className="p-1.5 rounded text-slate-600 hover:text-slate-900 hover:bg-surface-2 disabled:opacity-30 disabled:hover:bg-transparent"
-              >
-                <CopyIcon size={13} />
-              </button>
-              <button
-                onClick={handleDelete}
-                disabled={shapes.length === 0}
-                title="Delete (Del)"
-                className="p-1.5 rounded text-slate-600 hover:text-danger hover:bg-surface-2 disabled:opacity-30 disabled:hover:bg-transparent"
-              >
-                <Trash2 size={13} />
-              </button>
-            </div>
-
+            {/* Edit actions. historyTick is read here so these re-evaluate their
+                disabled state as the history stack changes. */}
+            {(() => {
+              void historyTick;
+              const h = historyRef.current;
+              const sel = drawings.find((d) => d.id === editingDrawingId);
+              const selLocked = sel ? isLocked(sel as EditableShape) : false;
+              return (
+                <div className="flex items-center gap-1 border-r border-line pr-2 mr-1">
+                  <button onClick={() => void undo()} disabled={!h?.canUndo} title="Undo (Ctrl+Z)"
+                    className="p-1 rounded text-zinc-400 hover:text-zinc-100 hover:bg-surface-2 disabled:opacity-30 disabled:hover:bg-transparent">
+                    <Undo2 size={13} />
+                  </button>
+                  <button onClick={() => void redo()} disabled={!h?.canRedo} title="Redo (Ctrl+Shift+Z)"
+                    className="p-1 rounded text-zinc-400 hover:text-zinc-100 hover:bg-surface-2 disabled:opacity-30 disabled:hover:bg-transparent">
+                    <Redo2 size={13} />
+                  </button>
+                  <button onClick={() => editingDrawingId && void duplicate(editingDrawingId)} disabled={!sel} title="Duplicate (Ctrl+D)"
+                    className="p-1 rounded text-zinc-400 hover:text-zinc-100 hover:bg-surface-2 disabled:opacity-30 disabled:hover:bg-transparent">
+                    <CopyIcon size={13} />
+                  </button>
+                  <button onClick={() => editingDrawingId && removeShape(editingDrawingId)} disabled={!sel || selLocked}
+                    title={selLocked ? "Unlock the shape to delete it" : "Delete (Del)"}
+                    className="p-1 rounded text-zinc-400 hover:text-danger hover:bg-surface-2 disabled:opacity-30 disabled:hover:bg-transparent">
+                    <Trash2 size={13} />
+                  </button>
+                </div>
+              );
+            })()}
             {drawBinding && drawMode !== "view" && (
-              <span className="text-[10px] text-slate-500 font-medium">
-                Binding to: <b className="text-slate-800">{drawBinding.featureLabel}</b>
-              </span>
+              <span className="text-[10px] text-zinc-400">Binding to: <b className="text-zinc-200">{drawBinding.featureLabel}</b></span>
             )}
-
-            {activePoints.length > 0 && drawMode === "polygon" && (
-              <button
-                onClick={handleClosePolygon}
-                className="btn-accent text-xs px-3 py-1 flex items-center gap-1 shadow-sm"
-              >
+            {activePoints.length > 0 && (drawMode === "polygon") && (
+              <button onClick={() => saveDrawing(activePoints)} className="btn-accent text-xs px-3 py-1 flex items-center gap-1">
                 <CheckCircle2 size={12} /> Close Shape
               </button>
             )}
-            <div className="flex items-center bg-slate-100 px-2.5 py-1 rounded-lg border border-slate-200 text-xs ml-auto gap-1.5 font-semibold text-slate-800">
-              <Camera size={13} className="text-slate-700" />
-              <span>Axis Live Feed</span>
-            </div>
           </div>
         </div>
 
-        {/* Viewport & Drawing Canvas */}
-        <div className="flex-1 relative bg-slate-100 flex items-center justify-center p-4 overflow-hidden">
-          <div className="relative aspect-video max-h-full max-w-full w-full rounded-xl border border-slate-300 overflow-hidden shadow-xl bg-slate-950 flex items-center justify-center">
-            {/* Live Camera Stream from Axis Camera */}
-            {!streamPaused && (
-              <img
-                src={getCameraSnapshotUrl()}
-                alt="Camera Stream"
-                className="h-full w-full object-contain pointer-events-none"
-                style={{
-                  filter: Boolean(features?.night_vision_zero_dce?.enabled || features?.night_vision?.enabled)
-                    ? 'contrast(1.45) brightness(1.35) saturate(1.2)'
-                    : 'none',
-                  transition: 'filter 0.3s ease-in-out'
-                }}
-                onLoad={() => setStreamFailed(false)}
-                onError={() => setStreamFailed(true)}
-              />
-            )}
-
-            {Boolean(features?.night_vision_zero_dce?.enabled || features?.night_vision?.enabled) && (
-              <div className="absolute top-3 right-3 z-20 flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-950/85 backdrop-blur-md text-xs font-mono text-amber-300 border border-amber-500/40 shadow-lg">
-                <span className="h-2 w-2 rounded-full bg-amber-400 animate-pulse" />
-                Zero-DCE Night Vision Active
-              </div>
-            )}
-
-            {streamFailed && (
-              <div className="absolute top-3 left-3 z-20 flex items-center gap-2 px-3 py-1.5 rounded-lg bg-black/85 backdrop-blur-md text-xs font-mono text-amber-400 border border-amber-400/30 shadow-lg">
-                <span className="h-2 w-2 rounded-full bg-amber-400 animate-ping" />
-                Connecting Axis Live Stream (/axis-cgi/mjpg/video.cgi)...
-              </div>
-            )}
-
-            {/* Interactive Vector Canvas */}
-            <canvas
-              ref={canvasRef}
-              onMouseDown={handleCanvasMouseDown}
-              onMouseUp={handleCanvasMouseUp}
-              className={clsx(
-                "absolute inset-0 w-full h-full z-10",
-                drawMode !== "view" ? "cursor-crosshair" : selectedShapeId ? "cursor-move" : "cursor-default"
+        {/* Viewport */}
+        <div className="flex-1 relative bg-surface-0 flex items-center justify-center p-4">
+          {selectedCam ? (
+            <div className="relative aspect-video max-h-full max-w-full w-full rounded-xl border border-line overflow-hidden shadow-2xl bg-zinc-950 flex items-center justify-center">
+              {engineOnline !== false ? (
+                <>
+                  <img
+                    key={selectedCam.id}
+                    ref={videoRef}
+                    src={mjpegStreamUrl(selectedCam.id)}
+                    alt=""
+                    className="h-full w-full object-contain pointer-events-none"
+                    onLoad={() => setStreamFailed(false)}
+                    onError={(e) => {
+                      setStreamFailed(true);
+                      const target = e.currentTarget;
+                      setTimeout(() => {
+                        if (target) {
+                          try {
+                            const base = mjpegStreamUrl(selectedCam.id);
+                            target.src = `${base}?_t=${Date.now()}`;
+                          } catch { /* ignore */ }
+                        }
+                      }, 1200);
+                    }}
+                  />
+                  {streamFailed && (
+                    <div className="absolute top-3 left-3 z-20 flex items-center gap-2 px-3 py-1.5 rounded-lg bg-black/80 backdrop-blur-md text-xs font-mono text-amber-400 border border-amber-400/30 shadow-lg">
+                      <span className="h-2 w-2 rounded-full bg-amber-400 animate-ping" />
+                      Connecting Live Stream...
+                    </div>
+                  )}
+                </>
+              ) : (
+                <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-zinc-900/90 px-6 text-center text-zinc-500">
+                  <Video size={36} />
+                  <span className="text-xs">Local AI engine offline — drawing still works on the canvas</span>
+                </div>
               )}
-            />
-          </div>
-        </div>
-
-        {/* Bottom Stream Status & Controls */}
-        <div className="h-10 bg-surface-1 border-t border-line px-4 flex items-center justify-between text-xs text-slate-600 shrink-0">
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => setStreamPaused(!streamPaused)}
-              className="p-1 hover:text-slate-900 hover:bg-surface-2 rounded transition font-medium"
-            >
-              {streamPaused ? '▶ Play' : '❚❚ Pause'}
-            </button>
-            <button
-              onClick={() => window.open(getCameraSnapshotUrl(), '_blank')}
-              className="p-1 hover:text-slate-900 hover:bg-surface-2 rounded transition font-medium"
-            >
-              📸 Snapshot
-            </button>
-            <button
-              onClick={() => setZonesVisible(!zonesVisible)}
-              className="p-1 hover:text-slate-900 hover:bg-surface-2 rounded transition font-medium"
-            >
-              {zonesVisible ? '👁️ Hide Zones' : '👁️ Show Zones'}
-            </button>
-          </div>
-
-          <div>
-            FPS: <strong className="text-slate-900 font-semibold">{fps}</strong> &bull; 2592 &times; 1952 &bull; H.264 / MJPEG &bull; VAPIX Edge
-          </div>
-
-          <div className="flex items-center gap-2">
-            <span className="text-[10px] text-slate-500 font-medium">{shapes.length} zones loaded</span>
-          </div>
+              <canvas
+                ref={canvasRef}
+                onClick={handleCanvasClick}
+                onMouseDown={handlePointerDown}
+                onMouseMove={handlePointerMove}
+                onMouseUp={handlePointerUp}
+                onMouseLeave={handlePointerUp}
+                className={clsx("absolute inset-0 w-full h-full z-10",
+                  drawMode !== "view" ? "cursor-crosshair" : editingDrawingId ? "cursor-move" : "cursor-default")}
+              />
+            </div>
+          ) : (
+            <div className="flex flex-col items-center justify-center p-8 text-center space-y-3 bg-surface-1 rounded-xl border border-line max-w-sm shadow-lg">
+              <Video size={32} className="text-zinc-500 mx-auto" />
+              <div className="text-sm font-semibold text-zinc-200">No Camera Selected</div>
+              <p className="text-xs text-zinc-400">
+                Select a camera from the left sidebar to start drawing zones and configuring AI analytics.
+              </p>
+            </div>
+          )}
         </div>
       </main>
 
-      {/* Sidebar 2: Dynamic Feature Config (Clean Light Theme) */}
-      <aside className="w-96 border-l border-line bg-surface-1 flex flex-col shrink-0 overflow-y-auto custom-scrollbar shadow-xs">
+      {/* Sidebar 2: dynamic feature config */}
+      <aside className="w-96 border-l border-line bg-surface-1 flex flex-col shrink-0 overflow-y-auto">
         {profileDef ? (
           <>
             <div className={clsx("p-4 border-b border-line", accent.bg)}>
-              <div className={clsx("flex items-center gap-2 font-bold text-sm", accent.text)}>
-                {(() => {
-                  const Icon = PROFILE_ICON[profileDef.key];
-                  return <Icon size={16} />;
-                })()}
-                <span>{profileDef.label} Profile</span>
+              <div className={clsx("flex items-center gap-2 font-semibold", accent.text)}>
+                {(() => { const Icon = PROFILE_ICON[profileDef.key]; return <Icon size={16} />; })()}
+                {profileDef.label} Profile
               </div>
-              <p className="text-[11px] text-slate-600 mt-1 leading-snug">{profileDef.description}</p>
+              <p className="text-[11px] text-zinc-400 mt-1">{profileDef.description}</p>
             </div>
 
             <div className="p-3 space-y-2">
-              {profileDef.groupOrder.map((group) => {
+              {groupsForProfile().map((group) => {
                 const groupFeatures = profileDef.features.filter((f) => f.group === group);
-                const isGroupCollapsed = collapsed[`${profileDef.key}:${group}`];
-
+                const isCollapsed = collapsed[`${profileDef.key}:${group}`];
                 return (
-                  <div key={group} className="rounded-lg border border-line bg-slate-50/60 overflow-hidden shadow-2xs">
-                    <button
-                      onClick={() =>
-                        setCollapsed((prev) => ({
-                          ...prev,
-                          [`${profileDef.key}:${group}`]: !isGroupCollapsed,
-                        }))
-                      }
-                      className="w-full flex items-center justify-between px-3 py-2 text-[11px] font-bold uppercase tracking-wider text-slate-700 hover:bg-slate-100 transition"
-                    >
+                  <div key={group} className="rounded-lg border border-line bg-surface-2/40 overflow-hidden">
+                    <button onClick={() => setCollapsed((c) => ({ ...c, [`${profileDef.key}:${group}`]: !isCollapsed }))}
+                      className="w-full flex items-center justify-between px-3 py-2 text-[11px] font-bold uppercase tracking-wider text-zinc-300 hover:bg-surface-2">
                       <span>{group}</span>
                       <div className="flex items-center gap-2">
-                        <span className="text-[9px] text-slate-500 font-normal normal-case">
+                        <span className="text-[9px] text-zinc-500 font-normal normal-case">
                           {groupFeatures.filter((f) => features[f.key]?.enabled).length}/{groupFeatures.length}
                         </span>
-                        {isGroupCollapsed ? <ChevronRight size={13} /> : <ChevronDown size={13} />}
+                        {isCollapsed ? <ChevronRight size={13} /> : <ChevronDown size={13} />}
                       </div>
                     </button>
-
-                    {!isGroupCollapsed && (
-                      <div className="p-2.5 space-y-2 border-t border-line bg-white">
-                        {group === "ROI & Zones" ? (
-                          /* ROI & Shapes Manager */
-                          <div className="space-y-2">
-                            <p className="text-[10px] text-slate-500">
-                              Drawn shapes bound to features and compile into camera memory on publish.
-                            </p>
-                            <div className="space-y-1.5">
-                              {shapes.map((s) => (
-                                <div
-                                  key={s.id}
-                                  onClick={() => setSelectedShapeId(s.id)}
-                                  className={clsx(
-                                    "p-2 rounded border transition flex items-center justify-between cursor-pointer",
-                                    selectedShapeId === s.id
-                                      ? "bg-blue-50/80 border-blue-400"
-                                      : "bg-surface-0 border-line hover:border-slate-300"
-                                  )}
-                                >
-                                  <div className="min-w-0 flex-1 pr-2">
-                                    <input
-                                      type="text"
-                                      value={s.name}
-                                      onChange={(e) => {
-                                        const updated = shapes.map((x) =>
-                                          x.id === s.id ? { ...x, name: e.target.value } : x
-                                        );
-                                        setShapes(updated);
-                                      }}
-                                      className="bg-transparent text-xs font-semibold text-slate-800 border-none outline-none w-full"
-                                    />
-                                    <div className="text-[9px] text-slate-500 capitalize">
-                                      {s.type} {s.properties?.featureKey ? `• ${s.properties.featureKey}` : ''}
-                                    </div>
-                                  </div>
-                                  <div className="flex items-center gap-1 shrink-0">
-                                    <button
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        const updated = shapes.map((x) =>
-                                          x.id === s.id ? { ...x, properties: { ...x.properties, locked: !isLocked(x) } } : x
-                                        );
-                                        setShapes(updated);
-                                      }}
-                                      className="text-slate-500 hover:text-slate-800 p-1"
-                                      title={isLocked(s) ? "Unlock" : "Lock"}
-                                    >
-                                      {isLocked(s) ? <Lock size={12} className="text-warn" /> : <Unlock size={12} />}
-                                    </button>
-                                    <button
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        const updated = shapes.filter((x) => x.id !== s.id);
-                                        setShapes(updated);
-                                        if (selectedShapeId === s.id) setSelectedShapeId(null);
-                                      }}
-                                      className="text-slate-500 hover:text-danger p-1"
-                                      title="Delete"
-                                    >
-                                      <Trash size={12} />
-                                    </button>
-                                  </div>
-                                </div>
-                              ))}
-                            </div>
-                          </div>
-                        ) : group === "Schedule" ? (
-                          <div className="p-2.5 rounded border border-line bg-surface-0 space-y-1.5">
-                            <span className="text-[11px] font-semibold text-slate-800">Active Schedule Window</span>
-                            <select className="w-full text-xs bg-white border border-line rounded px-2 py-1 text-slate-800 focus:outline-none focus:border-accent">
-                              <option>Always on (24/7 Continuous)</option>
-                              <option>Business Hours (08:00 - 18:00)</option>
-                              <option>Overnight Patrol (18:00 - 06:00)</option>
-                            </select>
-                          </div>
-                        ) : (
-                          /* Regular Features Cards */
-                          groupFeatures.map((f) => {
-                            const cfg = features[f.key] ?? { enabled: f.defaultEnabled ?? false, params: {} };
-                            const bound = shapes.filter((s) => s.properties?.featureKey === f.key);
-
-                            return (
-                              <div
-                                key={f.key}
-                                className={clsx(
-                                  "rounded-lg border p-2.5 transition",
-                                  cfg.enabled ? "border-slate-300 bg-white shadow-xs" : "border-line bg-slate-50/50"
-                                )}
-                              >
-                                <div className="flex items-start justify-between gap-2">
-                                  <div className="min-w-0">
-                                    <span className="text-xs font-semibold text-slate-900">{f.label}</span>
-                                    <p className="text-[10px] text-slate-500 leading-snug mt-0.5">{f.description}</p>
-                                  </div>
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      const updated = {
-                                        ...features,
-                                        [f.key]: {
-                                          ...cfg,
-                                          enabled: !cfg.enabled,
-                                        },
-                                      };
-                                      setFeatures(updated);
-                                    }}
-                                    className={clsx(
-                                      "relative h-5 w-9 rounded-full transition shrink-0",
-                                      cfg.enabled ? "bg-accent" : "bg-slate-300"
-                                    )}
-                                  >
-                                    <span
-                                      className={clsx(
-                                        "absolute top-0.5 h-4 w-4 rounded-full bg-white transition-all shadow-xs",
-                                        cfg.enabled ? "left-[18px]" : "left-0.5"
-                                      )}
-                                    />
-                                  </button>
-                                </div>
-
-                                {cfg.enabled && (
-                                  <div className="mt-2.5 space-y-2 pt-2 border-t border-line">
-                                    {f.params.map((p) => (
-                                      <div key={p.key} className="space-y-1">
-                                        <div className="flex justify-between text-[10px] text-slate-600 font-medium">
-                                          <span>{p.label}</span>
-                                          {p.type === 'slider' && (
-                                            <span className="font-mono text-slate-800">
-                                              {String(cfg.params[p.key] ?? p.default)}
-                                            </span>
-                                          )}
-                                        </div>
-                                        {p.type === 'slider' && (
-                                          <input
-                                            type="range"
-                                            min={p.min}
-                                            max={p.max}
-                                            step={p.step}
-                                            value={(cfg.params[p.key] as number) ?? (p.default as number)}
-                                            onChange={(e) => {
-                                              setFeatures({
-                                                ...features,
-                                                [f.key]: {
-                                                  ...cfg,
-                                                  params: { ...cfg.params, [p.key]: Number(e.target.value) },
-                                                },
-                                              });
-                                            }}
-                                            className="w-full accent-accent cursor-pointer"
-                                          />
-                                        )}
-                                        {p.type === 'select' && (
-                                          <select
-                                            value={(cfg.params[p.key] as string) ?? (p.default as string)}
-                                            onChange={(e) => {
-                                              setFeatures({
-                                                ...features,
-                                                [f.key]: {
-                                                  ...cfg,
-                                                  params: { ...cfg.params, [p.key]: e.target.value },
-                                                },
-                                              });
-                                            }}
-                                            className="w-full text-xs bg-slate-50 border border-line rounded px-2 py-1 text-slate-800"
-                                          >
-                                            {p.options?.map((o) => (
-                                              <option key={o.value} value={o.value}>
-                                                {o.label}
-                                              </option>
-                                            ))}
-                                          </select>
-                                        )}
-                                        {p.type === 'classes' && (
-                                          <div className="flex flex-wrap gap-1">
-                                            {p.classOptions?.map((c) => {
-                                              const sel = (cfg.params[p.key] as string[]) || (p.default as string[]) || [];
-                                              const on = sel.includes(c);
-                                              return (
-                                                <button
-                                                  key={c}
-                                                  type="button"
-                                                  onClick={() => {
-                                                    const nextClasses = on ? sel.filter((x) => x !== c) : [...sel, c];
-                                                    setFeatures({
-                                                      ...features,
-                                                      [f.key]: {
-                                                        ...cfg,
-                                                        params: { ...cfg.params, [p.key]: nextClasses },
-                                                      },
-                                                    });
-                                                  }}
-                                                  className={clsx(
-                                                    "text-[10px] px-1.5 py-0.5 rounded border font-mono transition",
-                                                    on ? "bg-blue-50 border-blue-400 text-blue-700 font-semibold" : "bg-slate-100 border-line text-slate-600 hover:bg-slate-200"
-                                                  )}
-                                                >
-                                                  {c}
-                                                </button>
-                                              );
-                                            })}
-                                          </div>
-                                        )}
-                                      </div>
-                                    ))}
-
-                                    {(f.key === 'face_recognition' || f.key === 'face_detection') && (
-                                      <div className="mt-3 pt-2 border-t border-line">
-                                        <TargetMatcherUI />
-                                      </div>
-                                    )}
-
-                                    {f.requiresGeometry && (
-                                      <div className="flex items-center justify-between pt-1">
-                                        <span className={clsx("text-[10px] font-medium", bound.length ? "text-ok" : "text-warn")}>
-                                          {bound.length ? `${bound.length} ${f.requiresGeometry}(s) drawn` : `Needs a ${f.requiresGeometry}`}
-                                        </span>
-                                        <button
-                                          type="button"
-                                          onClick={() => handleBindAndDraw(f)}
-                                          className="text-[10px] flex items-center gap-1 text-accent hover:underline font-semibold"
-                                        >
-                                          <Pencil size={11} /> Draw {f.drawTool?.label || f.requiresGeometry}
-                                        </button>
-                                      </div>
-                                    )}
-                                  </div>
-                                )}
-                              </div>
-                            );
-                          })
+                    {!isCollapsed && (
+                      <div className="p-2.5 space-y-2 border-t border-line">
+                        {groupFeatures.map((f) =>
+                          f.kind === "roi_editor" ? <div key={f.key}>{renderRoiPanel()}</div>
+                          : f.kind === "alerts" ? <div key={f.key}>{renderAlertsPanel()}</div>
+                          : f.kind === "custom_model_registration" ? <div key={f.key}>{renderCustomModelRegistrationPanel()}</div>
+                          : renderFeatureCard(f),
                         )}
                       </div>
                     )}
@@ -1046,12 +2226,117 @@ export const AdminStudio: React.FC<AdminStudioProps> = ({ onBackToWorkspace }) =
             </div>
           </>
         ) : (
-          <div className="p-6 text-center text-xs text-slate-500">Select an AI profile to configure.</div>
+          <div className="p-6 text-center text-xs text-zinc-500 flex-1 flex flex-col items-center justify-center gap-2">
+            <AlertCircle size={20} className="text-zinc-600" />
+            {selectedCam ? "Select an AI Mode to configure this camera." : "Select a camera to begin."}
+          </div>
         )}
       </aside>
 
+      {/* Admin Recording Settings Modal */}
+      {recordingSettingsOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4">
+          <div className="bg-surface-1 border border-line rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-5 animate-in fade-in zoom-in duration-150">
+            <div className="flex items-center justify-between border-b border-line pb-3">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 rounded-lg bg-accent/15 text-accent">
+                  <Sliders size={18} />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-white">NVR & Recording Configuration</h3>
+                  <p className="text-[11px] text-zinc-400">Continuous recording segment limit & AI burn-in</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setRecordingSettingsOpen(false)}
+                className="p-1 rounded-md text-zinc-400 hover:text-white hover:bg-surface-2 transition"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              {/* Segment Duration Selection */}
+              <div>
+                <label className="block text-xs font-semibold text-zinc-300 mb-2">
+                  Continuous Clip Duration
+                </label>
+                <div className="grid grid-cols-5 gap-2">
+                  {[5, 10, 15, 30, 60].map((mins) => (
+                    <button
+                      key={mins}
+                      type="button"
+                      onClick={() =>
+                        setAdminRecSettings((prev) => ({ ...prev, segment_minutes: mins }))
+                      }
+                      className={clsx(
+                        "py-2 px-2 rounded-lg text-xs font-mono font-medium border text-center transition",
+                        adminRecSettings.segment_minutes === mins
+                          ? "bg-accent text-black border-accent font-bold shadow-md shadow-accent/20"
+                          : "bg-surface-2 text-zinc-300 border-line hover:border-zinc-500"
+                      )}
+                    >
+                      {mins}m
+                    </button>
+                  ))}
+                </div>
+                <p className="text-[10px] text-zinc-500 mt-1.5">
+                  Camera streams are automatically split into MP4 files of this duration.
+                </p>
+              </div>
+
+              {/* AI Detections in Video Toggle */}
+              <div className="p-3.5 rounded-xl bg-surface-2 border border-line flex items-start gap-3">
+                <input
+                  type="checkbox"
+                  id="adminBurnInDets"
+                  checked={adminRecSettings.record_with_detections}
+                  onChange={(e) =>
+                    setAdminRecSettings((prev) => ({
+                      ...prev,
+                      record_with_detections: e.target.checked,
+                    }))
+                  }
+                  className="mt-1 h-4 w-4 rounded border-zinc-700 bg-surface-3 text-accent focus:ring-accent cursor-pointer accent-accent"
+                />
+                <label htmlFor="adminBurnInDets" className="flex-1 cursor-pointer">
+                  <div className="text-xs font-semibold text-zinc-200">
+                    Record with AI Detections & Overlay
+                  </div>
+                  <div className="text-[11px] text-zinc-400 mt-0.5 leading-relaxed">
+                    Burn real-time AI bounding boxes, classifications, track IDs, and speed km/h into video files.
+                  </div>
+                </label>
+              </div>
+            </div>
+
+            {/* Modal Actions */}
+            <div className="flex items-center justify-end gap-2.5 pt-2 border-t border-line">
+              <button
+                type="button"
+                onClick={() => setRecordingSettingsOpen(false)}
+                className="px-4 py-2 rounded-lg text-xs text-zinc-400 hover:text-white hover:bg-surface-2 transition font-medium"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveAdminRecSettings}
+                disabled={savingRecSettings}
+                className="flex items-center gap-1.5 px-4 py-2 rounded-lg bg-accent text-black font-semibold text-xs hover:bg-accent/90 transition shadow-md disabled:opacity-50"
+              >
+                {savingRecSettings ? (
+                  "Saving..."
+                ) : (
+                  <>
+                    <Check size={14} /> Save Changes
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
-};
-
-export default AdminStudio;
+}

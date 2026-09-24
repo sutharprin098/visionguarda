@@ -7,7 +7,7 @@ export default defineConfig({
   base: './',
   build: {
     outDir: path.resolve(__dirname, '../html'),
-    emptyOutDir: true,
+    emptyOutDir: false,
     rollupOptions: {
       output: {
         entryFileNames: 'assets/[name]-[hash].js',
