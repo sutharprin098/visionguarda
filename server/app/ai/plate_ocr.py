@@ -347,15 +347,15 @@ class PlateOCR:
         self.stats: Dict[str, int] = defaultdict(int)
 
         t0 = time.time()
+        from app.ai.accelerator import load_accelerated_onnx_session, guard_cpu_fallback
         so = ort.SessionOptions()
         so.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
         so.intra_op_num_threads = max(1, min(2, (os.cpu_count() or 2)))
         so.log_severity_level = 3
-        self.providers = _select_providers()
-        self.session = ort.InferenceSession(model_path, sess_options=so, providers=self.providers)
-        self.active_provider = self.session.get_providers()[0]
+        self.session = load_accelerated_onnx_session(model_path, sess_options=so)
+        self.providers = self.session.get_providers()
+        self.active_provider = self.providers[0]
         try:
-            from app.ai.accelerator import guard_cpu_fallback
             guard_cpu_fallback("ANPR OCR", self.active_provider)
         except RuntimeError:
             raise

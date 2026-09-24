@@ -21,7 +21,7 @@ interface Props {
   profileFeatures?: Record<string, any>;
 }
 
-const TRACK_HOLD_MS = 650;
+const TRACK_HOLD_MS = 120;
 
 interface TrailPoint {
   x: number;

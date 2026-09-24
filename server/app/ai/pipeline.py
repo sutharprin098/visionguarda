@@ -200,10 +200,11 @@ def _draw_snapshot_boxes(frame, detections):
 
 def _draw_normalized_overlay_boxes(frame, client_dets):
     """Draw bounding boxes from client_dets (normalized 0..1 coords) directly onto stream frame."""
-    return frame
     h, w = frame.shape[:2]
     for det in client_dets:
-        if float(det.get("confidence", 0.0)) < 0.08:
+        if float(det.get("confidence", 0.0)) < 0.40:
+            continue
+        if det.get("tracking_status") == "coasting":
             continue
         b = det.get("bbox")
         if not b:
@@ -236,7 +237,7 @@ def _draw_normalized_overlay_boxes(frame, client_dets):
             cv2.line(frame, (x2 - cs, y1 + bh), (x2, y1 + bh), color, 3)
             cv2.line(frame, (x2, y1 + bh), (x2, y1 + bh - cs), color, 3)
 
-        parts = [cls.upper()]
+        parts = [cls]
         tid = det.get("track_id")
         if tid is not None:
             parts.append(f"#{tid:02d}" if isinstance(tid, int) else f"#{tid}")
@@ -246,16 +247,14 @@ def _draw_normalized_overlay_boxes(frame, client_dets):
         speed = det.get("speed")
         if speed is not None:
             parts.append(f"{int(float(speed))}km/h")
-        if det.get("tracking_status") == "coasting":
-            parts.append(f"[COAST:{det.get('lost_frames', 0)}]")
         if det.get("plate_text"):
             parts.append(str(det["plate_text"]))
         label = " ".join(parts)
-        (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.45, 1)
+        (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)
         ly = y1 - th - 6 if y1 - th - 6 >= 0 else y1 + 2
-        cv2.rectangle(frame, (x1, ly), (x1 + tw + 6, ly + th + 6), (0, 0, 0), -1)
+        cv2.rectangle(frame, (x1, ly), (x1 + tw + 6, ly + th + 6), color, -1)
         cv2.putText(frame, label, (x1 + 3, ly + th + 2),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.45, color, 1, cv2.LINE_AA)
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1, cv2.LINE_AA)
     return frame
 
 
@@ -871,47 +870,8 @@ def resolve_emitted_detections(tracker, tracks_raw, detections, masks,
 
     # Unmatched raw detections are dropped. Only tracker-owned IDs are emitted;
 
-    # Coasting: a confirmed track the tracker is still predicting through a
-    for t in tracker.tracks:
-        if t.track_id in tracks_by_id or t.state != "confirmed":
-            continue
-        if not (t.time_since_update > 0 and tracker.secs_since_update(t) <= coast_render_seconds):
-            continue
-        cbbox = t.get_bbox()
-        tcx = (cbbox[0] + cbbox[2]) / 2.0
-        tcy = (cbbox[1] + cbbox[3]) / 2.0
-        tw = max(1.0, cbbox[2] - cbbox[0])
-        th = max(1.0, cbbox[3] - cbbox[1])
-        t_reach = max(tw, th) * 1.5
-
-        # Suppress coasting track if an active tracked object of compatible class is nearby
-        suppressed_by_active = False
-        for od in out_dets:
-            if od.get("tracking_status") != "tracked":
-                continue
-            if not (od.get("class") == t.class_name or _vehicle_classes_compatible(t.class_name, od.get("class"))):
-                continue
-            obx = od["bbox"]
-            ocx = (obx["x1"] + obx["x2"]) / 2.0
-            ocy = (obx["y1"] + obx["y2"]) / 2.0
-            dist = ((tcx - ocx) ** 2 + (tcy - ocy) ** 2) ** 0.5
-            iou = tracker._compute_iou(cbbox, [obx["x1"], obx["y1"], obx["x2"], obx["y2"]])
-            if iou > 0.15 or dist <= t_reach:
-                suppressed_by_active = True
-                break
-
-        if suppressed_by_active:
-            continue
-
-        out_dets.append({
-            "class": t.class_name,
-            "confidence": round(float(t.confidence), 2),
-            "track_id": t.track_id,
-            "dwell_time": round(time.time() - t.first_seen, 1),
-            "bbox": {"x1": cbbox[0], "y1": cbbox[1], "x2": cbbox[2], "y2": cbbox[3]},
-            "tracking_status": "coasting",
-        })
-        out_masks.append([])
+    # Coasting tracks are suppressed for live detection output per Rule 1:
+    # Only render/emit tracks with a current-frame detector match (time_since_update == 0).
 
     # Final safety net against "N boxes on one object". A single person can end
     if len(out_dets) > 1:

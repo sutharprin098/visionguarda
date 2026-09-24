@@ -1,14 +1,15 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
   Settings2, Shield, Car, Factory, ShoppingBag, Building2, Eye, Boxes,
-  Video, Camera, Youtube, Sparkles, ChevronDown, X, Activity, Cpu, Layers,
-  AlertTriangle, CheckCircle2, RefreshCw
+  Video, Camera, Sparkles, ChevronDown, X, Activity, Cpu, Layers,
+  AlertTriangle, CheckCircle2, RefreshCw, Cloud, Zap
 } from 'lucide-react';
 import CamAILogo from '../components/CamAILogo';
 import {
   ZONE_PROFILES,
   PROFILE_ORDER,
   type ZoneProfileKey,
+  type ProfileFeatures,
 } from '../lib/zoneProfiles';
 import {
   type EditableShape,
@@ -16,12 +17,14 @@ import {
 } from '../lib/zoneEditor';
 import {
   getCameraStreamUrl,
+  getCameraSnapshotUrl,
   loadShapesFromStorage,
   loadActiveProfile,
   saveActiveProfile,
+  loadFeatures,
 } from '../lib/cameraEngine';
 import DetectionOverlay, { type TelemetryDetection } from '../components/DetectionOverlay';
-import { telemetryEngine, type TelemetryAlertEvent, type ModelsStatusSummary } from '../lib/telemetryEngine';
+import { telemetryEngine, type TelemetryAlertEvent, type ModelsStatusSummary, type FpsMetrics, type FrameSyncStatus } from '../lib/telemetryEngine';
 
 export interface WorkspaceProps {
   onOpenAdminStudio: () => void;
@@ -40,11 +43,15 @@ const PROFILE_ICON: Record<ZoneProfileKey, React.ComponentType<{ size?: number |
 export const Workspace: React.FC<WorkspaceProps> = ({ onOpenAdminStudio }) => {
   const [activeProfile, setActiveProfile] = useState<ZoneProfileKey>(loadActiveProfile());
   const [shapes, setShapes] = useState<EditableShape[]>(loadShapesFromStorage());
+  const [features, setFeatures] = useState<ProfileFeatures>(loadFeatures());
   const [streamFailed, setStreamFailed] = useState(false);
-  const [fps, setFps] = useState('29.8');
+  const [fps, setFps] = useState('0.0');
+  const [fpsMetrics, setFpsMetrics] = useState<FpsMetrics>({ input_fps: 0, ai_fps: 0, display_fps: 0 });
+  const [frameSyncStatus, setFrameSyncStatus] = useState<FrameSyncStatus>(telemetryEngine.getFrameSyncStatus());
+  const [awsStatus, setAwsStatus] = useState<'connected' | 'disconnected' | 'unknown'>('unknown');
   const [detections, setDetections] = useState<TelemetryDetection[]>([]);
-  const [sourceMode, setSourceMode] = useState<'youtube' | 'axis' | 'webcam'>('youtube');
-  const [youtubeVideoId, setYoutubeVideoId] = useState('Ellzen6Z7t8'); // 4 Corners Downtown Live
+  const isAxisEnv = typeof window !== 'undefined' && (window.location.pathname.includes('/local/') || window.location.port === '41093');
+  const [sourceMode, setSourceMode] = useState<'axis' | 'webcam'>('axis');
   const [profileDropdownOpen, setProfileDropdownOpen] = useState(false);
   const [connStatus, setConnStatus] = useState<'online' | 'offline' | 'connecting' | 'error'>(telemetryEngine.getStatus());
   const [modelsSummary, setModelsSummary] = useState<ModelsStatusSummary>(telemetryEngine.getModelsSummary());
@@ -92,10 +99,21 @@ export const Workspace: React.FC<WorkspaceProps> = ({ onOpenAdminStudio }) => {
 
     const unsubStatus = telemetryEngine.subscribeStatus((st) => {
       setConnStatus(st);
+      // Infer AWS status from telemetry connection
+      setAwsStatus(st === 'online' ? 'connected' : st === 'connecting' ? 'unknown' : 'disconnected');
     });
 
     const unsubModels = telemetryEngine.subscribeModelsStatus((summary) => {
       setModelsSummary(summary);
+    });
+
+    const unsubFps = telemetryEngine.subscribeFps((m) => {
+      setFpsMetrics(m);
+      setFps((m.ai_fps > 0 ? m.ai_fps : m.input_fps).toFixed(1));
+    });
+
+    const unsubSync = telemetryEngine.subscribeFrameSync((syncStatus) => {
+      setFrameSyncStatus(syncStatus);
     });
 
     return () => {
@@ -103,12 +121,14 @@ export const Workspace: React.FC<WorkspaceProps> = ({ onOpenAdminStudio }) => {
       unsubAlerts();
       unsubStatus();
       unsubModels();
+      unsubFps();
+      unsubSync();
       telemetryEngine.stop();
     };
   }, []);
 
   useEffect(() => {
-    telemetryEngine.updateContext(activeProfile, shapes);
+    telemetryEngine.updateContext(activeProfile, shapes, loadFeatures());
   }, [activeProfile, shapes]);
 
   // Handle profile switch directly from workspace
@@ -116,16 +136,7 @@ export const Workspace: React.FC<WorkspaceProps> = ({ onOpenAdminStudio }) => {
     setActiveProfile(newProfile);
     saveActiveProfile(newProfile);
     setProfileDropdownOpen(false);
-    telemetryEngine.updateContext(newProfile, shapes);
-
-    // Sync profile to backend camera config if available
-    try {
-      fetch('http://127.0.0.1:8000/api/cameras/3bf58ac3-6468-4827-b813-268c0c195d42/config', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ zone_profile: newProfile })
-      }).catch(() => {});
-    } catch {}
+    telemetryEngine.updateContext(newProfile, shapes, loadFeatures());
 
     setEvents(prev => [
       {
@@ -163,6 +174,52 @@ export const Workspace: React.FC<WorkspaceProps> = ({ onOpenAdminStudio }) => {
     };
   }, [sourceMode]);
 
+  // High-performance continuous Axis snapshot video stream loop (Zero HTTP/2 drop - Zero 401 black screen)
+  useEffect(() => {
+    if (sourceMode !== 'axis') return;
+    let isActive = true;
+    let lastObjectUrl: string | null = null;
+
+    const fetchNextFrame = async () => {
+      if (!isActive) return;
+      try {
+        const snapUrl = getCameraSnapshotUrl();
+        const res = await fetch(snapUrl + `&_t=${Date.now()}`);
+        if (res.ok && isActive) {
+          const blob = await res.blob();
+          if (blob.size > 500 && isActive) {
+            const url = URL.createObjectURL(blob);
+            if (imgRef.current) {
+              imgRef.current.src = url;
+              setStreamFailed(false);
+              mediaRef.current = imgRef.current;
+              telemetryEngine.setMediaRef(imgRef);
+            }
+            if (lastObjectUrl) {
+              URL.revokeObjectURL(lastObjectUrl);
+            }
+            lastObjectUrl = url;
+          }
+        }
+      } catch {
+        // Keep retrying cleanly
+      } finally {
+        if (isActive) {
+          setTimeout(fetchNextFrame, 120); // ~8-10 FPS continuous live stream
+        }
+      }
+    };
+
+    fetchNextFrame();
+
+    return () => {
+      isActive = false;
+      if (lastObjectUrl) {
+        URL.revokeObjectURL(lastObjectUrl);
+      }
+    };
+  }, [sourceMode]);
+
   // Hot-swap when published in AdminStudio without reload
   useEffect(() => {
     const onConfigPublished = (e: any) => {
@@ -173,6 +230,9 @@ export const Workspace: React.FC<WorkspaceProps> = ({ onOpenAdminStudio }) => {
           setActiveProfile(e.detail.zone_profile);
           saveActiveProfile(e.detail.zone_profile);
         }
+        const activeFeats = e.detail.features || loadFeatures();
+        setFeatures(activeFeats);
+        telemetryEngine.updateContext(e.detail.zone_profile || activeProfile, publishedShapes, activeFeats);
         setEvents((prev) => [
           {
             id: String(Date.now()),
@@ -186,18 +246,16 @@ export const Workspace: React.FC<WorkspaceProps> = ({ onOpenAdminStudio }) => {
     };
     window.addEventListener('camai:local_config_published', onConfigPublished);
     return () => window.removeEventListener('camai:local_config_published', onConfigPublished);
-  }, []);
+  }, [activeProfile]);
 
-  // Frame rate monitoring bound to real telemetry
+  // Real-time Video Stream Render FPS Counter — driven by telemetry subscribeFps
+  // The setFps call in subscribesFps above keeps this updated automatically.
+  // Keeping a minimal interval just to refresh display if AI is silent
   useEffect(() => {
-    const running = modelsSummary.models.filter(m => m.status === 'running' || m.fps > 0);
-    if (running.length > 0) {
-      const avgFps = running.reduce((acc, m) => acc + m.fps, 0) / running.length;
-      setFps(avgFps > 0 ? avgFps.toFixed(1) : '0.0');
-    } else if (connStatus === 'offline') {
+    if (connStatus === 'offline') {
       setFps('0.0');
     }
-  }, [modelsSummary, connStatus]);
+  }, [connStatus]);
 
   // Render user drawn zones on top of live video feed
   const drawConfiguredZones = () => {
@@ -301,34 +359,14 @@ export const Workspace: React.FC<WorkspaceProps> = ({ onOpenAdminStudio }) => {
           </div>
         </div>
 
-        {/* Center Stream Source Selector: YouTube Live & Axis Live ONLY */}
-        <div className="flex items-center bg-slate-100 p-0.5 rounded-lg border border-slate-200 text-xs">
-          <button
-            onClick={() => setSourceMode('youtube')}
-            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md font-medium transition ${
-              sourceMode === 'youtube'
-                ? 'bg-white text-rose-600 shadow-2xs font-semibold'
-                : 'text-slate-500 hover:text-slate-800'
-            }`}
-          >
-            <Youtube size={13} className={sourceMode === 'youtube' ? 'text-rose-600' : 'text-slate-400'} />
-            <span>YouTube 4 Corners</span>
-          </button>
-          <button
-            onClick={() => setSourceMode('axis')}
-            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md font-medium transition ${
-              sourceMode === 'axis'
-                ? 'bg-white text-slate-900 shadow-2xs font-semibold'
-                : 'text-slate-500 hover:text-slate-800'
-            }`}
-          >
-            <Camera size={13} />
-            <span>Axis Live</span>
-          </button>
+        {/* Stream Source Status */}
+        <div className="flex items-center bg-slate-100 px-3 py-1 rounded-lg border border-slate-200 text-xs gap-2">
+          <Camera size={14} className="text-slate-700" />
+          <span className="font-semibold text-slate-800">Axis Camera Live Feed</span>
         </div>
 
         {/* Right Action Tools */}
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2">
           <button
             onClick={onOpenAdminStudio}
             className="btn-accent px-3 py-1.5 text-xs flex items-center gap-1.5 shadow-sm"
@@ -347,26 +385,27 @@ export const Workspace: React.FC<WorkspaceProps> = ({ onOpenAdminStudio }) => {
             ref={containerRef}
             className="flex-1 relative rounded-xl border border-slate-300 bg-slate-950 overflow-hidden shadow-xl flex items-center justify-center"
           >
-            {/* Stream Viewport: YouTube Live, Axis Stream, or Webcam */}
-            {sourceMode === 'youtube' ? (
-              <iframe
-                src={`https://www.youtube-nocookie.com/embed/${youtubeVideoId}?autoplay=1&mute=1&controls=0&modestbranding=1&enablejsapi=1&rel=0`}
-                title="4 Corners Downtown Live Traffic Feed"
-                className="h-full w-full object-cover pointer-events-none border-0"
-                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-              />
-            ) : sourceMode === 'axis' ? (
+            {/* Stream Viewport: Axis Camera MJPEG Stream or Webcam */}
+            {sourceMode === 'axis' ? (
               <img
                 ref={imgRef}
-                src={getCameraStreamUrl()}
+                src={getCameraSnapshotUrl()}
                 alt="Axis Camera Live Stream"
                 className="h-full w-full object-contain pointer-events-none"
+                style={{
+                  filter: Boolean(features?.night_vision_zero_dce?.enabled || features?.night_vision?.enabled)
+                    ? 'contrast(1.45) brightness(1.35) saturate(1.2)'
+                    : 'none',
+                  transition: 'filter 0.3s ease-in-out'
+                }}
                 onLoad={() => {
                   setStreamFailed(false);
                   mediaRef.current = imgRef.current;
                   telemetryEngine.setMediaRef(imgRef);
                 }}
-                onError={() => setStreamFailed(true)}
+                onError={() => {
+                  setStreamFailed(true);
+                }}
               />
             ) : (
               <video
@@ -381,6 +420,13 @@ export const Workspace: React.FC<WorkspaceProps> = ({ onOpenAdminStudio }) => {
                   telemetryEngine.setMediaRef(videoRef);
                 }}
               />
+            )}
+
+            {Boolean(features?.night_vision_zero_dce?.enabled || features?.night_vision?.enabled) && (
+              <div className="absolute top-4 right-4 z-20 flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-950/85 backdrop-blur-md text-xs font-mono text-amber-300 border border-amber-500/40 shadow-lg">
+                <span className="h-2 w-2 rounded-full bg-amber-400 animate-pulse" />
+                Zero-DCE Night Vision Active
+              </div>
             )}
 
             {streamFailed && (
@@ -402,42 +448,6 @@ export const Workspace: React.FC<WorkspaceProps> = ({ onOpenAdminStudio }) => {
               ref={canvasRef}
               className="absolute inset-0 w-full h-full pointer-events-none z-20"
             />
-
-            {/* Clean Slate Guidance Overlay (when 0 zones drawn) */}
-            {shapes.length === 0 && (
-              <div className="absolute top-4 left-4 z-25 flex items-center gap-2 px-3 py-1.5 rounded-lg bg-white/95 backdrop-blur-md border border-slate-200 text-xs font-medium text-slate-700 shadow-md">
-                <Sparkles size={14} className="text-accent" />
-                <span>Clean Slate: <b>0 Zones Configured</b>. Click "Open Admin Studio" to draw detection zones.</span>
-              </div>
-            )}
-
-            {/* Camera Offline Warning Overlay */}
-            {connStatus === 'offline' && (
-              <div className="absolute top-4 right-4 z-25 flex items-center gap-2 px-3 py-1.5 rounded-lg bg-rose-50/95 backdrop-blur-md border border-rose-300 text-xs font-bold text-rose-800 shadow-md">
-                <AlertTriangle size={15} className="text-rose-600" />
-                <span>CAMERA / VISION ENGINE OFFLINE (0 Detections)</span>
-              </div>
-            )}
-
-            {/* Live Telemetry Card in Corner */}
-            <div className="absolute bottom-3 left-3 z-30 flex items-center gap-3 px-3 py-1.5 rounded-lg bg-white/95 backdrop-blur-md border border-slate-200 text-xs text-slate-700 font-mono shadow-md">
-              <span className="flex items-center gap-1 text-emerald-700 font-semibold">
-                <span className="h-1.5 w-1.5 rounded-full bg-emerald-600 animate-pulse" />
-                Live Edge AI: {profileDef?.label || 'Active'}
-              </span>
-              <span>•</span>
-              <span className="text-slate-800">1920×1080</span>
-              <span>•</span>
-              <span className="text-slate-800">{fps} FPS</span>
-              <span>•</span>
-              <span className={shapes.length > 0 ? "text-blue-700 font-bold" : "text-slate-500 font-medium"}>
-                {shapes.length} Active Zones
-              </span>
-              <span>•</span>
-              <span className={connStatus === 'offline' ? "text-rose-700 font-bold" : detections.length > 0 ? "text-emerald-700 font-bold" : "text-slate-600"}>
-                {connStatus === 'offline' ? "CAMERA OFFLINE" : `${detections.length} Detected`}
-              </span>
-            </div>
           </div>
         </div>
 
@@ -465,7 +475,7 @@ export const Workspace: React.FC<WorkspaceProps> = ({ onOpenAdminStudio }) => {
                 return (
                   <div
                     key={ev.id}
-                    className={`p-2.5 rounded-lg border text-xs space-y-1 shadow-2xs transition ${
+                    className={`p-1.5 px-2 rounded.md border text-[11px] leading-tight space-y-0.5 shadow-2xs transition ${
                       isPlate
                         ? 'bg-amber-50/80 border-amber-300'
                         : isPpe || isIntrusion
@@ -477,10 +487,10 @@ export const Workspace: React.FC<WorkspaceProps> = ({ onOpenAdminStudio }) => {
                         : 'bg-slate-50 border-line'
                     }`}
                   >
-                    <div className="flex items-center justify-between text-[10px] text-slate-500 font-mono">
+                    <div className="flex items-center justify-between text-[9.5px] text-slate-500 font-mono">
                       <span>{ev.time}</span>
                       <span
-                        className={`font-semibold px-1.5 py-0.5 rounded text-[9.5px] ${
+                        className={`font-semibold px-1 py-0.2 rounded text-[9px] ${
                           isPlate
                             ? 'bg-amber-200 text-amber-900 font-bold'
                             : isPpe
@@ -497,23 +507,13 @@ export const Workspace: React.FC<WorkspaceProps> = ({ onOpenAdminStudio }) => {
                         {isPlate ? 'ANPR READ' : isPpe ? 'PPE ALERT' : isIntrusion ? 'INTRUSION' : isLine ? 'TRIPWIRE' : isConfig ? 'CONFIG' : 'NORMAL'}
                       </span>
                     </div>
-                    <div className={`text-[11.5px] leading-snug font-medium ${isPlate ? 'text-amber-950 font-bold' : (isPpe || isIntrusion) ? 'text-rose-950 font-bold' : isLine ? 'text-orange-950 font-bold' : 'text-slate-800'}`}>
+                    <div className={`text-[10.5px] leading-tight font-medium ${isPlate ? 'text-amber-950 font-bold' : (isPpe || isIntrusion) ? 'text-rose-950 font-bold' : isLine ? 'text-orange-950 font-bold' : 'text-slate-800'}`}>
                       {ev.text}
                     </div>
                   </div>
                 );
               })
             )}
-          </div>
-
-          <div className="p-3 border-t border-line bg-slate-50/70">
-            <button
-              onClick={onOpenAdminStudio}
-              className="w-full flex items-center justify-center gap-1.5 py-1.5 text-xs rounded-md bg-white hover:bg-slate-100 text-slate-800 border border-line transition font-semibold shadow-2xs"
-            >
-              <Settings2 size={13} />
-              <span>Configure Zones in Studio</span>
-            </button>
           </div>
         </aside>
       </div>
