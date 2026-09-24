@@ -1,0 +1,16 @@
+{
+  "type": "telemetry",
+  "frame_id": 1,
+  "timestamp": 1790000000000,
+  "fps": 5.0,
+  "input_fps": 5.0,
+  "ai_fps": 5.0,
+  "inference_latency_ms": 28,
+  "active_module": "traffic",
+  "aws": "connected",
+  "width": 1280,
+  "height": 720,
+  "count": 0,
+  "detections": [],
+  "error": null
+}
