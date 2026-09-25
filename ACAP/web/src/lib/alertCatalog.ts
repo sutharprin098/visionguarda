@@ -130,6 +130,9 @@ export const EVENT_CATALOG: Record<string, EventDef> = {
   suitcase: { title: "Suitcase Detected", severity: "medium", icon: Package, group: "Unattended Item", pad: CONTEXT },
   umbrella: { title: "Object Detected", severity: "low", icon: Package, group: "Unattended Item", pad: CONTEXT },
 
+  // --- micro motion --------------------------------------------------------
+  micro_motion: { title: "Subtle Motion Detected", severity: "high", icon: Crosshair, group: "Micro Motion", pad: CONTEXT },
+
   // --- catalogued, but no shipped model emits these. See the header note. ----
   fire: { title: "Fire Detected", severity: "critical", icon: Flame, group: "Hazard", pad: FIRE },
   smoke: { title: "Smoke Detected", severity: "critical", icon: CloudFog, group: "Hazard", pad: SMOKE },

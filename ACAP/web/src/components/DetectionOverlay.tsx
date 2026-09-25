@@ -192,28 +192,40 @@ const isDetectionModuleEnabled = (d: TelemetryDetection, pFeatures?: Record<stri
     if (typeof v === "object" && v.enabled !== undefined) return Boolean(v.enabled);
     return dflt;
   };
+  const isAnyOn = (keys: string[], dflt = true) => {
+    return keys.some((k) => isFeatOn(k, dflt));
+  };
   if (d.module) {
+    if (d.module === "vehicle_detection" || d.module === "vehicle") {
+      return isAnyOn(["vehicle", "vehicle_detection", "vehicle_classification", "speed_estimation", "anpr"], true);
+    }
+    if (d.module === "person_detection" || d.module === "person") {
+      return isAnyOn(["person", "person_detection", "worker_detection", "customer_staff_detection", "person_counting"], true);
+    }
+    if (d.module === "night_vision" || d.module === "zero_dce" || d.module === "night_vision_zero_dce") {
+      return isAnyOn(["night_vision", "zero_dce", "night_vision_zero_dce"], false);
+    }
     return isFeatOn(d.module, false);
   }
   if (!d.class) return true;
   const cls = d.class.toLowerCase();
   if (d.custom_match || cls.startsWith("target:")) {
-    return isFeatOn("face_recognition", false) || isFeatOn("vip_face", false) || isFeatOn("customer_demographics", false) || isFeatOn("custom_detector", false) || isFeatOn("custom_detection_zone", false) || isFeatOn("detection_zone", false);
+    return isAnyOn(["face_recognition", "vip_face", "customer_demographics", "custom_detector", "custom_detection_zone", "detection_zone"], false);
   }
-  if (cls === "face") return isFeatOn("face_detection", false) || isFeatOn("face_recognition", false) || isFeatOn("vip_face", false) || isFeatOn("customer_demographics", false);
-  if (cls === "helmet" || cls === "no_helmet") return isFeatOn("helmet_detection", false) || isFeatOn("twowheeler_safety_helmet", false) || isFeatOn("ppe_detection", false);
-  if (cls === "vest" || cls === "no_vest") return isFeatOn("safety_vest", false) || isFeatOn("ppe_detection", false);
-  if (cls === "gloves" || cls === "no_gloves") return isFeatOn("gloves", false) || isFeatOn("ppe_detection", false);
-  if (cls === "shoes" || cls === "no_shoes") return isFeatOn("safety_shoes", false) || isFeatOn("shoes", false) || isFeatOn("ppe_detection", false);
-  if (cls === "fire" || cls === "smoke") return isFeatOn("fire_detection", false) || isFeatOn("smoke_detection", false);
+  if (cls === "face") return isAnyOn(["face", "face_detection", "face_recognition", "vip_face", "customer_demographics"], false);
+  if (cls === "helmet" || cls === "no_helmet") return isAnyOn(["helmet", "helmet_detection", "twowheeler_safety_helmet", "ppe_detection"], false);
+  if (cls === "vest" || cls === "no_vest") return isAnyOn(["safety_vest", "ppe_detection"], false);
+  if (cls === "gloves" || cls === "no_gloves") return isAnyOn(["gloves", "ppe_detection"], false);
+  if (cls === "shoes" || cls === "no_shoes") return isAnyOn(["safety_shoes", "shoes", "ppe_detection"], false);
+  if (cls === "fire" || cls === "smoke") return isAnyOn(["fire_detection", "smoke_detection"], false);
   if (cls === "forklift") return isFeatOn("forklift_detection", false);
-  if (cls === "number_plate") return isFeatOn("anpr", false) || isFeatOn("municipal_anpr", false);
-  if (cls === "micro_motion") return isFeatOn("micro_motion", false) || isFeatOn("micro_motion_hud", false);
+  if (cls === "number_plate" || cls === "plate") return isAnyOn(["plate", "anpr", "municipal_anpr"], false);
+  if (cls === "micro_motion") return isAnyOn(["micro_motion", "micro_motion_hud"], false);
   if (cls === "person" || cls === "worker" || cls === "customer" || cls === "staff") {
-    return isFeatOn("person_detection", true) || isFeatOn("worker_detection", true) || isFeatOn("customer_staff_detection", true) || isFeatOn("person_counting", true);
+    return isAnyOn(["person", "person_detection", "worker_detection", "customer_staff_detection", "person_counting"], true);
   }
   if (VEHICLE_CLS_SET.has(cls)) {
-    return isFeatOn("vehicle_detection", true) || isFeatOn("speed_estimation", true) || isFeatOn("vehicle_classification", true);
+    return isAnyOn(["vehicle", "vehicle_detection", "speed_estimation", "vehicle_classification", "anpr"], true);
   }
   return true;
 };
@@ -393,7 +405,7 @@ export default function DetectionOverlay({ detections, refreshKey = 0, mediaRef,
 
     // --- 1. RENDER MOTION BREADCRUMB TRAILS ---
     for (const det of renderDets) {
-      if (det.confidence != null && det.confidence < 0.38) continue;
+      if (det.confidence != null && det.confidence < 0.15) continue;
       const item = detToItemMap.get(det);
       if (!item || !item.trail || item.trail.length < 2) continue;
 

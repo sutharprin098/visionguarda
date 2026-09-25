@@ -265,7 +265,7 @@ export class AlertEngine {
       // Only raise detection-level alerts for genuine immediate threats or if presence alerts are explicitly requested.
       // Normal cars, buses, bikes, pedestrians, traffic lights, and stop signs are regular
       // scene detections (rendered on live overlay & HUD counters), NOT unacknowledged alerts!
-      const isCriticalOrThreat = ["weapon", "knife", "gun", "fire", "smoke", "no_helmet", "no_vest"].includes(d.class);
+      const isCriticalOrThreat = ["weapon", "knife", "gun", "fire", "smoke", "no_helmet", "no_vest", "micro_motion"].includes(d.class);
       const isAnimal = ["dog", "cat", "cow", "horse", "bear", "wolf"].includes(d.class);
 
       let allowPresenceAlert = false;

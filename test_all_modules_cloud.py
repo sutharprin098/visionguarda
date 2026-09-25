@@ -26,8 +26,10 @@ import json
 import urllib.request
 import urllib.error
 
-AWS_URL = os.getenv("CAMAI_AWS_URL", "http://13.203.71.14:8000")
+AWS_URL = os.getenv("CAMAI_AWS_URL", "http://127.0.0.1:8000")
 SNAPSHOT_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "axis_snapshot.jpg")
+if not os.path.exists(SNAPSHOT_FILE):
+    SNAPSHOT_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ACAP", "axis_snapshot.jpg")
 
 GREEN = "\033[92m"
 RED = "\033[91m"

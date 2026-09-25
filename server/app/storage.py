@@ -121,6 +121,21 @@ def init_db():
         except sqlite3.OperationalError:
             pass
 
+        for col, col_def in [
+            ("host", "TEXT DEFAULT NULL"),
+            ("port", "INTEGER DEFAULT NULL"),
+            ("protocol", "TEXT DEFAULT 'rtsp'"),
+            ("stream_path", "TEXT DEFAULT NULL"),
+            ("vendor", "TEXT DEFAULT 'generic'"),
+            ("mac_address", "TEXT DEFAULT NULL"),
+            ("username", "TEXT DEFAULT NULL"),
+            ("password", "TEXT DEFAULT NULL"),
+        ]:
+            try:
+                conn.execute(f"ALTER TABLE cameras ADD COLUMN {col} {col_def}")
+            except sqlite3.OperationalError:
+                pass
+
         # Alerts table
         conn.execute("""
             CREATE TABLE IF NOT EXISTS alerts (
@@ -204,22 +219,104 @@ def init_db():
 # --- Database APIs ---
 
 # Cameras
-def get_all_cameras():
+def sanitize_camera_record(cam: dict) -> dict:
+    """Strip sensitive server-side credentials before returning camera to frontend."""
+    if not cam:
+        return cam
+    c = dict(cam)
+    c.pop("password", None)
+    c.pop("username", None)
+    if "source" in c and c["source"]:
+        # Mask inline basic auth passwords from source strings if present
+        import re
+        c["source"] = re.sub(r"://([^:]+):([^@]+)@", r"://\1:***@", str(c["source"]))
+    return c
+
+def get_all_cameras(safe: bool = True):
     with get_db() as conn:
         rows = conn.execute("SELECT * FROM cameras").fetchall()
-        return [dict(row) for row in rows]
+        cams = [dict(row) for row in rows]
+        return [sanitize_camera_record(c) for c in cams] if safe else cams
 
-def get_camera(camera_id: str):
+def get_camera(camera_id: str, safe: bool = True):
     with get_db() as conn:
         row = conn.execute("SELECT * FROM cameras WHERE id = ?", (camera_id,)).fetchone()
-        return dict(row) if row else None
+        if not row:
+            return None
+        c = dict(row)
+        return sanitize_camera_record(c) if safe else c
+
+def get_camera_full(camera_id: str):
+    """Internal backend method returning raw camera record including credentials."""
+    return get_camera(camera_id, safe=False)
 
 def save_camera(camera_id: str, name: str, type_: str, source: str, is_active: int, zones: str = "[]", lines: str = "[]", rules: str = "[]", zone_profile: str = None, profile_features: str = "{}"):
     with get_db() as conn:
         conn.execute("""
-            INSERT OR REPLACE INTO cameras (id, name, type, source, is_active, zones, lines, rules, zone_profile, profile_features)
+            INSERT INTO cameras (id, name, type, source, is_active, zones, lines, rules, zone_profile, profile_features)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                name=excluded.name,
+                type=excluded.type,
+                source=excluded.source,
+                is_active=excluded.is_active,
+                zones=excluded.zones,
+                lines=excluded.lines,
+                rules=excluded.rules,
+                zone_profile=excluded.zone_profile,
+                profile_features=excluded.profile_features
         """, (camera_id, name, type_, source, is_active, zones, lines, rules, zone_profile, profile_features))
+        conn.commit()
+
+def save_camera_enrolled(
+    camera_id: str,
+    name: str,
+    type_: str,
+    source: str,
+    is_active: int = 1,
+    zones: str = "[]",
+    lines: str = "[]",
+    rules: str = "[]",
+    zone_profile: str = None,
+    profile_features: str = "{}",
+    host: str = None,
+    port: int = None,
+    protocol: str = "rtsp",
+    stream_path: str = None,
+    vendor: str = "generic",
+    mac_address: str = None,
+    username: str = None,
+    password: str = None,
+):
+    with get_db() as conn:
+        conn.execute("""
+            INSERT INTO cameras (
+                id, name, type, source, is_active, zones, lines, rules, zone_profile, profile_features,
+                host, port, protocol, stream_path, vendor, mac_address, username, password
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                name=excluded.name,
+                type=excluded.type,
+                source=excluded.source,
+                is_active=excluded.is_active,
+                zones=excluded.zones,
+                lines=excluded.lines,
+                rules=excluded.rules,
+                zone_profile=excluded.zone_profile,
+                profile_features=excluded.profile_features,
+                host=excluded.host,
+                port=excluded.port,
+                protocol=excluded.protocol,
+                stream_path=excluded.stream_path,
+                vendor=excluded.vendor,
+                mac_address=excluded.mac_address,
+                username=COALESCE(excluded.username, cameras.username),
+                password=COALESCE(excluded.password, cameras.password)
+        """, (
+            camera_id, name, type_, source, is_active, zones, lines, rules, zone_profile, profile_features,
+            host, port, protocol, stream_path, vendor, mac_address, username, password
+        ))
         conn.commit()
 
 def delete_camera(camera_id: str):

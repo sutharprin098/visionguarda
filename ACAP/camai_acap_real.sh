@@ -17,7 +17,39 @@ mkdir -p "$STATE_DIR"
 AWS_URL="http://13.203.71.14:8000/api/detect"
 AUTH="VLTUser:wY0-oD0jA6jft3"
 COOKIE_JAR="$STATE_DIR/cookie_jar.txt"
-SNAP_URL="http://127.0.0.1/axis-cgi/jpg/image.cgi?resolution=640x360&compression=50"
+SNAP_URL="http://127.0.0.1/axis-cgi/jpg/image.cgi?resolution=800x450&compression=40"
+
+# Portable subsecond sleep mechanism for Axis OS / BusyBox Linux
+if command -v usleep >/dev/null 2>&1; then
+    SLEEP_MODE="usleep"
+elif python3 -c 'import time' >/dev/null 2>&1; then
+    SLEEP_MODE="python3"
+elif python -c 'import time' >/dev/null 2>&1; then
+    SLEEP_MODE="python"
+else
+    SLEEP_MODE="integer"
+fi
+
+msleep() {
+    MS="$1"
+    [ -z "$MS" ] && return
+    case "$SLEEP_MODE" in
+        usleep)
+            usleep $(( MS * 1000 )) 2>/dev/null || sleep 1
+            ;;
+        python3)
+            python3 -c "import time; time.sleep($MS/1000.0)" 2>/dev/null || sleep 1
+            ;;
+        python)
+            python -c "import time; time.sleep($MS/1000.0)" 2>/dev/null || sleep 1
+            ;;
+        *)
+            IS=$(( (MS + 999) / 1000 ))
+            [ "$IS" -lt 1 ] && IS=1
+            sleep "$IS" 2>/dev/null || true
+            ;;
+    esac
+}
 
 publish() {
     CONTENT="$1"
@@ -46,9 +78,9 @@ aws_worker_loop() {
     while true; do
         FRAME_SRC="$STATE_DIR/current_frame.jpg"
         if [ -f "$FRAME_SRC" ] && [ -s "$FRAME_SRC" ]; then
-            # Atomic consume: move to worker workspace so new capture doesn't overwrite mid-read
+            # Non-destructive copy: live video retains current_frame.jpg continuously
             WORK_JPEG="$STATE_DIR/worker_$$.jpg"
-            mv "$FRAME_SRC" "$WORK_JPEG" 2>/dev/null || true
+            cp "$FRAME_SRC" "$WORK_JPEG" 2>/dev/null || true
 
             if [ -f "$WORK_JPEG" ] && [ -s "$WORK_JPEG" ]; then
                 WORKER_FRAME=$(( (WORKER_FRAME + 1) % 1000000 ))
@@ -75,7 +107,6 @@ aws_worker_loop() {
                     printf "\",\"frame_id\":%s,\"zone_profile\":\"%s\",\"camera_id\":\"axis-cam-01\",\"config\":%s}" "$WORKER_FRAME" "$PROFILE" "$CONFIG_JSON" >> "$PAYLOAD_FILE"
                     rm -f "$B64_FILE"
 
-                    T_START=$(date +%s)
                     RESP=$(curl -s --max-time 4 --connect-timeout 2 \
                         -H "Content-Type: application/json" \
                         -X POST \
@@ -93,7 +124,7 @@ aws_worker_loop() {
                 fi
             fi
         fi
-        sleep 0.05
+        msleep 100
     done
 }
 
@@ -104,29 +135,103 @@ WORKER_PID=$!
 trap "kill $WORKER_PID 2>/dev/null; exit 0" INT TERM EXIT
 
 # ── Primary Camera Frame Capture Loop ─────────────────────────────────────────
-# Captures at ~3 FPS with HTTP Keep-Alive and cookie jar to prevent web server socket starvation
 logger -t "camai_acap" "Camera capture loop starting..."
+
+if command -v python3 >/dev/null 2>&1 || command -v python >/dev/null 2>&1; then
+    PY_BIN=$(command -v python3 || command -v python)
+    logger -t "camai_acap" "Using Python persistent HTTP Keep-Alive capture worker ($PY_BIN)"
+    $PY_BIN -c '
+import urllib.request, time, os
+
+state_dir = "/tmp/camai"
+os.makedirs(state_dir, exist_ok=True)
+url = "http://127.0.0.1/axis-cgi/mjpg/video.cgi?resolution=800x450&fps=25"
+auth = "VLTUser:wY0-oD0jA6jft3"
+
+mgr = urllib.request.HTTPPasswordMgrWithDefaultRealm()
+if ":" in auth:
+    u, p = auth.split(":", 1)
+    mgr.add_password(None, "http://127.0.0.1", u, p)
+
+opener = urllib.request.build_opener(urllib.request.HTTPDigestAuthHandler(mgr))
+
+fail_count = 0
+while True:
+    try:
+        req = urllib.request.Request(url, headers={"Connection": "keep-alive"})
+        with opener.open(req, timeout=8) as stream:
+            buf = bytearray()
+            while True:
+                chunk = stream.read(8192)
+                if not chunk:
+                    break
+                buf.extend(chunk)
+                soi = buf.find(b"\xff\xd8")
+                eoi = buf.find(b"\xff\xd9", soi + 2) if soi != -1 else -1
+                if soi != -1 and eoi != -1:
+                    jpeg = buf[soi:eoi+2]
+                    del buf[:eoi+2]
+                    tmp_path = f"{state_dir}/capture_tmp_{os.getpid()}.jpg"
+                    with open(tmp_path, "wb") as f:
+                        f.write(jpeg)
+                    os.replace(tmp_path, f"{state_dir}/current_frame.jpg")
+                    fail_count = 0
+    except Exception:
+        fail_count += 1
+        # Fallback to single snapshot if continuous MJPEG loopback drops
+        try:
+            snap_url = "http://127.0.0.1/axis-cgi/jpg/image.cgi?resolution=800x450&compression=40"
+            snap_req = urllib.request.Request(snap_url)
+            with opener.open(snap_req, timeout=2) as snap_resp:
+                s_data = snap_resp.read()
+                if s_data and s_data.startswith(b"\xff\xd8"):
+                    tmp_path = f"{state_dir}/capture_tmp_{os.getpid()}.jpg"
+                    with open(tmp_path, "wb") as f:
+                        f.write(s_data)
+                    os.replace(tmp_path, f"{state_dir}/current_frame.jpg")
+        except Exception:
+            pass
+        time.sleep(0.5 if fail_count < 5 else 1.5)
+' 2>/dev/null || true
+fi
+
+# Fallback shell capture worker (runs if python is not available)
 CAPTURE_FRAME=0
+FAIL_COUNT=0
 
 while true; do
     CAPTURE_FRAME=$(( (CAPTURE_FRAME + 1) % 1000000 ))
     TEMP_JPEG="$STATE_DIR/capture_tmp_$$.jpg"
 
-    # Capture frame locally using persistent auth session (no Connection: close)
-    curl -s --max-time 2 --connect-timeout 1 \
+    # Try local capture without auth first (most Axis cameras allow loopback 127.0.0.1)
+    curl -s --max-time 1 --connect-timeout 1 \
         -c "$COOKIE_JAR" -b "$COOKIE_JAR" \
-        -u "$AUTH" --digest \
+        -H "Connection: keep-alive" \
         -o "$TEMP_JPEG" \
         "$SNAP_URL" 2>/dev/null || true
 
-    if [ -f "$TEMP_JPEG" ] && [ -s "$TEMP_JPEG" ]; then
-        # Atomic update of latest frame buffer (latest frame always replaces older)
-        mv "$TEMP_JPEG" "$STATE_DIR/current_frame.jpg" 2>/dev/null || rm -f "$TEMP_JPEG"
-    else
+    # If empty or unauthorized, attempt digest authentication
+    if [ ! -s "$TEMP_JPEG" ] || grep -q "401 Unauthorized" "$TEMP_JPEG" 2>/dev/null; then
         rm -f "$TEMP_JPEG"
+        curl -s --max-time 1 --connect-timeout 1 \
+        -c "$COOKIE_JAR" -b "$COOKIE_JAR" \
+        -H "Connection: keep-alive" \
+        -u "$AUTH" --digest \
+        -o "$TEMP_JPEG" \
+        "$SNAP_URL" 2>/dev/null || true
     fi
 
-    # 350ms sleep = ~3 FPS capture rate. Leaves 95%+ CPU and socket resources free for live MJPEG stream
-    sleep 0.35
-done
+    if [ -f "$TEMP_JPEG" ] && [ -s "$TEMP_JPEG" ] && ! grep -q "401 Unauthorized" "$TEMP_JPEG" 2>/dev/null; then
+        mv "$TEMP_JPEG" "$STATE_DIR/current_frame.jpg" 2>/dev/null || rm -f "$TEMP_JPEG"
+        FAIL_COUNT=0
+    else
+        rm -f "$TEMP_JPEG"
+        FAIL_COUNT=$(( FAIL_COUNT + 1 ))
+    fi
 
+    if [ "$FAIL_COUNT" -gt 5 ]; then
+        msleep 1000
+    else
+        msleep 80
+    fi
+done

@@ -604,19 +604,31 @@ async def detect(request: Request):
     
     t_inf_start = time.perf_counter()
 
-    # 1. Zero-DCE Night Vision Preprocessing (Requirement 4: only when enabled / required)
+    # 1. Zero-DCE Night Vision Preprocessing (Auto-detect low-light or explicit profile feature)
     is_night_vision_enabled = bool(
         profile_features.get("night_vision", {}).get("enabled")
         or profile_features.get("zero_dce", {}).get("enabled")
+        or profile_features.get("night_vision_zero_dce", {}).get("enabled")
         or body.get("night_vision")
         or body.get("zero_dce")
+        or zone_profile in ("night", "night_vision")
     )
-    if zero_dce is not None and is_night_vision_enabled:
+    night_vision_stats = {"zero_dce_applied": False, "mean_luminance": 128.0, "method": "off"}
+    if zero_dce is not None:
         try:
-            frame, _ = zero_dce.enhance(frame, force_enable=True)
-            model_inference_counts["zero_dce"] += 1
-        except Exception:
-            pass
+            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY) if len(frame.shape) == 3 else frame
+            avg_brightness = float(np.mean(gray))
+            night_vision_stats["mean_luminance"] = round(avg_brightness, 1)
+            # Enhance only when scene is actually dark (avg_brightness < 100) or force_enable requested
+            if is_night_vision_enabled and (avg_brightness < 100.0 or body.get("force_night_vision")):
+                frame, _ = zero_dce.enhance(frame, force_enable=True)
+                night_vision_stats["zero_dce_applied"] = True
+                night_vision_stats["method"] = "fast_bgr_lut"
+                model_inference_counts["zero_dce"] += 1
+            else:
+                night_vision_stats["method"] = "idle" if is_night_vision_enabled else "off"
+        except Exception as e:
+            print(f"[CLOUD_NODE] Zero-DCE enhance notice: {e}", flush=True)
 
     # 2. Primary YOLOX Detection Pass
     caller_conf = body.get("conf_threshold")
@@ -724,9 +736,10 @@ async def detect(request: Request):
 
     # 3c. ANPR Plate Detection & CRNN OCR Reading Pass
     is_anpr_enabled = bool(
-        zone_profile in ("traffic", "smart_city")
+        zone_profile in ("traffic", "smart_city", "anpr", "security", "night", "retail", "factory")
         or profile_features.get("anpr", {}).get("enabled")
         or profile_features.get("municipal_anpr", {}).get("enabled")
+        or True
     )
     if plate_detector is not None and is_anpr_enabled:
         try:
@@ -763,7 +776,9 @@ async def detect(request: Request):
     # 3d. Micro-Motion Detection Pass (MOG2 + Lucas-Kanade)
     is_motion_enabled = bool(
         zone_profile == "micro_motion"
+        or profile_features.get("micro_motion", {}).get("enabled")
         or profile_features.get("micro_motion_hud", {}).get("enabled")
+        or profile_features.get("screen_motion", {}).get("enabled")
     )
     if motion_detector is not None and is_motion_enabled:
         try:
@@ -910,7 +925,7 @@ async def detect(request: Request):
             tracked_detections.append(d)
 
     # 5. Full Analytics & Rules Engine Step (Single Source of Truth)
-    from app.analytics import filter_by_features, filter_by_profile
+    from app.analytics import filter_by_features, filter_by_profile, filter_detections_by_user_zones
     pixel_dets = []
     for det in tracked_detections:
         pd = dict(det)
@@ -978,6 +993,10 @@ async def detect(request: Request):
             if not is_on:
                 continue
         final_detections.append(d)
+
+    # Strict ROI polygon boundary filtering: objects outside drawn polygon zones are dropped
+    if zones:
+        final_detections = filter_detections_by_user_zones(final_detections, zones, orig_w, orig_h)
 
     frames_processed += 1
     processing_timestamps.append(time.time())

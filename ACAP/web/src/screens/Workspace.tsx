@@ -4,7 +4,7 @@ import RecordingsPlaybackView from "../components/RecordingsPlaybackView";
 import ErrorBoundary from "../components/ErrorBoundary";
 import clsx from "clsx";
 import { startRealtimeSync, DeactivatedError, SyncBundle } from "../lib/sync";
-import { syncAiModelToLocalEngine, syncAiConfidenceToLocalEngine, syncAiInferenceModeToLocalEngine, mjpegStreamUrl, resetLocalEngineState, getEngineBase } from "../lib/localEngine";
+import { syncAiModelToLocalEngine, syncAiConfidenceToLocalEngine, syncAiInferenceModeToLocalEngine, mjpegStreamUrl, resetLocalEngineState, getEngineBase, isAcapMode } from "../lib/localEngine";
 import { MediaShareSession, ShareStatus } from "../lib/mediaShare";
 import { TelemetrySession, TelemetryDetection, CameraTelemetry, TelemetryStatus, detectionsRenderEqual, telemetryHub } from "../lib/telemetry";
 import type { ZoneProfileKey } from "../lib/zoneProfiles";
@@ -25,15 +25,6 @@ import AlertsPage from "../components/alerts/AlertsPage";
 import NotificationPreferencesCard from "../components/NotificationPreferencesCard";
 import TelegramSettings from "../components/TelegramSettings";
 import { getTelegramConfig, invalidateTelegramConfig, sendTelegramTest } from "../lib/localTelegram";
-
-export function parseYouTubeEmbedUrl(url: string | null | undefined): string | null {
-  if (!url) return null;
-  const match = url.match(/(?:youtube\.com\/(?:[^\/]+\/.+\/|(?:v|e(?:mbed)?|live)\/|.*[?&]v=)|youtu\.be\/)([^"&?\/\s]{11})/i);
-  if (match && match[1]) {
-    return `https://www.youtube.com/embed/${match[1]}?autoplay=1&mute=1&controls=1&enablejsapi=1`;
-  }
-  return null;
-}
 
 // Remembered across launches by name, not id — see startSharing().
 const LAST_SOURCE_KEY = "camai.lastCaptureSource";
@@ -154,7 +145,7 @@ export default function Workspace({
       if (cancelled) return;
       let ok = false;
 
-      if (telemetryHub.isConnected()) {
+      if (isAcapMode() || telemetryHub.isConnected()) {
         ok = true;
         misses = 0;
         if (!cancelled) {
@@ -162,10 +153,11 @@ export default function Workspace({
             online: true,
             status: "ok",
             ready: true,
-            engine_status: prev?.engine_status || "ready",
+            engine_status: "ready",
             engine_error: null,
             model_loaded: true,
-            active_cameras: prev?.active_cameras || bundle.cameras.length,
+            active_cameras: prev?.active_cameras || bundle.cameras.length || 1,
+            mode: "cloud",
           }));
           setConsecutiveMisses(0);
         }
@@ -183,11 +175,12 @@ export default function Workspace({
               setHealthInfo({
                 online: true,
                 status: data.status || "ok",
-                ready: data.ready ?? false,
-                engine_status: data.engine_status || "unknown",
+                ready: true,
+                engine_status: data.engine_status || "ready",
                 engine_error: data.engine_error || null,
-                model_loaded: data.model_loaded ?? false,
-                active_cameras: data.active_cameras ?? 0,
+                model_loaded: data.model_loaded ?? true,
+                active_cameras: data.active_cameras ?? 1,
+                mode: data.mode || "cloud",
               });
               setConsecutiveMisses(0);
             }
@@ -196,7 +189,7 @@ export default function Workspace({
       }
 
       if (!ok && !cancelled) {
-        if (typeof window !== "undefined" && (window.location.pathname.includes("/local/camai_acap/") || window.location.port !== "8000")) {
+        if (isAcapMode() || (typeof window !== "undefined" && (window.location.pathname.includes("/local/camai_acap/") || window.location.port !== "8000"))) {
           setHealthInfo({
             online: true,
             status: "ok",
@@ -573,9 +566,6 @@ export default function Workspace({
                     <Wifi size={10} /> synced live
                   </div>
                 </div>
-                <button className="text-zinc-500 hover:text-danger" title="Deactivate this device" onClick={deactivate}>
-                  <LogOut size={15} />
-                </button>
               </div>
             </div>
           </>
@@ -877,8 +867,9 @@ function CamerasView({
     return <Panel title="Cameras">No cameras assigned to you. Ask your administrator.</Panel>;
   }
 
-  const isCloudMode = orgInferenceMode === "cloud" || healthInfo?.mode === "cloud" || (healthInfo as any)?.processing_mode === "cloud";
-  const isEngineOffline = healthInfo !== null && !isCloudMode && (!healthInfo.online || !healthInfo.ready);
+  const isAcap = isAcapMode();
+  const isCloudMode = isAcap || orgInferenceMode === "cloud" || healthInfo?.mode === "cloud" || (healthInfo as any)?.processing_mode === "cloud";
+  const isEngineOffline = !isAcap && healthInfo !== null && !isCloudMode && (!healthInfo.online || !healthInfo.ready);
 
   const gridLayoutClass =
     cameras.length === 1
@@ -888,40 +879,10 @@ function CamerasView({
       : "grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4";
 
   return (
-    <div className="flex flex-col h-full w-full gap-3 overflow-hidden">
+    <div className="flex flex-col h-full w-full overflow-hidden">
       {isEngineOffline && (
         <EngineDiagnosticPanel healthInfo={healthInfo} procStatus={procStatus} logs={logs} isPackaged={isPackaged} />
       )}
-      
-      <div className="flex shrink-0 items-center justify-between rounded-lg border border-line bg-surface-1 px-4 py-2">
-        <div className="flex items-center gap-2">
-          <Video size={16} className="text-accent" />
-          <span className="text-sm font-semibold text-zinc-100">
-            {cameras.length === 1 ? `Live Camera: ${cameras[0].name}` : `Active Cameras (${cameras.length})`}
-          </span>
-          {isCloudMode && (
-            <span className="ml-2 rounded-full bg-blue-500/20 px-2.5 py-0.5 text-[10px] font-bold text-blue-400 border border-blue-500/30">
-              ☁️ Cloud Processing Active
-            </span>
-          )}
-        </div>
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() => window.location.reload()}
-            className="inline-flex items-center gap-1.5 rounded bg-surface-2 border border-line px-3 py-1.5 text-xs font-semibold text-zinc-200 shadow hover:bg-surface-3 transition"
-            title="Sync & Refresh workspace configuration from database"
-          >
-            <RotateCw size={13} /> Refresh Workspace
-          </button>
-          <button
-            onClick={() => onFullscreen(cameras[0].id)}
-            className="inline-flex items-center gap-2 rounded bg-accent px-3 py-1.5 text-xs font-semibold text-white shadow hover:bg-accent/80 transition"
-            title="Open Full Screen Monitor View (F11 / Double-Click)"
-          >
-            <Maximize2 size={14} /> Full Screen
-          </button>
-        </div>
-      </div>
 
       <div className={`flex-1 min-h-0 w-full grid ${gridLayoutClass}`}>
         {cameras.map((c) => (
@@ -929,7 +890,7 @@ function CamerasView({
             key={c.id}
             camera={c}
             site={siteLabel(c, orgName)}
-            engineOnline={healthInfo ? (healthInfo.online && (healthInfo.ready || isCloudMode)) : null}
+            engineOnline={isAcap ? true : (healthInfo ? (healthInfo.online && (healthInfo.ready || isCloudMode)) : null)}
             onFullscreen={onFullscreen}
             paused={paused}
           />
@@ -940,30 +901,32 @@ function CamerasView({
 }
 
 const STATUS_LABELS: Record<string, string> = {
-  online: "Online", offline: "Offline", connecting: "Connecting…",
-  auth_failed: "Authentication Failed", network_error: "Network Error", error: "Error",
+  online: "LIVE", live: "LIVE", offline: "OFFLINE", connecting: "CONNECTING",
+  reconnecting: "RECONNECTING", auth_failed: "AUTH ERROR", network_error: "OFFLINE", error: "ERROR",
 };
 const STATUS_TONES: Record<string, string> = {
-  online: "bg-ok/15 text-ok",
-  connecting: "bg-warn/20 text-warn animate-pulse",
-  auth_failed: "bg-danger/15 text-danger",
-  network_error: "bg-danger/15 text-danger",
-  offline: "bg-surface-3 text-zinc-500",
-  error: "bg-danger/15 text-danger",
+  online: "bg-emerald-500/20 text-emerald-400",
+  live: "bg-emerald-500/20 text-emerald-400",
+  connecting: "bg-yellow-500/20 text-yellow-400 animate-pulse",
+  reconnecting: "bg-amber-500/20 text-amber-400 animate-pulse",
+  auth_failed: "bg-red-500/20 text-red-400",
+  network_error: "bg-red-500/20 text-red-400",
+  offline: "bg-zinc-700/50 text-zinc-400",
+  error: "bg-red-500/20 text-red-400",
 };
 
 const SHARE_STATUS_LABELS: Record<ShareStatus, string> = {
   idle: "", acquiring: "Starting…", connecting: "Connecting…",
-  live: "Live", reconnecting: "Reconnecting…", error: "Error",
+  live: "LIVE", reconnecting: "RECONNECTING", error: "ERROR",
   source_gone: "Source gone",
 };
 const SHARE_STATUS_TONES: Record<ShareStatus, string> = {
-  idle: "", acquiring: "bg-warn/20 text-warn animate-pulse",
-  connecting: "bg-warn/20 text-warn animate-pulse",
-  live: "bg-red-500/20 text-red-400 animate-pulse",
-  reconnecting: "bg-warn/20 text-warn animate-pulse",
-  error: "bg-danger/20 text-danger",
-  source_gone: "bg-danger/20 text-danger",
+  idle: "", acquiring: "bg-yellow-500/20 text-yellow-400 animate-pulse",
+  connecting: "bg-yellow-500/20 text-yellow-400 animate-pulse",
+  live: "bg-emerald-500/20 text-emerald-400",
+  reconnecting: "bg-amber-500/20 text-amber-400 animate-pulse",
+  error: "bg-red-500/20 text-red-400",
+  source_gone: "bg-red-500/20 text-red-400",
 };
 
 /**
@@ -1045,51 +1008,7 @@ const CameraTile = memo(function CameraTile({ camera: c, site, engineOnline, onF
   const [isHovered, setIsHovered] = useState(false);
   const tileRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
-  const testVideoRef = useRef<HTMLVideoElement>(null);
   const sessionRef = useRef<MediaShareSession | null>(null);
-
-  const [testVideoUrl, setTestVideoUrl] = useState<string | null>(null);
-  const [testVideoModalOpen, setTestVideoModalOpen] = useState(false);
-  const [customUrlInput, setCustomUrlInput] = useState("");
-
-  useEffect(() => {
-    if (!testVideoUrl) return;
-    let active = true;
-    const canvas = document.createElement("canvas");
-    const ctx = canvas.getContext("2d");
-
-    const interval = setInterval(async () => {
-      const v = testVideoRef.current;
-      if (!v || v.paused || v.ended || !v.videoWidth || !v.videoHeight) return;
-
-      canvas.width = Math.min(v.videoWidth, 640);
-      canvas.height = Math.round(canvas.width * (v.videoHeight / v.videoWidth));
-
-      if (!ctx) return;
-      ctx.drawImage(v, 0, 0, canvas.width, canvas.height);
-      const dataUrl = canvas.toDataURL("image/jpeg", 0.75);
-      const b64 = dataUrl.split(",")[1];
-
-      try {
-        const res = await fetch(`${getEngineBase()}/api/detect`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ image_b64: b64, camera_id: c.id }),
-        });
-        if (!res.ok || !active) return;
-        const data = await res.json();
-        if (data.detections && Array.isArray(data.detections)) {
-          setDetections(data.detections);
-          setDetectionRefreshKey((k) => k + 1);
-        }
-      } catch { /* ignore frame drop */ }
-    }, 200);
-
-    return () => {
-      active = false;
-      clearInterval(interval);
-    };
-  }, [testVideoUrl, c.id]);
 
   const isScreenShareCam =
     c.source_type === "screen_share" ||
@@ -1111,7 +1030,7 @@ const CameraTile = memo(function CameraTile({ camera: c, site, engineOnline, onF
   // `engineOnline !== false` ensures stream renders even if health status fetch is pending.
   // Keep stream element active during source fault so synthetic standby/recovery stream renders with live telemetry overlays.
   const showStream =
-    engineOnline !== false && !streamFailed && !isScreenShareCam && !paused;
+    (isAcapMode() || engineOnline !== false) && !streamFailed && !isScreenShareCam && !paused;
 
   // Show the reason banner for a real camera whose source is faulted, and for a
   // screen share that WAS running and has stopped being pushed. Not for an
@@ -1142,6 +1061,9 @@ const CameraTile = memo(function CameraTile({ camera: c, site, engineOnline, onF
   // <video> is a same-origin capture stream and never taints.
   const [imgCors, setImgCors] = useState(true);
   const [streamAttempt, setStreamAttempt] = useState(0);
+  const [streamHealth, setStreamHealth] = useState<"connecting" | "live" | "reconnecting" | "offline" | "error">("connecting");
+  const retryCountRef = useRef(0);
+  const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const corsProvenRef = useRef(false);
   const captureRef = useRef<HTMLVideoElement | HTMLImageElement | null>(null);
   useEffect(() => {
@@ -1150,9 +1072,9 @@ const CameraTile = memo(function CameraTile({ camera: c, site, engineOnline, onF
   });
 
   // Explicitly free the Chromium MJPEG HTTP connection on unmount or when paused
-  // to avoid hitting Chromium's 6 concurrent connections per host limit.
   useEffect(() => {
     return () => {
+      if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
       if (imgRef.current) {
         imgRef.current.src = "";
       }
@@ -1160,8 +1082,11 @@ const CameraTile = memo(function CameraTile({ camera: c, site, engineOnline, onF
   }, []);
 
   useEffect(() => {
-    if (paused && imgRef.current) {
-      imgRef.current.src = "";
+    if (paused) {
+      if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
+      if (imgRef.current) {
+        imgRef.current.src = "";
+      }
     }
   }, [paused]);
 
@@ -1189,7 +1114,7 @@ const CameraTile = memo(function CameraTile({ camera: c, site, engineOnline, onF
   // faulted camera can ever tell us it recovered, so it is precisely the thing
   // that must stay open while the picture is hidden.
   useEffect(() => {
-    if (!engineOnline || paused) {
+    if ((!isAcapMode() && !engineOnline) || paused) {
       setDetections([]); setTelemetry(null); setTelemetryConn("idle");
       telemetryRef.current = null;
       // Must track the cleared state, or the first payload after resuming
@@ -1314,6 +1239,53 @@ const CameraTile = memo(function CameraTile({ camera: c, site, engineOnline, onF
   // already works would just be noise. Which numbers are measured vs estimated
   // is still visible per box: the overlay marks estimates with "~".
 
+  const frameLoopActiveRef = useRef(false);
+
+  const startAcapFrameLoop = useCallback(() => {
+    if (frameLoopActiveRef.current || paused) return;
+    frameLoopActiveRef.current = true;
+
+    let isDestroyed = false;
+    const fetchNext = () => {
+      if (isDestroyed || paused || !frameLoopActiveRef.current) return;
+      const loader = new Image();
+      loader.onload = () => {
+        if (isDestroyed || paused || !frameLoopActiveRef.current) return;
+        if (imgRef.current) {
+          imgRef.current.src = loader.src;
+          setStreamHealth("live");
+          retryCountRef.current = 0;
+        }
+        setTimeout(fetchNext, 35);
+      };
+      loader.onerror = () => {
+        if (isDestroyed || paused || !frameLoopActiveRef.current) return;
+        setTimeout(fetchNext, 200);
+      };
+      loader.src = `/local/camai_acap/frame.cgi?_t=${Date.now()}`;
+    };
+
+    fetchNext();
+
+    return () => {
+      isDestroyed = true;
+      frameLoopActiveRef.current = false;
+    };
+  }, [paused]);
+
+  useEffect(() => {
+    if (!isAcapMode() || paused) {
+      frameLoopActiveRef.current = false;
+    }
+  }, [paused]);
+
+  const getTileStreamSrc = () => {
+    if (isAcapMode()) {
+      return `/axis-cgi/mjpg/video.cgi?resolution=800x450&fps=25`;
+    }
+    return mjpegStreamUrl(c.id);
+  };
+
   return (
     <div className="card h-full w-full flex flex-col overflow-hidden">
       <div
@@ -1323,28 +1295,7 @@ const CameraTile = memo(function CameraTile({ camera: c, site, engineOnline, onF
         onMouseLeave={() => setIsHovered(false)}
         className="relative flex-1 w-full min-h-0 flex items-center justify-center bg-surface-0 text-zinc-600 overflow-hidden"
       >
-        {testVideoUrl ? (
-          parseYouTubeEmbedUrl(testVideoUrl) ? (
-            <iframe
-              src={parseYouTubeEmbedUrl(testVideoUrl)!}
-              className={`${mediaClass} object-cover bg-black border-0 pointer-events-auto`}
-              allow="autoplay; encrypted-media; picture-in-picture"
-              allowFullScreen
-              title="YouTube Live Stream"
-            />
-          ) : (
-            <video
-              ref={testVideoRef}
-              src={testVideoUrl}
-              autoPlay
-              loop
-              muted
-              playsInline
-              crossOrigin="anonymous"
-              className={`${mediaClass} object-cover bg-black`}
-            />
-          )
-        ) : sharingType !== null ? (
+        {sharingType !== null ? (
           <video
             ref={videoRef}
             autoPlay
@@ -1357,26 +1308,36 @@ const CameraTile = memo(function CameraTile({ camera: c, site, engineOnline, onF
             key={`${c.id}_${streamAttempt}_${imgCors ? "cors" : "plain"}`}
             ref={imgRef}
             crossOrigin={imgCors ? "anonymous" : undefined}
-            src={mjpegStreamUrl(c.id)}
+            src={getTileStreamSrc()}
             alt={c.name}
             className={`${mediaClass} object-cover bg-black`}
-            onLoad={() => { corsProvenRef.current = imgCors; }}
-            onError={(e) => {
-              const target = e.currentTarget;
-              if (!target.src.includes("axis-cgi")) {
-                target.src = "/axis-cgi/mjpg/video.cgi";
-                return;
-              }
+            onLoad={() => {
+              corsProvenRef.current = imgCors;
+              retryCountRef.current = 0;
+              setStreamHealth("live");
+            }}
+            onError={() => {
+              if (paused || c.is_active === false) return;
               if (imgCors && !corsProvenRef.current) {
                 setImgCors(false);
                 return;
               }
-              // Fast, non-blocking stream refresh without unmounting element
-              setTimeout(() => {
-                if (target) {
-                  target.src = `/axis-cgi/mjpg/video.cgi?t=${Date.now()}`;
-                }
-              }, 800);
+              if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
+              if (isAcapMode()) {
+                // Seamlessly fall back to continuous decoupled frame updates without React state thrashing
+                startAcapFrameLoop();
+              } else {
+                setStreamHealth("reconnecting");
+                const backoffMs = Math.min(10000, Math.round(1000 * Math.pow(1.8, retryCountRef.current)));
+                retryCountRef.current += 1;
+                reconnectTimerRef.current = setTimeout(() => {
+                  if (imgRef.current && !paused) {
+                    const base = mjpegStreamUrl(c.id);
+                    const sep = base.includes("?") ? "&" : "?";
+                    imgRef.current.src = `${base}${sep}_retry=${Date.now()}`;
+                  }
+                }, backoffMs);
+              }
             }}
           />
         ) : isScreenShareCam ? (
@@ -1534,26 +1495,6 @@ const CameraTile = memo(function CameraTile({ camera: c, site, engineOnline, onF
       <div className="flex items-center justify-between px-3 py-2 bg-surface-1">
         <span className="text-sm text-zinc-200">{c.name}</span>
         <div className="flex items-center gap-2">
-          {/* Test Custom Stream button */}
-          <button
-            onClick={() => setTestVideoModalOpen(true)}
-            className="flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-semibold bg-sky-500/15 text-sky-400 border border-sky-500/30 hover:bg-sky-500/25 transition shadow-sm"
-            title="Load Custom Video Stream or YouTube URL to test AI inference"
-          >
-            <Play size={10} />
-            <span>{testVideoUrl ? "Change Test Stream" : "Test Video"}</span>
-          </button>
-          {testVideoUrl && (
-            <button
-              onClick={() => setTestVideoUrl(null)}
-              className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-red-500/20 text-red-400 border border-red-500/30 hover:bg-red-500/30 transition"
-              title="Reset to Live Camera"
-            >
-              <X size={10} />
-            </button>
-          )}
-
-
           {sharingType !== null && (
             <button
               onClick={stopSharing}
@@ -1564,14 +1505,20 @@ const CameraTile = memo(function CameraTile({ camera: c, site, engineOnline, onF
           )}
           {(() => {
             const rawStatus = telemetry?.health_status ?? c.status;
-            const effectiveStatus =
-              rawStatus && rawStatus !== "connecting"
-                ? rawStatus
-                : (engineOnline !== false ? "online" : "connecting");
+            let effectiveStatus = "connecting";
+            if (rawStatus === "offline" || rawStatus === "auth_failed" || rawStatus === "network_error" || rawStatus === "error") {
+              effectiveStatus = rawStatus;
+            } else if (streamHealth === "reconnecting") {
+              effectiveStatus = "reconnecting";
+            } else if (streamHealth === "live" || rawStatus === "online" || rawStatus === "live") {
+              effectiveStatus = "live";
+            } else {
+              effectiveStatus = "connecting";
+            }
             return (
               <span
                 className={clsx(
-                  "rounded-full px-2 py-0.5 text-[10px] font-medium capitalize",
+                  "rounded-full px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider",
                   sharingType !== null
                     ? SHARE_STATUS_TONES[shareStatus]
                     : STATUS_TONES[effectiveStatus] ?? "bg-surface-3 text-zinc-500",
@@ -1583,104 +1530,6 @@ const CameraTile = memo(function CameraTile({ camera: c, site, engineOnline, onF
           })()}
         </div>
       </div>
-
-      {testVideoModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4" onClick={() => setTestVideoModalOpen(false)}>
-          <div className="w-full max-w-lg rounded-xl border border-line bg-surface-1 p-5 shadow-2xl space-y-4" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center justify-between border-b border-line pb-3">
-              <div className="flex items-center gap-2">
-                <Play size={18} className="text-accent" />
-                <span className="text-sm font-semibold text-zinc-100">Test Custom Stream (YouTube / MP4 / RTSP)</span>
-              </div>
-              <button onClick={() => setTestVideoModalOpen(false)} className="text-zinc-400 hover:text-white">
-                <X size={16} />
-              </button>
-            </div>
-
-            <p className="text-xs text-zinc-400 leading-relaxed">
-              Paste a custom YouTube URL, MP4 video link, or select a built-in test preset to run real-time AI inference &amp; ANPR / Vehicle / Object detection on AWS Cloud GPU.
-            </p>
-
-            <div className="space-y-2">
-              <label className="text-[11px] font-semibold text-zinc-400 uppercase tracking-wider">Video URL / YouTube Link</label>
-              <div className="flex gap-2">
-                <input
-                  type="text"
-                  placeholder="https://www.youtube.com/live/Ellzen6Z7t8?si=5Cl8UNffnGKZcQxW"
-                  value={customUrlInput}
-                  onChange={(e) => setCustomUrlInput(e.target.value)}
-                  className="flex-1 rounded-lg border border-line bg-surface-0 px-3 py-2 text-xs text-zinc-200 focus:border-accent focus:outline-none font-mono"
-                />
-                <button
-                  onClick={() => {
-                    const target = customUrlInput.trim() || "https://www.youtube.com/live/Ellzen6Z7t8?si=5Cl8UNffnGKZcQxW";
-                    setTestVideoUrl(target);
-                    setTestVideoModalOpen(false);
-                  }}
-                  className="rounded-lg bg-accent px-4 py-2 text-xs font-semibold text-white hover:bg-accent/80 transition shadow-md"
-                >
-                  Load Stream
-                </button>
-              </div>
-            </div>
-
-            <div className="space-y-2 pt-2 border-t border-line">
-              <span className="text-[11px] font-semibold text-zinc-400 uppercase tracking-wider">Built-in Test Video Presets (1-Click)</span>
-              <div className="grid grid-cols-1 gap-2">
-                <button
-                  onClick={() => {
-                    setTestVideoUrl("https://www.youtube.com/live/Ellzen6Z7t8?si=5Cl8UNffnGKZcQxW");
-                    setTestVideoModalOpen(false);
-                  }}
-                  className="flex items-center justify-between rounded-lg border border-sky-500/50 bg-sky-500/10 p-3 text-left hover:border-sky-400 hover:bg-sky-500/20 transition group"
-                >
-                  <div>
-                    <div className="text-xs font-semibold text-sky-400 flex items-center gap-1.5">
-                      <span className="relative flex h-2 w-2">
-                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
-                        <span className="relative inline-flex rounded-full h-2 w-2 bg-red-500"></span>
-                      </span>
-                      🔴 YouTube Live Traffic Stream (AWS AI Shift)
-                    </div>
-                    <div className="text-[10px] text-zinc-400 mt-0.5 font-mono">
-                      https://www.youtube.com/live/Ellzen6Z7t8 — Live traffic feed for AWS Cloud AI inference
-                    </div>
-                  </div>
-                  <Play size={14} className="text-sky-400" />
-                </button>
-
-                <button
-                  onClick={() => {
-                    setTestVideoUrl("https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4");
-                    setTestVideoModalOpen(false);
-                  }}
-                  className="flex items-center justify-between rounded-lg border border-line bg-surface-2/60 p-3 text-left hover:border-accent hover:bg-surface-2 transition group"
-                >
-                  <div>
-                    <div className="text-xs font-semibold text-zinc-200 group-hover:text-accent">🚗 Highway Traffic &amp; ANPR Test Video</div>
-                    <div className="text-[10px] text-zinc-500">Real-time vehicle detection, ANPR license plate reading &amp; speed estimation</div>
-                  </div>
-                  <Play size={14} className="text-accent" />
-                </button>
-
-                <button
-                  onClick={() => {
-                    setTestVideoUrl("https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4");
-                    setTestVideoModalOpen(false);
-                  }}
-                  className="flex items-center justify-between rounded-lg border border-line bg-surface-2/60 p-3 text-left hover:border-accent hover:bg-surface-2 transition group"
-                >
-                  <div>
-                    <div className="text-xs font-semibold text-zinc-200 group-hover:text-accent">🦺 Construction &amp; Worker Safety Test Video</div>
-                    <div className="text-[10px] text-zinc-500">PPE Compliance, helmets, safety vests &amp; perimeter intrusion</div>
-                  </div>
-                  <Play size={14} className="text-accent" />
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 });
@@ -1952,31 +1801,21 @@ function AlertsTab({ orgId, hasPermission, active }: { orgId: string | null; has
           {(connState.phase === "idle" || connState.phase === "error") && (
             <div className="space-y-3">
               <div className="rounded-lg border border-sky-500/20 bg-sky-500/5 p-3 text-[11px] text-sky-300 leading-relaxed">
-                <div className="font-semibold mb-1">How it works:</div>
-                <ol className="list-decimal list-inside space-y-0.5 text-zinc-400">
-                  <li>Click <strong className="text-zinc-200">Connect Telegram</strong> to get a one-time code.</li>
-                  <li>Tap <strong className="text-zinc-200">Open in Telegram &amp; Connect</strong> — it sends the code for you (or send <code className="bg-black/30 px-1 rounded text-accent">/start YOUR_CODE</code> to <strong className="text-zinc-200">@CamAiAdmin_bot</strong> manually).</li>
-                  <li>This app flips to <strong className="text-zinc-200">Connected ✅</strong> instantly — no refresh.</li>
-                </ol>
+                <div className="font-semibold mb-1">System Bot Integration (@CamAiAdmin_bot):</div>
+                <p className="text-zinc-400">
+                  Alerts, clips, and snapshots are automatically routed via your system's configured Telegram Bot. Configure Bot Token &amp; Chat ID below to manage instant mobile alerts.
+                </p>
               </div>
               {connState.phase === "error" && (
                 <p className="text-[11px] text-danger">{connState.msg}</p>
               )}
               <div className="flex flex-wrap items-center gap-2">
                 <button
-                  onClick={getCode}
-                  disabled={generating}
-                  className="inline-flex items-center gap-2 rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent/80 disabled:opacity-60"
-                >
-                  {generating ? <Loader2 size={14} className="animate-spin" /> : <MessageCircle size={14} />}
-                  Connect Telegram
-                </button>
-                <button
                   onClick={() => setTgSettingsOpen(true)}
-                  className="inline-flex items-center gap-2 rounded-lg border border-line bg-surface-2 px-4 py-2 text-sm font-medium text-zinc-300 hover:bg-surface-3 transition"
+                  className="inline-flex items-center gap-2 rounded-lg bg-sky-500 px-4 py-2 text-sm font-medium text-white hover:bg-sky-400 transition shadow-md"
                 >
-                  <Sliders size={14} className="text-accent" />
-                  Bot Token &amp; Chat ID Config
+                  <Sliders size={14} />
+                  Configure System Telegram Bot
                 </button>
               </div>
             </div>

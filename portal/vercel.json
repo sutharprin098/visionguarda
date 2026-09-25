@@ -57,7 +57,7 @@
   "redirects": [],
   "rewrites": [
     {
-      "source": "/((?!downloads/).*)",
+      "source": "/((?!downloads/|overview/|overview\\.html|assets/).*)",
       "destination": "/index.html"
     }
   ]

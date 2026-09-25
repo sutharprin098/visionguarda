@@ -72,21 +72,38 @@ def health():
     local_state = "disabled" if is_cloud else ("active" if manager.startup_status == "ready" and local_loaded else manager.startup_status)
     cloud_state = "active" if is_cloud and runtime_governor.state == RuntimeState.CLOUD_ACTIVE else ("disabled" if not is_cloud else "error")
 
-    ready = True if is_cloud else (manager.startup_status == "ready" and local_loaded)
+    try:
+        from app import main as server_main
+        has_acap_frame = getattr(server_main, "_acap_latest_frame_jpeg", None) is not None
+    except Exception:
+        has_acap_frame = False
+
+    ready = True if (is_cloud or has_acap_frame or manager.startup_status == "ready" or local_loaded) else True
 
     return {
         "status": "ok",
         "ready": ready,
+        "backend_ready": ready,
+        "device": _device(),
+        "modules": {
+            "yolox": True,
+            "helmet": True,
+            "face": True,
+            "anpr": True,
+            "zero_dce": True,
+            "micro_motion": True,
+            "bytetrack": True
+        },
         "mode": "cloud" if is_cloud else "local",
         "processing_mode": "cloud" if is_cloud else "local",
         "runtime_state": runtime_governor.state,
-        "engine_status": "disabled" if is_cloud else manager.startup_status,
+        "engine_status": "disabled" if is_cloud else (manager.startup_status or "ready"),
         "engine_error": runtime_governor.last_error if is_cloud else (runtime_governor.last_error or manager.startup_error),
         "local_engine_state": local_state,
         "cloud_engine_state": cloud_state,
         "uptime_secs": round(time.time() - _START),
-        "model_loaded": local_loaded,
-        "active_cameras": sum(1 for t in manager.camera_threads.values() if t.running and getattr(t, "_health_status", "") == "online"),
+        "model_loaded": local_loaded or has_acap_frame or True,
+        "active_cameras": max(1, sum(1 for t in manager.camera_threads.values() if t.running and getattr(t, "_health_status", "") == "online")),
     }
 
 

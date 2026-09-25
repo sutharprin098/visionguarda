@@ -54,12 +54,13 @@ PRODUCIBLE_PPE_CLASSES = {"helmet", "no_helmet", "vest", "no_vest", "gloves", "s
 
 PROFILE_CLASSES = {
     "traffic": set(PRODUCIBLE_VEHICLE_CLASSES) | {"person", "traffic_light", "stop_sign", "helmet", "no_helmet", "number_plate", "fire", "smoke"},
-    "security": set(PRODUCIBLE_VEHICLE_CLASSES) | set(PRODUCIBLE_ANIMAL_CLASSES) | {"person", "backpack", "handbag", "suitcase", "umbrella", "face", "fire", "smoke"},
-    "factory": set(PRODUCIBLE_VEHICLE_CLASSES) | set(PRODUCIBLE_ANIMAL_CLASSES) | {"person", "face", "helmet", "no_helmet", "vest", "no_vest", "gloves", "shoes", "mask", "goggles", "fire", "smoke", "forklift"},
-    "retail": set(PRODUCIBLE_VEHICLE_CLASSES) | {"person", "backpack", "handbag", "suitcase", "cell phone", "face"},
+    "security": set(PRODUCIBLE_VEHICLE_CLASSES) | set(PRODUCIBLE_ANIMAL_CLASSES) | {"person", "backpack", "handbag", "suitcase", "umbrella", "face", "fire", "smoke", "number_plate", "micro_motion"},
+    "factory": set(PRODUCIBLE_VEHICLE_CLASSES) | set(PRODUCIBLE_ANIMAL_CLASSES) | {"person", "face", "helmet", "no_helmet", "vest", "no_vest", "gloves", "shoes", "mask", "goggles", "fire", "smoke", "forklift", "number_plate"},
+    "retail": set(PRODUCIBLE_VEHICLE_CLASSES) | {"person", "backpack", "handbag", "suitcase", "cell phone", "face", "number_plate"},
     "smart_city": set(PRODUCIBLE_VEHICLE_CLASSES) | set(PRODUCIBLE_ANIMAL_CLASSES) | {"person", "traffic_light", "stop_sign", "fire", "smoke", "number_plate", "helmet", "no_helmet", "face"},
     "micro_motion": set(PRODUCIBLE_VEHICLE_CLASSES) | set(PRODUCIBLE_ANIMAL_CLASSES) | {"person", "backpack", "handbag", "suitcase", "umbrella", "face", "micro_motion"},
-    "custom": set(PRODUCIBLE_VEHICLE_CLASSES) | set(PRODUCIBLE_ANIMAL_CLASSES) | {"person", "backpack", "handbag", "suitcase", "umbrella", "face", "custom_object", "fire", "smoke", "helmet", "vest"},
+    "night": set(PRODUCIBLE_VEHICLE_CLASSES) | set(PRODUCIBLE_ANIMAL_CLASSES) | {"person", "face", "number_plate", "helmet", "no_helmet", "micro_motion"},
+    "custom": set(PRODUCIBLE_VEHICLE_CLASSES) | set(PRODUCIBLE_ANIMAL_CLASSES) | {"person", "backpack", "handbag", "suitcase", "umbrella", "face", "custom_object", "fire", "smoke", "helmet", "vest", "number_plate", "micro_motion"},
 }
 
 
@@ -103,11 +104,17 @@ FEATURE_CLASSES = {
     "queue_length": set(PRODUCIBLE_VEHICLE_CLASSES) | {"person"},
     "u_turn_detection": set(PRODUCIBLE_VEHICLE_CLASSES),
     "anpr": {"number_plate"},
+    "municipal_anpr": {"number_plate"},
     "object_left_behind": {"backpack", "handbag", "suitcase", "umbrella", "cell phone"},
     "object_removed": {"backpack", "handbag", "suitcase", "umbrella", "cell phone"},
     "traffic_light_violation": {"traffic_light"},
     "stop_line_violation": {"stop_sign"},
+    "micro_motion": {"micro_motion"},
     "micro_motion_hud": {"micro_motion"},
+    "screen_motion": {"micro_motion"},
+    "night_vision": set(PRODUCIBLE_VEHICLE_CLASSES) | {"person", "face", "number_plate", "micro_motion"},
+    "zero_dce": set(PRODUCIBLE_VEHICLE_CLASSES) | {"person", "face", "number_plate", "micro_motion"},
+    "night_vision_zero_dce": set(PRODUCIBLE_VEHICLE_CLASSES) | {"person", "face", "number_plate", "micro_motion"},
     "custom_detector": {"custom_object", "person"},
     "custom_counting": set(PRODUCIBLE_VEHICLE_CLASSES) | {"person"},
     "custom_classification": {"custom_object"},

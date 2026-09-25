@@ -48,8 +48,8 @@ export const DEFAULT_OFFLINE_BUNDLE: SyncBundle = {
     },
   ],
   settings: [
-    { scope: "org", key: "ai.inference_mode", value: "cloud" },
-    { scope: "org", key: "ai.cloud_endpoint_url", value: "http://13.203.71.14:8000" },
+    { scope: "org", key: "ai.inference_mode", value: "local" },
+    { scope: "org", key: "ai.cloud_endpoint_url", value: "http://127.0.0.1:8000" },
   ],
   notifications: [],
   ai_model_assignments: [],

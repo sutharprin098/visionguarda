@@ -19,6 +19,7 @@ export interface TelemetryDetection {
   plate_text?: string | null;
   custom_match?: boolean;
   label?: string;
+  module?: string;
   bbox: { x1: number; y1: number; x2: number; y2: number };
 }
 
@@ -299,7 +300,7 @@ class MultiTelemetryHub {
       } catch {
         /* ignore */
       }
-    }, 80);
+    }, 120);
   }
 
   private startHeartbeat(): void {

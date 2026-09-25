@@ -96,7 +96,8 @@ def build_eap_for_arch(arch):
                 ]
             },
             'licensing': {
-                'licenseType': 'free'
+                'licenseType': 'custom',
+                'licensePage': 'LICENSE'
             }
         }
     }, indent=2).encode()
@@ -122,8 +123,8 @@ def build_eap_for_arch(arch):
         'VENDOR="%s"' % vendor,
         'VENDORURL="https://camai.princesite.in"',
         'RUNMODE="respawn"',
-        'LICENSETYPE="free"',
-        'LICENSEPAGE="none"',
+        'LICENSETYPE="custom"',
+        'LICENSEPAGE="LICENSE"',
         'SETTINGSPAGEFILE="index.html"',
         'SETTINGPAGE="index.html"',
         'APPURL="index.html"',
@@ -135,7 +136,20 @@ def build_eap_for_arch(arch):
     ]).encode()
 
     param_data = b'# CamAI parameters\n'
-    license_data = b'No licenses\n'
+    
+    license_file_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'LICENSE')
+    if os.path.isfile(license_file_path):
+        with open(license_file_path, 'rb') as lf:
+            license_data = lf.read()
+    else:
+        license_data = (
+            b"CamAI Proprietary License Agreement\n\n"
+            b"Copyright (c) 2026 CamAI. All Rights Reserved.\n\n"
+            b"This software and associated documentation files (the \"Software\") are proprietary and confidential.\n"
+            b"Unauthorized copying, modifying, merging, publishing, distributing, sublicensing, or selling copies\n"
+            b"of the Software, via any medium, is strictly prohibited.\n\n"
+            b"The Software is provided \"AS IS\", without warranty of any kind, express or implied.\n"
+        )
 
     # ── Load the REAL inference script ────────────────────────────────────────
     # camai_acap_real.sh is the actual working inference loop that:
@@ -171,6 +185,7 @@ def build_eap_for_arch(arch):
         ('param.conf',             param_data,    0o644),
         ('LICENSE',                license_data,  0o644),
         ('camai_acap_LICENSE.txt', license_data,  0o644),
+        ('html/LICENSE',           license_data,  0o644),
         (app,                      shell_script,  0o755),  # Real inference script (exec)
     ]
 
@@ -182,53 +197,98 @@ def build_eap_for_arch(arch):
 
     config_cgi_code = (
         "#!/bin/sh\n"
-        "printf \"Status: 200 OK\\r\\n\"\n"
-        "printf \"Content-Type: application/json\\r\\n\"\n"
-        "printf \"Cache-Control: no-cache, no-store, must-revalidate\\r\\n\"\n"
-        "printf \"Access-Control-Allow-Origin: *\\r\\n\\r\\n\"\n"
+        "echo \"Content-Type: application/json\"\n"
+        "echo \"Cache-Control: no-cache, no-store, must-revalidate\"\n"
+        "echo \"Access-Control-Allow-Origin: *\"\n"
+        "echo \"Access-Control-Allow-Methods: GET, POST, OPTIONS\"\n"
+        "echo \"Access-Control-Allow-Headers: Content-Type\"\n"
+        "echo \"\"\n"
         "mkdir -p /tmp/camai\n"
-        "cat > /tmp/camai/config.json\n"
-        "sed -n 's/.*\"zone_profile\":\"\\([^\"]*\\)\".*/\\1/p' /tmp/camai/config.json > /tmp/camai/active_profile.txt 2>/dev/null || true\n"
-        "printf '{\"status\":\"ok\"}'\n"
-        "printf \"\\n\"\n"
+        "if [ \"$REQUEST_METHOD\" = \"POST\" ]; then\n"
+        "    cat > /tmp/camai/config.json 2>/dev/null || true\n"
+        "    sed -n 's/.*\"zone_profile\":\"\\([^\"]*\\)\".*/\\1/p' /tmp/camai/config.json > /tmp/camai/active_profile.txt 2>/dev/null || true\n"
+        "    echo '{\"status\":\"ok\"}'\n"
+        "else\n"
+        "    if [ -f /tmp/camai/config.json ] && [ -s /tmp/camai/config.json ]; then\n"
+        "        cat /tmp/camai/config.json\n"
+        "    else\n"
+        "        echo '{\"zone_profile\":\"traffic\",\"profile_features\":{},\"zones\":[],\"lines\":[]}'\n"
+        "    fi\n"
+        "fi\n"
     ).encode()
 
     detections_cgi_code = (
         "#!/bin/sh\n"
-        "printf \"Status: 200 OK\\r\\n\"\n"
-        "printf \"Content-Type: application/json\\r\\n\"\n"
-        "printf \"Cache-Control: no-cache, no-store, must-revalidate\\r\\n\"\n"
-        "printf \"Access-Control-Allow-Origin: *\\r\\n\\r\\n\"\n"
+        "echo \"Content-Type: application/json\"\n"
+        "echo \"Cache-Control: no-cache, no-store, must-revalidate\"\n"
+        "echo \"Access-Control-Allow-Origin: *\"\n"
+        "echo \"\"\n"
         "if [ -f /tmp/camai/latest_detections.json ] && [ -s /tmp/camai/latest_detections.json ]; then\n"
         "    cat /tmp/camai/latest_detections.json\n"
         "else\n"
-        "    printf '{\"type\":\"telemetry\",\"status\":\"ok\",\"count\":0,\"detections\":[],\"alerts\":[]}'\n"
+        "    echo '{\"type\":\"telemetry\",\"status\":\"ok\",\"count\":0,\"detections\":[],\"alerts\":[]}'\n"
         "fi\n"
-        "printf \"\\n\"\n"
     ).encode()
 
     telemetry_cgi_code = (
         "#!/bin/sh\n"
-        "printf \"Status: 200 OK\\r\\n\"\n"
-        "printf \"Content-Type: application/json\\r\\n\"\n"
-        "printf \"Cache-Control: no-cache, no-store, must-revalidate\\r\\n\"\n"
-        "printf \"Access-Control-Allow-Origin: *\\r\\n\\r\\n\"\n"
+        "echo \"Content-Type: application/json\"\n"
+        "echo \"Cache-Control: no-cache, no-store, must-revalidate\"\n"
+        "echo \"Access-Control-Allow-Origin: *\"\n"
+        "echo \"\"\n"
         "if [ -f /tmp/camai/latest_telemetry.json ] && [ -s /tmp/camai/latest_telemetry.json ]; then\n"
         "    cat /tmp/camai/latest_telemetry.json\n"
         "else\n"
-        "    printf '{\"type\":\"telemetry\",\"status\":\"ok\",\"count\":0,\"detections\":[],\"alerts\":[]}'\n"
+        "    echo '{\"type\":\"telemetry\",\"status\":\"ok\",\"count\":0,\"detections\":[],\"alerts\":[]}'\n"
         "fi\n"
-        "printf \"\\n\"\n"
+    ).encode()
+
+    frame_cgi_code = (
+        "#!/bin/sh\n"
+        "echo \"Content-Type: image/jpeg\"\n"
+        "echo \"Cache-Control: no-cache, no-store, must-revalidate\"\n"
+        "echo \"Access-Control-Allow-Origin: *\"\n"
+        "echo \"\"\n"
+        "if [ -f /tmp/camai/current_frame.jpg ] && [ -s /tmp/camai/current_frame.jpg ]; then\n"
+        "    cat /tmp/camai/current_frame.jpg\n"
+        "elif [ -f /tmp/camai/live_frame.jpg ]; then\n"
+        "    cat /tmp/camai/live_frame.jpg\n"
+        "fi\n"
+    ).encode()
+
+    video_cgi_code = (
+        "#!/bin/sh\n"
+        "echo \"HTTP/1.1 200 OK\"\n"
+        "echo \"Content-Type: multipart/x-mixed-replace; boundary=--myboundary\"\n"
+        "echo \"Cache-Control: no-cache, no-store, must-revalidate\"\n"
+        "echo \"Pragma: no-cache\"\n"
+        "echo \"Access-Control-Allow-Origin: *\"\n"
+        "echo \"Connection: close\"\n"
+        "echo \"\"\n"
+        "while true; do\n"
+        "    if [ -f /tmp/camai/current_frame.jpg ] && [ -s /tmp/camai/current_frame.jpg ]; then\n"
+        "        echo \"--myboundary\"\n"
+        "        echo \"Content-Type: image/jpeg\"\n"
+        "        echo \"\"\n"
+        "        cat /tmp/camai/current_frame.jpg\n"
+        "        echo \"\"\n"
+        "    fi\n"
+        "    usleep 33000 2>/dev/null || sleep 1\n"
+        "done\n"
     ).encode()
 
     with open(os.path.join(html_dir, 'config.cgi'), 'wb') as f: f.write(config_cgi_code)
     with open(os.path.join(html_dir, 'detections.cgi'), 'wb') as f: f.write(detections_cgi_code)
     with open(os.path.join(html_dir, 'telemetry.cgi'), 'wb') as f: f.write(telemetry_cgi_code)
+    with open(os.path.join(html_dir, 'frame.cgi'), 'wb') as f: f.write(frame_cgi_code)
+    with open(os.path.join(html_dir, 'video.cgi'), 'wb') as f: f.write(video_cgi_code)
 
     cgi_bridges = [
         ('html/config.cgi',     os.path.join(html_dir, 'config.cgi')),
         ('html/detections.cgi', os.path.join(html_dir, 'detections.cgi')),
         ('html/telemetry.cgi',  os.path.join(html_dir, 'telemetry.cgi')),
+        ('html/frame.cgi',      os.path.join(html_dir, 'frame.cgi')),
+        ('html/video.cgi',      os.path.join(html_dir, 'video.cgi')),
     ]
     for eap_name, cgi_path in cgi_bridges:
         if os.path.isfile(cgi_path):
@@ -284,24 +344,28 @@ def build_eap_for_arch(arch):
             add_file(tf, name, data, mode)
 
     eap_bytes = buf.getvalue()
-    filename = f'{app}_{ver.replace(".", "_")}_{arch}.eap'
+    filenames = [
+        f'{app}_{ver.replace(".", "_")}_{arch}.eap',
+        f'camai_edge_{ver.replace(".", "_")}_{arch}.eap'
+    ]
 
     dest_dirs = [
-        os.path.dirname(os.path.abspath(__file__)),  # ACAP dir always first
+        os.path.dirname(os.path.abspath(__file__)),
         r'd:\camAI\portal\public\downloads',
         r'd:\camAI\portal\dist\downloads',
         r'd:\camAI\overview_site\downloads',
     ]
 
-    for d in dest_dirs:
-        if os.path.exists(d):
-            fp = os.path.join(d, filename)
-            with open(fp, 'wb') as f:
-                f.write(eap_bytes)
-            print(f" -> Deployed: {fp}")
+    for fn in filenames:
+        for d in dest_dirs:
+            if os.path.exists(d):
+                fp = os.path.join(d, fn)
+                with open(fp, 'wb') as f:
+                    f.write(eap_bytes)
+                print(f" -> Deployed: {fp}")
 
-    print(f"[SUCCESS] Built: {filename} ({len(eap_bytes)} bytes)")
-    return filename
+    print(f"[SUCCESS] Built {arch} packages ({len(eap_bytes)} bytes)")
+    return filenames[0]
 
 def verify_eap(eap_path):
     """Verify EAP package contents."""

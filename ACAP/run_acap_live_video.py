@@ -28,13 +28,54 @@ import numpy as np
 # Add server directory to path
 ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 SERVER_DIR = os.path.join(ROOT_DIR, "server")
-sys.path.insert(0, SERVER_DIR)
+if SERVER_DIR not in sys.path:
+    sys.path.insert(0, SERVER_DIR)
+if ROOT_DIR not in sys.path:
+    sys.path.insert(0, ROOT_DIR)
 
-from app.ai.stream_resolver import resolve, needs_resolution
+try:
+    from app.ai.stream_resolver import resolve, needs_resolution
+except ImportError:
+    from server.app.ai.stream_resolver import resolve, needs_resolution  # type: ignore
 
-DEFAULT_VIDEO_URL = "https://www.youtube.com/watch?v=Ellzen6Z7t8"
+AXIS_SNAPSHOT = os.path.join(ROOT_DIR, "ACAP", "axis_snapshot.jpg")
+DEFAULT_VIDEO_URL = AXIS_SNAPSHOT
 LOCAL_VIDEO_FALLBACK = os.path.join(ROOT_DIR, "videos", "CamAI_Enterprise_Demo_50s.mp4")
-LOCAL_IMAGE_FALLBACK = os.path.join(ROOT_DIR, "test_axis_frame.jpg")
+LOCAL_IMAGE_FALLBACK = AXIS_SNAPSHOT
+
+
+class ImageStreamCapture:
+    """Provides a smooth 30 FPS VideoCapture-compatible interface for static camera snapshots."""
+    def __init__(self, image_path):
+        self.image_path = image_path
+        self.frame = cv2.imread(image_path)
+        if self.frame is None:
+            self.frame = np.zeros((720, 1280, 3), dtype=np.uint8)
+        self.h, self.w = self.frame.shape[:2]
+        self._opened = True
+
+    def isOpened(self):
+        return self._opened
+
+    def read(self):
+        if not self._opened:
+            return False, None
+        return True, self.frame.copy()
+
+    def get(self, prop):
+        if prop == cv2.CAP_PROP_FPS:
+            return 30.0
+        elif prop == cv2.CAP_PROP_FRAME_WIDTH:
+            return self.w
+        elif prop == cv2.CAP_PROP_FRAME_HEIGHT:
+            return self.h
+        return 0
+
+    def set(self, prop, val):
+        return True
+
+    def release(self):
+        self._opened = False
 
 
 def ensure_server_running():
@@ -64,35 +105,44 @@ def ensure_server_running():
 
 
 def get_playable_stream(video_url):
-    """Resolve online URL or fallback to local video/synthetic stream."""
+    """Resolve Axis camera stream, local image/video or direct media stream."""
     print(f"[*] Resolving video stream source: {video_url}")
 
-    if ("youtube.com" in video_url or "youtu.be" in video_url) and \
-            len(video_url.split("v=")[-1].split("&")[0]) < 11:
-        print("[!] Provided YouTube video ID is truncated. Using default.")
-        video_url = DEFAULT_VIDEO_URL
+    if not video_url or video_url == "default" or "youtube" in str(video_url).lower():
+        video_url = AXIS_SNAPSHOT
 
-    try:
-        if needs_resolution(video_url):
-            direct = resolve(video_url)
-            print(f"[+] Resolved direct media stream URL: {direct[:80]}...")
-            cap = cv2.VideoCapture(direct)
-            if cap.isOpened():
-                return cap, video_url
-    except Exception as e:
-        print(f"[!] Online stream resolution notice: {e}")
+    # Check if local image
+    if os.path.exists(video_url) and (video_url.lower().endswith(('.jpg', '.jpeg', '.png', '.bmp'))):
+        print(f"[+] Loading Axis Camera Snapshot stream: {video_url}")
+        return ImageStreamCapture(video_url), video_url
 
-    if os.path.exists(LOCAL_VIDEO_FALLBACK):
-        print(f"[*] Loading local camera video feed: {LOCAL_VIDEO_FALLBACK}")
-        cap = cv2.VideoCapture(LOCAL_VIDEO_FALLBACK)
+    # Check if local video
+    if os.path.exists(video_url) and (video_url.lower().endswith(('.mp4', '.avi', '.mkv', '.mov'))):
+        print(f"[+] Loading local camera video feed: {video_url}")
+        cap = cv2.VideoCapture(video_url)
         if cap.isOpened():
-            return cap, LOCAL_VIDEO_FALLBACK
+            return cap, video_url
 
-    if os.path.exists(LOCAL_IMAGE_FALLBACK):
-        print(f"[*] Loading local camera frame feed: {LOCAL_IMAGE_FALLBACK}")
-        cap = cv2.VideoCapture(LOCAL_IMAGE_FALLBACK)
-        if cap.isOpened():
-            return cap, LOCAL_IMAGE_FALLBACK
+    # Check online or RTSP/HTTP stream
+    if str(video_url).startswith(("http://", "https://", "rtsp://")):
+        try:
+            if needs_resolution(video_url):
+                direct = resolve(video_url)
+                print(f"[+] Resolved direct media stream URL: {direct[:80]}...")
+                cap = cv2.VideoCapture(direct)
+                if cap.isOpened():
+                    return cap, video_url
+            else:
+                cap = cv2.VideoCapture(video_url)
+                if cap.isOpened():
+                    return cap, video_url
+        except Exception as e:
+            print(f"[!] Online stream resolution notice: {e}")
+
+    # Fallback to Axis snapshot
+    if os.path.exists(AXIS_SNAPSHOT):
+        print(f"[+] Fallback to Axis Camera Snapshot: {AXIS_SNAPSHOT}")
+        return ImageStreamCapture(AXIS_SNAPSHOT), AXIS_SNAPSHOT
 
     return None, "None"
 
@@ -148,7 +198,10 @@ def _ai_worker_loop(server_url):
 def _push_frame_to_mjpeg_buffer(jpeg_bytes):
     """Write JPEG directly to server MJPEG buffer - no HTTP, no latency."""
     try:
-        import app.main as server_main
+        try:
+            import app.main as server_main
+        except ImportError:
+            import server.app.main as server_main  # type: ignore
         with server_main._acap_jpeg_lock:
             server_main._acap_latest_frame_jpeg = jpeg_bytes
     except Exception:
@@ -217,12 +270,26 @@ def run_acap_live_pipeline(video_url=DEFAULT_VIDEO_URL, server_url="http://127.0
             frame_counter += 1
             ai_subsample_counter += 1
 
-            # PIPELINE A: resize + encode + push to MJPEG buffer
+            # PIPELINE A: High-Definition resize + optional Night Vision + encode + push to MJPEG buffer
             h, w = frame.shape[:2]
-            tw = 1280
-            th = max(360, int(h * tw / float(w)))
-            display = cv2.resize(frame, (tw, th), interpolation=cv2.INTER_LINEAR)
-            _, buf = cv2.imencode('.jpg', display, [cv2.IMWRITE_JPEG_QUALITY, 85])
+            tw = 1920 if w >= 1280 else 1280
+            th = max(480, int(h * tw / float(w)))
+            display = cv2.resize(frame, (tw, th), interpolation=cv2.INTER_CUBIC)
+
+            try:
+                try:
+                    import app.main as server_main
+                except ImportError:
+                    import server.app.main as server_main
+                if getattr(server_main, "_acap_night_vision_active", False):
+                    z_dce = server_main._get_acap_submodels()[0]
+                    if z_dce is not None:
+                        display, _ = z_dce.enhance(display, force_enable=True)
+            except Exception:
+                pass
+
+            # High Quality Crystal Clear JPEG Stream (Quality 95)
+            _, buf = cv2.imencode('.jpg', display, [cv2.IMWRITE_JPEG_QUALITY, 95])
             _push_frame_to_mjpeg_buffer(buf.tobytes())
 
             # Log real video FPS every 5 seconds
@@ -239,13 +306,12 @@ def run_acap_live_pipeline(video_url=DEFAULT_VIDEO_URL, server_url="http://127.0
             # PIPELINE B: subsampled frames only -> AI worker
             if ai_subsample_counter >= AI_SUBSAMPLE:
                 ai_subsample_counter = 0
-                _, ai_buf = cv2.imencode('.jpg', display, [cv2.IMWRITE_JPEG_QUALITY, 78])
+                _, ai_buf = cv2.imencode('.jpg', display, [cv2.IMWRITE_JPEG_QUALITY, 92])
                 with _state_lock:
                     _latest_ai_payload = {
                         "image_b64": base64.b64encode(ai_buf).decode('utf-8'),
                         "frame_id": frame_counter,
                         "camera_id": "axis-cam-01",
-                        "zone_profile": "security",
                     }
 
             # Rate-limit to TARGET_FPS

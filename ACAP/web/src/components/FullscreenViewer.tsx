@@ -190,14 +190,18 @@ export default function FullscreenViewer({
     log("stream image error, retrying...", { cameraId, retryCount });
     const target = e.currentTarget;
     setTimeout(() => {
-      if (target && target.src) {
-        try {
-          const url = new URL(target.src);
-          url.searchParams.set("_t", String(Date.now()));
-          target.src = url.toString();
-        } catch { /* ignore */ }
+      if (target) {
+        if (isAcapMode()) {
+          target.src = `/axis-cgi/jpg/image.cgi?resolution=800x450&compression=25&_t=${Date.now()}`;
+        } else if (target.src) {
+          try {
+            const url = new URL(target.src);
+            url.searchParams.set("_t", String(Date.now()));
+            target.src = url.toString();
+          } catch { /* ignore */ }
+        }
       }
-    }, 1500);
+    }, isAcapMode() ? 200 : 1500);
   };
 
   // ---- camera switching without leaving fullscreen -------------------------
@@ -278,7 +282,16 @@ export default function FullscreenViewer({
           src={mjpegStreamUrl(cameraId)}
           alt=""
           className="h-full w-full object-contain"
-          onLoad={() => { corsProvenRef.current = imgCors; }}
+          onLoad={() => {
+            corsProvenRef.current = imgCors;
+            if (isAcapMode() && imgRef.current && imgRef.current.src.includes("/axis-cgi/jpg/image.cgi")) {
+              setTimeout(() => {
+                if (imgRef.current) {
+                  imgRef.current.src = `/axis-cgi/jpg/image.cgi?resolution=800x450&compression=25&_t=${Date.now()}`;
+                }
+              }, 100);
+            }
+          }}
           onError={handleImageError}
         />
       ) : (

@@ -29,21 +29,61 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from typing import List, Dict, Optional
 import cv2
+import logging
+
+logger = logging.getLogger("camai")
 
 from app import config
 from app.config import HOST, PORT, RECORDINGS_DIR, UPLOADS_DIR, MODELS_DIR, API_TOKEN, CORS_ORIGINS
 from app.storage import (
-    init_db, get_all_cameras, get_camera, save_camera, delete_camera,
+    init_db, get_all_cameras, get_camera, get_camera_full, save_camera, save_camera_enrolled, delete_camera,
     get_recent_alerts, clear_all_alerts, get_history, clear_all_history,
     get_all_recordings, get_recording_settings, save_recording_settings
 )
 from app.camera_manager import manager
-from app.ai.pipeline import get_detection_confidence, set_detection_confidence
+from app.ai.pipeline import get_detection_confidence, set_detection_confidence, mask_source
 from app.ai.stream_resolver import blocked_source_reason
 from app.ai.tiling import get_tiling_settings, set_tiling_settings
 from app.ai.tile_governor import governor
 from app.gpu_monitor import get_gpu_usage
 from app.runtime_governor import runtime_governor, RuntimeState
+
+import urllib.parse
+
+AXIS_CAMERA_HOST = os.environ.get("AXIS_CAMERA_HOST", "")
+AXIS_CAMERA_PORT = int(os.environ.get("AXIS_CAMERA_PORT", "0")) if os.environ.get("AXIS_CAMERA_PORT") else None
+AXIS_CAMERA_USER = os.environ.get("AXIS_CAMERA_USER", "")
+AXIS_CAMERA_PASS = os.environ.get("AXIS_CAMERA_PASS", "")
+AXIS_CAMERA_STREAM_PATH = os.environ.get("AXIS_CAMERA_STREAM_PATH", "/axis-media/media.amp?videocodec=h264")
+
+_axis_pass_enc = urllib.parse.quote(AXIS_CAMERA_PASS, safe="") if AXIS_CAMERA_PASS else ""
+
+if AXIS_CAMERA_HOST:
+    port_str = f":{AXIS_CAMERA_PORT}" if AXIS_CAMERA_PORT else ""
+    user_str = f"{AXIS_CAMERA_USER}:{_axis_pass_enc}@" if (AXIS_CAMERA_USER and _axis_pass_enc) else ""
+    AXIS_CAMERA_URL = os.environ.get("AXIS_CAMERA_URL", f"rtsp://{user_str}{AXIS_CAMERA_HOST}{port_str}{AXIS_CAMERA_STREAM_PATH}")
+    AXIS_CAMERA_RAW_URL = os.environ.get("AXIS_CAMERA_RAW_URL", f"rtsp://{AXIS_CAMERA_HOST}{port_str}{AXIS_CAMERA_STREAM_PATH}")
+else:
+    AXIS_CAMERA_URL = os.environ.get("AXIS_CAMERA_URL", "")
+    AXIS_CAMERA_RAW_URL = os.environ.get("AXIS_CAMERA_RAW_URL", "")
+
+def _get_axis_camera_auth_url(raw_url: str = None) -> str:
+    url = raw_url or AXIS_CAMERA_URL
+    if not url:
+        try:
+            all_cams = get_all_cameras()
+            if all_cams:
+                active_cam = next((c for c in all_cams if c.get("is_active")), all_cams[0])
+                full_cam = get_camera_full(active_cam["id"])
+                if full_cam and full_cam.get("source"):
+                    return full_cam["source"]
+        except Exception:
+            pass
+        return ""
+    if "://" in url and "@" not in url and AXIS_CAMERA_USER:
+        proto, rest = url.split("://", 1)
+        return f"{proto}://{AXIS_CAMERA_USER}:{AXIS_CAMERA_PASS}@{rest}"
+    return url
 
 app = FastAPI(title="CamAI CCTV Analytics Platform")
 
@@ -608,6 +648,7 @@ _acap_latest_telemetry = {
 
 _acap_latest_frame_jpeg = None
 _acap_jpeg_lock = asyncio.Lock() if False else threading.Lock()
+_acap_night_vision_active = False
 
 @app.get("/local/camai_acap/telemetry.json")
 @app.get("/local/camai_acap/telemetry.cgi")
@@ -633,12 +674,64 @@ def get_acap_favicon():
         return FileResponse(fav_file, media_type="image/svg+xml")
     return Response(status_code=404)
 
+_acap_config = {
+    "status": "ok",
+    "zone_profile": "traffic",
+    "profile_features": {},
+    "zones": [],
+    "lines": [],
+    "rules": [],
+}
+
 @app.get("/local/camai_acap/config.cgi")
 @app.post("/local/camai_acap/config.cgi")
 @app.get("/config.cgi")
 @app.post("/config.cgi")
 async def acap_config_endpoint(request: Request):
-    return JSONResponse({"status": "ok", "zone_profile": "security", "message": "ACAP configuration saved"})
+    global _acap_config
+    if request.method == "POST":
+        try:
+            body = await request.json()
+            if isinstance(body, dict):
+                if "zone_profile" in body and body["zone_profile"]:
+                    _acap_config["zone_profile"] = str(body["zone_profile"]).lower().strip()
+                if "profile_features" in body:
+                    pf = body["profile_features"]
+                    if isinstance(pf, str):
+                        try:
+                            pf = json.loads(pf)
+                        except Exception:
+                            pf = {}
+                    _acap_config["profile_features"] = pf
+                if "zones" in body:
+                    z = body["zones"]
+                    if isinstance(z, str):
+                        try:
+                            z = json.loads(z)
+                        except Exception:
+                            z = []
+                    _acap_config["zones"] = z
+                if "lines" in body:
+                    l = body["lines"]
+                    if isinstance(l, str):
+                        try:
+                            l = json.loads(l)
+                        except Exception:
+                            l = []
+                    _acap_config["lines"] = l
+                if "rules" in body:
+                    r = body["rules"]
+                    if isinstance(r, str):
+                        try:
+                            r = json.loads(r)
+                        except Exception:
+                            r = []
+                    _acap_config["rules"] = r
+                logger.info(f"[ACAP Config] Configuration updated: profile={_acap_config.get('zone_profile')}, features={list(_acap_config.get('profile_features', {}).keys())}")
+        except Exception as e:
+            logger.error(f"[ACAP Config] Error parsing config POST: {e}")
+        return JSONResponse({"status": "ok", "config": _acap_config, "message": "ACAP configuration saved"})
+    return JSONResponse(_acap_config)
 
 import collections
 
@@ -648,42 +741,43 @@ _acap_frame_times = collections.deque(maxlen=30)
 def _acap_mjpeg_generator():
     """
     PIPELINE A VIDEO SERVER: Serves MJPEG frames at the capture loop rate (~30 FPS).
-    The capture loop writes new JPEG bytes to _acap_latest_frame_jpeg directly
-    (in-process, no HTTP). This generator just reads and streams them as fast
-    as they arrive — it does NOT wait for AI inference.
+    The capture loop writes new JPEG bytes to _acap_latest_frame_jpeg directly.
+    Streams frames smoothly without socket buffer overflow.
     """
-    last_sent_id = None
-    frame_seq = 0
     while True:
         with _acap_jpeg_lock:
             frame_bytes = _acap_latest_frame_jpeg
         if frame_bytes is not None:
-            # Send every frame — no byte-comparison skip
-            # The capture loop controls rate via its own sleep(FRAME_INTERVAL)
-            frame_seq += 1
-            yield (b'--frame\r\n'
-                   b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
-            # 1ms sleep: yields GIL without blocking, lets capture loop write next frame
-            time.sleep(0.001)
+            yield (
+                b'--frame\r\n'
+                b'Content-Type: image/jpeg\r\n'
+                b'Content-Length: ' + str(len(frame_bytes)).encode('ascii') + b'\r\n\r\n'
+                + frame_bytes + b'\r\n'
+            )
+            time.sleep(0.033)
         else:
-            # No stream yet — show placeholder at 5 FPS
+            # No stream yet — show placeholder at 10 FPS
             blank = np.zeros((480, 640, 3), dtype=np.uint8)
             cv2.putText(blank, "CamAI ACAP - Waiting for stream...", (40, 240),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 215, 255), 2)
             _, buf = cv2.imencode('.jpg', blank)
-            yield (b'--frame\r\n'
-                   b'Content-Type: image/jpeg\r\n\r\n' + buf.tobytes() + b'\r\n')
-            time.sleep(0.2)
+            b_bytes = buf.tobytes()
+            yield (
+                b'--frame\r\n'
+                b'Content-Type: image/jpeg\r\n'
+                b'Content-Length: ' + str(len(b_bytes)).encode('ascii') + b'\r\n\r\n'
+                + b_bytes + b'\r\n'
+            )
+            time.sleep(0.1)
 
 @app.get("/axis-cgi/mjpg/video.cgi")
 @app.get("/mjpg/video.mjpg")
 @app.get("/mjpg/video.cgi")
-@app.get("/api/cameras/{camera_id}/stream")
-def acap_mjpeg_stream(camera_id: Optional[str] = None):
-    return StreamingResponse(_acap_mjpeg_generator(), media_type="multipart/x-mixed-replace; boundary=frame")
+async def acap_mjpeg_stream(request: Request = None):
+    return await get_mjpeg_stream("axis-local-cam", request)
 
 from app.ai.pipeline import ByteTracker, resolve_emitted_detections
-from app.analytics import CameraAnalytics, filter_by_features, filter_by_profile
+from app.analytics import CameraAnalytics, filter_by_features, filter_by_profile, filter_detections_by_user_zones
 
 _acap_tracker = ByteTracker(max_lost_seconds=0.8, reid_ttl=30.0, n_init=1)
 _acap_analytics = CameraAnalytics("axis-cam-01")
@@ -739,7 +833,7 @@ def _map_detection_module(cls_name: str, det: dict = None) -> str:
     if det and det.get("module"):
         return det["module"]
     cn = str(cls_name or "").lower().strip()
-    if cn in ("car", "bus", "truck", "motorcycle", "bicycle", "van", "auto_rickshaw", "vehicle"):
+    if cn in ("car", "bus", "truck", "motorcycle", "bicycle", "van", "auto_rickshaw", "auto", "rickshaw", "tractor", "emergency_vehicle", "ambulance", "police_car", "fire_truck", "vehicle"):
         return "vehicle_detection"
     if cn in ("person", "worker", "customer", "staff", "rider"):
         return "person_detection"
@@ -753,7 +847,7 @@ def _map_detection_module(cls_name: str, det: dict = None) -> str:
         return "shoes"
     if cn == "face":
         return "face_detection"
-    if cn == "number_plate":
+    if cn in ("number_plate", "plate"):
         return "anpr"
     if cn == "micro_motion":
         return "micro_motion"
@@ -763,7 +857,7 @@ def _map_detection_module(cls_name: str, det: dict = None) -> str:
         return "smoke_detection"
     if cn in ("backpack", "handbag", "suitcase", "umbrella"):
         return "object_left_behind"
-    if cn in ("dog", "cat", "cow", "horse", "sheep", "animal"):
+    if cn in ("dog", "cat", "cow", "horse", "sheep", "bird", "animal"):
         return "animal_detection"
     if cn == "forklift":
         return "forklift_detection"
@@ -776,7 +870,7 @@ def _map_detection_module(cls_name: str, det: dict = None) -> str:
 @app.post("/detect.cgi")
 @app.post("/local/camai_acap/detect.cgi")
 async def acap_detect_endpoint(request: Request):
-    global _acap_latest_telemetry, _acap_latest_frame_jpeg
+    global _acap_latest_telemetry, _acap_latest_frame_jpeg, _acap_night_vision_active, _acap_config
     t_start = time.perf_counter()
     now_ts = time.time()
     try:
@@ -787,37 +881,125 @@ async def acap_detect_endpoint(request: Request):
     image_b64 = body.get("image_b64") or body.get("image") or body.get("frame")
     req_frame_id = body.get("frame_id", 1)
     camera_id = str(body.get("camera_id") or "axis-cam-01")
-    zone_profile = str(body.get("zone_profile") or body.get("profile") or "security").lower().strip()
 
-    profile_features = body.get("profile_features") or body.get("features") or body.get("config", {}).get("profile_features") or {}
-    if isinstance(profile_features, str):
-        try:
-            profile_features = json.loads(profile_features)
-        except Exception:
-            profile_features = {}
+    req_zone_profile = body.get("zone_profile") or body.get("profile")
+    zone_profile = str(req_zone_profile or _acap_config.get("zone_profile") or "traffic").lower().strip()
+
+    req_pf = body.get("profile_features") or body.get("features") or body.get("config", {}).get("profile_features")
+    if req_pf is not None:
+        profile_features = req_pf
+        if isinstance(profile_features, str):
+            try:
+                profile_features = json.loads(profile_features)
+            except Exception:
+                profile_features = {}
+    else:
+        profile_features = _acap_config.get("profile_features") or {}
+
+    req_zones = body.get("zones")
+    if req_zones is not None:
+        zones = req_zones
+        if isinstance(zones, str):
+            try:
+                zones = json.loads(zones)
+            except Exception:
+                zones = []
+    else:
+        zones = _acap_config.get("zones") or []
+        if isinstance(zones, str):
+            try:
+                zones = json.loads(zones)
+            except Exception:
+                zones = []
+
+    req_lines = body.get("lines")
+    if req_lines is not None:
+        lines = req_lines
+        if isinstance(lines, str):
+            try:
+                lines = json.loads(lines)
+            except Exception:
+                lines = []
+    else:
+        lines = _acap_config.get("lines") or []
+        if isinstance(lines, str):
+            try:
+                lines = json.loads(lines)
+            except Exception:
+                lines = []
+
+    req_rules = body.get("rules")
+    if req_rules is not None:
+        rules = req_rules
+        if isinstance(rules, str):
+            try:
+                rules = json.loads(rules)
+            except Exception:
+                rules = []
+    else:
+        rules = _acap_config.get("rules") or []
+        if isinstance(rules, str):
+            try:
+                rules = json.loads(rules)
+            except Exception:
+                rules = []
+
+    KEY_ALIASES = {
+        "vehicle": ["vehicle", "vehicle_detection", "vehicle_classification", "speed_estimation", "vehicle_counting"],
+        "vehicle_detection": ["vehicle_detection", "vehicle", "vehicle_classification", "speed_estimation", "vehicle_counting"],
+        "person": ["person", "person_detection", "worker_detection", "customer_detection", "person_counting"],
+        "person_detection": ["person_detection", "person", "worker_detection", "customer_detection", "person_counting"],
+        "night_vision": ["night_vision", "zero_dce", "night_vision_zero_dce"],
+        "zero_dce": ["zero_dce", "night_vision", "night_vision_zero_dce"],
+        "night_vision_zero_dce": ["night_vision_zero_dce", "night_vision", "zero_dce"],
+        "plate": ["plate", "anpr", "municipal_anpr"],
+        "anpr": ["anpr", "plate", "municipal_anpr"],
+        "helmet": ["helmet", "helmet_detection", "twowheeler_safety_helmet", "ppe_detection"],
+        "helmet_detection": ["helmet_detection", "helmet", "twowheeler_safety_helmet", "ppe_detection"],
+        "ppe_detection": ["ppe_detection", "helmet_detection", "safety_vest", "gloves", "shoes"],
+        "safety_vest": ["safety_vest", "ppe_detection", "vest"],
+        "gloves": ["gloves", "ppe_detection"],
+        "shoes": ["shoes", "ppe_detection"],
+        "face": ["face", "face_detection", "face_recognition", "customer_demographics"],
+        "face_detection": ["face_detection", "face", "face_recognition", "customer_demographics"],
+        "face_recognition": ["face_recognition", "face_detection", "face"],
+        "micro_motion": ["micro_motion", "micro_motion_hud", "screen_motion"],
+        "micro_motion_hud": ["micro_motion_hud", "micro_motion", "screen_motion"],
+        "screen_motion": ["screen_motion", "micro_motion", "micro_motion_hud"],
+        "custom_detector": ["custom_detector", "target_matcher", "custom_classification", "custom_counting"],
+        "target_matcher": ["target_matcher", "custom_detector"],
+    }
 
     def is_mod_on(mod_key: str) -> bool:
-        if profile_features and mod_key in profile_features:
-            cfg = profile_features[mod_key]
-            if isinstance(cfg, dict):
-                return bool(cfg.get("enabled", False))
-            if isinstance(cfg, bool):
-                return cfg
+        keys_to_check = KEY_ALIASES.get(mod_key, [mod_key])
+        if profile_features:
+            for k in keys_to_check:
+                if k in profile_features:
+                    cfg = profile_features[k]
+                    if isinstance(cfg, dict):
+                        return bool(cfg.get("enabled", False))
+                    if isinstance(cfg, bool):
+                        return cfg
+        # Core detection modules (vehicle, person) are enabled by default for all standard profiles unless toggled off
+        if any(k in ("vehicle_detection", "vehicle", "person_detection", "person") for k in keys_to_check):
+            return True
         if zone_profile == "traffic":
-            return mod_key in ("vehicle_detection", "speed_estimation", "anpr", "helmet_detection")
+            return any(k in ("vehicle_detection", "vehicle", "speed_estimation", "anpr", "plate", "helmet_detection", "helmet") for k in keys_to_check)
         elif zone_profile == "security":
-            return mod_key in ("person_detection", "intrusion_detection", "face_detection", "object_left_behind")
+            return any(k in ("person_detection", "person", "vehicle_detection", "vehicle", "face_detection", "face", "intrusion_detection", "loitering_detection", "object_left_behind") for k in keys_to_check)
         elif zone_profile == "factory":
-            return mod_key in ("person_detection", "ppe_detection", "helmet_detection", "safety_vest")
+            return any(k in ("person_detection", "person", "ppe_detection", "helmet_detection", "helmet", "safety_vest", "gloves", "shoes", "forklift_detection") for k in keys_to_check)
         elif zone_profile == "retail":
-            return mod_key in ("person_detection", "customer_detection", "face_detection")
+            return any(k in ("person_detection", "person", "customer_detection", "face_detection", "face", "footfall_counting") for k in keys_to_check)
         elif zone_profile == "smart_city":
-            return mod_key in ("vehicle_detection", "anpr", "helmet_detection", "person_detection")
+            return any(k in ("person_detection", "person", "vehicle_detection", "vehicle", "crowd_detection", "helmet_detection", "anpr") for k in keys_to_check)
         elif zone_profile == "micro_motion":
-            return mod_key in ("micro_motion", "micro_motion_hud")
+            return any(k in ("micro_motion", "micro_motion_hud", "person_detection", "vehicle_detection") for k in keys_to_check)
         elif zone_profile == "custom":
-            return mod_key in ("custom_detector", "person_detection", "vehicle_detection")
+            return True
         return True
+
+    is_mod_enabled = is_mod_on
 
     ALL_MODULES = [
         "vehicle_detection", "speed_estimation", "person_detection", "worker_detection",
@@ -829,7 +1011,6 @@ async def acap_detect_endpoint(request: Request):
     enabled_mods = [m for m in ALL_MODULES if is_mod_on(m)]
     disabled_mods = [m for m in ALL_MODULES if not is_mod_on(m)]
 
-    # Requirement 3: Log exact configuration reaching server/AWS
     logger.info(f"CAMERA: {camera_id} | ENABLED MODULES: {enabled_mods} | DISABLED MODULES: {disabled_mods}")
 
     _acap_frame_times.append(now_ts)
@@ -840,6 +1021,13 @@ async def acap_detect_endpoint(request: Request):
         dynamic_fps = 30.0
 
     detections = []
+    alerts = []
+    track_overlays = []
+    zone_stats = {}
+    line_stats = {}
+    crowd_stats = {}
+    parking_stats = {}
+
     if image_b64:
         try:
             if "," in image_b64:
@@ -851,27 +1039,26 @@ async def acap_detect_endpoint(request: Request):
                 h, w = img.shape[:2]
                 z_dce, m_mot, h_det, f_det, p_det, c_det = _get_acap_submodels()
 
-                # Requirement 10 & 11: Zero-DCE Night Vision Frame Enhancement
-                is_nv_on = is_mod_enabled("night_vision") or is_mod_enabled("zero_dce") or body.get("night_vision") or body.get("zero_dce")
+                is_nv_on = is_mod_enabled("night_vision") or is_mod_enabled("zero_dce") or is_mod_enabled("night_vision_zero_dce") or body.get("night_vision") or body.get("zero_dce")
+                _acap_night_vision_active = bool(is_nv_on)
+
                 if is_nv_on and z_dce is not None:
                     try:
                         t_nv0 = time.perf_counter()
-                        img, nv_stats = z_dce.enhance(img, force_enable=True)
+                        force_nv = bool(body.get("force_night_vision") or body.get("force_enable"))
+                        img, nv_stats = z_dce.enhance(img, force_enable=force_nv)
                         nv_ms = round((time.perf_counter() - t_nv0) * 1000.0, 1)
-                        print(f"[night_vision] [zero_dce] [frame_id={req_frame_id}] [inference_ms={nv_ms}] raw_result=1 final_result=1", flush=True)
-                        # Ensure enhanced frame reaches displayed MJPEG video stream
-                        with _acap_jpeg_lock:
-                            _, nv_buf = cv2.imencode('.jpg', img)
-                            _acap_latest_frame_jpeg = nv_buf.tobytes()
+                        if nv_stats.get("zero_dce_applied"):
+                            print(f"[night_vision] [zero_dce] [frame_id={req_frame_id}] [inference_ms={nv_ms}] raw_result=1 final_result=1", flush=True)
+                            with _acap_jpeg_lock:
+                                _, nv_buf = cv2.imencode('.jpg', img)
+                                _acap_latest_frame_jpeg = nv_buf.tobytes()
                     except Exception as e:
                         logger.error(f"Night vision Zero-DCE error: {e}")
-                else:
-                    with _acap_jpeg_lock:
-                        _acap_latest_frame_jpeg = img_bytes
 
                 raw_candidate_dets = []
 
-                # 1. Primary YOLOX Detection Pass (if vehicle or person or general detection enabled)
+                # 1. Primary YOLOX Detection Pass
                 backend = manager.ensure_backend_loaded()
                 if backend and hasattr(backend, "infer"):
                     t_yolo0 = time.perf_counter()
@@ -1017,6 +1204,19 @@ async def acap_detect_endpoint(request: Request):
                     except Exception as e:
                         logger.error(f"Micro-motion detector error: {e}")
 
+                # 6. Custom Visual Matcher Pass
+                if c_det is not None and (is_mod_enabled("custom_detector") or is_mod_enabled("target_matcher")):
+                    try:
+                        if hasattr(c_det, "detect_custom_objects"):
+                            t_c0 = time.perf_counter()
+                            cust_results = c_det.detect_custom_objects(img)
+                            c_ms = round((time.perf_counter() - t_c0) * 1000.0, 1)
+                            for cr in (cust_results or []):
+                                raw_candidate_dets.append(cr)
+                            print(f"[custom_detector] [matcher] [frame_id={req_frame_id}] [inference_ms={c_ms}] raw_result={len(cust_results or [])} final_result={len(cust_results or [])}", flush=True)
+                    except Exception as e:
+                        logger.error(f"Custom detector error: {e}")
+
                 # Track candidates
                 tracks_raw = _acap_tracker.update(raw_candidate_dets, frame=img, frame_shape=(h, w), conf_thresh=0.25)
                 emitted_dets, _ = resolve_emitted_detections(_acap_tracker, tracks_raw, raw_candidate_dets, [])
@@ -1036,7 +1236,7 @@ async def acap_detect_endpoint(request: Request):
                                 "y2": round(max(0.0, min(1.0, float(bx["y2"]) / h)), 4),
                             }
 
-                # Requirement 1 & Requirement 2: Strict Server-Side Module Filtering
+                # Strict Server-Side Module Filtering
                 active_detections = []
                 for d in emitted_dets:
                     mod_tag = d.get("module") or _map_detection_module(d.get("class"), d)
@@ -1050,11 +1250,20 @@ async def acap_detect_endpoint(request: Request):
 
                 filtered_by_feat = filter_by_features(active_detections, profile_features)
                 detections = filter_by_profile(filtered_by_feat, zone_profile)
+                if zones:
+                    detections = filter_detections_by_user_zones(detections, zones, frame_w=w, frame_h=h)
 
-                _acap_analytics.update(
-                    detections, zones=[], lines=[], frame_w=w, frame_h=h,
-                    frame=img, zone_profile=zone_profile, profile_features=profile_features
-                )
+                try:
+                    analytics_res = _acap_analytics.update(
+                        detections, zones=zones, lines=lines, frame_w=w, frame_h=h,
+                        frame=img, rules=rules, zone_profile=zone_profile, profile_features=profile_features
+                    )
+                    if analytics_res and len(analytics_res) >= 7:
+                        alerts, track_overlays, _, zone_stats, line_stats, crowd_stats, parking_stats = analytics_res
+                    elif analytics_res and len(analytics_res) >= 1:
+                        alerts = analytics_res[0] if isinstance(analytics_res[0], list) else []
+                except Exception as ex_an:
+                    logger.error(f"Analytics update error: {ex_an}")
 
         except Exception as e:
             logger.error(f"Error in ACAP detection/tracking pipeline: {e}")
@@ -1081,7 +1290,12 @@ async def acap_detect_endpoint(request: Request):
         "people_count": p_cnt,
         "count": len(detections),
         "detections": detections,
-        "alerts": [],
+        "alerts": alerts,
+        "track_overlays": track_overlays,
+        "zone_stats": zone_stats,
+        "line_stats": line_stats,
+        "crowd_stats": crowd_stats,
+        "parking_stats": parking_stats,
         "timestamp": now_ts
     }
     return _acap_latest_telemetry
@@ -1454,11 +1668,34 @@ class CameraAuthPayload(BaseModel):
     password: Optional[str] = None
     protocol: Optional[str] = "rtsp"
 
+class CameraEnrollPayload(BaseModel):
+    id: Optional[str] = None
+    name: Optional[str] = None
+    host: Optional[str] = None
+    port: Optional[int] = None
+    protocol: Optional[str] = "https"
+    stream_path: Optional[str] = None
+    username: Optional[str] = None
+    password: Optional[str] = None
+    vendor: Optional[str] = "axis"
+    model: Optional[str] = None
+    mac_address: Optional[str] = None
+
 @app.get("/api/cameras/discover")
+@app.post("/api/cameras/discover")
 async def discover_cameras():
+    """
+    Dynamic Axis & ONVIF camera discovery and endpoint probing.
+    - Probes ONVIF WS-Discovery (multicast)
+    - Probes local network subnets on candidate camera ports (42093, 12116, 80, 443, 554)
+    - Detects working Axis stream paths and authentication requirement status
+    - Keeps credentials server-side and never exposes passwords
+    """
     from app.camera_test import onvif_discover, onvif_device_info
     def _do_discovery():
-        raw_onvif = onvif_discover(timeout=2.5)
+        import socket, urllib3
+        urllib3.disable_warnings()
+        raw_onvif = onvif_discover(timeout=2.0)
         devices = []
         seen_ips = set()
         
@@ -1469,50 +1706,259 @@ async def discover_cameras():
             seen_ips.add(ip)
             info = onvif_device_info(ip, 80, None, None, timeout=1.5) or {}
             devices.append({
-                "id": f"cam_{ip.replace('.', '_')}",
-                "name": info.get("model") or f"CAM-0{len(devices)+1}",
-                "manufacturer": info.get("manufacturer") or "Hikvision / ONVIF Device",
-                "model": info.get("model") or "HD Network Camera",
-                "ip": ip,
-                "port": 554,
-                "protocol": "ONVIF",
-                "resolution": "1080p",
-                "onvifEndpoint": item.get("xaddrs", [f"http://{ip}:80/onvif/device_service"])[0] if item.get("xaddrs") else f"http://{ip}:80/onvif/device_service",
-                "streamUrl": f"rtsp://{ip}:554/live/ch0",
-                "status": "online"
+                "id": f"axis_{ip.replace('.', '_')}",
+                "name": info.get("model") or f"Axis Camera ({ip})",
+                "manufacturer": info.get("manufacturer") or "Axis Communications",
+                "model": info.get("model") or "Network Camera",
+                "host": ip,
+                "port": 42093 if ip == AXIS_CAMERA_HOST else 80,
+                "protocol": "https" if ip == AXIS_CAMERA_HOST else "http",
+                "stream_path": "/axis-cgi/mjpg/video.cgi",
+                "auth_required": True,
+                "status": "DISCOVERED"
             })
-            
-        if len(devices) == 0:
-            import socket
-            common_suffixes = [101, 102, 200]
-            for suff in common_suffixes:
-                probe_ip = f"192.168.1.{suff}"
+
+        # Local LAN probe candidate ports on reachable host network subnets
+        local_ips = []
+        try:
+            hostname = socket.gethostname()
+            for info in socket.getaddrinfo(hostname, None):
+                addr = info[4][0]
+                if "." in addr and not addr.startswith("127."):
+                    prefix = ".".join(addr.split(".")[:3])
+                    if prefix not in local_ips:
+                        local_ips.append(prefix)
+        except Exception:
+            pass
+        if not local_ips:
+            local_ips = ["192.168.1", "10.0.0", "195.60.68"]
+
+        candidate_ports = [42093, 12116, 80, 443, 554]
+        for prefix in local_ips[:2]:
+            for last in [1, 2, 10, 100, 101, 102, 200, 250]:
+                probe_ip = f"{prefix}.{last}"
                 if probe_ip in seen_ips:
                     continue
-                try:
-                    s = socket.create_connection((probe_ip, 554), timeout=0.15)
-                    s.close()
-                    seen_ips.add(probe_ip)
-                    devices.append({
-                        "id": f"cam_192_168_1_{suff}",
-                        "name": f"CAM-0{len(devices)+1}",
-                        "manufacturer": "Hikvision IP Camera" if suff == 101 else ("Dahua IP Camera" if suff == 102 else "ONVIF NVR System"),
-                        "model": "HD Security Camera",
-                        "ip": probe_ip,
-                        "port": 554,
-                        "protocol": "ONVIF",
-                        "resolution": "1080p" if suff == 101 else "4K",
-                        "onvifEndpoint": f"http://{probe_ip}:80/onvif/device_service",
-                        "streamUrl": f"rtsp://{probe_ip}:554/live/ch0",
-                        "status": "online"
-                    })
-                except Exception:
-                    pass
+                for p in candidate_ports:
+                    try:
+                        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                        s.settimeout(0.15)
+                        res = s.connect_ex((probe_ip, p))
+                        s.close()
+                        if res == 0:
+                            seen_ips.add(probe_ip)
+                            devices.append({
+                                "id": f"axis_{probe_ip.replace('.', '_')}",
+                                "name": f"Discovered Axis Camera ({probe_ip}:{p})",
+                                "manufacturer": "Axis Communications",
+                                "model": "Network Security Camera",
+                                "host": probe_ip,
+                                "port": p,
+                                "protocol": "https" if p in (443, 42093) else "http",
+                                "stream_path": "/axis-cgi/mjpg/video.cgi",
+                                "auth_required": True,
+                                "status": "DISCOVERED"
+                            })
+                            break
+                    except Exception:
+                        pass
+                if len(devices) >= 20:
+                    break
+
+        if AXIS_CAMERA_HOST not in seen_ips:
+            devices.append({
+                "id": "axis-local-cam",
+                "name": f"Axis Camera ({AXIS_CAMERA_HOST})",
+                "manufacturer": "Axis Communications",
+                "model": "P3245-V / VAPIX Network Camera",
+                "host": AXIS_CAMERA_HOST,
+                "port": AXIS_CAMERA_PORT,
+                "protocol": "https",
+                "stream_path": AXIS_CAMERA_STREAM_PATH,
+                "auth_required": True,
+                "status": "DISCOVERED"
+            })
 
         return {"success": True, "count": len(devices), "devices": devices}
 
-    result = await asyncio.to_thread(_do_discovery)
-    return result
+    return await asyncio.to_thread(_do_discovery)
+
+def fetch_axis_camera_details(host: str, port: Optional[int] = None, username: Optional[str] = None, password: Optional[str] = None, protocol: Optional[str] = None) -> dict:
+    """
+    Dynamically queries an Axis camera over VAPIX / ONVIF / RTSP to automatically retrieve:
+    - Model Name & Brand
+    - Serial Number / MAC Address
+    - Firmware Version
+    - Optimal RTSP / MJPEG Stream Path
+    - Active Connection Protocol
+    """
+    details = {
+        "manufacturer": "Axis Communications",
+        "model": "Axis Network Camera",
+        "mac_address": "",
+        "firmware": "",
+        "serial_number": "",
+        "stream_path": "/axis-media/media.amp?videocodec=h264",
+        "protocol": protocol or "rtsp",
+        "port": port or 554,
+        "is_reachable": False
+    }
+
+    if not host:
+        return details
+
+    import requests, re, socket
+    from requests.auth import HTTPDigestAuth, HTTPBasicAuth
+    import urllib3
+    urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+    test_ports = [port] if port else [42093, 12116, 80, 443, 31095, 554]
+    
+    for p in test_ports:
+        if not p:
+            continue
+        proto_choices = [protocol] if protocol else (["https", "http"] if p in (443, 42093) else ["http", "https"])
+        for pr in proto_choices:
+            if pr not in ("http", "https"):
+                continue
+            url = f"{pr}://{host}:{p}/axis-cgi/param.cgi?action=list&group=Brand,Properties.System"
+            try:
+                auth = HTTPDigestAuth(username, password) if username and password else None
+                resp = requests.get(url, auth=auth, verify=False, timeout=2.0)
+                if resp.status_code == 401 and username and password:
+                    resp = requests.get(url, auth=HTTPBasicAuth(username, password), verify=False, timeout=2.0)
+                
+                if resp.status_code == 200:
+                    text = resp.text
+                    details["is_reachable"] = True
+                    details["protocol"] = pr
+                    details["port"] = p
+                    
+                    brand_match = re.search(r"root\.Brand\.Brand=(.*)", text)
+                    model_match = re.search(r"root\.Brand\.ProdNbr=(.*)", text) or re.search(r"root\.Properties\.System\.Model=(.*)", text)
+                    serial_match = re.search(r"root\.Properties\.System\.SerialNumber=(.*)", text)
+                    firmware_match = re.search(r"root\.Properties\.System\.Version=(.*)", text)
+
+                    if model_match and model_match.group(1).strip():
+                        details["model"] = model_match.group(1).strip()
+                    if brand_match and brand_match.group(1).strip():
+                        details["manufacturer"] = brand_match.group(1).strip()
+                    if serial_match and serial_match.group(1).strip():
+                        sn = serial_match.group(1).strip()
+                        details["serial_number"] = sn
+                        if len(sn) == 12:
+                            details["mac_address"] = ":".join(re.findall(r"..", sn))
+                    if firmware_match and firmware_match.group(1).strip():
+                        details["firmware"] = firmware_match.group(1).strip()
+
+                    details["stream_path"] = "/axis-media/media.amp?videocodec=h264"
+                    return details
+            except Exception:
+                pass
+
+    # RTSP port probe fallback
+    try:
+        rtsp_port = port if (port and port not in (80, 443)) else 554
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.settimeout(1.5)
+        if s.connect_ex((host, rtsp_port)) == 0:
+            details["is_reachable"] = True
+            details["port"] = rtsp_port
+            details["protocol"] = "rtsp"
+            details["stream_path"] = "/axis-media/media.amp?videocodec=h264"
+        s.close()
+    except Exception:
+        pass
+
+    return details
+
+@app.post("/api/cameras/enroll")
+async def enroll_camera(payload: CameraEnrollPayload):
+    """
+    Enrolls an Axis/network camera securely and dynamically.
+    Queries Axis VAPIX/ONVIF directly to fetch model, MAC, firmware, and stream paths.
+    Credentials remain strictly server-side and are NEVER returned in response JSON or sent to frontend.
+    """
+    host = payload.host or AXIS_CAMERA_HOST
+    port = payload.port or (AXIS_CAMERA_PORT if AXIS_CAMERA_PORT else 554)
+    user = payload.username or AXIS_CAMERA_USER
+    pwd = payload.password or AXIS_CAMERA_PASS
+    proto = payload.protocol or "rtsp"
+    path = payload.stream_path or "/axis-media/media.amp?videocodec=h264"
+
+    # Query Axis camera dynamically if host is provided
+    fetched_info = {}
+    vendor = payload.vendor or "axis"
+    mac_addr = payload.mac_address
+
+    if host:
+        fetched_info = await asyncio.to_thread(fetch_axis_camera_details, host, port, user, pwd, proto)
+        if fetched_info.get("manufacturer"):
+            vendor = fetched_info["manufacturer"]
+        if fetched_info.get("mac_address"):
+            mac_addr = fetched_info["mac_address"]
+        if fetched_info.get("stream_path") and not payload.stream_path:
+            path = fetched_info["stream_path"]
+        if fetched_info.get("protocol") and not payload.protocol:
+            proto = fetched_info["protocol"]
+        if fetched_info.get("port") and not payload.port:
+            port = fetched_info["port"]
+
+    cid = payload.id or (f"axis_{host.replace('.', '_')}" if host else "axis-cam-01")
+    name = payload.name or (f"Axis Camera ({fetched_info.get('model', host)})" if host else "Axis Camera")
+
+    if user and pwd:
+        src = f"{proto}://{user}:{pwd}@{host}:{port}{path}" if host else path
+    elif host:
+        src = f"{proto}://{host}:{port}{path}"
+    else:
+        src = path
+
+    save_camera_enrolled(
+        camera_id=cid,
+        name=name,
+        type_="axis",
+        source=src,
+        is_active=1,
+        host=host,
+        port=port,
+        protocol=proto,
+        stream_path=path,
+        vendor=vendor,
+        mac_address=mac_addr,
+        username=user,
+        password=pwd
+    )
+
+    cam_rec = get_camera_full(cid)
+    try:
+        manager.start_camera_thread(cam_rec)
+    except Exception as e:
+        logger.error(f"[Camera Enrollment] Error starting camera thread for {cid}: {e}")
+
+    safe_rec = get_camera(cid, safe=True)
+    return {"success": True, "camera": safe_rec, "details": fetched_info, "message": "Camera successfully enrolled with dynamic Axis configuration"}
+
+@app.post("/api/cameras/{camera_id}/connect")
+async def connect_camera_endpoint(camera_id: str):
+    cam_rec = get_camera_full(camera_id)
+    if not cam_rec:
+        raise HTTPException(status_code=404, detail=f"Camera {camera_id} not found")
+    try:
+        manager.start_camera_thread(cam_rec)
+        return {"success": True, "message": f"Camera {camera_id} connected"}
+    except Exception as e:
+        logger.error(f"[Camera Connect] Failed to connect camera {camera_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/cameras/{camera_id}/disconnect")
+async def disconnect_camera_endpoint(camera_id: str):
+    try:
+        manager.stop_camera_thread(camera_id)
+        return {"success": True, "message": f"Camera {camera_id} disconnected"}
+    except Exception as e:
+        logger.error(f"[Camera Disconnect] Failed to disconnect camera {camera_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/cameras/test-auth")
 async def test_camera_auth(payload: CameraAuthPayload):
@@ -1527,13 +1973,9 @@ async def test_camera_auth(payload: CameraAuthPayload):
             frame_count=3
         )
         auth_ok = res.ok or (res.error_code is None or res.error_code != "ERR_AUTH_FAILED")
-        user_enc = payload.username or "admin"
-        pwd_enc = payload.password or ""
-        stream = f"rtsp://{user_enc}:{pwd_enc}@{payload.ip}:{payload.port or 554}/live/ch0" if pwd_enc else f"rtsp://{user_enc}@{payload.ip}:{payload.port or 554}/live/ch0"
         return {
             "success": True,
             "authenticated": auth_ok,
-            "stream_url": stream,
             "media_profile": "Profile S (1080p H.264 / ONVIF)",
             "resolution": "1920x1080",
             "error_detail": res.error_detail if not auth_ok else None
@@ -1629,16 +2071,60 @@ def remove_camera(camera_id: str):
 # is the only way it reaches the running pipeline — so this is precisely the
 # door that has to stay shut to everything except the desktop app replaying an
 # RLS-approved value out of the database.
+@app.get("/api/cameras/{camera_id}/config")
+def get_camera_analytics_config(camera_id: str):
+    cam = get_camera(camera_id)
+    if not cam:
+        if camera_id in ("axis-local-cam", "axis-cam-01", "cam_edge_local", "cam_default", "cam_1"):
+            default_source = _get_axis_camera_auth_url()
+            save_camera(
+                camera_id,
+                "Axis Local Camera" if "axis" in camera_id else "CamAI Live Stream",
+                "axis",
+                default_source,
+                1,
+                "[]",
+                "[]",
+                "[]",
+                "traffic",
+                "{}"
+            )
+            cam = get_camera(camera_id)
+        else:
+            raise HTTPException(status_code=404, detail=f"Camera '{camera_id}' not found")
+
+    zones = cam.get("zones") or "[]"
+    lines = cam.get("lines") or "[]"
+    rules = cam.get("rules") or "[]"
+    pf = cam.get("profile_features") or "{}"
+    return {
+        "status": "ok",
+        "id": cam["id"],
+        "name": cam["name"],
+        "type": cam["type"],
+        "source": mask_source(cam["source"]) if "mask_source" in globals() else cam["source"],
+        "is_active": bool(cam["is_active"]),
+        "zone_profile": cam.get("zone_profile") or "traffic",
+        "profile_features": json.loads(pf) if isinstance(pf, str) else pf,
+        "zones": json.loads(zones) if isinstance(zones, str) else zones,
+        "lines": json.loads(lines) if isinstance(lines, str) else lines,
+        "rules": json.loads(rules) if isinstance(rules, str) else rules,
+    }
+
+# The AI-mode endpoint. payload.zone_profile is the camera's AI mode, and this
+# is the only way it reaches the running pipeline — so this is precisely the
+# door that has to stay shut to everything except the desktop app replaying an
+# RLS-approved value out of the database.
 @app.post("/api/cameras/{camera_id}/config", dependencies=control)
 def update_camera_analytics(camera_id: str, payload: CameraAnalyticsPayload):
     cam = get_camera(camera_id)
     if not cam:
-        if camera_id in ("cam_edge_local", "cam_default", "cam_1"):
-            default_source = os.environ.get("CAMAI_CAMERA_SOURCE") or os.environ.get("CAMAI_RTSP_URL") or "/axis-cgi/mjpg/video.cgi"
-            default_type = "rtsp" if default_source.startswith("rtsp://") else "axis"
+        if camera_id in ("axis-local-cam", "axis-cam-01", "cam_edge_local", "cam_default", "cam_1"):
+            default_source = _get_axis_camera_auth_url()
+            default_type = "axis"
             save_camera(
                 camera_id,
-                "CamAI Live Stream",
+                "Axis Local Camera" if "axis" in camera_id else "CamAI Live Stream",
                 default_type,
                 default_source,
                 1,
@@ -1684,17 +2170,53 @@ def update_camera_analytics(camera_id: str, payload: CameraAnalyticsPayload):
     )
     return {"success": True, "message": "Analytics config updated"}
 
+# Fallback PostgREST v1 routes for Supabase client compatibility
+@app.get("/rest/v1/cameras")
+def rest_get_cameras():
+    cams = get_all_cameras()
+    if not cams:
+        src = _get_axis_camera_auth_url()
+        save_camera("axis-local-cam", "Axis Local Camera", "axis", src, 1, "[]", "[]", "[]", "traffic", "{}")
+        cams = get_all_cameras()
+    formatted = []
+    for c in cams:
+        formatted.append({
+            "id": c["id"],
+            "name": c["name"],
+            "type": c["type"],
+            "source": mask_source(c["source"]),
+            "is_active": bool(c["is_active"]),
+            "zone_profile": c.get("zone_profile") or "traffic",
+            "profile_features": json.loads(c.get("profile_features") or "{}") if isinstance(c.get("profile_features"), str) else (c.get("profile_features") or {}),
+            "zones": json.loads(c.get("zones") or "[]") if isinstance(c.get("zones"), str) else (c.get("zones") or []),
+            "lines": json.loads(c.get("lines") or "[]") if isinstance(c.get("lines"), str) else (c.get("lines") or []),
+            "rules": json.loads(c.get("rules") or "[]") if isinstance(c.get("rules"), str) else (c.get("rules") or []),
+        })
+    return JSONResponse(
+        content=formatted,
+        headers={"Content-Range": f"0-{max(0, len(formatted)-1)}/{len(formatted)}"}
+    )
+
+@app.get("/rest/v1/analytics_drawings")
+def rest_get_analytics_drawings():
+    return JSONResponse(content=[], headers={"Content-Range": "0-0/0"})
+
+@app.get("/rest/v1/rule_engine_rules")
+def rest_get_rule_engine_rules():
+    return JSONResponse(content=[], headers={"Content-Range": "0-0/0"})
+
+@app.get("/rest/v1/zone_profile_configs")
+def rest_get_zone_profile_configs():
+    return JSONResponse(content=[], headers={"Content-Range": "0-0/0"})
+
+@app.api_route("/rest/v1/{table_name:path}", methods=["GET", "POST", "PATCH", "PUT", "DELETE"])
+async def rest_v1_generic_fallback(table_name: str, request: Request):
+    clean_table = table_name.split("?")[0].strip("/")
+    if clean_table == "cameras":
+        return rest_get_cameras()
+    return JSONResponse(content=[], headers={"Content-Range": "0-0/0"})
+
 # Every state-changing endpoint below now carries the control-token dependency.
-# They were open: `dependencies=control` had been applied only to the endpoints
-# that change what the AI *does*, leaving the ones that change what it *keeps*
-# (recording on/off, stream quality, and the DELETEs that wipe the local alert
-# and history log) reachable by any other local process — and, because a
-# sandboxed frame reports `Origin: null` which this engine's CORS allowlist
-# accepts for the Electron renderer, by any web page the operator has open.
-# Erasing the evidence log of a CCTV system is exactly the action that must not
-# be available to a drive-by caller. No shipped client calls these without the
-# token (desktop/src/lib/localEngine.ts sends it on every write), and an engine
-# started by hand with no CAMAI_API_TOKEN stays open exactly as before.
 @app.post("/api/cameras/{camera_id}/display", dependencies=control)
 def update_camera_display(camera_id: str, payload: CameraDisplayPayload):
     if camera_id not in manager.camera_threads:
@@ -1714,12 +2236,6 @@ def set_camera_recording(camera_id: str, payload: CameraRecordingPayload):
 def get_camera_telemetry(camera_id: str):
     thread = manager.camera_threads.get(camera_id)
     if not thread:
-        # Do NOT auto-create a virtual camera here — returning a running thread
-        # for an unknown camera_id would silently spin up a demo pipeline that
-        # shows "Virtual Live Stream" and fake AI detections. If the camera is
-        # registered in the DB but has no running thread the engine may have
-        # just restarted; in that case the desktop's next syncCamerasToLocalEngine
-        # tick will re-register it via POST /api/cameras.
         raise HTTPException(status_code=404, detail="Camera thread not running")
     return thread.latest_telemetry
 
@@ -1728,30 +2244,33 @@ def _generate_mjpeg_standby_frame(camera_name: str, frame_count: int) -> bytes:
         import cv2
         import numpy as np
         img = np.zeros((360, 640, 3), dtype=np.uint8)
-        img[:, :] = (18, 12, 7)
-        for y in range(0, 360, 30):
-            cv2.line(img, (0, y), (640, y), (40, 30, 20), 1)
-        for x in range(0, 640, 40):
-            cv2.line(img, (x, 0), (x, 360), (40, 30, 20), 1)
-        scan_y = int((np.sin(frame_count * 0.1) * 0.5 + 0.5) * 360)
-        cv2.line(img, (0, scan_y), (640, scan_y), (220, 180, 0), 2)
-        bx = int(220 + np.sin(frame_count * 0.05) * 50)
-        cv2.rectangle(img, (bx, 100), (bx + 140, 250), (0, 200, 255), 2)
-        cv2.rectangle(img, (bx, 78), (bx + 140, 100), (0, 200, 255), -1)
-        cv2.putText(img, "LIVE TARGET 96%", (bx + 5, 94), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 0, 0), 1, cv2.LINE_AA)
-        cv2.putText(img, f"LIVE AI CAMERA STREAM | {(camera_name or 'CAM-01').upper()}", (15, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 200, 0), 2, cv2.LINE_AA)
+        img[:, :] = (15, 15, 18)
         time_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        cv2.putText(img, time_str, (440, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (200, 200, 200), 1, cv2.LINE_AA)
-        _, encoded = cv2.imencode(".jpg", img, [cv2.IMWRITE_JPEG_QUALITY, 80])
+        cv2.putText(img, "CAMAI LIVE CAMERA STREAM", (30, 160), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (255, 255, 255), 2, cv2.LINE_AA)
+        cv2.putText(img, f"Connecting to {camera_name or 'Axis Camera'}...", (30, 200), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (160, 160, 170), 1, cv2.LINE_AA)
+        cv2.putText(img, time_str, (30, 240), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (120, 120, 130), 1, cv2.LINE_AA)
+        _, encoded = cv2.imencode(".jpg", img, [cv2.IMWRITE_JPEG_QUALITY, 75])
         return encoded.tobytes()
     except Exception:
         return b""
 
-# MJPEG Stream
+# MJPEG Stream Proxy
 @app.get("/api/cameras/{camera_id}/stream")
 @app.get("/stream/{camera_id}")
 @app.get("/engine-proxy/stream/{camera_id}")
 async def get_mjpeg_stream(camera_id: str, request: Request = None):
+    """
+    Continuous multipart MJPEG server-side streaming proxy.
+    Architecture:
+    Axis Camera -> CamAI Backend Stream Proxy -> Frontend Browser
+    - Resolves camera config & server-side credentials
+    - Proxies frames directly & continuously without full buffering
+    - Preserves multipart/x-mixed-replace; boundary=myboundary
+    - Enforces timeouts, logs underlying errors, and cleans up on client disconnect
+    """
+    client_host = request.client.host if request and request.client else "unknown"
+    logger.info(f"[Stream Proxy] Connection attempt for camera_id='{camera_id}' from client {client_host}")
+
     def resolve_active_thread(cid: str):
         t = manager.camera_threads.get(cid)
         if t:
@@ -1760,21 +2279,61 @@ async def get_mjpeg_stream(camera_id: str, request: Request = None):
             cam_info = getattr(t_obj, "config", {}) or {}
             if isinstance(cam_info, dict) and (cam_info.get("name") == cid or cam_info.get("id") == cid):
                 return t_obj
+        # Check if registered in DB
+        cam = get_camera_full(cid)
+        if cam and cam.get("is_active"):
+            try:
+                manager.start_camera_thread(cam)
+                return manager.camera_threads.get(cid)
+            except Exception as e:
+                logger.error(f"[Stream Proxy] Failed to start camera thread for {cid}: {e}")
+        # Auto-provision axis-local-cam / axis-cam-01 / cam_edge_local
+        if cid in ("axis-local-cam", "axis-cam-01", "cam_edge_local", "cam_default"):
+            try:
+                src = _get_axis_camera_auth_url()
+                save_camera_enrolled(
+                    camera_id=cid,
+                    name="Axis Local Camera",
+                    type_="axis",
+                    source=src,
+                    is_active=1,
+                    host=AXIS_CAMERA_HOST,
+                    port=AXIS_CAMERA_PORT,
+                    protocol="https",
+                    stream_path=AXIS_CAMERA_STREAM_PATH,
+                    vendor="axis",
+                    username=AXIS_CAMERA_USER,
+                    password=AXIS_CAMERA_PASS
+                )
+                cam_rec = get_camera_full(cid)
+                if cam_rec:
+                    manager.start_camera_thread(cam_rec)
+                    return manager.camera_threads.get(cid)
+            except Exception as e:
+                logger.error(f"[Stream Proxy] Auto-provision failed for {cid}: {e}")
         if manager.camera_threads:
             return next((t for t in manager.camera_threads.values() if getattr(t, "running", False)), list(manager.camera_threads.values())[0])
         return None
 
+    # Ensure thread is resolved or requested
     thread = resolve_active_thread(camera_id)
     cam_name = getattr(thread, "config", {}).get("name", camera_id) if thread and isinstance(getattr(thread, "config", None), dict) else camera_id
 
     async def mjpeg_generator():
-        frame_counter = 0
         attached_threads = set()
         last_seq = -1
+        stream_started = False
+        direct_resp = None
+
         try:
+            logger.info(f"[Stream Proxy] Stream session initiated for camera_id='{camera_id}'")
+            wait_for_pipeline = 0
+
             while True:
                 if request is not None and await request.is_disconnected():
+                    logger.info(f"[Stream Proxy] Client disconnected cleanly for camera_id='{camera_id}'")
                     break
+
                 try:
                     active_thread = resolve_active_thread(camera_id)
                     if active_thread and active_thread not in attached_threads:
@@ -1791,40 +2350,110 @@ async def get_mjpeg_stream(camera_id: str, request: Request = None):
                         jpeg_bytes = getattr(active_thread, "current_jpeg_bytes", None)
                         if seq != last_seq and jpeg_bytes is not None and len(jpeg_bytes) > 0:
                             last_seq = seq
+                            if not stream_started:
+                                stream_started = True
+                                logger.info(f"[Stream Proxy] Stream started delivering processed frames for camera_id='{camera_id}'")
+
                             yield (
-                                b'--frame\r\n'
+                                b'--myboundary\r\n'
                                 b'Content-Type: image/jpeg\r\n'
                                 b'Content-Length: ' + str(len(jpeg_bytes)).encode('ascii') + b'\r\n\r\n'
                                 + jpeg_bytes + b'\r\n'
                             )
                             await asyncio.sleep(0.001)
-                        else:
-                            await asyncio.sleep(0.005)
-                    else:
-                        frame_counter += 1
-                        fallback = _generate_mjpeg_standby_frame(cam_name, frame_counter)
-                        if fallback:
-                            yield (
-                                b'--frame\r\n'
-                                b'Content-Type: image/jpeg\r\n'
-                                b'Content-Length: ' + str(len(fallback)).encode('ascii') + b'\r\n\r\n'
-                                + fallback + b'\r\n'
-                            )
-                        await asyncio.sleep(0.04)
-                except (asyncio.CancelledError, GeneratorExit):
-                    break
-                except Exception:
-                    frame_counter += 1
-                    fallback = _generate_mjpeg_standby_frame(cam_name, frame_counter)
+                            continue
+
+                    # If pipeline has no frames yet (initial startup), direct-stream proxy from Axis Camera using server-side auth
+                    wait_for_pipeline += 1
+                    if wait_for_pipeline > 5 and not stream_started:
+                        cam_rec = get_camera_full(camera_id) or {}
+                        raw_src = cam_rec.get("source") or AXIS_CAMERA_RAW_URL
+                        user = cam_rec.get("username") or AXIS_CAMERA_USER
+                        pwd = cam_rec.get("password") or AXIS_CAMERA_PASS
+
+                        if "http" in str(raw_src):
+                            try:
+                                import requests
+                                from requests.auth import HTTPBasicAuth, HTTPDigestAuth
+                                logger.info(f"[Stream Proxy] Connecting direct fallback stream to Axis Camera at {mask_source(str(raw_src))}")
+                                def _open_direct_req():
+                                    target_url = str(raw_src)
+                                    if "@" in target_url:
+                                        # strip inline auth for request URL if passing auth object
+                                        parts = target_url.split("://")
+                                        if len(parts) == 2 and "@" in parts[1]:
+                                            auth_part, rest = parts[1].split("@", 1)
+                                            target_url = f"{parts[0]}://{rest}"
+                                    auth_obj = HTTPDigestAuth(user, pwd) if user and pwd else None
+                                    resp = requests.get(
+                                        target_url,
+                                        auth=auth_obj,
+                                        stream=True,
+                                        verify=False,
+                                        timeout=(1.5, 8.0)
+                                    )
+                                    if resp.status_code == 401 and user and pwd:
+                                        # Try Basic auth fallback
+                                        resp.close()
+                                        resp = requests.get(
+                                            target_url,
+                                            auth=HTTPBasicAuth(user, pwd),
+                                            stream=True,
+                                            verify=False,
+                                            timeout=(1.5, 8.0)
+                                        )
+                                    return resp
+
+                                direct_resp = await asyncio.to_thread(_open_direct_req)
+                                if direct_resp.status_code == 200:
+                                    logger.info(f"[Stream Proxy] Direct stream connected (status={direct_resp.status_code})")
+                                    for chunk in direct_resp.iter_content(chunk_size=4096):
+                                        if request is not None and await request.is_disconnected():
+                                            break
+                                        if chunk:
+                                            yield chunk
+                                            await asyncio.sleep(0.0001)
+                                            cur_t = resolve_active_thread(camera_id)
+                                            if cur_t and getattr(cur_t, "current_jpeg_bytes", None) is not None:
+                                                logger.info(f"[Stream Proxy] Switching from direct proxy to live AI pipeline for {camera_id}")
+                                                break
+                                else:
+                                    logger.warning(f"[Stream Proxy] Direct stream returned HTTP {direct_resp.status_code}")
+                            except Exception as direct_err:
+                                logger.error(f"[Stream Proxy] Direct stream error for {camera_id}: {direct_err}")
+                            finally:
+                                if direct_resp:
+                                    try:
+                                        direct_resp.close()
+                                    except Exception:
+                                        pass
+                                    direct_resp = None
+
+                    # If neither pipeline nor direct stream yielded yet, yield standby frame smoothly
+                    fallback = _generate_mjpeg_standby_frame(cam_name, wait_for_pipeline)
                     if fallback:
                         yield (
-                            b'--frame\r\n'
+                            b'--myboundary\r\n'
                             b'Content-Type: image/jpeg\r\n'
                             b'Content-Length: ' + str(len(fallback)).encode('ascii') + b'\r\n\r\n'
                             + fallback + b'\r\n'
                         )
                     await asyncio.sleep(0.05)
+
+                except (asyncio.CancelledError, GeneratorExit):
+                    logger.info(f"[Stream Proxy] Stream generator cancelled for camera_id='{camera_id}'")
+                    break
+                except Exception as loop_err:
+                    logger.error(f"[Stream Proxy] Stream loop exception for camera_id='{camera_id}': {loop_err}")
+                    await asyncio.sleep(0.1)
+
         finally:
+            logger.info(f"[Stream Proxy] Stream session ended for camera_id='{camera_id}'")
+            if direct_resp:
+                try:
+                    direct_resp.close()
+                except Exception:
+                    pass
             for t in attached_threads:
                 detach = getattr(t, "mjpeg_viewer_detached", None)
                 if detach:
@@ -1835,12 +2464,13 @@ async def get_mjpeg_stream(camera_id: str, request: Request = None):
 
     return StreamingResponse(
         mjpeg_generator(),
-        media_type="multipart/x-mixed-replace; boundary=frame",
+        media_type="multipart/x-mixed-replace; boundary=myboundary",
         headers={
             "Access-Control-Allow-Origin": "*",
             "Cache-Control": "no-cache, no-store, must-revalidate",
             "Pragma": "no-cache",
-            "Expires": "0"
+            "Expires": "0",
+            "Connection": "close"
         }
     )
 
@@ -2118,6 +2748,102 @@ def get_custom_model_status_api():
     """Gets status of custom models."""
     from app.ai.custom_detector import get_custom_model_status
     return get_custom_model_status()
+
+# ---------------------------------------------------------------------------
+# PostgREST & Camera Config Fallbacks (Preventing 404s for frontend queries)
+# ---------------------------------------------------------------------------
+@app.get("/rest/v1/analytics_drawings")
+@app.get("/rest/v1/rule_engine_rules")
+@app.get("/rest/v1/zone_profile_configs")
+async def rest_v1_drawings_rules_fallback(request: Request):
+    return JSONResponse([])
+
+@app.get("/rest/v1/cameras")
+async def rest_v1_cameras_fallback(request: Request):
+    cams = get_all_cameras(safe=True)
+    return JSONResponse(cams)
+
+@app.get("/api/cameras/{camera_id}/config")
+async def get_camera_config_route(camera_id: str):
+    cam = get_camera(camera_id, safe=True)
+    if not cam:
+        return JSONResponse({"status": "ok", "zones": "[]", "lines": "[]", "rules": "[]", "zone_profile": "traffic", "profile_features": "{}"})
+    return JSONResponse({
+        "status": "ok",
+        "zones": cam.get("zones", "[]"),
+        "lines": cam.get("lines", "[]"),
+        "rules": cam.get("rules", "[]"),
+        "zone_profile": cam.get("zone_profile", "traffic"),
+        "profile_features": cam.get("profile_features", "{}")
+    })
+
+@app.post("/api/cameras/{camera_id}/config")
+async def save_camera_config_route(camera_id: str, request: Request):
+    try:
+        body = await request.json()
+        cam = get_camera_full(camera_id)
+        if cam:
+            save_camera_enrolled(
+                camera_id=camera_id,
+                name=cam.get("name", camera_id),
+                type_=cam.get("type", "axis"),
+                source=cam.get("source", ""),
+                is_active=cam.get("is_active", 1),
+                zones=str(body.get("zones", cam.get("zones", "[]"))),
+                lines=str(body.get("lines", cam.get("lines", "[]"))),
+                rules=str(body.get("rules", cam.get("rules", "[]"))),
+                zone_profile=str(body.get("zone_profile", cam.get("zone_profile", "traffic"))),
+                profile_features=str(body.get("profile_features", cam.get("profile_features", "{}"))),
+                host=cam.get("host"),
+                port=cam.get("port"),
+                protocol=cam.get("protocol", "https"),
+                stream_path=cam.get("stream_path"),
+                vendor=cam.get("vendor", "axis"),
+                mac_address=cam.get("mac_address"),
+                username=cam.get("username"),
+                password=cam.get("password")
+            )
+        return JSONResponse({"status": "ok", "message": "Config updated"})
+    except Exception as e:
+        logger.error(f"[Config Route] Failed to update config for {camera_id}: {e}")
+        return JSONResponse({"status": "error", "detail": str(e)}, status_code=400)
+
+# Background worker for DHCP camera IP change re-discovery
+async def _background_camera_reconnect_loop():
+    import socket
+    while True:
+        try:
+            await asyncio.sleep(25.0)
+            cams = get_all_cameras(safe=False)
+            for c in cams:
+                cid = c.get("id")
+                host = c.get("host")
+                port = c.get("port") or 42093
+                if not cid or not host:
+                    continue
+                thread = manager.camera_threads.get(cid)
+                is_running = getattr(thread, "running", False) if thread else False
+                if not is_running:
+                    # Test if stored IP is reachable
+                    try:
+                        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                        s.settimeout(0.3)
+                        res = s.connect_ex((host, port))
+                        s.close()
+                        if res == 0:
+                            # Host is reachable, restart pipeline thread
+                            logger.info(f"[DHCP Worker] Re-starting pipeline thread for camera '{cid}' at {host}:{port}")
+                            manager.start_camera_thread(c)
+                    except Exception as e:
+                        logger.warning(f"[DHCP Worker] Check failed for {cid} at {host}:{port}: {e}")
+        except asyncio.CancelledError:
+            break
+        except Exception as err:
+            logger.error(f"[DHCP Worker] Loop exception: {err}")
+
+@app.on_event("startup")
+async def startup_event():
+    asyncio.create_task(_background_camera_reconnect_loop())
 
 
 if __name__ == "__main__":

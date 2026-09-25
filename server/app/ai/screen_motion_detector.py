@@ -10,12 +10,12 @@ class ScreenMicroMotionDetector:
     including rodents, insects, birds, vegetation shifts, and distant human motion.
     """
     def __init__(self, 
-                 min_area: int = 15, 
-                 max_area: int = 35000, 
-                 threshold_value: int = 4, 
-                 blur_kernel: Tuple[int, int] = (5, 5),
+                 min_area: int = 10, 
+                 max_area: int = 45000, 
+                 threshold_value: int = 3, 
+                 blur_kernel: Tuple[int, int] = (3, 3),
                  history_frames: int = 5,
-                 max_targets: int = 1):
+                 max_targets: int = 8):
         self.min_area = min_area
         self.max_area = max_area
         self.threshold_value = threshold_value
@@ -129,12 +129,13 @@ class ScreenMicroMotionDetector:
         # cleanup before it becomes a target.
         _, thresh = cv2.threshold(frame_delta, adaptive_thr, 255, cv2.THRESH_BINARY)
         fg = self.bg_subtractor.apply(blurred, learningRate=0.015 if mean_lum < 85.0 else 0.03)
-        _, fg = cv2.threshold(fg, 180, 255, cv2.THRESH_BINARY)
-        thresh = cv2.bitwise_or(thresh, fg)
+        if len(self.frame_buffer) >= 3 and (float(np.count_nonzero(fg)) / max(1.0, float(proc_w * proc_h))) < 0.40:
+            _, fg = cv2.threshold(fg, 180, 255, cv2.THRESH_BINARY)
+            thresh = cv2.bitwise_or(thresh, fg)
         
-        # Exclude bottom 10% and top 5% timestamp/header noise regions
-        thresh[:int(proc_h * 0.05), :] = 0
-        thresh[int(proc_h * 0.88):, :] = 0
+        # Exclude only extreme 1% outer borders
+        thresh[:int(proc_h * 0.01), :] = 0
+        thresh[int(proc_h * 0.99):, :] = 0
 
         # 4. Small morphology: connect real moving edges, but do not balloon tiny
         # objects into huge boxes or merge unrelated speckles.
@@ -153,21 +154,36 @@ class ScreenMicroMotionDetector:
                 
                 # Ignore extreme aspect ratio streaks (camera noise)
                 aspect = max(bw / max(1, bh), bh / max(1, bw))
-                if aspect > 5.0:
+                if aspect > 8.0:
                     continue
 
                 roi_delta = frame_delta[y:y+bh, x:x+bw]
                 intensity = float(np.mean(roi_delta)) if roi_delta.size > 0 else 0.0
                 active_ratio = float(np.count_nonzero(thresh[y:y+bh, x:x+bw])) / max(1.0, float(bw * bh))
                 flow_px = self._local_flow_score(prev_frame, blurred, x, y, bw, bh)
-                if flow_px < 0.35 and active_ratio < 0.18:
-                    continue
-                if intensity < adaptive_thr * 0.65 and flow_px < 0.75:
-                    continue
-                motion_score = (intensity + 8.0 * flow_px) * (area ** 0.5) * (0.4 + active_ratio)
-                confidence = min(0.99, max(0.35, (intensity / max(8.0, adaptive_thr * 3.0)) + min(flow_px, 2.0) * 0.16))
 
-                tag = "TINY MOTION" if area < 700 else ("SMALL ANIMAL / BIRD" if area < 2500 else "SUBTLE MOTION TARGET")
+                # Digital clocks / timers change numbers in place (intensity changes, but flow_px may be 0)
+                is_timer_change = (intensity >= adaptive_thr * 0.20 or active_ratio >= 0.02)
+                is_flow_motion = (flow_px >= 0.12)
+
+                if not is_timer_change and not is_flow_motion:
+                    continue
+
+                motion_score = (intensity + 12.0 * flow_px + 8.0 * active_ratio) * (area ** 0.5)
+                conf_intensity = intensity / max(3.0, adaptive_thr * 1.5)
+                conf_flow = min(flow_px, 2.0) * 0.25
+                conf_active = min(active_ratio * 3.0, 0.45)
+                confidence = min(0.99, max(0.55, conf_intensity + conf_flow + conf_active))
+
+                if flow_px < 0.20 and is_timer_change:
+                    tag = "TIMER / CLOCK DISPLAY CHANGE"
+                elif area < 500:
+                    tag = "MICRO MOTION DETECTED"
+                elif area < 2000:
+                    tag = "SUBTLE MOVEMENT"
+                else:
+                    tag = "MOTION TARGET"
+
                 color = (0, 255, 255) if area < 1500 else (0, 165, 255)
 
                 # Scale coordinates back to original frame dimensions
@@ -191,7 +207,7 @@ class ScreenMicroMotionDetector:
         # Sort candidates by motion saliency score (highest intensity/area first)
         candidates.sort(key=lambda item: item["score"], reverse=True)
         
-        # Keep ONLY the top 1 primary target (single box on the mouse)
+        # Keep top targets
         selected_targets = candidates[:self.max_targets]
 
         detections = []

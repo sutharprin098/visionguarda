@@ -176,12 +176,28 @@ footer {
   
 <header>
   <div class="logo-area">
-    <a href="../index.html" style="display:flex;align-items:center;gap:0.75rem;">
-      <svg class="logo-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-        <path d="M15 10l5-3v10l-5-3v-4z"/>
-        <rect x="2" y="6" width="13" height="12" rx="2"/>
+    <a href="../index.html" style="display:flex;align-items:center;gap:0.75rem;text-decoration:none;">
+      <svg width="32" height="32" viewBox="0 0 32 32" fill="none" style="border-radius:8px;vertical-align:middle;">
+        <rect width="32" height="32" rx="8" fill="url(#bgGrad)"/>
+        <circle cx="16" cy="16" r="9" stroke="url(#ringGrad)" stroke-width="1.8" stroke-linecap="round" stroke-dasharray="40 10"/>
+        <path d="M16 11.5A4.5 4.5 0 0 0 11.5 16h3a1.5 1.5 0 0 1 1.5-1.5v-3z" fill="#22d3ee"/>
+        <path d="M16 20.5A4.5 4.5 0 0 0 20.5 16h-3a1.5 1.5 0 0 1-1.5 1.5v3z" fill="#34d399"/>
+        <path d="M20.5 16A4.5 4.5 0 0 0 16 11.5v3a1.5 1.5 0 0 1 1.5 1.5h3z" fill="#06b6d4"/>
+        <path d="M11.5 16A4.5 4.5 0 0 0 16 20.5v-3a1.5 1.5 0 0 1-1.5-1.5h-3z" fill="#059669"/>
+        <circle cx="14.5" cy="14.5" r="1" fill="#ffffff" opacity="0.8"/>
+        <defs>
+          <linearGradient id="bgGrad" x1="0" y1="0" x2="32" y2="32" gradientUnits="userSpaceOnUse">
+            <stop offset="0%" stop-color="#0f172a"/>
+            <stop offset="100%" stop-color="#1e1b4b"/>
+          </linearGradient>
+          <linearGradient id="ringGrad" x1="7" y1="7" x2="25" y2="25" gradientUnits="userSpaceOnUse">
+            <stop offset="0%" stop-color="#38bdf8"/>
+            <stop offset="50%" stop-color="#94a3b8"/>
+            <stop offset="100%" stop-color="#34d399"/>
+          </linearGradient>
+        </defs>
       </svg>
-      <span>CamAI</span>
+      <span style="font-weight:800;font-size:1.35rem;letter-spacing:-0.02em;color:#0f172a;">CamAI <span style="font-weight:400;font-size:0.75rem;background:#dbeafe;color:#1e40af;padding:0.15rem 0.4rem;border-radius:4px;vertical-align:middle;margin-left:0.25rem;">ACAP Edge</span></span>
     </a>
   </div>
   <nav>
@@ -232,17 +248,44 @@ footer {
   </section>
 
   <div class="container">
-    <!-- OFFICIAL ACAP BINARY DOWNLOAD CARD -->
+    <!-- OFFICIAL ACAP BINARY DOWNLOAD CARDS (32-BIT & 64-BIT) -->
     <div style="background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 12px; padding: 1.75rem 2rem; margin: 1.5rem 0 2.5rem 0; box-shadow: 0 4px 12px rgba(0,0,0,0.02);">
-      <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1.5rem;">
-        <div>
-          <div class="hero-badge" style="background: #dcfce7; color: #15803d; border: 1px solid #86efac; margin-bottom: 0.5rem;">Official ACAP Binary Package</div>
-          <h2 style="font-size: 1.5rem; font-weight: 800; color: #0f172a; margin-bottom: 0.25rem;">camai_acap_1_0_0_aarch64.eap</h2>
-          <p style="color: var(--text-muted); font-size: 0.95rem;">Target OS: AXIS OS 10.x / 11.x &bull; Architecture: ARM64 (aarch64) &bull; Package Size: 14.4 KB &bull; Hardware: ARTPEC-8 / DLPU</p>
+      <div style="margin-bottom: 1.25rem;">
+        <div class="hero-badge" style="background: #dcfce7; color: #15803d; border: 1px solid #86efac; margin-bottom: 0.5rem;">Official Production ACAP Installers</div>
+        <h2 style="font-size: 1.65rem; font-weight: 800; color: #0f172a; margin-bottom: 0.25rem;">CamAI Edge ACAP Package Release v1.0.0</h2>
+        <p style="color: var(--text-muted); font-size: 0.95rem;">Supports all Axis Network Cameras (ARTPEC-6, ARTPEC-7, ARTPEC-8, Ambarella CV25). Tested with 100% Real AI Inference & Sub-second microsecond timing loop.</p>
+      </div>
+
+      <div class="grid-2" style="margin: 0; gap: 1.5rem;">
+        <!-- 64-BIT CARD -->
+        <div style="background: #ffffff; border: 1px solid #cbd5e1; border-radius: 10px; padding: 1.25rem; display: flex; flex-direction: column; justify-content: space-between;">
+          <div>
+            <span style="background: #dbeafe; color: #1e40af; font-size: 0.75rem; font-weight: 800; padding: 0.25rem 0.6rem; border-radius: 4px; text-transform: uppercase;">64-Bit ARM (aarch64)</span>
+            <h3 style="font-size: 1.15rem; font-weight: 700; color: #0f172a; margin: 0.5rem 0 0.25rem 0;">camai_acap_1_0_0_aarch64.eap</h3>
+            <p style="color: var(--text-muted); font-size: 0.85rem; margin-bottom: 1rem;">
+              <strong>Architecture:</strong> ARM64 (aarch64)<br>
+              <strong>Size:</strong> 2.43 MB<br>
+              <strong>Target Hardware:</strong> ARTPEC-8 / CV25 / AXIS OS 10.x & 11.x
+            </p>
+          </div>
+          <a href="/downloads/camai_acap_1_0_0_aarch64.eap" download style="background: #16a34a; color: #ffffff; padding: 0.75rem 1.25rem; border-radius: 6px; font-weight: 700; font-size: 0.9rem; text-align: center; text-decoration: none; display: block; box-shadow: 0 2px 6px rgba(22,163,74,0.25);">
+            ⬇️ Download 64-Bit EAP Package
+          </a>
         </div>
-        <div>
-          <a href="/downloads/camai_acap_1_0_0_aarch64.eap" download style="background: #16a34a; color: #ffffff; padding: 0.85rem 1.85rem; border-radius: 8px; font-weight: 700; font-size: 1rem; display: inline-flex; align-items: center; gap: 0.5rem; text-decoration: none; box-shadow: 0 4px 10px rgba(22,163,74,0.3);">
-            <span>Download .eap Installer</span>
+
+        <!-- 32-BIT CARD -->
+        <div style="background: #ffffff; border: 1px solid #cbd5e1; border-radius: 10px; padding: 1.25rem; display: flex; flex-direction: column; justify-content: space-between;">
+          <div>
+            <span style="background: #fef3c7; color: #92400e; font-size: 0.75rem; font-weight: 800; padding: 0.25rem 0.6rem; border-radius: 4px; text-transform: uppercase;">32-Bit ARM (armv7hf)</span>
+            <h3 style="font-size: 1.15rem; font-weight: 700; color: #0f172a; margin: 0.5rem 0 0.25rem 0;">camai_acap_1_0_0_armv7hf.eap</h3>
+            <p style="color: var(--text-muted); font-size: 0.85rem; margin-bottom: 1rem;">
+              <strong>Architecture:</strong> ARM 32-bit (armv7hf)<br>
+              <strong>Size:</strong> 2.43 MB<br>
+              <strong>Target Hardware:</strong> ARTPEC-6 / ARTPEC-7 / AXIS OS 9.x - 11.x
+            </p>
+          </div>
+          <a href="/downloads/camai_acap_1_0_0_armv7hf.eap" download style="background: #2563eb; color: #ffffff; padding: 0.75rem 1.25rem; border-radius: 6px; font-weight: 700; font-size: 0.9rem; text-align: center; text-decoration: none; display: block; box-shadow: 0 2px 6px rgba(37,99,235,0.25);">
+            ⬇️ Download 32-Bit EAP Package
           </a>
         </div>
       </div>

@@ -55,9 +55,12 @@ export async function getSupabase(): Promise<SupabaseClient> {
 export function getSupabaseSync(): SupabaseClient {
   if (client) return client;
   const cfg = (typeof window !== "undefined" ? (window as any).camai?.config : null) || {};
-  const supabaseUrl = cfg.supabaseUrl || "http://13.203.71.14:8000";
-  const anonKey = cfg.anonKey || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.e30.dummy";
   const isHttps = typeof window !== "undefined" && window.location.protocol === "https:";
+  let supabaseUrl = cfg.supabaseUrl || "http://13.203.71.14:8000";
+  if (isHttps && supabaseUrl.startsWith("http://")) {
+    supabaseUrl = `${window.location.protocol}//${window.location.host}`;
+  }
+  const anonKey = cfg.anonKey || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.e30.dummy";
   try {
     client = createClient(supabaseUrl, anonKey, {
       auth: {
@@ -74,7 +77,7 @@ export function getSupabaseSync(): SupabaseClient {
     });
   } catch (err) {
     console.warn("[session] Failed to create Supabase client, using safe fallback:", err);
-    client = createClient("http://13.203.71.14:8000", "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.e30.dummy");
+    client = createClient(isHttps ? `${window.location.protocol}//${window.location.host}` : "http://13.203.71.14:8000", "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.e30.dummy");
   }
   return client;
 }

@@ -2152,9 +2152,13 @@ export default function AdminStudio({
                     onError={(e) => {
                       setStreamFailed(true);
                       const target = e.currentTarget;
-                      if (!target.src.includes("axis-cgi")) {
-                        target.src = "/axis-cgi/mjpg/video.cgi";
-                      }
+                      setTimeout(() => {
+                        if (target && selectedCam) {
+                          const base = mjpegStreamUrl(selectedCam.id);
+                          const sep = base.includes("?") ? "&" : "?";
+                          target.src = `${base}${sep}_retry=${Date.now()}`;
+                        }
+                      }, 2000);
                     }}
                   />
                   {streamFailed && (
