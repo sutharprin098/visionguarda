@@ -282,6 +282,8 @@ def _point_in_zone_shape(px: float, py: float, pts, shape_type: str = "polygon",
     """
     if not pts:
         return False
+    if isinstance(pts, (list, tuple)) and len(pts) > 0 and isinstance(pts[0], dict):
+        pts = [[float(p.get("x", 0)), float(p.get("y", 0))] for p in pts if isinstance(p, dict)]
     pts_arr = np.array(pts, dtype=np.float32)
     if pts_arr.size == 0 or pts_arr.ndim < 2 or pts_arr.shape[1] < 2:
         return False
@@ -811,7 +813,7 @@ class CameraAnalytics:
         
         # Read or initialize metadata tracking structures
         for zone in zones:
-            z_id = zone["id"]
+            z_id = str(zone.get("id") or zone.get("name") or "zone")
             if z_id not in self.zone_active_tracks:
                 self.zone_active_tracks[z_id] = {}
             if z_id not in self.zone_dwell_history:
@@ -828,10 +830,10 @@ class CameraAnalytics:
                 self.zone_total_frames[z_id] = 0
                 
         for line in lines:
-            l_id = line["id"]
+            l_id = str(line.get("id") or line.get("name") or "line")
             if l_id not in self.line_counters:
                 self.line_counters[l_id] = {"in_count": 0, "out_count": 0}
-        lines_by_id = {line["id"]: line for line in lines}
+        lines_by_id = {str(line.get("id") or line.get("name") or "line"): line for line in lines}
 
         # Process active detections
         for det in detections:
@@ -1210,15 +1212,29 @@ class CameraAnalytics:
         # --- Advanced Zone Analytics ---
         zone_stats = {}
         for zone in zones:
-            z_id = zone["id"]
+            z_id = str(zone.get("id") or zone.get("name") or "zone")
             z_name = zone.get("name", "Zone")
             shape_type = zone.get("shapeType", "polygon")
             zone_type = zone.get("zoneType", "intrusion")
             max_occupancy = zone.get("maxOccupancy", 5)
             dwell_limit = zone.get("dwellLimit", 10)
-            pts = zone["points"]
+            pts = zone.get("points") or zone.get("polygon") or []
             is_parking_slot = zone_type == "parking"
             
+            if z_id not in self.zone_total_frames:
+                self.zone_total_frames[z_id] = 0
+            if z_id not in self.zone_active_tracks:
+                self.zone_active_tracks[z_id] = {}
+            if z_id not in self.zone_dwell_history:
+                self.zone_dwell_history[z_id] = []
+            if z_id not in self.zone_max_occupancy:
+                self.zone_max_occupancy[z_id] = 0
+            if z_id not in self.zone_entry_counts:
+                self.zone_entry_counts[z_id] = 0
+            if z_id not in self.zone_exit_counts:
+                self.zone_exit_counts[z_id] = 0
+            if z_id not in self.zone_occupied_frames:
+                self.zone_occupied_frames[z_id] = 0
             self.zone_total_frames[z_id] += 1
             
             # 1. Identify which active tracks are inside this zone. Uses
@@ -1518,9 +1534,9 @@ class CameraAnalytics:
         # --- Advanced Line Crossing Analytics ---
         line_stats = {}
         for line in lines:
-            l_id = line["id"]
+            l_id = str(line.get("id") or line.get("name") or "line")
             l_name = line.get("name", "Line")
-            line_pts = line["points"]
+            line_pts = line.get("points") or line.get("coords") or []
             line_type = line.get("lineType", "crossing") # entry_counting, exit_counting, wrong_direction, etc
             
             if len(line_pts) < 2:
