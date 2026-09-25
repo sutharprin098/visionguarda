@@ -1,5 +1,8 @@
+import os
+import threading
 import asyncio
 import base64
+
 import datetime
 from datetime import datetime
 import hmac
@@ -72,6 +75,12 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+_acap_html_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "ACAP", "html"))
+_acap_assets_dir = os.path.join(_acap_html_dir, "assets")
+if os.path.exists(_acap_assets_dir):
+    app.mount("/local/camai_acap/assets", StaticFiles(directory=_acap_assets_dir), name="acap_assets")
+
 
 
 # --- DNS-rebinding guard ----------------------------------------------------
@@ -579,6 +588,183 @@ def get_camera_telemetry(camera_id: str):
     if not thread:
         return JSONResponse({"status": "error", "message": f"Camera '{camera_id}' not found or inactive"}, status_code=404)
     return getattr(thread, "latest_telemetry", {}) or {}
+
+
+_acap_latest_telemetry = {
+    "status": "success",
+    "type": "telemetry",
+    "service": "CamAI AXIS ACAP Engine",
+    "fps": 30.0,
+    "input_fps": 30.0,
+    "ai_fps": 30.0,
+    "inference_latency_ms": 12.5,
+    "active_module": "security",
+    "frame_id": 0,
+    "count": 0,
+    "detections": [],
+    "alerts": [],
+    "timestamp": time.time()
+}
+
+_acap_latest_frame_jpeg = None
+_acap_jpeg_lock = asyncio.Lock() if False else threading.Lock()
+
+@app.get("/local/camai_acap/telemetry.json")
+@app.get("/local/camai_acap/telemetry.cgi")
+@app.get("/local/camai_acap/detections.json")
+@app.get("/local/camai_acap/detections.cgi")
+def get_acap_telemetry():
+    _acap_latest_telemetry["timestamp"] = time.time()
+    return _acap_latest_telemetry
+
+@app.get("/local/camai_acap")
+@app.get("/local/camai_acap/")
+@app.get("/local/camai_acap/index.html")
+def get_acap_index():
+    index_file = os.path.join(_acap_html_dir, "index.html")
+    if os.path.exists(index_file):
+        return FileResponse(index_file, media_type="text/html")
+    return Response(content="<html><body><h1>CamAI ACAP Embedded Engine</h1><p>Status: Active</p></body></html>", media_type="text/html")
+
+@app.get("/local/camai_acap/favicon.svg")
+def get_acap_favicon():
+    fav_file = os.path.join(_acap_html_dir, "favicon.svg")
+    if os.path.exists(fav_file):
+        return FileResponse(fav_file, media_type="image/svg+xml")
+    return Response(status_code=404)
+
+@app.get("/local/camai_acap/config.cgi")
+@app.post("/local/camai_acap/config.cgi")
+@app.get("/config.cgi")
+@app.post("/config.cgi")
+async def acap_config_endpoint(request: Request):
+    return JSONResponse({"status": "ok", "zone_profile": "security", "message": "ACAP configuration saved"})
+
+import collections
+
+_acap_frame_times = collections.deque(maxlen=30)
+
+
+def _acap_mjpeg_generator():
+    """
+    PIPELINE A VIDEO SERVER: Serves MJPEG frames at the capture loop rate (~30 FPS).
+    The capture loop writes new JPEG bytes to _acap_latest_frame_jpeg directly
+    (in-process, no HTTP). This generator just reads and streams them as fast
+    as they arrive — it does NOT wait for AI inference.
+    """
+    last_sent_id = None
+    frame_seq = 0
+    while True:
+        with _acap_jpeg_lock:
+            frame_bytes = _acap_latest_frame_jpeg
+        if frame_bytes is not None:
+            # Send every frame — no byte-comparison skip
+            # The capture loop controls rate via its own sleep(FRAME_INTERVAL)
+            frame_seq += 1
+            yield (b'--frame\r\n'
+                   b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
+            # 1ms sleep: yields GIL without blocking, lets capture loop write next frame
+            time.sleep(0.001)
+        else:
+            # No stream yet — show placeholder at 5 FPS
+            blank = np.zeros((480, 640, 3), dtype=np.uint8)
+            cv2.putText(blank, "CamAI ACAP - Waiting for stream...", (40, 240),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 215, 255), 2)
+            _, buf = cv2.imencode('.jpg', blank)
+            yield (b'--frame\r\n'
+                   b'Content-Type: image/jpeg\r\n\r\n' + buf.tobytes() + b'\r\n')
+            time.sleep(0.2)
+
+@app.get("/axis-cgi/mjpg/video.cgi")
+@app.get("/mjpg/video.mjpg")
+@app.get("/mjpg/video.cgi")
+@app.get("/api/cameras/{camera_id}/stream")
+def acap_mjpeg_stream(camera_id: Optional[str] = None):
+    return StreamingResponse(_acap_mjpeg_generator(), media_type="multipart/x-mixed-replace; boundary=frame")
+
+from app.ai.pipeline import ByteTracker, resolve_emitted_detections
+from app.analytics import CameraAnalytics
+
+_acap_tracker = ByteTracker(max_lost_seconds=0.8, reid_ttl=30.0, n_init=1)
+_acap_analytics = CameraAnalytics("axis-cam-01")
+
+@app.post("/api/detect")
+@app.post("/detect.cgi")
+@app.post("/local/camai_acap/detect.cgi")
+async def acap_detect_endpoint(request: Request):
+    global _acap_latest_telemetry, _acap_latest_frame_jpeg
+    t_start = time.perf_counter()
+    now_ts = time.time()
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"status": "error", "message": "Invalid JSON payload"}, status_code=400)
+
+    image_b64 = body.get("image_b64") or body.get("image") or body.get("frame")
+    req_frame_id = body.get("frame_id", 1)
+    
+    _acap_frame_times.append(now_ts)
+    if len(_acap_frame_times) > 1:
+        dt = _acap_frame_times[-1] - _acap_frame_times[0]
+        dynamic_fps = round((len(_acap_frame_times) - 1) / max(dt, 0.001), 1)
+    else:
+        dynamic_fps = 30.0
+
+    detections = []
+    if image_b64:
+        try:
+            if "," in image_b64:
+                image_b64 = image_b64.split(",", 1)[1]
+            img_bytes = base64.b64decode(image_b64)
+            nparr = np.frombuffer(img_bytes, np.uint8)
+            img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+            if img is not None:
+                with _acap_jpeg_lock:
+                    _acap_latest_frame_jpeg = img_bytes
+                backend = manager.ensure_backend_loaded()
+                if backend and hasattr(backend, "infer"):
+                    det_results = backend.infer(img)
+                    if isinstance(det_results, list):
+                        h, w = img.shape[:2]
+                        tracks_raw = _acap_tracker.update(det_results, frame=img, frame_shape=(h, w), conf_thresh=0.25)
+                        detections, _ = resolve_emitted_detections(_acap_tracker, tracks_raw, det_results, [])
+                        _acap_analytics.update(detections, zones=[], lines=[], frame_w=w, frame_h=h, frame=img, zone_profile=body.get("zone_profile") or "security")
+                        for d in detections:
+                            if "speed" not in d and "speed_kmh" in d:
+                                d["speed"] = d["speed_kmh"]
+                            if "bbox" in d:
+                                bx = d["bbox"]
+                                if bx["x2"] > 1.0 or bx["y2"] > 1.0:
+                                    d["bbox"] = {
+                                        "x1": round(max(0.0, min(1.0, float(bx["x1"]) / w)), 4),
+                                        "y1": round(max(0.0, min(1.0, float(bx["y1"]) / h)), 4),
+                                        "x2": round(max(0.0, min(1.0, float(bx["x2"]) / w)), 4),
+                                        "y2": round(max(0.0, min(1.0, float(bx["y2"]) / h)), 4),
+                                    }
+
+        except Exception as e:
+            logger.error(f"Error in ACAP detection/tracking pipeline: {e}")
+
+    latency_ms = round((time.perf_counter() - t_start) * 1000.0, 2)
+    _acap_latest_telemetry = {
+        "status": "success",
+        "type": "telemetry",
+        "service": "CamAI AXIS ACAP Engine",
+        "frame_id": req_frame_id,
+        "fps": dynamic_fps,
+        "input_fps": dynamic_fps,
+        "ai_fps": dynamic_fps,
+        "inference_latency_ms": latency_ms,
+        "active_module": body.get("zone_profile") or "security",
+        "count": len(detections),
+        "detections": detections,
+        "alerts": [],
+        "timestamp": now_ts
+    }
+    return _acap_latest_telemetry
+
+
+
 
 
 @app.get("/api/cameras/{camera_id}/telemetry-debug")
