@@ -288,7 +288,7 @@ def build_eap_for_arch(arch):
     video_cgi_code = (
         "#!/bin/sh\n"
         "echo \"Status: 302 Found\"\n"
-        "echo \"Location: /axis-cgi/mjpg/video.cgi?compression=15&fps=25\"\n"
+        "echo \"Location: /axis-cgi/mjpg/video.cgi?resolution=800x450&compression=25&fps=25\"\n"
         "echo \"Cache-Control: no-cache, no-store, must-revalidate\"\n"
         "echo \"Access-Control-Allow-Origin: *\"\n"
         "echo \"\"\n"
