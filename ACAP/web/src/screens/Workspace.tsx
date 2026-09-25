@@ -1087,8 +1087,14 @@ const CameraTile = memo(function CameraTile({ camera: c, site, engineOnline, onF
       if (imgRef.current) {
         imgRef.current.src = "";
       }
+    } else {
+      if (imgRef.current) {
+        const base = mjpegStreamUrl(c.id);
+        const sep = base.includes("?") ? "&" : "?";
+        imgRef.current.src = `${base}${sep}_t=${Date.now()}`;
+      }
     }
-  }, [paused]);
+  }, [paused, c.id]);
 
   const ingestAlert = useAlertIngest();
 
@@ -1370,6 +1376,17 @@ const CameraTile = memo(function CameraTile({ camera: c, site, engineOnline, onF
                 <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" />
                 AI: AWS OFFLINE
               </span>
+            ) : isAcapMode() ? (
+              <>
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                <span>{shownDetections.length} detected</span>
+                <span>·</span>
+                <span>25 FPS (Video)</span>
+                <span>·</span>
+                <span>{((telemetry.ai_fps ?? (typeof telemetry.fps === "number" ? telemetry.fps : 5))).toFixed(1)} AI FPS</span>
+                <span>·</span>
+                <span>AWS CLOUD</span>
+              </>
             ) : (
               <>
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />

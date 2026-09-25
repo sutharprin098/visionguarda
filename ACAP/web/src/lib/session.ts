@@ -56,6 +56,7 @@ export function getSupabaseSync(): SupabaseClient {
   if (client) return client;
   const cfg = (typeof window !== "undefined" ? (window as any).camai?.config : null) || {};
   const isAcap = typeof window !== "undefined" && (window.location.pathname.includes("/local/camai_acap/") || window.location.port === "42093" || window.location.port !== "8000");
+  const isHttps = typeof window !== "undefined" && window.location.protocol === "https:";
   let supabaseUrl = cfg.supabaseUrl || "http://13.203.71.14:8000";
   if (isHttps && supabaseUrl.startsWith("http://") && !isAcap) {
     supabaseUrl = `${window.location.protocol}//${window.location.host}`;

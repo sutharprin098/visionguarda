@@ -299,6 +299,7 @@ async function doSyncCamerasToLocalEngine(
   rules: any[] = [],
   zoneProfileConfigs: any[] = []
 ): Promise<void> {
+  if (isAcapMode()) return;
   const status = await getEngineAppStatus();
   if (!status) return;
   const live = new Set(Object.keys(status.cameras || {}));
