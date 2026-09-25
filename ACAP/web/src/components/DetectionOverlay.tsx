@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef } from "react";
-import type { TelemetryDetection } from "../lib/telemetry";
+import { TelemetryDetection } from "../lib/telemetry";
+export type { TelemetryDetection };
 
 /**
  * Renders normalized bounding box detections over video/image streams
@@ -35,12 +36,13 @@ interface ActiveTrackRecord {
   trail: TrailPoint[];
 }
 
-function sourceSize(el: HTMLVideoElement | HTMLImageElement | null): { w: number; h: number } | null {
-  if (!el) return null;
-  const w = (el as HTMLVideoElement).videoWidth || (el as HTMLImageElement).naturalWidth;
-  const h = (el as HTMLVideoElement).videoHeight || (el as HTMLImageElement).naturalHeight;
-  return w && h ? { w, h } : null;
+function sourceSize(el: HTMLVideoElement | HTMLImageElement | null): { w: number; h: number } {
+  if (!el) return { w: 1280, h: 720 };
+  const w = (el as HTMLVideoElement).videoWidth || (el as HTMLImageElement).naturalWidth || (el as HTMLElement).clientWidth || 1280;
+  const h = (el as HTMLVideoElement).videoHeight || (el as HTMLImageElement).naturalHeight || (el as HTMLElement).clientHeight || 720;
+  return { w: w || 1280, h: h || 720 };
 }
+
 
 /** Black or white, whichever is readable on `hex`. The label chip is filled with
  *  the box colour, and half this palette is light (amber #eab308, green #22c55e,
@@ -432,11 +434,18 @@ export default function DetectionOverlay({ detections, refreshKey = 0, mediaRef,
       const item = detToItemMap.get(det);
       const alpha = item ? item.alpha : 1.0;
 
-      const x1 = ox + det.bbox.x1 * dw;
-      const y1 = oy + det.bbox.y1 * dh;
-      const w = (det.bbox.x2 - det.bbox.x1) * dw;
-      const h = (det.bbox.y2 - det.bbox.y1) * dh;
+      const isNorm = det.bbox.x2 <= 1.0 && det.bbox.y2 <= 1.0;
+      const bx1 = isNorm ? det.bbox.x1 : det.bbox.x1 / src.w;
+      const by1 = isNorm ? det.bbox.y1 : det.bbox.y1 / src.h;
+      const bx2 = isNorm ? det.bbox.x2 : det.bbox.x2 / src.w;
+      const by2 = isNorm ? det.bbox.y2 : det.bbox.y2 / src.h;
+
+      const x1 = ox + bx1 * dw;
+      const y1 = oy + by1 * dh;
+      const w = (bx2 - bx1) * dw;
+      const h = (by2 - by1) * dh;
       if (w <= 0 || h <= 0) continue;
+
 
       const color = colorFor(det);
 
