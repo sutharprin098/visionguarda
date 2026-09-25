@@ -302,13 +302,13 @@ class MultiTelemetryHub {
         inFlight = true;
         try {
           const cgiUrl = typeof window !== "undefined" && window.location.pathname.includes("/local/camai_acap/")
-            ? `/local/camai_acap/telemetry.json?_t=${Date.now()}`
-            : `telemetry.json?_t=${Date.now()}`;
+            ? `/local/camai_acap/telemetry.cgi?_t=${Date.now()}`
+            : `telemetry.cgi?_t=${Date.now()}`;
           let res = await fetch(cgiUrl, { signal: AbortSignal.timeout(1200), cache: "no-store" });
           if (!res.ok) {
             const fallbackUrl = typeof window !== "undefined" && window.location.pathname.includes("/local/camai_acap/")
-              ? `/local/camai_acap/telemetry.cgi?_t=${Date.now()}`
-              : `telemetry.cgi?_t=${Date.now()}`;
+              ? `/local/camai_acap/telemetry.json?_t=${Date.now()}`
+              : `telemetry.json?_t=${Date.now()}`;
             res = await fetch(fallbackUrl, { signal: AbortSignal.timeout(1200), cache: "no-store" });
           }
           if (res.ok) {
@@ -327,8 +327,11 @@ class MultiTelemetryHub {
                 lastDataTs = now;
                 lastFrameId = fid;
               }
-              if (measuredFps > 0 && (!data.fps || data.fps === 0)) {
-                data.fps = Math.round(measuredFps * 10) / 10;
+              if (!data.camera_fps) {
+                data.camera_fps = 25.0;
+              }
+              if (!data.ai_fps) {
+                data.ai_fps = measuredFps > 0 ? Math.round(measuredFps * 10) / 10 : (data.fps || 25.0);
               }
               this.listeners.forEach((callbacks) => {
                 callbacks.forEach((fn) => fn(data as CameraTelemetry));

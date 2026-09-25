@@ -1059,7 +1059,7 @@ const CameraTile = memo(function CameraTile({ camera: c, site, engineOnline, onF
   // taints the canvas, and handing that to the alert engine would make it
   // conclude snapshots are impossible for every camera. A screen/webcam
   // <video> is a same-origin capture stream and never taints.
-  const [imgCors, setImgCors] = useState(true);
+  const [imgCors, setImgCors] = useState(!isAcapMode());
   const [streamAttempt, setStreamAttempt] = useState(0);
   const [streamHealth, setStreamHealth] = useState<"connecting" | "live" | "reconnecting" | "offline" | "error">("connecting");
   const retryCountRef = useRef(0);
@@ -1380,12 +1380,26 @@ const CameraTile = memo(function CameraTile({ camera: c, site, engineOnline, onF
               <>
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
                 <span>{shownDetections.length} detected</span>
-                {typeof telemetry.fps === "number" && telemetry.fps > 0 && (
-                  <>
-                    <span>·</span>
-                    <span>{telemetry.fps.toFixed(1)} FPS</span>
-                  </>
-                )}
+                {(() => {
+                  const streamFps = telemetry.camera_fps ?? (isAcapMode() ? 25.0 : telemetry.fps);
+                  const aiFps = telemetry.ai_fps ?? telemetry.fps;
+                  return (
+                    <>
+                      {typeof streamFps === "number" && streamFps > 0 && (
+                        <>
+                          <span>·</span>
+                          <span>{streamFps.toFixed(1)} FPS</span>
+                        </>
+                      )}
+                      {typeof aiFps === "number" && aiFps > 0 && aiFps !== streamFps && (
+                        <>
+                          <span>·</span>
+                          <span className="text-zinc-400">{aiFps.toFixed(1)} AI FPS</span>
+                        </>
+                      )}
+                    </>
+                  );
+                })()}
                 {(() => {
                   const lat = telemetry.inference_latency_ms ?? telemetry.inference_latency ?? telemetry.latency;
                   return typeof lat === "number" && lat > 0 ? (

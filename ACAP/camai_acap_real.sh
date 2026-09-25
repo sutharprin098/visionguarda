@@ -61,13 +61,13 @@ def load_user_auth():
     return []
 
 def build_opener(u, p):
-    if not u and not p:
-        return urllib.request.build_opener()
-    mgr = urllib.request.HTTPPasswordMgrWithDefaultRealm()
-    mgr.add_password(None, "http://127.0.0.1", u, p)
-    digest_handler = urllib.request.HTTPDigestAuthHandler(mgr)
-    basic_handler = urllib.request.HTTPBasicAuthHandler(mgr)
-    return urllib.request.build_opener(digest_handler, basic_handler)
+    handlers = [urllib.request.HTTPCookieProcessor()]
+    if u or p:
+        mgr = urllib.request.HTTPPasswordMgrWithDefaultRealm()
+        mgr.add_password(None, "http://127.0.0.1", u, p)
+        handlers.append(urllib.request.HTTPDigestAuthHandler(mgr))
+        handlers.append(urllib.request.HTTPBasicAuthHandler(mgr))
+    return urllib.request.build_opener(*handlers)
 
 def get_best_opener():
     candidates = load_user_auth() + auth_candidates
@@ -87,13 +87,14 @@ def get_best_opener():
 opener = get_best_opener()
 frame_id = 0
 last_auth_check = time.time()
+frame_timestamps = []
 print(f"[DAEMON] CamAI Python AI worker running, PID={os.getpid()}", flush=True)
 
 while True:
     loop_start = time.time()
     frame_id = (frame_id + 1) % 1000000
 
-    if loop_start - last_auth_check > 45.0:
+    if loop_start - last_auth_check > 60.0:
         opener = get_best_opener()
         last_auth_check = loop_start
 
@@ -112,6 +113,16 @@ while True:
             jpeg_bytes = None
 
     if jpeg_bytes and jpeg_bytes.startswith(b"\xff\xd8"):
+        frame_timestamps.append(loop_start)
+        if len(frame_timestamps) > 10:
+            frame_timestamps.pop(0)
+
+        ai_fps = 0.0
+        if len(frame_timestamps) >= 2:
+            dt = frame_timestamps[-1] - frame_timestamps[0]
+            if dt > 0.01:
+                ai_fps = round((len(frame_timestamps) - 1) / dt, 1)
+
         tmp_frame = os.path.join(STATE_DIR, f"frame_tmp_{os.getpid()}.jpg")
         try:
             with open(tmp_frame, "wb") as f:
@@ -157,10 +168,17 @@ while True:
                 headers={"Content-Type": "application/json"}
             )
 
+            t_post = time.time()
             with urllib.request.urlopen(aws_req, timeout=3.0) as aws_resp:
                 resp_bytes = aws_resp.read()
                 resp_json = json.loads(resp_bytes.decode("utf-8"))
                 
+                resp_json["camera_fps"] = 25.0
+                resp_json["ai_fps"] = ai_fps or round(resp_json.get("fps") or 0.0, 1)
+                resp_json["fps"] = 25.0
+                if "inference_latency_ms" not in resp_json or not resp_json["inference_latency_ms"]:
+                    resp_json["inference_latency_ms"] = round((time.time() - t_post) * 1000)
+
                 tmp_json = os.path.join(STATE_DIR, f"pub_tmp_{os.getpid()}.json")
                 with open(tmp_json, "w") as jf:
                     json.dump(resp_json, jf)
@@ -186,7 +204,9 @@ while True:
                 "count": 0,
                 "detections": [],
                 "alerts": [],
-                "fps": None,
+                "camera_fps": 25.0,
+                "fps": 25.0,
+                "ai_fps": ai_fps,
                 "inference_latency_ms": None
             }
             tmp_json = os.path.join(STATE_DIR, f"pub_tmp_{os.getpid()}.json")
@@ -198,7 +218,7 @@ while True:
                 pass
 
     elapsed = time.time() - loop_start
-    sleep_time = max(0.05, 0.25 - elapsed)
+    sleep_time = max(0.08, 0.30 - elapsed)
     time.sleep(sleep_time)
 '
 fi

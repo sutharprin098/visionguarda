@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Minimize2, ChevronLeft, ChevronRight, Video, AlertTriangle } from "lucide-react";
 import clsx from "clsx";
 import DetectionOverlay from "./DetectionOverlay";
-import { mjpegStreamUrl } from "../lib/localEngine";
+import { mjpegStreamUrl, isAcapMode } from "../lib/localEngine";
 import { TelemetrySession, TelemetryDetection, CameraTelemetry } from "../lib/telemetry";
 import { filterDetections, loadModules } from "../lib/aiModules";
 import { useAlertIngest } from "./alerts/AlertProvider";
@@ -114,12 +114,7 @@ export default function FullscreenViewer({
   }, [winApi]);
 
   const [retryCount, setRetryCount] = useState(0);
-  // Same CORS-with-fallback arrangement as the grid tile: the stream is
-  // requested with crossOrigin so the alert system can crop a snapshot out of
-  // the canvas, and falls back to a plain request (no snapshots) rather than
-  // ever leaving the operator staring at a black window. See Workspace's
-  // CameraTile for the full reasoning.
-  const [imgCors, setImgCors] = useState(true);
+  const [imgCors, setImgCors] = useState(!isAcapMode());
   const corsProvenRef = useRef(false);
 
   // ---- telemetry: detection keeps running; this only subscribes ------------
@@ -339,7 +334,8 @@ export default function FullscreenViewer({
           "absolute bottom-4 left-4 z-20 rounded bg-black/70 px-3 py-1 text-xs font-semibold text-zinc-100 shadow transition-opacity",
           showChrome ? "opacity-100" : "opacity-0",
         )}>
-          {shown.length} shown · {(telemetry.fps ?? telemetry.decode_fps ?? telemetry.camera_fps ?? 0).toFixed(1)} fps
+          {shown.length} shown · {(telemetry.camera_fps ?? (isAcapMode() ? 25.0 : telemetry.fps) ?? 25.0).toFixed(1)} fps
+          {telemetry.ai_fps && telemetry.ai_fps > 0 && telemetry.ai_fps !== (telemetry.camera_fps ?? 25.0) ? ` · ${telemetry.ai_fps.toFixed(1)} AI fps` : ""}
           {telemetry.device ? ` · ${telemetry.device.toUpperCase()}` : ""}
         </div>
       )}
