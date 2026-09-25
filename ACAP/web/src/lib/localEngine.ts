@@ -57,7 +57,7 @@ export function mjpegStreamUrl(cameraId?: string): string {
   if (typeof window !== "undefined") {
     const isAcap = isAcapMode();
     if (isAcap) {
-      return "/axis-cgi/mjpg/video.cgi?resolution=800x450&fps=25";
+      return "/axis-cgi/mjpg/video.cgi?compression=15&fps=25";
     }
   }
   return `${getEngineBase()}/api/cameras/${cid}/stream`;

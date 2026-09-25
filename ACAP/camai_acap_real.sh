@@ -37,7 +37,7 @@ STATE_DIR = "/tmp/camai"
 os.makedirs(STATE_DIR, exist_ok=True)
 
 AWS_URL = "http://13.203.71.14:8000/api/detect"
-SNAP_URL = "http://127.0.0.1/axis-cgi/jpg/image.cgi?resolution=800x450&compression=35"
+SNAP_URL = "http://127.0.0.1/axis-cgi/jpg/image.cgi?resolution=1280x720&compression=20"
 
 auth_candidates = [
     ("", ""),
@@ -215,7 +215,7 @@ fi
 # Fallback POSIX shell loop if python is not present
 logger -t "camai_acap" "Python not found, running fallback curl worker"
 AWS_URL="http://13.203.71.14:8000/api/detect"
-SNAP_URL="http://127.0.0.1/axis-cgi/jpg/image.cgi?resolution=800x450&compression=35"
+SNAP_URL="http://127.0.0.1/axis-cgi/jpg/image.cgi?resolution=1280x720&compression=20"
 AUTH="VLTUser:wY0-oD0jA6jft3"
 COOKIE_JAR="$STATE_DIR/cookie_jar.txt"
 FRAME_ID=0

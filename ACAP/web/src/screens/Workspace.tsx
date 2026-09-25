@@ -1235,8 +1235,8 @@ const CameraTile = memo(function CameraTile({ camera: c, site, engineOnline, onF
   // fit is in play so the boxes track the change.
   // The tile is always the grid-sized, centre-cropped view now; the letterboxed
   // full-frame view is the viewer's job.
-  const fit: "cover" | "contain" = "cover";
-  const mediaClass = "h-full w-full object-cover";
+  const fit: "cover" | "contain" = "contain";
+  const mediaClass = "h-full w-full object-contain";
   const shownDetections = filterDetections(detections, modules);
 
   // The "Calibration Required" badge lived here. Speed is automatic now (the
@@ -1273,7 +1273,7 @@ const CameraTile = memo(function CameraTile({ camera: c, site, engineOnline, onF
             crossOrigin={imgCors ? "anonymous" : undefined}
             src={getTileStreamSrc()}
             alt={c.name}
-            className={`${mediaClass} object-cover bg-black`}
+            className={`${mediaClass} bg-black`}
             onLoad={() => {
               corsProvenRef.current = imgCors;
               retryCountRef.current = 0;
