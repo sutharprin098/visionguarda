@@ -333,6 +333,8 @@ class MultiTelemetryHub {
               if (!data.ai_fps) {
                 data.ai_fps = measuredFps > 0 ? Math.round(measuredFps * 10) / 10 : (data.fps || 25.0);
               }
+              // In ACAP mode, local camera is always online even if AWS cloud is temporarily unreachable
+              data.health_status = "online";
               this.listeners.forEach((callbacks) => {
                 callbacks.forEach((fn) => fn(data as CameraTelemetry));
               });
@@ -345,7 +347,7 @@ class MultiTelemetryHub {
         }
       }
       if (this.isPollingActive) {
-        this.cgiPollTimer = setTimeout(pollTick, 150);
+        this.cgiPollTimer = setTimeout(pollTick, 250);
       }
     };
 

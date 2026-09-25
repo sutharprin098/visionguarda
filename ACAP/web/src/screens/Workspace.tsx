@@ -1016,15 +1016,14 @@ const CameraTile = memo(function CameraTile({ camera: c, site, engineOnline, onF
     c.source_type === "virtual";
 
   // The engine reached the camera's source but got no usable video. Explicitly
-  // NOT "telemetry is null": that just means we haven't heard anything yet
-  // (still connecting, tile just mounted), which must not flash a fault banner.
-  // Only a payload that positively reports a hard offline/error state counts.
-  const sourceFault =
+  // NOT "telemetry is null": that just means we haven't heard anything yet.
+  // In ACAP mode, the hardware camera stream is direct and independent from cloud inference.
+  const sourceFault = !isAcapMode() && (
     telemetry?.health_status === "offline" ||
     telemetry?.health_status === "auth_failed" ||
     telemetry?.health_status === "network_error" ||
-    telemetry?.health_status === "error" ||
-    telemetry?.health_status === "source_gone";
+    telemetry?.health_status === "source_gone"
+  );
 
   // `!paused` drops the MJPEG connection while the viewer covers this tile.
   // `engineOnline !== false` ensures stream renders even if health status fetch is pending.
@@ -1045,24 +1044,11 @@ const CameraTile = memo(function CameraTile({ camera: c, site, engineOnline, onF
   const showingMedia = sharingType !== null || showStream;
 
   // ---- smart-snapshot capture source --------------------------------------
-  //
-  // The alert system crops its evidence out of THIS element — the frames the
-  // operator is already watching. Nothing extra is fetched and no second MJPEG
-  // connection is opened, which matters more than it sounds: every MJPEG <img>
-  // pins one of Chromium's six per-host connections for as long as it lives, so
-  // a capture that opened its own stream would stall the grid it was capturing.
-  //
-  // Kept in a ref rather than read from the render closure because the
-  // telemetry subscription deliberately does not re-subscribe when a share
-  // starts — a closed-over element would go stale exactly when the source
-  // changed. `imgCors` gates the <img> case only: a stream fetched without CORS
-  // taints the canvas, and handing that to the alert engine would make it
-  // conclude snapshots are impossible for every camera. A screen/webcam
-  // <video> is a same-origin capture stream and never taints.
   const [imgCors, setImgCors] = useState(!isAcapMode());
   const [streamAttempt, setStreamAttempt] = useState(0);
   const [streamHealth, setStreamHealth] = useState<"connecting" | "live" | "reconnecting" | "offline" | "error">("connecting");
   const retryCountRef = useRef(0);
+  const lastLoadedRef = useRef(Date.now());
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const corsProvenRef = useRef(false);
   const captureRef = useRef<HTMLVideoElement | HTMLImageElement | null>(null);
@@ -1098,6 +1084,21 @@ const CameraTile = memo(function CameraTile({ camera: c, site, engineOnline, onF
       }
     }
   }, [paused, c.id]);
+
+  // Continuous watchdog: ensure video stream never freezes or turns black
+  useEffect(() => {
+    if (paused || !showStream) return;
+    const interval = setInterval(() => {
+      if (imgRef.current && (!imgRef.current.complete || imgRef.current.naturalWidth === 0)) {
+        if (Date.now() - lastLoadedRef.current > 4500 && !paused) {
+          const base = mjpegStreamUrl(c.id);
+          const sep = base.includes("?") ? "&" : "?";
+          imgRef.current.src = `${base}${sep}_watchdog=${Date.now()}`;
+        }
+      }
+    }, 2500);
+    return () => clearInterval(interval);
+  }, [paused, showStream, c.id]);
 
   const ingestAlert = useAlertIngest();
 
@@ -1280,6 +1281,7 @@ const CameraTile = memo(function CameraTile({ camera: c, site, engineOnline, onF
             onLoad={() => {
               corsProvenRef.current = imgCors;
               retryCountRef.current = 0;
+              lastLoadedRef.current = Date.now();
               setStreamHealth("live");
             }}
             onError={() => {
@@ -1290,7 +1292,7 @@ const CameraTile = memo(function CameraTile({ camera: c, site, engineOnline, onF
               }
               if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
               setStreamHealth("reconnecting");
-              const backoffMs = isAcapMode() ? 1500 : Math.min(10000, Math.round(1000 * Math.pow(1.8, retryCountRef.current)));
+              const backoffMs = isAcapMode() ? 500 : Math.min(8000, Math.round(1000 * Math.pow(1.5, retryCountRef.current)));
               retryCountRef.current += 1;
               reconnectTimerRef.current = setTimeout(() => {
                 if (imgRef.current && !paused) {

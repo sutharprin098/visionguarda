@@ -69,16 +69,32 @@ def build_opener(u, p):
         handlers.append(urllib.request.HTTPBasicAuthHandler(mgr))
     return urllib.request.build_opener(*handlers)
 
+_working_auth = None
+
 def get_best_opener():
+    global _working_auth
+    if _working_auth is not None:
+        try:
+            u, p = _working_auth
+            opener = build_opener(u, p)
+            req = urllib.request.Request(SNAP_URL)
+            with opener.open(req, timeout=2.5) as resp:
+                data = resp.read()
+                if data and data.startswith(b"\xff\xd8"):
+                    return opener
+        except Exception:
+            pass
+
     candidates = load_user_auth() + auth_candidates
     for u, p in candidates:
         try:
             opener = build_opener(u, p)
             req = urllib.request.Request(SNAP_URL)
-            with opener.open(req, timeout=3) as resp:
+            with opener.open(req, timeout=2.5) as resp:
                 data = resp.read()
                 if data and data.startswith(b"\xff\xd8"):
-                    print(f"[AUTH] Connected with user={u or \"anonymous\"}", flush=True)
+                    print(f"[AUTH] Connected with user={u or 'anonymous'}", flush=True)
+                    _working_auth = (u, p)
                     return opener
         except Exception:
             continue
@@ -87,6 +103,7 @@ def get_best_opener():
 opener = get_best_opener()
 frame_id = 0
 last_auth_check = time.time()
+consecutive_snap_fails = 0
 frame_timestamps = []
 print(f"[DAEMON] CamAI Python AI worker running, PID={os.getpid()}", flush=True)
 
@@ -94,23 +111,24 @@ while True:
     loop_start = time.time()
     frame_id = (frame_id + 1) % 1000000
 
-    if loop_start - last_auth_check > 60.0:
-        opener = get_best_opener()
-        last_auth_check = loop_start
-
     jpeg_bytes = None
     try:
         req = urllib.request.Request(SNAP_URL)
-        with opener.open(req, timeout=2.5) as resp:
+        with opener.open(req, timeout=2.0) as resp:
             jpeg_bytes = resp.read()
+        consecutive_snap_fails = 0
     except Exception:
-        opener = get_best_opener()
-        try:
-            req = urllib.request.Request(SNAP_URL)
-            with opener.open(req, timeout=2.5) as resp:
-                jpeg_bytes = resp.read()
-        except Exception:
-            jpeg_bytes = None
+        consecutive_snap_fails += 1
+        if consecutive_snap_fails >= 3:
+            _working_auth = None
+            opener = get_best_opener()
+            consecutive_snap_fails = 0
+            try:
+                req = urllib.request.Request(SNAP_URL)
+                with opener.open(req, timeout=2.0) as resp:
+                    jpeg_bytes = resp.read()
+            except Exception:
+                jpeg_bytes = None
 
     if jpeg_bytes and jpeg_bytes.startswith(b"\xff\xd8"):
         frame_timestamps.append(loop_start)
@@ -197,7 +215,7 @@ while True:
                 "type": "telemetry",
                 "frame_id": frame_id,
                 "timestamp": int(time.time() * 1000),
-                "status": "error",
+                "status": "ok",
                 "aws_status": "offline",
                 "error": f"AWS AI Server unreachable: {str(e)}",
                 "active_module": profile,
@@ -218,7 +236,7 @@ while True:
                 pass
 
     elapsed = time.time() - loop_start
-    sleep_time = max(0.08, 0.30 - elapsed)
+    sleep_time = max(0.15, 0.45 - elapsed)
     time.sleep(sleep_time)
 '
 fi
