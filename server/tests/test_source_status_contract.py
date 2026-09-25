@@ -154,7 +154,7 @@ def test_each_failure_mode_explains_itself(health, expect_substring):
 
 def test_resolver_error_wins_over_generic_classification():
     """The extractor knows the actual reason; don't paper over it."""
-    pc = make_coordinator(source="https://www.youtube.com/watch?v=deadbeef")
+    pc = make_coordinator(source="https://www.twitch.tv/deadbeef")
     pc._health_status = "network_error"
     pc._resolve_error = "This video is not available"
 
