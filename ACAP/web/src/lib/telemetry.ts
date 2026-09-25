@@ -286,6 +286,10 @@ class MultiTelemetryHub {
     this.isPollingActive = true;
 
     let inFlight = false;
+    let lastDataTs = 0;
+    let lastFrameId = -1;
+    let measuredFps = 0;
+
     const pollTick = async () => {
       if (!this.isPollingActive) return;
       if (this.ws && this.ws.readyState === WebSocket.OPEN) {
@@ -308,6 +312,22 @@ class MultiTelemetryHub {
           if (res.ok) {
             const data = await res.json();
             if (data) {
+              const now = Date.now();
+              const fid = data.frame_id ?? 0;
+              if (fid !== lastFrameId && fid > 0) {
+                if (lastDataTs > 0) {
+                  const dt = (now - lastDataTs) / 1000;
+                  if (dt > 0.05 && dt < 5.0) {
+                    const instFps = 1.0 / dt;
+                    measuredFps = measuredFps > 0 ? (0.75 * measuredFps + 0.25 * instFps) : instFps;
+                  }
+                }
+                lastDataTs = now;
+                lastFrameId = fid;
+              }
+              if (measuredFps > 0 && (!data.fps || data.fps === 0)) {
+                data.fps = Math.round(measuredFps * 10) / 10;
+              }
               this.listeners.forEach((callbacks) => {
                 callbacks.forEach((fn) => fn(data as CameraTelemetry));
               });

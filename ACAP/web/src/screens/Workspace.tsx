@@ -1376,24 +1376,24 @@ const CameraTile = memo(function CameraTile({ camera: c, site, engineOnline, onF
                 <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" />
                 AI: AWS OFFLINE
               </span>
-            ) : isAcapMode() ? (
-              <>
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-                <span>{shownDetections.length} detected</span>
-                <span>·</span>
-                <span>25 FPS (Video)</span>
-                <span>·</span>
-                <span>{((telemetry.ai_fps ?? (typeof telemetry.fps === "number" ? telemetry.fps : 5))).toFixed(1)} AI FPS</span>
-                <span>·</span>
-                <span>AWS CLOUD</span>
-              </>
             ) : (
               <>
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-                <span>{shownDetections.length} shown</span>
+                <span>{shownDetections.length} detected</span>
+                {typeof telemetry.fps === "number" && telemetry.fps > 0 && (
+                  <>
+                    <span>·</span>
+                    <span>{telemetry.fps.toFixed(1)} FPS</span>
+                  </>
+                )}
+                {typeof telemetry.inference_latency_ms === "number" && telemetry.inference_latency_ms > 0 && (
+                  <>
+                    <span>·</span>
+                    <span>{Math.round(telemetry.inference_latency_ms)}ms</span>
+                  </>
+                )}
                 <span>·</span>
-                <span>{(typeof telemetry.fps === "object" ? ((telemetry.fps as any)?.processing_fps ?? (telemetry.fps as any)?.inference_fps ?? 0) : (telemetry.fps ?? telemetry.decode_fps ?? telemetry.camera_fps ?? 0)).toFixed(1)} fps</span>
-                {telemetry.device ? <span>· {telemetry.device.toUpperCase()}</span> : <span>· AWS CLOUD</span>}
+                <span>{telemetry.device ? telemetry.device.toUpperCase() : "AWS CLOUD"}</span>
               </>
             )}
           </div>
