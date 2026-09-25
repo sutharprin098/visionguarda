@@ -54,7 +54,7 @@ PRODUCIBLE_PPE_CLASSES = {"helmet", "no_helmet", "vest", "no_vest", "gloves", "s
 
 PROFILE_CLASSES = {
     "traffic": set(PRODUCIBLE_VEHICLE_CLASSES) | {"person", "traffic_light", "stop_sign", "helmet", "no_helmet", "number_plate", "fire", "smoke"},
-    "security": set(PRODUCIBLE_VEHICLE_CLASSES) | set(PRODUCIBLE_ANIMAL_CLASSES) | {"person", "backpack", "handbag", "suitcase", "umbrella", "face", "fire", "smoke", "number_plate", "micro_motion"},
+    "security": set(PRODUCIBLE_VEHICLE_CLASSES) | set(PRODUCIBLE_ANIMAL_CLASSES) | {"person", "backpack", "handbag", "suitcase", "umbrella", "face", "fire", "smoke", "micro_motion"},
     "factory": set(PRODUCIBLE_VEHICLE_CLASSES) | set(PRODUCIBLE_ANIMAL_CLASSES) | {"person", "face", "helmet", "no_helmet", "vest", "no_vest", "gloves", "shoes", "mask", "goggles", "fire", "smoke", "forklift", "number_plate"},
     "retail": set(PRODUCIBLE_VEHICLE_CLASSES) | {"person", "backpack", "handbag", "suitcase", "cell phone", "face", "number_plate"},
     "smart_city": set(PRODUCIBLE_VEHICLE_CLASSES) | set(PRODUCIBLE_ANIMAL_CLASSES) | {"person", "traffic_light", "stop_sign", "fire", "smoke", "number_plate", "helmet", "no_helmet", "face"},

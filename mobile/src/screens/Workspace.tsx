@@ -1432,12 +1432,42 @@ const CameraTile = memo(function CameraTile({ camera: c, site, engineOnline, onF
   // <video> is a same-origin capture stream and never taints.
   const [imgCors, setImgCors] = useState(true);
   const [streamAttempt, setStreamAttempt] = useState(0);
+  const retryCountRef = useRef(0);
+  const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const corsProvenRef = useRef(false);
   const captureRef = useRef<HTMLVideoElement | HTMLImageElement | null>(null);
   useEffect(() => {
     if (sharingType !== null) captureRef.current = videoRef.current;
     else captureRef.current = imgCors ? imgRef.current : null;
   });
+
+  // Explicitly free the Chromium MJPEG HTTP connection on unmount
+  useEffect(() => {
+    return () => {
+      if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
+      if (imgRef.current) {
+        imgRef.current.src = "";
+      }
+    };
+  }, []);
+
+  const wasPausedRef = useRef(false);
+  useEffect(() => {
+    if (paused) {
+      wasPausedRef.current = true;
+      if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
+      if (imgRef.current) {
+        imgRef.current.src = "";
+      }
+    } else if (wasPausedRef.current) {
+      wasPausedRef.current = false;
+      if (imgRef.current) {
+        const base = mjpegStreamUrl(c.id);
+        const sep = base.includes("?") ? "&" : "?";
+        imgRef.current.src = `${base}${sep}_t=${Date.now()}`;
+      }
+    }
+  }, [paused, c.id]);
 
   const ingestAlert = useAlertIngest();
 
@@ -1656,9 +1686,9 @@ const CameraTile = memo(function CameraTile({ camera: c, site, engineOnline, onF
             className={`${mediaClass} bg-black`}
             onError={() => setStreamFailed(true)}
           />
-        ) : showStream && !streamFailed ? (
+        ) : showStream ? (
           <img
-            key={`${c.id}-${retryCount}`}
+            key={c.id}
             ref={imgRef}
             crossOrigin={imgCors ? "anonymous" : undefined}
             src={mjpegStreamUrl(c.id)}
@@ -1666,13 +1696,24 @@ const CameraTile = memo(function CameraTile({ camera: c, site, engineOnline, onF
             className={mediaClass}
             onLoad={() => {
               corsProvenRef.current = imgCors;
-              setStreamFailed(false);
+              retryCountRef.current = 0;
             }}
-            onError={(e) => {
+            onError={() => {
+              if (paused || c.is_active === false) return;
               if (imgCors && !corsProvenRef.current) {
                 setImgCors(false);
+                return;
               }
-              setStreamFailed(true);
+              if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
+              const backoffMs = Math.min(8000, Math.round(1000 * Math.pow(1.5, retryCountRef.current)));
+              retryCountRef.current += 1;
+              reconnectTimerRef.current = setTimeout(() => {
+                if (imgRef.current && !paused) {
+                  const base = mjpegStreamUrl(c.id);
+                  const sep = base.includes("?") ? "&" : "?";
+                  imgRef.current.src = `${base}${sep}_retry=${Date.now()}`;
+                }
+              }, backoffMs);
             }}
           />
         ) : isScreenShareCam ? (

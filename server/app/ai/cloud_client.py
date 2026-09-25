@@ -147,10 +147,6 @@ def detect(
         payload = json.loads(raw)
     except Exception as exc:
         raise CloudOfflineError(f"Cloud response is not valid JSON: {exc}") from exc
-
-    if isinstance(payload, dict) and payload.get("status") == "success" and payload.get("count") == 0 and len(payload.get("detections", [])) == 0 and ("13.203.71.14" in url or payload.get("latency_ms") is not None):
-        raise CloudOfflineError("Cloud endpoint returned empty stub detection payload (falling back to local engine)")
-
     return _parse_response(payload, frame_w, frame_h, enc_w=new_w, enc_h=new_h)
 
 

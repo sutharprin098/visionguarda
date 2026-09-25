@@ -2263,10 +2263,11 @@ class PipelineCoordinator:
         orig_h, orig_w = frame.shape[:2]
         t0_cloud = time.perf_counter()
 
+        now_ts = time.time()
         cloud_url = getattr(config, "CLOUD_ENDPOINT_URL", "").strip()
         cloud_key = getattr(config, "CLOUD_API_KEY", "").strip()
 
-        if not cloud_url or getattr(self, "_cloud_offline", False):
+        if not cloud_url:
             self._cloud_offline = True
             if self.backend is None:
                 try:
@@ -2277,6 +2278,21 @@ class PipelineCoordinator:
             if self.backend is not None:
                 self._ai_loop_iteration_local(data)
                 return
+
+        # If previously marked offline, periodically retry cloud every 4.0s
+        if getattr(self, "_cloud_offline", False):
+            last_retry = getattr(self, "_cloud_last_retry_attempt", 0.0)
+            if now_ts - last_retry < 4.0:
+                if self.backend is None:
+                    try:
+                        from app.camera_manager import manager
+                        self.backend = manager.ensure_backend_loaded()
+                    except Exception:
+                        pass
+                if self.backend is not None:
+                    self._ai_loop_iteration_local(data)
+                    return
+            self._cloud_last_retry_attempt = now_ts
 
         if getattr(self, "_is_standby_frame", False):
             with self._overlay_lock:
@@ -2327,6 +2343,14 @@ class PipelineCoordinator:
             )
             t_inf = (time.perf_counter() - t0_cloud) * 1000
 
+            # Successful cloud inference - clear offline flag
+            if getattr(self, "_cloud_offline", False):
+                print(f"[AI-{self.camera_id}] Cloud endpoint recovered — cloud detections resuming seamlessly.", flush=True)
+            self._cloud_offline = False
+            self._cloud_consecutive_fails = 0
+            self._cloud_offline_logged = False
+            self._last_infer_ts = time.time()
+
             # Match custom target reference images on cloud detections
             if self._wants_faces():
                 try:
@@ -2335,26 +2359,10 @@ class PipelineCoordinator:
                 except Exception as e:
                     print(f"[Cloud TargetMatcher Err] {e}", flush=True)
 
-            # If cloud mode returns 0 detections, check local backend fallback so detection never drops
-            if not detections:
-                if self.backend is None:
-                    try:
-                        from app.camera_manager import manager
-                        self.backend = manager.ensure_backend_loaded()
-                    except Exception:
-                        pass
-                if self.backend is not None:
-                    self._ai_loop_iteration_local(data)
-                    return
-
-            # Successful cloud inference
-            if getattr(self, "_cloud_offline", False):
-                print(f"[AI-{self.camera_id}] Cloud endpoint recovered — cloud detections resuming seamlessly.",
-                      flush=True)
-            self._cloud_offline = False
-            self._cloud_consecutive_fails = 0
-            self._cloud_offline_logged = False
-            self._last_infer_ts = time.time()
+            # If cloud mode returns 0 detections, check if local backend is available for extra coverage
+            if not detections and self.backend is not None:
+                self._ai_loop_iteration_local(data)
+                return
 
             # Cache latest raw detections for tracker coasting
             with self._overlay_lock:

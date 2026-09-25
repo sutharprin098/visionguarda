@@ -183,20 +183,13 @@ export default function FullscreenViewer({
       setImgCors(false);
     }
     log("stream image error, retrying...", { cameraId, retryCount });
-    const target = e.currentTarget;
     setTimeout(() => {
       if (target) {
-        if (isAcapMode()) {
-          target.src = `/local/camai_acap/frame.cgi?_t=${Date.now()}`;
-        } else if (target.src) {
-          try {
-            const url = new URL(target.src);
-            url.searchParams.set("_t", String(Date.now()));
-            target.src = url.toString();
-          } catch { /* ignore */ }
-        }
+        const base = mjpegStreamUrl(cameraId);
+        const sep = base.includes("?") ? "&" : "?";
+        target.src = `${base}${sep}_retry=${Date.now()}`;
       }
-    }, isAcapMode() ? 200 : 1500);
+    }, isAcapMode() ? 500 : 1500);
   };
 
   // ---- camera switching without leaving fullscreen -------------------------

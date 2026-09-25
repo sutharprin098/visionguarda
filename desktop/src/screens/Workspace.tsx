@@ -1053,6 +1053,8 @@ const CameraTile = memo(function CameraTile({ camera: c, site, engineOnline, onF
   // <video> is a same-origin capture stream and never taints.
   const [imgCors, setImgCors] = useState(true);
   const [streamAttempt, setStreamAttempt] = useState(0);
+  const retryCountRef = useRef(0);
+  const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const corsProvenRef = useRef(false);
   const captureRef = useRef<HTMLVideoElement | HTMLImageElement | null>(null);
   useEffect(() => {
@@ -1064,6 +1066,7 @@ const CameraTile = memo(function CameraTile({ camera: c, site, engineOnline, onF
   // to avoid hitting Chromium's 6 concurrent connections per host limit.
   useEffect(() => {
     return () => {
+      if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
       if (imgRef.current) {
         imgRef.current.src = "";
       }
@@ -1255,22 +1258,33 @@ const CameraTile = memo(function CameraTile({ camera: c, site, engineOnline, onF
           />
         ) : showStream ? (
           <img
-            key={`${c.id}_${streamAttempt}_${imgCors ? "cors" : "plain"}`}
+            key={c.id}
             ref={imgRef}
             crossOrigin={imgCors ? "anonymous" : undefined}
             src={mjpegStreamUrl(c.id)}
             alt={c.name}
             className={mediaClass}
-            onLoad={() => { corsProvenRef.current = imgCors; }}
+            onLoad={() => {
+              corsProvenRef.current = imgCors;
+              retryCountRef.current = 0;
+            }}
             onError={() => {
+              if (paused || c.is_active === false) return;
               if (imgCors && !corsProvenRef.current) {
                 console.warn(`[Alerts] stream for ${c.id} refused CORS — falling back to plain stream`);
                 setImgCors(false);
                 return;
               }
-              setTimeout(() => {
-                setStreamAttempt((a) => a + 1);
-              }, 2000);
+              if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
+              const backoffMs = Math.min(8000, Math.round(1000 * Math.pow(1.5, retryCountRef.current)));
+              retryCountRef.current += 1;
+              reconnectTimerRef.current = setTimeout(() => {
+                if (imgRef.current && !paused) {
+                  const base = mjpegStreamUrl(c.id);
+                  const sep = base.includes("?") ? "&" : "?";
+                  imgRef.current.src = `${base}${sep}_retry=${Date.now()}`;
+                }
+              }, backoffMs);
             }}
           />
         ) : isScreenShareCam ? (
