@@ -1,4 +1,5 @@
 import { useEffect, useState, useRef, useCallback } from "react";
+import clsx from "clsx";
 import {
   Video,
   RotateCcw,
@@ -36,8 +37,7 @@ import {
   Check,
   X,
 } from "lucide-react";
-import clsx from "clsx";
-import type { SyncBundle } from "../lib/sync";
+import { isAcapMode, type SyncBundle } from "../lib/sync";
 import { getSupabase } from "../lib/session";
 import { useAlertState } from "../components/alerts/AlertProvider";
 import { fnErrorMessage } from "../lib/fnError";
@@ -46,9 +46,6 @@ import {
   mjpegStreamUrl,
   controlHeaders,
   getEngineBase,
-  fetchRecordingSettings,
-  updateRecordingSettings,
-  RecordingSettings,
 } from "../lib/localEngine";
 import TargetMatcherUI from "../components/TargetMatcherUI";
 
@@ -220,28 +217,7 @@ export default function AdminStudio({
   const [activePoints, setActivePoints] = useState<number[][]>([]);
   const [editingDrawingId, setEditingDrawingId] = useState<string | null>(null);
 
-  // Recording & NVR Admin Settings State
-  const [recordingSettingsOpen, setRecordingSettingsOpen] = useState(false);
-  const [adminRecSettings, setAdminRecSettings] = useState<RecordingSettings>({ segment_minutes: 10, record_with_detections: true });
-  const [savingRecSettings, setSavingRecSettings] = useState(false);
 
-  useEffect(() => {
-    fetchRecordingSettings().then((s) => {
-      if (s) setAdminRecSettings(s);
-    });
-  }, []);
-
-  const handleSaveAdminRecSettings = async () => {
-    setSavingRecSettings(true);
-    try {
-      await updateRecordingSettings(adminRecSettings);
-      setRecordingSettingsOpen(false);
-    } catch (err) {
-      console.error("Failed to save recording settings:", err);
-    } finally {
-      setSavingRecSettings(false);
-    }
-  };
 
   // Custom Product Visual Registration State & Handlers
   const [customImages, setCustomImages] = useState<{ file: File; preview: string }[]>([]);
@@ -257,7 +233,7 @@ export default function AdminStudio({
 
   const fetchCustomModels = useCallback(async () => {
     try {
-      const res = await fetch("http://localhost:8000/api/custom_models");
+      const res = await fetch(`${getEngineBase()}/api/custom_models`);
       if (res.ok) {
         const data = await res.json();
         setCustomModelsList(data.models || []);
@@ -326,7 +302,7 @@ export default function AdminStudio({
         formData.append("files", img.file);
       });
 
-      const res = await fetch("http://localhost:8000/api/custom_models/register", {
+      const res = await fetch(`${getEngineBase()}/api/custom_models/register`, {
         method: "POST",
         body: formData,
       });
@@ -356,7 +332,7 @@ export default function AdminStudio({
 
   const handleToggleModel = async (modelId: string, currentActive: boolean) => {
     try {
-      const res = await fetch(`http://localhost:8000/api/custom_models/${modelId}/toggle`, {
+      const res = await fetch(`${getEngineBase()}/api/custom_models/${modelId}/toggle`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ active: !currentActive }),
@@ -372,7 +348,7 @@ export default function AdminStudio({
   const handleDeleteModel = async (modelId: string, modelName: string) => {
     if (!confirm(`Are you sure you want to delete model '${modelName}'?`)) return;
     try {
-      const res = await fetch(`http://localhost:8000/api/custom_models/${modelId}`, {
+      const res = await fetch(`${getEngineBase()}/api/custom_models/${modelId}`, {
         method: "DELETE",
       });
       if (res.ok) {
@@ -430,6 +406,43 @@ export default function AdminStudio({
     async function loadCameras() {
       let cams: Camera[] = [];
 
+      // 0. Standalone ACAP Mode
+      if (isAcapMode()) {
+        const defaultCam: Camera = {
+          id: "axis-local-cam",
+          name: "Axis Edge Camera",
+          source_type: "axis",
+          status: "online",
+          zone_profile: "traffic",
+          zones: "[]",
+          lines: "[]",
+        };
+        try {
+          const cfgRes = await fetch("/local/camai_acap/config.cgi", { signal: AbortSignal.timeout(2000) });
+          if (cfgRes.ok) {
+            const cfg = await cfgRes.json();
+            if (cfg && (cfg.zone_profile || cfg.profile)) {
+              defaultCam.zone_profile = cfg.zone_profile || cfg.profile;
+            }
+            if (cfg && cfg.zones) {
+              defaultCam.zones = typeof cfg.zones === "string" ? cfg.zones : JSON.stringify(cfg.zones);
+            }
+            if (cfg && cfg.lines) {
+              defaultCam.lines = typeof cfg.lines === "string" ? cfg.lines : JSON.stringify(cfg.lines);
+            }
+          }
+        } catch (_) {}
+
+        if (!active) return;
+        setCamsLoad({ loading: false, error: null });
+        setCameras([defaultCam]);
+        setSelectedCam((prev) => {
+          if (prev) return { ...defaultCam, zone_profile: prev.zone_profile || defaultCam.zone_profile };
+          return defaultCam;
+        });
+        return;
+      }
+
       // 1. First check bundle cameras
       if (bundle?.cameras && bundle.cameras.length > 0) {
         cams = bundle.cameras.map((c) => ({
@@ -445,7 +458,7 @@ export default function AdminStudio({
 
       // 2. Fetch from local engine directly: http://127.0.0.1:8000/api/cameras
       try {
-        const engineRes = await fetch("http://127.0.0.1:8000/api/cameras", { signal: AbortSignal.timeout(3000) });
+        const engineRes = await fetch(`${getEngineBase()}/api/cameras`, { signal: AbortSignal.timeout(3000) });
         if (engineRes.ok) {
           const engineCams = await engineRes.json();
           if (Array.isArray(engineCams) && engineCams.length > 0) {
@@ -529,6 +542,7 @@ export default function AdminStudio({
     }
 
     async function loadConfigVersions() {
+      if (isAcapMode()) return;
       try {
         const sb = await getSupabase();
         const { data: vers } = await sb.from("config_versions").select("*").order("version", { ascending: false });
@@ -540,6 +554,10 @@ export default function AdminStudio({
     }
 
     async function initializeStudio() {
+      if (isAcapMode()) {
+        await loadCameras();
+        return;
+      }
       try {
         const sb = await getSupabase();
         const { data: auth } = await sb.auth.getUser();
@@ -560,33 +578,35 @@ export default function AdminStudio({
     initializeStudio();
 
     // Subscribe to real-time additions/edits of cameras & configs if Supabase is active
-    try {
-      getSupabase().then((sb) => {
-        if (!active) return;
-        channel = sb.channel("admin-studio-sync")
-          .on("postgres_changes", { event: "*", schema: "public", table: "cameras" }, (payload: any) => {
-            if (payload.eventType === "UPDATE" && payload.new) {
-              const currentCam = camerasRef.current.find((c) => c.id === payload.new.id);
-              if (currentCam) {
-                const keysToCompare = ["name", "source_type", "zone_profile", "zones", "lines"] as const;
-                const onlyStatusChanged = keysToCompare.every((key) => {
-                  return JSON.stringify(payload.new[key]) === JSON.stringify(currentCam[key]);
-                });
-                if (onlyStatusChanged) {
-                  setCameras((prev) => prev.map((c) => (c.id === payload.new.id ? { ...c, status: payload.new.status } : c)));
-                  setSelectedCam((prev) => (prev && prev.id === payload.new.id ? { ...prev, status: payload.new.status } : prev));
-                  return;
+    if (!isAcapMode()) {
+      try {
+        getSupabase().then((sb) => {
+          if (!active) return;
+          channel = sb.channel("admin-studio-sync")
+            .on("postgres_changes", { event: "*", schema: "public", table: "cameras" }, (payload: any) => {
+              if (payload.eventType === "UPDATE" && payload.new) {
+                const currentCam = camerasRef.current.find((c) => c.id === payload.new.id);
+                if (currentCam) {
+                  const keysToCompare = ["name", "source_type", "zone_profile", "zones", "lines"] as const;
+                  const onlyStatusChanged = keysToCompare.every((key) => {
+                    return JSON.stringify(payload.new[key]) === JSON.stringify(currentCam[key]);
+                  });
+                  if (onlyStatusChanged) {
+                    setCameras((prev) => prev.map((c) => (c.id === payload.new.id ? { ...c, status: payload.new.status } : c)));
+                    setSelectedCam((prev) => (prev && prev.id === payload.new.id ? { ...prev, status: payload.new.status } : prev));
+                    return;
+                  }
                 }
               }
-            }
-            loadCameras();
-          })
-          .on("postgres_changes", { event: "*", schema: "public", table: "config_versions" }, () => {
-            loadConfigVersions();
-          })
-          .subscribe();
-      }).catch(() => {});
-    } catch {}
+              loadCameras();
+            })
+            .on("postgres_changes", { event: "*", schema: "public", table: "config_versions" }, () => {
+              loadConfigVersions();
+            })
+            .subscribe();
+        }).catch(() => {});
+      } catch {}
+    }
 
     isEngineOnline().then((online) => active && setEngineOnline(online));
     const interval = setInterval(() => {
@@ -605,7 +625,7 @@ export default function AdminStudio({
   useEffect(() => {
     async function fetchStatus() {
       try {
-        const res = await fetch("http://localhost:8000/api/custom_model/status");
+        const res = await fetch(`${getEngineBase()}/api/custom_model/status`);
         if (res.ok) {
           const data = await res.json();
           setModelStatus(data);
@@ -1395,21 +1415,25 @@ export default function AdminStudio({
     try {
       if (selectedCam && activeProfile) {
         syncEngineDirectly(features, activeProfile);
+        if (!isAcapMode()) {
+          try {
+            const sb = await getSupabase();
+            await sb.from("cameras").update({ zone_profile: activeProfile }).eq("id", selectedCam.id);
+          } catch { /* offline safe */ }
+        }
+      }
+      if (!isAcapMode()) {
         try {
           const sb = await getSupabase();
-          await sb.from("cameras").update({ zone_profile: activeProfile }).eq("id", selectedCam.id);
-        } catch { /* offline safe */ }
-      }
-      try {
-        const sb = await getSupabase();
-        const { error } = await sb.functions.invoke("publish-config", {
-          body: { org_id: effectiveOrgId, comment: publishComment || "Configuration update" },
-        });
-        if (error) console.warn("Cloud publish sync warning:", error);
-        const { data: vers } = await sb.from("config_versions").select("*").order("version", { ascending: false });
-        if (vers) setVersions(vers);
-      } catch (cloudErr) {
-        console.warn("[AdminStudio] Cloud publish skipped (offline):", cloudErr);
+          const { error } = await sb.functions.invoke("publish-config", {
+            body: { org_id: effectiveOrgId, comment: publishComment || "Configuration update" },
+          });
+          if (error) console.warn("Cloud publish sync warning:", error);
+          const { data: vers } = await sb.from("config_versions").select("*").order("version", { ascending: false });
+          if (vers) setVersions(vers);
+        } catch (cloudErr) {
+          console.warn("[AdminStudio] Cloud publish skipped (offline):", cloudErr);
+        }
       }
       setDrawings((prev) => prev.map((d) => ({ ...d, is_draft: false })));
       setRules((prev) => prev.map((r) => ({ ...r, is_draft: false })));
@@ -2021,14 +2045,7 @@ export default function AdminStudio({
             <button onClick={publishConfig} disabled={publishing} className="w-full btn-accent flex items-center justify-center gap-1.5 py-1.5 text-xs">
               <Send size={12} />{publishing ? "Publishing..." : "Publish Configs"}
             </button>
-            <button
-              type="button"
-              onClick={() => setRecordingSettingsOpen(true)}
-              className="w-full flex items-center justify-center gap-1.5 py-1.5 px-3 rounded text-xs bg-surface-2 hover:bg-surface-3 text-zinc-300 border border-line transition font-medium"
-            >
-              <Sliders size={12} className="text-accent" />
-              Recording Settings ({adminRecSettings.segment_minutes}m)
-            </button>
+
           </div>
           <button onClick={onDeactivated} className="w-full text-center text-xs text-zinc-500 hover:text-zinc-300 pt-1">Exit Studio</button>
         </div>
@@ -2127,23 +2144,17 @@ export default function AdminStudio({
               {engineOnline !== false ? (
                 <>
                   <img
-                    key={selectedCam.id}
-                    ref={videoRef}
+                    key={`${selectedCam.id}_${streamFailed ? "retry" : "live"}`}
                     src={mjpegStreamUrl(selectedCam.id)}
-                    alt=""
-                    className="h-full w-full object-contain pointer-events-none"
+                    alt={selectedCam.name}
+                    className="h-full w-full object-contain pointer-events-none bg-black"
                     onLoad={() => setStreamFailed(false)}
                     onError={(e) => {
                       setStreamFailed(true);
                       const target = e.currentTarget;
-                      setTimeout(() => {
-                        if (target) {
-                          try {
-                            const base = mjpegStreamUrl(selectedCam.id);
-                            target.src = `${base}?_t=${Date.now()}`;
-                          } catch { /* ignore */ }
-                        }
-                      }, 1200);
+                      if (!target.src.includes("axis-cgi")) {
+                        target.src = "/axis-cgi/mjpg/video.cgi";
+                      }
                     }}
                   />
                   {streamFailed && (
@@ -2156,7 +2167,7 @@ export default function AdminStudio({
               ) : (
                 <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-zinc-900/90 px-6 text-center text-zinc-500">
                   <Video size={36} />
-                  <span className="text-xs">Local AI engine offline — drawing still works on the canvas</span>
+                  <span className="text-xs">AWS Cloud AI Engine Connecting — drawing works on the canvas</span>
                 </div>
               )}
               <canvas
@@ -2233,110 +2244,7 @@ export default function AdminStudio({
         )}
       </aside>
 
-      {/* Admin Recording Settings Modal */}
-      {recordingSettingsOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4">
-          <div className="bg-surface-1 border border-line rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-5 animate-in fade-in zoom-in duration-150">
-            <div className="flex items-center justify-between border-b border-line pb-3">
-              <div className="flex items-center gap-2.5">
-                <div className="p-2 rounded-lg bg-accent/15 text-accent">
-                  <Sliders size={18} />
-                </div>
-                <div>
-                  <h3 className="text-sm font-bold text-white">NVR & Recording Configuration</h3>
-                  <p className="text-[11px] text-zinc-400">Continuous recording segment limit & AI burn-in</p>
-                </div>
-              </div>
-              <button
-                onClick={() => setRecordingSettingsOpen(false)}
-                className="p-1 rounded-md text-zinc-400 hover:text-white hover:bg-surface-2 transition"
-              >
-                <X size={18} />
-              </button>
-            </div>
 
-            <div className="space-y-4">
-              {/* Segment Duration Selection */}
-              <div>
-                <label className="block text-xs font-semibold text-zinc-300 mb-2">
-                  Continuous Clip Duration
-                </label>
-                <div className="grid grid-cols-5 gap-2">
-                  {[5, 10, 15, 30, 60].map((mins) => (
-                    <button
-                      key={mins}
-                      type="button"
-                      onClick={() =>
-                        setAdminRecSettings((prev) => ({ ...prev, segment_minutes: mins }))
-                      }
-                      className={clsx(
-                        "py-2 px-2 rounded-lg text-xs font-mono font-medium border text-center transition",
-                        adminRecSettings.segment_minutes === mins
-                          ? "bg-accent text-black border-accent font-bold shadow-md shadow-accent/20"
-                          : "bg-surface-2 text-zinc-300 border-line hover:border-zinc-500"
-                      )}
-                    >
-                      {mins}m
-                    </button>
-                  ))}
-                </div>
-                <p className="text-[10px] text-zinc-500 mt-1.5">
-                  Camera streams are automatically split into MP4 files of this duration.
-                </p>
-              </div>
-
-              {/* AI Detections in Video Toggle */}
-              <div className="p-3.5 rounded-xl bg-surface-2 border border-line flex items-start gap-3">
-                <input
-                  type="checkbox"
-                  id="adminBurnInDets"
-                  checked={adminRecSettings.record_with_detections}
-                  onChange={(e) =>
-                    setAdminRecSettings((prev) => ({
-                      ...prev,
-                      record_with_detections: e.target.checked,
-                    }))
-                  }
-                  className="mt-1 h-4 w-4 rounded border-zinc-700 bg-surface-3 text-accent focus:ring-accent cursor-pointer accent-accent"
-                />
-                <label htmlFor="adminBurnInDets" className="flex-1 cursor-pointer">
-                  <div className="text-xs font-semibold text-zinc-200">
-                    Record with AI Detections & Overlay
-                  </div>
-                  <div className="text-[11px] text-zinc-400 mt-0.5 leading-relaxed">
-                    Burn real-time AI bounding boxes, classifications, track IDs, and speed km/h into video files.
-                  </div>
-                </label>
-              </div>
-            </div>
-
-            {/* Modal Actions */}
-            <div className="flex items-center justify-end gap-2.5 pt-2 border-t border-line">
-              <button
-                type="button"
-                onClick={() => setRecordingSettingsOpen(false)}
-                className="px-4 py-2 rounded-lg text-xs text-zinc-400 hover:text-white hover:bg-surface-2 transition font-medium"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={handleSaveAdminRecSettings}
-                disabled={savingRecSettings}
-                className="flex items-center gap-1.5 px-4 py-2 rounded-lg bg-accent text-black font-semibold text-xs hover:bg-accent/90 transition shadow-md disabled:opacity-50"
-              >
-                {savingRecSettings ? (
-                  "Saving..."
-                ) : (
-                  <>
-                    <Check size={14} /> Save Changes
-                  </>
-                )}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
