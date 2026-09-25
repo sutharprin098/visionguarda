@@ -1117,3 +1117,14 @@ class EngineBackend:
 
         t_post = (time.time() - t0) * 1000
         return detections, masks_polygons, t_post
+
+    def infer(self, frame, conf_threshold=0.25, imgsz=320):
+        """High-level single-call inference helper for a single frame."""
+        if frame is None or not hasattr(frame, "shape") or frame.size == 0:
+            return []
+        h, w = frame.shape[:2]
+        tensor, _ = self.preprocess(frame, imgsz)
+        outputs, _ = self.run_inference(tensor)
+        dets, _, _ = self.postprocess(outputs, (h, w), conf_threshold=conf_threshold)
+        return dets
+
