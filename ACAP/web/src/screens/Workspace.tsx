@@ -1370,7 +1370,7 @@ const CameraTile = memo(function CameraTile({ camera: c, site, engineOnline, onF
         )}
 
         {showingMedia && !showSourceFault && (
-          <div className="absolute bottom-2 left-2 z-20 flex items-center gap-1.5 rounded bg-black/70 px-2 py-0.5 text-[10px] font-semibold text-zinc-200 shadow">
+          <div className="absolute bottom-2 left-2 z-20 flex items-center gap-1.5 rounded bg-black/75 px-2 py-0.5 text-[10px] font-semibold text-zinc-200 shadow backdrop-blur-sm">
             {((telemetry as any)?.aws_status === "offline" || (telemetry as any)?.status === "error") ? (
               <span className="text-red-400 font-bold flex items-center gap-1">
                 <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" />
@@ -1378,11 +1378,22 @@ const CameraTile = memo(function CameraTile({ camera: c, site, engineOnline, onF
               </span>
             ) : (
               <>
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-                <span>{shownDetections.length} detected</span>
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
                 {(() => {
-                  const streamFps = telemetry?.camera_fps ?? (isAcapMode() ? 25.0 : (telemetry?.fps ?? 25.0));
-                  const aiFps = telemetry?.ai_fps ?? telemetry?.fps;
+                  const pCount = telemetry?.people ?? 0;
+                  const vCount = telemetry?.vehicles ?? 0;
+                  const totCount = shownDetections.length;
+                  let detLabel = `${totCount} detected`;
+                  if (totCount > 0) {
+                    if (pCount > 0 && vCount > 0) detLabel = `${pCount} people, ${vCount} vehicles`;
+                    else if (pCount > 0) detLabel = `${pCount} ${pCount === 1 ? "person" : "people"}`;
+                    else if (vCount > 0) detLabel = `${vCount} ${vCount === 1 ? "vehicle" : "vehicles"}`;
+                  }
+                  return <span>{detLabel}</span>;
+                })()}
+                {(() => {
+                  const streamFps = telemetry?.camera_fps ?? telemetry?.fps;
+                  const aiFps = telemetry?.ai_fps;
                   return (
                     <>
                       {typeof streamFps === "number" && streamFps > 0 && (
@@ -1391,7 +1402,7 @@ const CameraTile = memo(function CameraTile({ camera: c, site, engineOnline, onF
                           <span>{streamFps.toFixed(1)} FPS</span>
                         </>
                       )}
-                      {typeof aiFps === "number" && aiFps > 0 && aiFps !== streamFps && (
+                      {typeof aiFps === "number" && aiFps > 0 && Math.abs(aiFps - (streamFps || 0)) > 0.5 && (
                         <>
                           <span>·</span>
                           <span className="text-zinc-400">{aiFps.toFixed(1)} AI FPS</span>
@@ -1408,6 +1419,25 @@ const CameraTile = memo(function CameraTile({ camera: c, site, engineOnline, onF
                       <span>{Math.round(lat)}ms</span>
                     </>
                   ) : null;
+                })()}
+                {(() => {
+                  const prof = (telemetry?.active_module || (telemetry as any)?.zone_profile || c.zone_profile || (c as any).profile || "traffic").toLowerCase();
+                  const profMap: Record<string, string> = {
+                    traffic: "Traffic AI",
+                    security: "Security AI",
+                    factory: "Factory PPE",
+                    retail: "Retail AI",
+                    smart_city: "Smart City",
+                    micro_motion: "Night DCE",
+                    custom: "Custom AI"
+                  };
+                  const profName = profMap[prof] || `${prof.toUpperCase()} AI`;
+                  return (
+                    <>
+                      <span>·</span>
+                      <span className="text-indigo-400">{profName}</span>
+                    </>
+                  );
                 })()}
                 <span>·</span>
                 <span>{telemetry?.device ? telemetry.device.toUpperCase() : "AWS CLOUD"}</span>
