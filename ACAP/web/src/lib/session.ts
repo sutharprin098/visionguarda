@@ -55,8 +55,9 @@ export async function getSupabase(): Promise<SupabaseClient> {
 export function getSupabaseSync(): SupabaseClient {
   if (client) return client;
   const cfg = (typeof window !== "undefined" ? (window as any).camai?.config : null) || {};
-  const supabaseUrl = cfg.supabaseUrl || "https://local-node.camai.cloud";
+  const supabaseUrl = cfg.supabaseUrl || "http://13.203.71.14:8000";
   const anonKey = cfg.anonKey || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.e30.dummy";
+  const isHttps = typeof window !== "undefined" && window.location.protocol === "https:";
   try {
     client = createClient(supabaseUrl, anonKey, {
       auth: {
@@ -66,10 +67,14 @@ export function getSupabaseSync(): SupabaseClient {
         storageKey: "camai.session",
         detectSessionInUrl: false,
       },
+      realtime: {
+        timeout: 2000,
+        ...(isHttps && supabaseUrl.startsWith("http://") ? { transport: null } : {}),
+      },
     });
   } catch (err) {
     console.warn("[session] Failed to create Supabase client, using safe fallback:", err);
-    client = createClient("https://local-node.camai.cloud", "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.e30.dummy");
+    client = createClient("http://13.203.71.14:8000", "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.e30.dummy");
   }
   return client;
 }
@@ -107,9 +112,8 @@ export type RestoreResult = "ready" | "no-creds" | "retry";
 export async function restoreSession(force = false): Promise<RestoreResult> {
   // `force` matters on the retry path: the prefetch is memoised in the main
   // process, so a caller backing off after a "retry" would otherwise be handed
-  // the same stale failure forever instead of a fresh attempt.
   const warm = await window.camai.getWarmSession(force);
-  if (!warm.ok) return warm.reason;
+  if (!warm || !warm.ok) return warm && "reason" in warm ? warm.reason : "no-creds";
 
   const sb = getSupabaseSync();
   try {
