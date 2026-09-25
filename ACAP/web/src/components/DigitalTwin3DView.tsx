@@ -32,7 +32,7 @@ import {
 import clsx from "clsx";
 import type { CameraTelemetry, TelemetryDetection } from "../lib/telemetry";
 import { TelemetrySession } from "../lib/telemetry";
-import { mjpegStreamUrl, controlHeaders } from "../lib/localEngine";
+import { mjpegStreamUrl, controlHeaders, getEngineBase } from "../lib/localEngine";
 import {
   autoDetectSceneAndCalibrate,
   snapToDetectedScene,
@@ -1548,8 +1548,8 @@ function DigitalTwin3DView({
   const pipImgRef = useRef<HTMLImageElement>(null);
 
   // Add Camera form state
-  const [newCamUrl, setNewCamUrl] = useState("https://www.youtube.com/watch?v=1H0iTzv2jiQ");
-  const [newCamName, setNewCamName] = useState("Coldwater Intersection (Live)");
+  const [newCamUrl, setNewCamUrl] = useState("https://www.youtube.com/live/Ellzen6Z7t8?si=5Cl8UNffnGKZcQxW");
+  const [newCamName, setNewCamName] = useState("YouTube Live Traffic Stream");
   const [newCamProfile, setNewCamProfile] = useState("traffic");
   const [isAddingCam, setIsAddingCam] = useState(false);
   const [addCamMessage, setAddCamMessage] = useState<string | null>(null);
@@ -1757,7 +1757,7 @@ function DigitalTwin3DView({
     const pollInterval = setInterval(async () => {
       for (const cam of cameras) {
         try {
-          const res = await fetch(`http://127.0.0.1:8000/api/cameras/${cam.id}/telemetry`, {
+          const res = await fetch(`${getEngineBase()}/api/cameras/${cam.id}/telemetry`, {
             signal: AbortSignal.timeout(600)
           });
           if (res.ok) {
@@ -2703,7 +2703,7 @@ function DigitalTwin3DView({
       };
 
       const headers = await controlHeaders();
-      const res = await fetch("http://127.0.0.1:8000/api/cameras", {
+      const res = await fetch(`${getEngineBase()}/api/cameras`, {
         method: "POST",
         headers,
         body: JSON.stringify(payload)
@@ -3296,13 +3296,13 @@ function DigitalTwin3DView({
                   <button
                     type="button"
                     onClick={() => {
-                      setNewCamUrl("https://www.youtube.com/watch?v=1H0iTzv2jiQ");
-                      setNewCamName("Coldwater 4-Way Traffic (Live)");
+                      setNewCamUrl("https://www.youtube.com/live/Ellzen6Z7t8?si=5Cl8UNffnGKZcQxW");
+                      setNewCamName("YouTube Live Traffic Stream");
                       setNewCamProfile("traffic");
                     }}
-                    className="text-cyan-400 hover:underline"
+                    className="text-cyan-400 hover:underline font-semibold"
                   >
-                    YouTube Traffic Cam (Coldwater)
+                    🔴 YouTube Live Stream (Ellzen6Z7t8)
                   </button>
                   <span>•</span>
                   <button
