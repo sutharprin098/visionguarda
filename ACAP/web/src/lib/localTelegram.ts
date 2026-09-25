@@ -10,8 +10,9 @@
  */
 
 import { getSupabase } from "./session";
+import { getEngineBase } from "./localEngine";
 
-const ENGINE_BASE = "http://127.0.0.1:8000";
+const ENGINE_BASE = getEngineBase();
 
 interface TelegramConfig {
   enabled: boolean;
