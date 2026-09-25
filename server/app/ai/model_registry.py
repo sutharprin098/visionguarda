@@ -164,10 +164,19 @@ class CamAIModelRegistry:
                 entry.status = ModelStatus.READY
                 entry.record_inference(18.5, detections=1)
         print(f"[ModelRegistry] All 19 models catalog armed. Ready models: {sum(1 for m in self.models.values() if m.status in (ModelStatus.READY, ModelStatus.RUNNING))}/19\n", flush=True)
+        if fast:
+            return
 
         try:
+            import cv2
             from app.ai.accelerator import load_accelerated_onnx_session
             import onnxruntime as ort
+
+            onnx_keys = [
+                "yolox_tiny", "yolox_s", "yolox_m", "yolov8_visdrone",
+                "yolov8_helmet", "rtdetr_helmet", "lpd_yunet", "plate_detector",
+                "crnn_ocr", "plate_ocr"
+            ]
 
             for key in onnx_keys:
                 entry = self.models[key]
