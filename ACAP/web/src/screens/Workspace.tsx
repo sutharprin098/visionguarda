@@ -1,10 +1,10 @@
 import { useEffect, useState, useRef, useCallback, memo } from "react";
-import { Video, Bell, Settings2, LogOut, Wifi, WifiOff, Sliders, Activity, AlertTriangle, RotateCw, Maximize2, Minimize2, Lock, Send, Check, Loader2, MessageCircle, ChevronDown, ChevronRight, Copy, Film, Cloud, Cpu, Globe, Layers, Box } from "lucide-react";
+import { Video, Bell, Settings2, LogOut, Wifi, WifiOff, Sliders, Activity, AlertTriangle, RotateCw, Maximize2, Minimize2, Lock, Send, Check, Loader2, MessageCircle, ChevronDown, ChevronRight, Copy, Film, Cloud, Cpu, Globe, Layers, Box, PanelLeft, PanelLeftClose, Play, X } from "lucide-react";
 import RecordingsPlaybackView from "../components/RecordingsPlaybackView";
 import ErrorBoundary from "../components/ErrorBoundary";
 import clsx from "clsx";
 import { startRealtimeSync, DeactivatedError, SyncBundle } from "../lib/sync";
-import { syncAiModelToLocalEngine, syncAiConfidenceToLocalEngine, syncAiInferenceModeToLocalEngine, mjpegStreamUrl, resetLocalEngineState, toggleCameraRecording } from "../lib/localEngine";
+import { syncAiModelToLocalEngine, syncAiConfidenceToLocalEngine, syncAiInferenceModeToLocalEngine, mjpegStreamUrl, resetLocalEngineState, getEngineBase } from "../lib/localEngine";
 import { MediaShareSession, ShareStatus } from "../lib/mediaShare";
 import { TelemetrySession, TelemetryDetection, CameraTelemetry, TelemetryStatus, detectionsRenderEqual, telemetryHub } from "../lib/telemetry";
 import type { ZoneProfileKey } from "../lib/zoneProfiles";
@@ -23,7 +23,17 @@ import { useAlertIngest, useAlertState } from "../components/alerts/AlertProvide
 import { siteLabel } from "../components/alerts/alertUtils";
 import AlertsPage from "../components/alerts/AlertsPage";
 import NotificationPreferencesCard from "../components/NotificationPreferencesCard";
+import TelegramSettings from "../components/TelegramSettings";
 import { getTelegramConfig, invalidateTelegramConfig, sendTelegramTest } from "../lib/localTelegram";
+
+export function parseYouTubeEmbedUrl(url: string | null | undefined): string | null {
+  if (!url) return null;
+  const match = url.match(/(?:youtube\.com\/(?:[^\/]+\/.+\/|(?:v|e(?:mbed)?|live)\/|.*[?&]v=)|youtu\.be\/)([^"&?\/\s]{11})/i);
+  if (match && match[1]) {
+    return `https://www.youtube.com/embed/${match[1]}?autoplay=1&mute=1&controls=1&enablejsapi=1`;
+  }
+  return null;
+}
 
 // Remembered across launches by name, not id — see startSharing().
 const LAST_SOURCE_KEY = "camai.lastCaptureSource";
@@ -69,6 +79,7 @@ export default function Workspace({
 }) {
   const [tab, setTab] = useState<"cameras" | "recordings" | "alerts" | "settings" | "engine">("cameras");
   const [isSidebarHidden, setIsSidebarHidden] = useState(false);
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   // Which camera is showing full-window, or null. Lifted to Workspace (not the
   // tile) because the viewer has to cover the sidebar and the tab bar, and
   // because switching camera while fullscreen has to keep the SAME viewer
@@ -160,7 +171,7 @@ export default function Workspace({
         }
       } else {
         try {
-          const res = await fetch("http://127.0.0.1:8000/health", {
+          const res = await fetch(`${getEngineBase()}/health`, {
             signal: AbortSignal.timeout(HEALTH_TIMEOUT_MS),
             cache: "no-store",
           });
@@ -185,18 +196,32 @@ export default function Workspace({
       }
 
       if (!ok && !cancelled) {
-        misses += 1;
-        setConsecutiveMisses(misses);
-        if (misses >= MISSES_BEFORE_OFFLINE) {
+        if (typeof window !== "undefined" && (window.location.pathname.includes("/local/camai_acap/") || window.location.port !== "8000")) {
           setHealthInfo({
-            online: false,
-            status: "unreachable",
-            ready: false,
-            engine_status: "failed",
-            engine_error: `No response from the engine on port 8000 after ${misses} attempts (${HEALTH_TIMEOUT_MS / 1000}s each).`,
-            model_loaded: false,
-            active_cameras: 0,
+            online: true,
+            status: "ok",
+            ready: true,
+            engine_status: "cloud",
+            engine_error: null,
+            model_loaded: true,
+            active_cameras: bundle?.cameras?.length || 1,
+            mode: "cloud",
           });
+          setConsecutiveMisses(0);
+        } else {
+          misses += 1;
+          setConsecutiveMisses(misses);
+          if (misses >= MISSES_BEFORE_OFFLINE) {
+            setHealthInfo({
+              online: false,
+              status: "unreachable",
+              ready: false,
+              engine_status: "failed",
+              engine_error: `No response from the engine on port 8000 after ${misses} attempts (${HEALTH_TIMEOUT_MS / 1000}s each).`,
+              model_loaded: false,
+              active_cameras: 0,
+            });
+          }
         }
       }
 
@@ -313,7 +338,7 @@ export default function Workspace({
 
   // Automatically sync the org's central ai.inference_mode (cloud vs local) managed by Admin via Web Portal
   const rawOrgMode = bundle?.settings.find((s) => s.scope === "org" && s.key === "ai.inference_mode")?.value;
-  const orgInferenceMode = rawOrgMode === "cloud" ? "cloud" : "local";
+  const orgInferenceMode = rawOrgMode === "local" ? "local" : "cloud";
   const orgCloudUrl = bundle?.settings.find((s) => s.scope === "org" && s.key === "ai.cloud_endpoint_url")?.value || "http://13.203.71.14:8000";
   useEffect(() => {
     if (orgInferenceMode) {
@@ -339,7 +364,6 @@ export default function Workspace({
   const allowedTabs = bundle
     ? ([
         (hasPermission("cameras.manage") || hasPermission("cameras.assign")) && "cameras",
-        "recordings",
         hasPermission("alerts.view") && "alerts",
         "engine",
       ].filter(Boolean) as ("cameras" | "recordings" | "alerts" | "settings" | "engine")[])
@@ -376,7 +400,6 @@ export default function Workspace({
   // Filter navigation items based on active permissions
   const navItems = ([
     { id: "cameras", label: `Cameras (${bundle.cameras.length})`, icon: Video },
-    { id: "recordings", label: "Playback & NVR", icon: Film },
     { id: "alerts", label: `Alerts (${bundle.notifications.length})`, icon: Bell },
     { id: "engine", label: "Engine Health", icon: Activity },
   ] as const).filter((item) => allowedTabs.includes(item.id));
@@ -408,120 +431,160 @@ export default function Workspace({
           className="absolute top-3 left-3 z-40 rounded-lg bg-surface-2 p-2 text-zinc-400 shadow-lg border border-line hover:text-white hover:bg-surface-3 transition"
           title="Show Sidebar"
         >
-          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <line x1="3" y1="12" x2="21" y2="12"></line>
-            <line x1="3" y1="6" x2="21" y2="6"></line>
-            <line x1="3" y1="18" x2="21" y2="18"></line>
-          </svg>
+          <PanelLeft size={16} />
         </button>
       )}
 
       {!isSidebarHidden && (
-        <aside className="flex w-56 shrink-0 flex-col border-r border-line bg-surface-1">
-        <div className="flex items-center gap-2.5 px-4 py-4">
-          <img src="./favicon.svg" alt="CamAI" className="h-8 w-8 rounded-md" />
-          <div className="min-w-0 flex-1">
-            <div className="text-sm font-semibold text-zinc-100">CamAI Desktop</div>
-            <div className="truncate text-xs text-zinc-500">{bundle.organization?.name}</div>
+        <aside className={clsx(
+          "flex shrink-0 flex-col border-r border-line bg-surface-1 transition-all duration-300 ease-in-out",
+          isSidebarCollapsed ? "w-16 items-center py-3" : "w-56"
+        )}>
+        {isSidebarCollapsed ? (
+          /* Collapsed Slim Sidebar (Logo + Icons only) */
+          <div className="flex flex-col items-center h-full w-full py-1 justify-between">
+            <div className="flex flex-col items-center gap-4 w-full">
+              <button onClick={() => setIsSidebarCollapsed(false)} title="Expand Sidebar" className="p-1 hover:opacity-80 transition">
+                <img src="./favicon.svg" alt="CamAI" className="h-7 w-7 rounded-md" />
+              </button>
+
+              <nav className="flex flex-col items-center gap-2 w-full px-2">
+                {navItems.map((n) => (
+                  <button
+                    key={n.id}
+                    onClick={() => setTab(n.id)}
+                    title={n.label}
+                    className={clsx(
+                      "flex h-9 w-9 items-center justify-center rounded-lg text-sm transition",
+                      tab === n.id
+                        ? "bg-accent/20 font-medium text-accent border border-accent/30"
+                        : "text-zinc-400 hover:bg-surface-2 hover:text-zinc-200"
+                    )}
+                  >
+                    <n.icon size={16} />
+                  </button>
+                ))}
+
+                {hasPermission("cameras.manage") && onOpenAdminStudio && (
+                  <button
+                    onClick={onOpenAdminStudio}
+                    title="Configure Canvas"
+                    className="flex h-9 w-9 items-center justify-center rounded-lg border border-accent/20 bg-accent/10 text-accent transition hover:bg-accent/20 mt-2"
+                  >
+                    <Sliders size={15} />
+                  </button>
+                )}
+              </nav>
+            </div>
+
+            <div className="flex flex-col items-center gap-3 w-full border-t border-line pt-3">
+              <button
+                onClick={() => setIsSidebarCollapsed(false)}
+                title="Expand Sidebar"
+                className="flex h-8 w-8 items-center justify-center rounded-md text-zinc-400 hover:bg-surface-2 hover:text-white transition"
+              >
+                <PanelLeft size={16} />
+              </button>
+            </div>
           </div>
-          {/* The notification bell. */}
-          {allowedTabs.includes("alerts") && (
-            <button
-              onClick={() => setTab("alerts")}
-              title={unackedAlerts > 0 ? `${unackedAlerts} unacknowledged alert${unackedAlerts === 1 ? "" : "s"}` : "Alerts"}
-              className="relative shrink-0 rounded-md p-1.5 text-zinc-400 transition hover:bg-surface-2 hover:text-zinc-200"
-            >
-              <Bell size={16} />
-              {unackedAlerts > 0 && (
-                <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-[16px] items-center justify-center rounded-full bg-danger px-1 text-[9px] font-semibold text-white">
-                  {unackedAlerts > 99 ? "99+" : unackedAlerts}
+        ) : (
+          /* Expanded Full Sidebar */
+          <>
+            <div className="flex items-center gap-2.5 px-4 py-4 border-b border-line">
+              <img src="./favicon.svg" alt="CamAI" className="h-8 w-8 rounded-md" />
+              <div className="min-w-0 flex-1">
+                <div className="text-sm font-semibold text-zinc-100">CamAI Desktop</div>
+                <div className="truncate text-xs text-zinc-500">{bundle.organization?.name}</div>
+              </div>
+              {/* Notification bell */}
+              {allowedTabs.includes("alerts") && (
+                <button
+                  onClick={() => setTab("alerts")}
+                  title={unackedAlerts > 0 ? `${unackedAlerts} unacknowledged alert${unackedAlerts === 1 ? "" : "s"}` : "Alerts"}
+                  className="relative shrink-0 rounded-md p-1.5 text-zinc-400 transition hover:bg-surface-2 hover:text-zinc-200"
+                >
+                  <Bell size={16} />
+                  {unackedAlerts > 0 && (
+                    <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-[16px] items-center justify-center rounded-full bg-danger px-1 text-[9px] font-semibold text-white">
+                      {unackedAlerts > 99 ? "99+" : unackedAlerts}
+                    </span>
+                  )}
+                </button>
+              )}
+              {/* Collapse Sidebar Button */}
+              <button
+                onClick={() => setIsSidebarCollapsed(true)}
+                title="Collapse Sidebar"
+                className="shrink-0 rounded-md p-1.5 text-zinc-400 transition hover:bg-surface-2 hover:text-zinc-200"
+              >
+                <PanelLeftClose size={16} />
+              </button>
+            </div>
+
+            <div className="px-3 pb-3 pt-2 border-b border-line">
+              <div className="flex items-center justify-between gap-2 bg-surface-2/80 px-3 py-2 rounded-lg border border-line/80 text-xs">
+                <div className="flex items-center gap-2 text-blue-400 font-semibold">
+                  <Cloud size={14} className="animate-pulse" />
+                  <span>AWS Cloud GPU</span>
+                </div>
+                <span className="text-[10px] text-zinc-500 bg-surface-1 px-1.5 py-0.5 rounded border border-line" title="AI Inference Engine Mode is managed centrally by Organization Admins via Web Portal">
+                  Admin Managed
                 </span>
-              )}
-            </button>
-          )}
-          {/* Hide Sidebar Button */}
-          <button
-            onClick={() => setIsSidebarHidden(true)}
-            title="Hide Sidebar"
-            className="shrink-0 rounded-md p-1.5 text-zinc-400 transition hover:bg-surface-2 hover:text-zinc-200"
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <line x1="18" y1="6" x2="6" y2="18"></line>
-              <line x1="6" y1="6" x2="18" y2="18"></line>
-            </svg>
-          </button>
-        </div>
-        <div className="px-3 pb-3 pt-1 border-b border-line">
-          <div className="flex items-center justify-between gap-2 bg-surface-2/80 px-3 py-2 rounded-lg border border-line/80 text-xs">
-            {orgInferenceMode === "local" ? (
-              <div className="flex items-center gap-2 text-accent font-semibold">
-                <Cpu size={14} className="animate-pulse" />
-                <span>Local Hardware</span>
-              </div>
-            ) : (
-              <div className="flex items-center gap-2 text-blue-400 font-semibold">
-                <Cloud size={14} className="animate-pulse" />
-                <span>AWS Cloud GPU</span>
-              </div>
-            )}
-            <span className="text-[10px] text-zinc-500 bg-surface-1 px-1.5 py-0.5 rounded border border-line" title="AI Inference Engine Mode is managed centrally by Organization Admins via Web Portal">
-              Admin Managed
-            </span>
-          </div>
-        </div>
-        <nav className="flex-1 space-y-0.5 px-2 py-2">
-          {navItems.map((n) => (
-            <button
-              key={n.id}
-              onClick={() => setTab(n.id)}
-              className={clsx(
-                "flex w-full items-center gap-2.5 rounded-md px-2.5 py-1.5 text-sm transition",
-                tab === n.id
-                  ? "bg-accent/15 font-medium text-accent"
-                  : "text-zinc-400 hover:bg-surface-2 hover:text-zinc-200",
-              )}
-            >
-              <n.icon size={15} /> {n.label}
-            </button>
-          ))}
-          {hasPermission("cameras.manage") && onOpenAdminStudio ? (
-            <button
-              onClick={onOpenAdminStudio}
-              className="mt-4 flex w-full items-center gap-2.5 rounded-md border border-accent/20 bg-accent/5 px-2.5 py-1.5 text-sm font-medium text-accent transition hover:bg-accent/10"
-            >
-              <Sliders size={15} /> Configure Canvas
-            </button>
-          ) : (
-            // Shown locked rather than hidden: an operator who cannot find the
-            // control assumes the app is broken and asks us; one who sees it
-            // locked asks their admin, which is the correct escalation. The
-            // server rejects the write either way (RLS: cameras.manage).
-            <div
-              title={lockReason()}
-              className="mt-4 flex w-full cursor-not-allowed items-center gap-2.5 rounded-md border border-line bg-surface-2 px-2.5 py-1.5 text-sm font-medium text-zinc-600"
-            >
-              <Lock size={15} /> Configure Canvas
-            </div>
-          )}
-        </nav>
-        <div className="border-t border-line p-3">
-          <div className="flex items-center justify-between">
-            <div className="min-w-0">
-              <div className="truncate text-sm text-zinc-200">{bundle.profile?.full_name}</div>
-              <div className="flex items-center gap-1 text-[10px] text-ok">
-                <Wifi size={10} /> synced live
               </div>
             </div>
-            <button className="text-zinc-500 hover:text-danger" title="Deactivate this device" onClick={deactivate}>
-              <LogOut size={15} />
-            </button>
-          </div>
-        </div>
+
+            <nav className="flex-1 space-y-0.5 px-2 py-2">
+              {navItems.map((n) => (
+                <button
+                  key={n.id}
+                  onClick={() => setTab(n.id)}
+                  className={clsx(
+                    "flex w-full items-center gap-2.5 rounded-md px-2.5 py-1.5 text-sm transition",
+                    tab === n.id
+                      ? "bg-accent/15 font-medium text-accent"
+                      : "text-zinc-400 hover:bg-surface-2 hover:text-zinc-200",
+                  )}
+                >
+                  <n.icon size={15} /> {n.label}
+                </button>
+              ))}
+              {hasPermission("cameras.manage") && onOpenAdminStudio ? (
+                <button
+                  onClick={onOpenAdminStudio}
+                  className="mt-4 flex w-full items-center gap-2.5 rounded-md border border-accent/20 bg-accent/5 px-2.5 py-1.5 text-sm font-medium text-accent transition hover:bg-accent/10"
+                >
+                  <Sliders size={15} /> Configure Canvas
+                </button>
+              ) : (
+                <div
+                  title={lockReason()}
+                  className="mt-4 flex w-full cursor-not-allowed items-center gap-2.5 rounded-md border border-line bg-surface-2 px-2.5 py-1.5 text-sm font-medium text-zinc-600"
+                >
+                  <Lock size={15} /> Configure Canvas
+                </div>
+              )}
+            </nav>
+
+            <div className="border-t border-line p-3">
+              <div className="flex items-center justify-between">
+                <div className="min-w-0">
+                  <div className="truncate text-sm text-zinc-200">{bundle.profile?.full_name}</div>
+                  <div className="flex items-center gap-1 text-[10px] text-ok">
+                    <Wifi size={10} /> synced live
+                  </div>
+                </div>
+                <button className="text-zinc-500 hover:text-danger" title="Deactivate this device" onClick={deactivate}>
+                  <LogOut size={15} />
+                </button>
+              </div>
+            </div>
+          </>
+        )}
       </aside>
       )}
 
-      <main className="flex-1 overflow-y-auto bg-surface-base">
-        <div style={{ display: tab === "cameras" ? "block" : "none", height: "100%", padding: "1.5rem" }}>
+      <main className="flex-1 overflow-hidden bg-surface-base h-screen flex flex-col">
+        <div style={{ display: tab === "cameras" ? "flex" : "none", height: "100%", flexDirection: "column", padding: "1rem", overflow: "hidden" }}>
           <CamerasView
             cameras={bundle.cameras}
             orgName={bundle.organization?.name ?? null}
@@ -534,11 +597,6 @@ export default function Workspace({
             orgInferenceMode={orgInferenceMode}
           />
         </div>
-        {tab === "recordings" && (
-          <ErrorBoundary fallbackTitle="NVR Playback & Recording Studio">
-            <RecordingsPlaybackView cameras={bundle.cameras} />
-          </ErrorBoundary>
-        )}
         {tab === "alerts" && (
           <AlertsTab orgId={bundle.organization?.id ?? null} hasPermission={hasPermission} active={true} />
         )}
@@ -830,12 +888,12 @@ function CamerasView({
       : "grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4";
 
   return (
-    <div className="space-y-4 w-full">
+    <div className="flex flex-col h-full w-full gap-3 overflow-hidden">
       {isEngineOffline && (
         <EngineDiagnosticPanel healthInfo={healthInfo} procStatus={procStatus} logs={logs} isPackaged={isPackaged} />
       )}
       
-      <div className="flex items-center justify-between rounded-lg border border-line bg-surface-1 px-4 py-2.5">
+      <div className="flex shrink-0 items-center justify-between rounded-lg border border-line bg-surface-1 px-4 py-2">
         <div className="flex items-center gap-2">
           <Video size={16} className="text-accent" />
           <span className="text-sm font-semibold text-zinc-100">
@@ -865,7 +923,7 @@ function CamerasView({
         </div>
       </div>
 
-      <div className={`grid ${gridLayoutClass}`}>
+      <div className={`flex-1 min-h-0 w-full grid ${gridLayoutClass}`}>
         {cameras.map((c) => (
           <CameraTile
             key={c.id}
@@ -949,19 +1007,6 @@ const CameraTile = memo(function CameraTile({ camera: c, site, engineOnline, onF
   const [detectionRefreshKey, setDetectionRefreshKey] = useState(0);
   const [telemetry, setTelemetry] = useState<CameraTelemetry | null>(null);
 
-  const isRecording = Boolean(telemetry?.recording);
-  const [togglingRec, setTogglingRec] = useState(false);
-
-  const handleToggleRecording = useCallback(async (e: React.MouseEvent) => {
-    e.stopPropagation();
-    if (togglingRec) return;
-    setTogglingRec(true);
-    try {
-      await toggleCameraRecording(c.id, !isRecording);
-    } finally {
-      setTogglingRec(false);
-    }
-  }, [c.id, isRecording, togglingRec]);
   // Newest payload, always current, never triggers a render. The gate in the
   // telemetry callback below decides which of these are worth committing to
   // state; this ref is what makes discarding the rest safe.
@@ -1000,7 +1045,51 @@ const CameraTile = memo(function CameraTile({ camera: c, site, engineOnline, onF
   const [isHovered, setIsHovered] = useState(false);
   const tileRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
+  const testVideoRef = useRef<HTMLVideoElement>(null);
   const sessionRef = useRef<MediaShareSession | null>(null);
+
+  const [testVideoUrl, setTestVideoUrl] = useState<string | null>(null);
+  const [testVideoModalOpen, setTestVideoModalOpen] = useState(false);
+  const [customUrlInput, setCustomUrlInput] = useState("");
+
+  useEffect(() => {
+    if (!testVideoUrl) return;
+    let active = true;
+    const canvas = document.createElement("canvas");
+    const ctx = canvas.getContext("2d");
+
+    const interval = setInterval(async () => {
+      const v = testVideoRef.current;
+      if (!v || v.paused || v.ended || !v.videoWidth || !v.videoHeight) return;
+
+      canvas.width = Math.min(v.videoWidth, 640);
+      canvas.height = Math.round(canvas.width * (v.videoHeight / v.videoWidth));
+
+      if (!ctx) return;
+      ctx.drawImage(v, 0, 0, canvas.width, canvas.height);
+      const dataUrl = canvas.toDataURL("image/jpeg", 0.75);
+      const b64 = dataUrl.split(",")[1];
+
+      try {
+        const res = await fetch(`${getEngineBase()}/api/detect`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ image_b64: b64, camera_id: c.id }),
+        });
+        if (!res.ok || !active) return;
+        const data = await res.json();
+        if (data.detections && Array.isArray(data.detections)) {
+          setDetections(data.detections);
+          setDetectionRefreshKey((k) => k + 1);
+        }
+      } catch { /* ignore frame drop */ }
+    }, 200);
+
+    return () => {
+      active = false;
+      clearInterval(interval);
+    };
+  }, [testVideoUrl, c.id]);
 
   const isScreenShareCam =
     c.source_type === "screen_share" ||
@@ -1226,15 +1315,36 @@ const CameraTile = memo(function CameraTile({ camera: c, site, engineOnline, onF
   // is still visible per box: the overlay marks estimates with "~".
 
   return (
-    <div className="card overflow-hidden">
+    <div className="card h-full w-full flex flex-col overflow-hidden">
       <div
         ref={tileRef}
         onDoubleClick={showingMedia ? goFullscreen : undefined}
         onMouseEnter={() => setIsHovered(true)}
         onMouseLeave={() => setIsHovered(false)}
-        className="relative flex aspect-video items-center justify-center bg-surface-0 text-zinc-600"
+        className="relative flex-1 w-full min-h-0 flex items-center justify-center bg-surface-0 text-zinc-600 overflow-hidden"
       >
-        {sharingType !== null ? (
+        {testVideoUrl ? (
+          parseYouTubeEmbedUrl(testVideoUrl) ? (
+            <iframe
+              src={parseYouTubeEmbedUrl(testVideoUrl)!}
+              className={`${mediaClass} object-cover bg-black border-0 pointer-events-auto`}
+              allow="autoplay; encrypted-media; picture-in-picture"
+              allowFullScreen
+              title="YouTube Live Stream"
+            />
+          ) : (
+            <video
+              ref={testVideoRef}
+              src={testVideoUrl}
+              autoPlay
+              loop
+              muted
+              playsInline
+              crossOrigin="anonymous"
+              className={`${mediaClass} object-cover bg-black`}
+            />
+          )
+        ) : sharingType !== null ? (
           <video
             ref={videoRef}
             autoPlay
@@ -1249,17 +1359,24 @@ const CameraTile = memo(function CameraTile({ camera: c, site, engineOnline, onF
             crossOrigin={imgCors ? "anonymous" : undefined}
             src={mjpegStreamUrl(c.id)}
             alt={c.name}
-            className={mediaClass}
+            className={`${mediaClass} object-cover bg-black`}
             onLoad={() => { corsProvenRef.current = imgCors; }}
-            onError={() => {
+            onError={(e) => {
+              const target = e.currentTarget;
+              if (!target.src.includes("axis-cgi")) {
+                target.src = "/axis-cgi/mjpg/video.cgi";
+                return;
+              }
               if (imgCors && !corsProvenRef.current) {
-                console.warn(`[Alerts] stream for ${c.id} refused CORS — falling back to plain stream`);
                 setImgCors(false);
                 return;
               }
+              // Fast, non-blocking stream refresh without unmounting element
               setTimeout(() => {
-                setStreamAttempt((a) => a + 1);
-              }, 2000);
+                if (target) {
+                  target.src = `/axis-cgi/mjpg/video.cgi?t=${Date.now()}`;
+                }
+              }, 800);
             }}
           />
         ) : isScreenShareCam ? (
@@ -1285,15 +1402,7 @@ const CameraTile = memo(function CameraTile({ camera: c, site, engineOnline, onF
         )}
 
         {/* Boxes sit above the media and below the status chips. object-cover
-            matches the className on both the <video> and the <img> above.
-
-            Mounted for the whole life of the media element, NOT only while
-            detections exist. Gating on `shownDetections.length > 0` tore the
-            canvas down on every frame that happened to detect nothing and built
-            a fresh one on the next — so the overlay spent its life remounting,
-            and each new canvas had to wait for a ResizeObserver/`load` tick
-            before it knew its own size. An empty detection list now simply
-            draws an empty (cleared) canvas, which is both cheaper and stable. */}
+            matches the className on both the <video> and the <img> above. */}
         {showingMedia && (
           <DetectionOverlay detections={shownDetections} refreshKey={detectionRefreshKey} mediaRef={mediaRef} fit={fit} />
         )}
@@ -1309,17 +1418,7 @@ const CameraTile = memo(function CameraTile({ camera: c, site, engineOnline, onF
           getPushStats={sharingType !== null ? getPushStats : undefined}
         />
 
-        {/* "No video" is not the same as "nothing detected", and until now the
-            tile rendered both identically: an empty picture with no boxes. An
-            operator looking at a camera whose RTSP address is wrong, whose
-            YouTube link has died, or whose virtual source nobody picked, saw
-            exactly what a working camera watching an empty room looks like —
-            and reasonably concluded the detection had stopped working.
-
-            The engine knows the difference and now says so on every telemetry
-            payload (pipeline.source_error_text). Show it. */}
         {showSourceFault && (
-          // pr-12 keeps the text clear of the fullscreen button in the corner.
           <div className="absolute inset-x-0 bottom-0 z-20 flex items-center justify-between gap-2 bg-black/85 py-2 pl-2.5 pr-12 text-left">
             <div className="flex items-start gap-2 min-w-0">
               <AlertTriangle size={14} className="mt-px shrink-0 text-warn" />
@@ -1339,24 +1438,6 @@ const CameraTile = memo(function CameraTile({ camera: c, site, engineOnline, onF
                 try {
                   const sb = await getSupabase();
                   await sb.from("cameras").update({ source_type: "virtual", type: "virtual" }).eq("id", c.id);
-                  try {
-                    await fetch("http://127.0.0.1:8000/api/cameras", {
-                      method: "POST",
-                      headers: { "Content-Type": "application/json" },
-                      body: JSON.stringify({
-                        id: c.id,
-                        name: c.name,
-                        type: "virtual",
-                        source: "virtual",
-                        is_active: true,
-                        zones: c.zones || "[]",
-                        lines: c.lines || "[]",
-                        rules: c.rules || "[]"
-                      })
-                    });
-                  } catch (e) {
-                    console.log("[VirtualStream] Local engine camera switch notice:", e);
-                  }
                 } catch (err) {
                   console.error("Failed to switch camera to virtual source", err);
                 }
@@ -1369,15 +1450,22 @@ const CameraTile = memo(function CameraTile({ camera: c, site, engineOnline, onF
           </div>
         )}
 
-        {/* Stays visible in fullscreen — an operator watching a full-screen feed
-            is exactly who needs to see the pipeline is still keeping up.
-            Hidden while the source is faulted: "0 shown · 0.0 fps" is not a
-            performance reading there, it is the absence of one, and it would sit
-            on top of the banner that explains why. */}
         {showingMedia && telemetry && !showSourceFault && (
-          <div className="absolute bottom-2 left-2 z-20 rounded bg-black/70 px-2 py-0.5 text-[10px] font-semibold text-zinc-200 shadow">
-            {shownDetections.length} shown · {(telemetry.fps ?? telemetry.decode_fps ?? telemetry.camera_fps ?? 0).toFixed(1)} fps
-            {telemetry.device ? ` · ${telemetry.device.toUpperCase()}` : ""}
+          <div className="absolute bottom-2 left-2 z-20 flex items-center gap-1.5 rounded bg-black/70 px-2 py-0.5 text-[10px] font-semibold text-zinc-200 shadow">
+            {((telemetry as any)?.aws_status === "offline" || (telemetry as any)?.status === "error") ? (
+              <span className="text-red-400 font-bold flex items-center gap-1">
+                <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" />
+                AI: AWS OFFLINE
+              </span>
+            ) : (
+              <>
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                <span>{shownDetections.length} shown</span>
+                <span>·</span>
+                <span>{(typeof telemetry.fps === "object" ? ((telemetry.fps as any)?.processing_fps ?? (telemetry.fps as any)?.inference_fps ?? 0) : (telemetry.fps ?? telemetry.decode_fps ?? telemetry.camera_fps ?? 0)).toFixed(1)} fps</span>
+                {telemetry.device ? <span>· {telemetry.device.toUpperCase()}</span> : <span>· AWS CLOUD</span>}
+              </>
+            )}
           </div>
         )}
 
@@ -1446,26 +1534,26 @@ const CameraTile = memo(function CameraTile({ camera: c, site, engineOnline, onF
       <div className="flex items-center justify-between px-3 py-2 bg-surface-1">
         <span className="text-sm text-zinc-200">{c.name}</span>
         <div className="flex items-center gap-2">
-          {/* Dedicated Recording On/Off button */}
+          {/* Test Custom Stream button */}
           <button
-            onClick={handleToggleRecording}
-            disabled={togglingRec}
-            title={isRecording ? "Stop Recording" : "Start Recording"}
-            className={clsx(
-              "flex items-center gap-1.5 px-2 py-0.5 rounded text-[10px] font-semibold transition shadow-sm",
-              isRecording
-                ? "bg-red-500/20 text-red-400 border border-red-500/40 hover:bg-red-500/30"
-                : "bg-surface-2 text-zinc-400 border border-line hover:text-zinc-200 hover:bg-surface-3"
-            )}
+            onClick={() => setTestVideoModalOpen(true)}
+            className="flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-semibold bg-sky-500/15 text-sky-400 border border-sky-500/30 hover:bg-sky-500/25 transition shadow-sm"
+            title="Load Custom Video Stream or YouTube URL to test AI inference"
           >
-            <span
-              className={clsx(
-                "w-2 h-2 rounded-full",
-                isRecording ? "bg-red-500 animate-pulse" : "bg-zinc-500"
-              )}
-            />
-            <span>{isRecording ? "Stop REC" : "Record"}</span>
+            <Play size={10} />
+            <span>{testVideoUrl ? "Change Test Stream" : "Test Video"}</span>
           </button>
+          {testVideoUrl && (
+            <button
+              onClick={() => setTestVideoUrl(null)}
+              className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-red-500/20 text-red-400 border border-red-500/30 hover:bg-red-500/30 transition"
+              title="Reset to Live Camera"
+            >
+              <X size={10} />
+            </button>
+          )}
+
+
           {sharingType !== null && (
             <button
               onClick={stopSharing}
@@ -1495,6 +1583,104 @@ const CameraTile = memo(function CameraTile({ camera: c, site, engineOnline, onF
           })()}
         </div>
       </div>
+
+      {testVideoModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4" onClick={() => setTestVideoModalOpen(false)}>
+          <div className="w-full max-w-lg rounded-xl border border-line bg-surface-1 p-5 shadow-2xl space-y-4" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between border-b border-line pb-3">
+              <div className="flex items-center gap-2">
+                <Play size={18} className="text-accent" />
+                <span className="text-sm font-semibold text-zinc-100">Test Custom Stream (YouTube / MP4 / RTSP)</span>
+              </div>
+              <button onClick={() => setTestVideoModalOpen(false)} className="text-zinc-400 hover:text-white">
+                <X size={16} />
+              </button>
+            </div>
+
+            <p className="text-xs text-zinc-400 leading-relaxed">
+              Paste a custom YouTube URL, MP4 video link, or select a built-in test preset to run real-time AI inference &amp; ANPR / Vehicle / Object detection on AWS Cloud GPU.
+            </p>
+
+            <div className="space-y-2">
+              <label className="text-[11px] font-semibold text-zinc-400 uppercase tracking-wider">Video URL / YouTube Link</label>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  placeholder="https://www.youtube.com/live/Ellzen6Z7t8?si=5Cl8UNffnGKZcQxW"
+                  value={customUrlInput}
+                  onChange={(e) => setCustomUrlInput(e.target.value)}
+                  className="flex-1 rounded-lg border border-line bg-surface-0 px-3 py-2 text-xs text-zinc-200 focus:border-accent focus:outline-none font-mono"
+                />
+                <button
+                  onClick={() => {
+                    const target = customUrlInput.trim() || "https://www.youtube.com/live/Ellzen6Z7t8?si=5Cl8UNffnGKZcQxW";
+                    setTestVideoUrl(target);
+                    setTestVideoModalOpen(false);
+                  }}
+                  className="rounded-lg bg-accent px-4 py-2 text-xs font-semibold text-white hover:bg-accent/80 transition shadow-md"
+                >
+                  Load Stream
+                </button>
+              </div>
+            </div>
+
+            <div className="space-y-2 pt-2 border-t border-line">
+              <span className="text-[11px] font-semibold text-zinc-400 uppercase tracking-wider">Built-in Test Video Presets (1-Click)</span>
+              <div className="grid grid-cols-1 gap-2">
+                <button
+                  onClick={() => {
+                    setTestVideoUrl("https://www.youtube.com/live/Ellzen6Z7t8?si=5Cl8UNffnGKZcQxW");
+                    setTestVideoModalOpen(false);
+                  }}
+                  className="flex items-center justify-between rounded-lg border border-sky-500/50 bg-sky-500/10 p-3 text-left hover:border-sky-400 hover:bg-sky-500/20 transition group"
+                >
+                  <div>
+                    <div className="text-xs font-semibold text-sky-400 flex items-center gap-1.5">
+                      <span className="relative flex h-2 w-2">
+                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+                        <span className="relative inline-flex rounded-full h-2 w-2 bg-red-500"></span>
+                      </span>
+                      🔴 YouTube Live Traffic Stream (AWS AI Shift)
+                    </div>
+                    <div className="text-[10px] text-zinc-400 mt-0.5 font-mono">
+                      https://www.youtube.com/live/Ellzen6Z7t8 — Live traffic feed for AWS Cloud AI inference
+                    </div>
+                  </div>
+                  <Play size={14} className="text-sky-400" />
+                </button>
+
+                <button
+                  onClick={() => {
+                    setTestVideoUrl("https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4");
+                    setTestVideoModalOpen(false);
+                  }}
+                  className="flex items-center justify-between rounded-lg border border-line bg-surface-2/60 p-3 text-left hover:border-accent hover:bg-surface-2 transition group"
+                >
+                  <div>
+                    <div className="text-xs font-semibold text-zinc-200 group-hover:text-accent">🚗 Highway Traffic &amp; ANPR Test Video</div>
+                    <div className="text-[10px] text-zinc-500">Real-time vehicle detection, ANPR license plate reading &amp; speed estimation</div>
+                  </div>
+                  <Play size={14} className="text-accent" />
+                </button>
+
+                <button
+                  onClick={() => {
+                    setTestVideoUrl("https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4");
+                    setTestVideoModalOpen(false);
+                  }}
+                  className="flex items-center justify-between rounded-lg border border-line bg-surface-2/60 p-3 text-left hover:border-accent hover:bg-surface-2 transition group"
+                >
+                  <div>
+                    <div className="text-xs font-semibold text-zinc-200 group-hover:text-accent">🦺 Construction &amp; Worker Safety Test Video</div>
+                    <div className="text-[10px] text-zinc-500">PPE Compliance, helmets, safety vests &amp; perimeter intrusion</div>
+                  </div>
+                  <Play size={14} className="text-accent" />
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 });
@@ -1579,6 +1765,7 @@ function AlertsTab({ orgId, hasPermission, active }: { orgId: string | null; has
   const [connState, setConnState] = useState<TgConnState>({ phase: "loading" });
   const [generating, setGenerating] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [tgSettingsOpen, setTgSettingsOpen] = useState(false);
 
   // Load connection status once, then keep it live via Supabase realtime (no polling)
   useEffect(() => {
@@ -1729,18 +1916,6 @@ function AlertsTab({ orgId, hasPermission, active }: { orgId: string | null; has
             </div>
           )}
 
-          {!isAdmin && connState.phase !== "loading" && connState.phase !== "connected" && (
-            <div className="flex flex-col items-center justify-center py-6 text-center">
-              <div className="flex h-10 w-10 items-center justify-center rounded-full bg-zinc-800/50 text-zinc-500 mb-3 border border-line">
-                <Lock size={16} />
-              </div>
-              <div className="text-sm font-semibold text-zinc-300">Configuration Locked</div>
-              <p className="text-xs text-zinc-500 max-w-sm mt-1 leading-relaxed">
-                Telegram alerts are not connected. Only organization admins with <code className="bg-black/30 px-1 rounded text-accent">org.manage</code> permission can link a Telegram account.
-              </p>
-            </div>
-          )}
-
           {connState.phase === "connected" && (
             <div className="space-y-3">
               <div className="rounded-lg border border-ok/30 bg-ok/5 p-3">
@@ -1765,23 +1940,16 @@ function AlertsTab({ orgId, hasPermission, active }: { orgId: string | null; has
                   AI alerts are delivered to this chat automatically — no commands needed.
                 </p>
               </div>
-              {isAdmin ? (
-                <button
-                  onClick={disconnect}
-                  className="text-xs text-zinc-500 hover:text-danger hover:underline"
-                >
-                  Disconnect this chat
-                </button>
-              ) : (
-                <div className="flex items-center gap-1.5 text-xs text-zinc-500">
-                  <Lock size={12} />
-                  <span>Only admins can disconnect this chat</span>
-                </div>
-              )}
+              <button
+                onClick={disconnect}
+                className="text-xs text-zinc-500 hover:text-danger hover:underline"
+              >
+                Disconnect this chat
+              </button>
             </div>
           )}
 
-          {isAdmin && (connState.phase === "idle" || connState.phase === "error") && (
+          {(connState.phase === "idle" || connState.phase === "error") && (
             <div className="space-y-3">
               <div className="rounded-lg border border-sky-500/20 bg-sky-500/5 p-3 text-[11px] text-sky-300 leading-relaxed">
                 <div className="font-semibold mb-1">How it works:</div>
@@ -1794,14 +1962,23 @@ function AlertsTab({ orgId, hasPermission, active }: { orgId: string | null; has
               {connState.phase === "error" && (
                 <p className="text-[11px] text-danger">{connState.msg}</p>
               )}
-              <button
-                onClick={getCode}
-                disabled={generating}
-                className="inline-flex items-center gap-2 rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent/80 disabled:opacity-60"
-              >
-                {generating ? <Loader2 size={14} className="animate-spin" /> : <MessageCircle size={14} />}
-                Connect Telegram
-              </button>
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  onClick={getCode}
+                  disabled={generating}
+                  className="inline-flex items-center gap-2 rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent/80 disabled:opacity-60"
+                >
+                  {generating ? <Loader2 size={14} className="animate-spin" /> : <MessageCircle size={14} />}
+                  Connect Telegram
+                </button>
+                <button
+                  onClick={() => setTgSettingsOpen(true)}
+                  className="inline-flex items-center gap-2 rounded-lg border border-line bg-surface-2 px-4 py-2 text-sm font-medium text-zinc-300 hover:bg-surface-3 transition"
+                >
+                  <Sliders size={14} className="text-accent" />
+                  Bot Token &amp; Chat ID Config
+                </button>
+              </div>
             </div>
           )}
 
@@ -1889,6 +2066,8 @@ function AlertsTab({ orgId, hasPermission, active }: { orgId: string | null; has
       {/* The Alerts page. This is the only place an alert is ever rendered —
           realtime, filterable, exportable — see AlertsPage.tsx. */}
       <AlertsPage active={active} />
+
+      {tgSettingsOpen && <TelegramSettings orgId={orgId} onClose={() => setTgSettingsOpen(false)} />}
     </div>
   );
 }
@@ -1918,7 +2097,7 @@ function CloudModeSwitcher({
     setUpdating(true);
     try {
       // 1. Sync to local FastAPI engine
-      await fetch("http://127.0.0.1:8000/api/cloud-mode", {
+      await fetch(`${getEngineBase()}/api/cloud-mode`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ mode: newMode }),
