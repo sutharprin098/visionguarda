@@ -501,29 +501,82 @@ async def detect(request: Request):
 
     # Load configuration parameters
     saved_cfg = camera_configs.get(camera_id, {})
-    zone_profile = body.get("zone_profile") or body.get("profile") or saved_cfg.get("zone_profile") or "traffic"
-    profile_features = body.get("profile_features") or body.get("features") or saved_cfg.get("profile_features") or {}
+    cfg = body.get("config") or {}
+    if isinstance(cfg, str):
+        try:
+            cfg = json.loads(cfg)
+        except Exception:
+            cfg = {}
+
+    zone_profile = body.get("zone_profile") or body.get("profile") or cfg.get("zone_profile") or cfg.get("profile") or saved_cfg.get("zone_profile") or "traffic"
+    profile_features = body.get("profile_features") or body.get("features") or cfg.get("profile_features") or cfg.get("features") or saved_cfg.get("profile_features") or {}
     if isinstance(profile_features, str):
         try:
             profile_features = json.loads(profile_features)
         except Exception:
             profile_features = {}
 
-    zones = body.get("zones") or saved_cfg.get("zones") or []
-    if isinstance(zones, str):
+    raw_zones = body.get("zones") or cfg.get("zones") or saved_cfg.get("zones") or []
+    if isinstance(raw_zones, str):
         try:
-            zones = json.loads(zones)
+            raw_zones = json.loads(raw_zones)
         except Exception:
-            zones = []
+            raw_zones = []
 
-    lines = body.get("lines") or saved_cfg.get("lines") or []
-    if isinstance(lines, str):
+    zones = []
+    for idx, z in enumerate(raw_zones if isinstance(raw_zones, list) else []):
+        if not isinstance(z, dict):
+            continue
+        zid = str(z.get("id") or z.get("zone_id") or z.get("name") or f"zone_{idx}")
+        zname = str(z.get("name") or zid)
+        raw_pts = z.get("points") or z.get("polygon") or z.get("coords") or []
+        pts = []
+        for p in raw_pts:
+            if isinstance(p, dict):
+                pts.append([float(p.get("x", 0)), float(p.get("y", 0))])
+            elif isinstance(p, (list, tuple)) and len(p) >= 2:
+                pts.append([float(p[0]), float(p[1])])
+        zones.append({
+            "id": zid,
+            "name": zname,
+            "points": pts,
+            "polygon": pts,
+            "shapeType": z.get("shapeType", "polygon"),
+            "zoneType": z.get("zoneType", "intrusion"),
+            "maxOccupancy": int(z.get("maxOccupancy", 5)),
+            "dwellLimit": float(z.get("dwellLimit", 10.0)),
+            "is_roi": bool(z.get("roi") or z.get("is_roi")),
+            "roi": bool(z.get("roi") or z.get("is_roi"))
+        })
+
+    raw_lines = body.get("lines") or cfg.get("lines") or saved_cfg.get("lines") or []
+    if isinstance(raw_lines, str):
         try:
-            lines = json.loads(lines)
+            raw_lines = json.loads(raw_lines)
         except Exception:
-            lines = []
+            raw_lines = []
 
-    rules = body.get("rules") or saved_cfg.get("rules") or []
+    lines = []
+    for idx, l in enumerate(raw_lines if isinstance(raw_lines, list) else []):
+        if not isinstance(l, dict):
+            continue
+        lid = str(l.get("id") or l.get("line_id") or l.get("name") or f"line_{idx}")
+        raw_pts = l.get("points") or l.get("coords") or []
+        pts = []
+        for p in raw_pts:
+            if isinstance(p, dict):
+                pts.append([float(p.get("x", 0)), float(p.get("y", 0))])
+            elif isinstance(p, (list, tuple)) and len(p) >= 2:
+                pts.append([float(p[0]), float(p[1])])
+        lines.append({
+            "id": lid,
+            "name": str(l.get("name") or lid),
+            "points": pts,
+            "lineType": l.get("lineType", "crossing"),
+            "direction": l.get("direction", "both")
+        })
+
+    rules = body.get("rules") or cfg.get("rules") or saved_cfg.get("rules") or []
     if isinstance(rules, str):
         try:
             rules = json.loads(rules)
@@ -735,10 +788,59 @@ async def detect(request: Request):
         except Exception as e:
             print(f"[CLOUD_NODE] Micro-Motion error: {e}", flush=True)
 
+    # 3e. Target Matcher Pass (Face & Visual Recognition)
+    is_target_matcher_enabled = bool(
+        zone_profile in ("security", "retail", "custom")
+        or profile_features.get("face_recognition", {}).get("enabled")
+        or profile_features.get("target_matcher", {}).get("enabled")
+    )
+    if is_target_matcher_enabled and raw_detections:
+        try:
+            from app.ai.target_matcher import target_matcher
+            matched_dets = []
+            for d in raw_detections:
+                matched_dets.append({
+                    "class": d["class"],
+                    "confidence": d["confidence"],
+                    "bbox": d["bbox_px"]
+                })
+            results = target_matcher.match_detections(frame, matched_dets)
+            for idx, res in enumerate(results):
+                if idx < len(raw_detections) and res.get("custom_match"):
+                    raw_detections[idx]["class"] = res["class"]
+                    raw_detections[idx]["label"] = res.get("label", res["class"])
+                    raw_detections[idx]["custom_match"] = True
+                    raw_detections[idx]["confidence"] = round(float(res.get("confidence", raw_detections[idx]["confidence"])), 2)
+        except Exception as e:
+            print(f"[CLOUD_NODE] Target Matcher error: {e}", flush=True)
+
+    # 3f. Custom Product Visual Registration / Matcher
+    is_custom_enabled = bool(
+        zone_profile == "custom"
+        or profile_features.get("custom_detector", {}).get("enabled")
+        or profile_features.get("custom_classification", {}).get("enabled")
+    )
+    if is_custom_enabled and custom_detector is not None and raw_detections:
+        try:
+            if hasattr(custom_detector, "has_active_custom_models") and custom_detector.has_active_custom_models():
+                candidates = [d for d in raw_detections if float(d.get("confidence", 0.0)) >= 0.35]
+                for det in candidates[:3]:
+                    px = det["bbox_px"]
+                    crop = frame[px["y1"]:px["y2"], px["x1"]:px["x2"]]
+                    if crop is not None and crop.size > 0:
+                        is_m, sim, m_name = custom_detector.match_crop(crop, threshold=0.60)
+                        if is_m and m_name:
+                            det["class"] = m_name
+                            det["label"] = f"{m_name} ({int(sim * 100)}%)"
+                            det["custom_match"] = True
+                            det["confidence"] = round(float(sim), 2)
+        except Exception as e:
+            print(f"[CLOUD_NODE] Custom detector error: {e}", flush=True)
+
     inf_latency_ms = round((time.perf_counter() - t_inf_start) * 1000, 1)
     inference_latencies.append(inf_latency_ms)
 
-    # 4. Multi-Object Tracking Step (ByteTrack)
+    # 4. Multi-Object Tracking Step (ByteTrack + IoU Association)
     tracked_detections = []
     if tracker is not None and len(raw_detections) > 0:
         try:
@@ -753,13 +855,48 @@ async def detect(request: Request):
 
             tracked_objs = tracker.update(formatted_dets, frame.shape[:2])
             model_inference_counts["bytetrack"] += 1
-            for idx, trk in enumerate(tracked_objs):
-                if idx < len(raw_detections):
-                    det = dict(raw_detections[idx])
-                    det["track_id"] = getattr(trk, "track_id", idx + 1)
-                    det["state"] = "ACTIVE"
-                    tracked_detections.append(det)
-        except Exception:
+
+            # Match raw_detections to tracked_objs using IoU to preserve continuous track_ids
+            pairs = []
+            for di, det in enumerate(raw_detections):
+                dbx = det["bbox_px"]
+                d_box = [dbx["x1"], dbx["y1"], dbx["x2"], dbx["y2"]]
+                for ti, trk in enumerate(tracked_objs):
+                    t_box = trk.tlbr if hasattr(trk, "tlbr") else (trk.get("bbox") if isinstance(trk, dict) else [0, 0, 0, 0])
+                    xx1 = max(d_box[0], t_box[0]); yy1 = max(d_box[1], t_box[1])
+                    xx2 = min(d_box[2], t_box[2]); yy2 = min(d_box[3], t_box[3])
+                    w = max(0.0, xx2 - xx1); h = max(0.0, yy2 - yy1)
+                    inter = w * h
+                    area_d = max(1.0, (d_box[2] - d_box[0]) * (d_box[3] - d_box[1]))
+                    area_t = max(1.0, (t_box[2] - t_box[0]) * (t_box[3] - t_box[1]))
+                    iou = inter / (area_d + area_t - inter)
+                    if iou > 0.05:
+                        pairs.append((iou, di, trk))
+
+            pairs.sort(key=lambda p: p[0], reverse=True)
+            matched_d = set()
+            matched_t = set()
+            det_to_trk = {}
+            for iou, di, trk in pairs:
+                tid = getattr(trk, "track_id", id(trk))
+                if di in matched_d or tid in matched_t:
+                    continue
+                matched_d.add(di)
+                matched_t.add(tid)
+                det_to_trk[di] = trk
+
+            for di, det in enumerate(raw_detections):
+                d = dict(det)
+                trk = det_to_trk.get(di)
+                if trk is not None:
+                    d["track_id"] = getattr(trk, "track_id", di + 1)
+                    d["state"] = "ACTIVE"
+                else:
+                    d["track_id"] = di + 1
+                    d["state"] = "ACTIVE"
+                tracked_detections.append(d)
+        except Exception as e:
+            print(f"[CLOUD_NODE] Tracking error: {e}", flush=True)
             for idx, det in enumerate(raw_detections):
                 d = dict(det)
                 d["track_id"] = idx + 1
@@ -774,18 +911,28 @@ async def detect(request: Request):
 
     # 5. Full Analytics & Rules Engine Step (Single Source of Truth)
     from app.analytics import filter_by_features, filter_by_profile
+    pixel_dets = []
+    for det in tracked_detections:
+        pd = dict(det)
+        pd["bbox"] = det["bbox_px"]
+        pixel_dets.append(pd)
+
     analytics = get_or_create_analytics(camera_id)
-    alerts, track_overlays, heatmap_list, zone_stats, line_stats, crowd_stats, parking_stats = analytics.update(
-        detections=tracked_detections,
-        zones=zones,
-        lines=lines,
-        frame_w=orig_w,
-        frame_h=orig_h,
-        frame=frame,
-        rules=rules,
-        zone_profile=zone_profile,
-        profile_features=profile_features
-    )
+    try:
+        alerts, track_overlays, heatmap_list, zone_stats, line_stats, crowd_stats, parking_stats = analytics.update(
+            detections=pixel_dets,
+            zones=zones,
+            lines=lines,
+            frame_w=orig_w,
+            frame_h=orig_h,
+            frame=frame,
+            rules=rules,
+            zone_profile=zone_profile,
+            profile_features=profile_features
+        )
+    except Exception as e:
+        print(f"[CLOUD_NODE] Analytics update warning: {e}", flush=True)
+        alerts, track_overlays, heatmap_list, zone_stats, line_stats, crowd_stats, parking_stats = [], [], [], {}, {}, {}, {}
 
     # 6. Apply strict feature and profile filtering to output detections
     filtered_dets = filter_by_features(tracked_detections, profile_features)
