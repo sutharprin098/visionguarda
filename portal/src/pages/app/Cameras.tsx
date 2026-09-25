@@ -251,7 +251,7 @@ const SOURCE_TYPES = [
 const DEFAULT_PORTS: Record<string, string> = { rtsp: "554", nvr: "554", dvr: "554", onvif: "80", ip: "80" };
 
 /** Hosts that serve a watch PAGE rather than a media address. */
-const LIVE_PAGE_HOSTS = ["youtube.com", "youtu.be", "youtube-nocookie.com", "twitch.tv"];
+const LIVE_PAGE_HOSTS = ["twitch.tv"];
 
 function isLivePageUrl(raw: string): boolean {
   let host: string;
@@ -436,7 +436,7 @@ function AddCameraForm({ camera, onDone }: { camera?: CameraRow; onDone: () => v
             hint={
               form.source_type === "phone_camera"
                 ? "Enter the RTSP/HTTP/MJPEG URL from your mobile camera app (e.g. rtsp://192.168.1.50:8080/h264_pcm.sdp or IP Webcam URL)"
-                : "A YouTube or Twitch live link, an HLS playlist (.m3u8), an MJPEG endpoint, or an RTSP URL that already includes its credentials. Paste it exactly as-is."
+                : "An HLS playlist (.m3u8), an MJPEG endpoint, or an RTSP URL that already includes its credentials. Paste it exactly as-is."
             }
           >
             <textarea
@@ -446,7 +446,7 @@ function AddCameraForm({ camera, onDone }: { camera?: CameraRow; onDone: () => v
                   ? "unchanged"
                   : form.source_type === "phone_camera"
                   ? "rtsp://192.168.1.XX:8080/h264_pcm.sdp or http://192.168.1.XX:8080/video"
-                  : "https://www.youtube.com/watch?v=… or https://example.com/live/playlist.m3u8"
+                  : "rtsp://admin:pass@192.168.1.XX:554/stream or https://example.com/live/playlist.m3u8"
               }
               value={form.url}
               onChange={(e) => { setForm({ ...form, url: e.target.value }); setTestState({ state: "idle" }); }}
@@ -465,7 +465,7 @@ function AddCameraForm({ camera, onDone }: { camera?: CameraRow; onDone: () => v
           <div className="rounded-control border border-accent/20 bg-accent/5 p-3 text-xs leading-relaxed text-ink-2">
             Check URL validates the address and scheme only. The stream itself is never fetched from the cloud — it is stored as given and opened by the desktop app on your own machine, so a URL that passes the check can still fail to open, and the camera will then show as offline.
             <br /><br />
-            Note that a raw signed playlist URL (not a YouTube/Twitch link) expires after a few hours and cannot be renewed on its own. For a long unattended run, use a page link or a stream whose address is stable.
+            Note that a raw signed playlist URL expires after a few hours and cannot be renewed on its own. For a long unattended run, use a stream whose address is stable.
           </div>
         </>
       ) : (

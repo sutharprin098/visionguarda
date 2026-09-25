@@ -345,11 +345,10 @@ const STREAM_URL_SCHEMES = ["http:", "https:", "rtsp:", "rtsps:", "rtmp:", "rtmp
  * only so "Check URL" can tell the operator which of the two things they
  * pasted, since the two fail in very different ways.
  */
-const LIVE_PAGE_HOSTS = ["youtube.com", "youtu.be", "youtube-nocookie.com", "twitch.tv"];
+const LIVE_PAGE_HOSTS = ["twitch.tv"];
 
 function isLivePageHost(hostname: string): boolean {
   const host = hostname.toLowerCase().replace(/^www\./, "");
-  // Domain-boundary match: notyoutube.com is a different site.
   return LIVE_PAGE_HOSTS.some((h) => host === h || host.endsWith("." + h));
 }
 

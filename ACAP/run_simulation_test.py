@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """
-CamAI ACAP Simulation Test Suite (Camera-Free Execution)
-Simulates camera video frames, runs detection & tracking logic, checks ROI intrusion,
-and validates event formatting without needing physical Axis camera hardware.
+CamAI ACAP Synthetic Geometry & Logic Unit Test
+================================================
+NOTE: This is a SYNTHETIC UNIT / GEOMETRY TEST for ray-casting ROI logic.
+It validates ray-casting polygon algorithms and math. It is NOT evidence
+that physical Axis hardware or live camera models work.
 """
 
 import time
@@ -11,19 +13,25 @@ import math
 
 class Point2D:
     def __init__(self, x, y):
-        self.x = x
-        self.y = y
+        self.x = float(x)
+        self.y = float(y)
 
 def is_point_in_polygon(pt, poly):
     inside = False
     n = len(poly)
+    if n < 3:
+        return False
     j = n - 1
     for i in range(n):
-        if ((poly[i].y > pt.y) != (poly[j].y > pt.y)) and \
-           (pt.x < (poly[j].x - poly[i].x) * (pt.y - poly[i].y) / (poly[i].y - poly[i].y + 1e-6) + poly[i].x):
-            inside = not inside
+        dy = poly[j].y - poly[i].y
+        if ((poly[i].y > pt.y) != (poly[j].y > pt.y)):
+            if abs(dy) > 1e-9:
+                x_intersect = (poly[j].x - poly[i].x) * (pt.y - poly[i].y) / dy + poly[i].x
+                if pt.x < x_intersect:
+                    inside = not inside
         j = i
     return inside
+
 
 def run_simulation():
     print("==================================================")

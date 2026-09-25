@@ -151,7 +151,7 @@ def read_jpeg_dimensions(jpeg_bytes):
     return 0, 0
 
 
-def send_to_aws(aws_url, jpeg_bytes, frame_id, timestamp_ms, timeout=15):
+def send_to_aws(aws_url, jpeg_bytes, frame_id, timestamp_ms, zone_profile="traffic", config=None, timeout=15):
     """
     POST the JPEG to AWS /api/detect.
     Returns (response_json, latency_ms) or raises on error.
@@ -162,7 +162,10 @@ def send_to_aws(aws_url, jpeg_bytes, frame_id, timestamp_ms, timeout=15):
     payload = {
         "image_b64": image_b64,
         "frame_id": frame_id,
-        "timestamp_ms": timestamp_ms
+        "timestamp_ms": timestamp_ms,
+        "zone_profile": zone_profile,
+        "camera_id": "axis-cam-01",
+        "config": config or {}
     }
     
     url = aws_url.rstrip('/') + '/api/detect'
@@ -269,7 +272,7 @@ def draw_detections(frame, detections, frame_w, frame_h):
     return annotated
 
 
-def run_single_test(camera_ip, username, password, aws_url, frame_id, save_debug=True, debug_dir="."):
+def run_single_test(camera_ip, username, password, aws_url, frame_id, image_path=None, zone_profile="traffic", config=None, save_debug=True, debug_dir="."):
     """
     Run a single end-to-end test cycle.
     Returns dict with results.
@@ -285,10 +288,21 @@ def run_single_test(camera_ip, username, password, aws_url, frame_id, save_debug
         'error': None
     }
     
-    # Step 1: Capture JPEG
+    # Step 1: Capture JPEG (from camera or real snapshot file)
     try:
         t_capture = time.time()
-        jpeg_bytes, width, height, cv_frame = capture_axis_jpeg(camera_ip, username, password)
+        if image_path and os.path.isfile(image_path):
+            with open(image_path, "rb") as f:
+                jpeg_bytes = f.read()
+            if HAS_CV2:
+                np_arr = np.frombuffer(jpeg_bytes, np.uint8)
+                cv_frame = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
+                height, width = cv_frame.shape[:2]
+            else:
+                width, height = read_jpeg_dimensions(jpeg_bytes)
+                cv_frame = None
+        else:
+            jpeg_bytes, width, height, cv_frame = capture_axis_jpeg(camera_ip, username, password)
         capture_ms = round((time.time() - t_capture) * 1000, 1)
         
         result['camera_ok'] = True
@@ -306,9 +320,9 @@ def run_single_test(camera_ip, username, password, aws_url, frame_id, save_debug
     # Step 2: Send to AWS
     try:
         timestamp_ms = int(time.time() * 1000)
-        log("AWS_REQUEST", f"{frame_id} payload_size={len(jpeg_bytes)}B → {aws_url}/api/detect", BLUE)
+        log("AWS_REQUEST", f"{frame_id} payload_size={len(jpeg_bytes)}B profile={zone_profile} -> {aws_url}/api/detect", BLUE)
         
-        response, latency_ms = send_to_aws(aws_url, jpeg_bytes, frame_id, timestamp_ms)
+        response, latency_ms = send_to_aws(aws_url, jpeg_bytes, frame_id, timestamp_ms, zone_profile=zone_profile, config=config)
         
         result['aws_ok'] = True
         result['latency_ms'] = latency_ms
@@ -366,16 +380,21 @@ def run_single_test(camera_ip, username, password, aws_url, frame_id, save_debug
 def run_continuous_test(
     camera_ip, username, password, aws_url,
     num_frames=20, min_confidence=0.25,
+    image_path=None, zone_profile="traffic", config=None,
     save_debug=True, debug_dir="."
 ):
     """
     Run continuous end-to-end test.
     """
     print(f"\n{'='*60}")
-    print(f"  {BOLD}CAMAI REAL AXIS → AWS TEST{RESET}")
+    print(f"  {BOLD}CAMAI REAL AXIS -> AWS TEST{RESET}")
     print(f"{'='*60}")
-    print(f"  Camera:     {camera_ip}")
+    if image_path:
+        print(f"  Source:     Real Frame File ({image_path})")
+    else:
+        print(f"  Camera:     {camera_ip}")
     print(f"  AWS:        {aws_url}/api/detect")
+    print(f"  Profile:    {zone_profile}")
     print(f"  Frames:     {num_frames}")
     print(f"  Min conf:   {min_confidence}")
     print(f"  Debug dir:  {debug_dir}")
@@ -383,19 +402,25 @@ def run_continuous_test(
     
     os.makedirs(debug_dir, exist_ok=True)
     
-    # Check camera connectivity
-    INFO(f"Testing camera connectivity at {camera_ip}...")
-    try:
-        r = requests.get(f"http://{camera_ip}/axis-cgi/jpg/image.cgi?resolution=640x480",
-                        auth=(username, password), timeout=5)
-        if r.status_code == 200 and len(r.content) > 100:
-            PASS(f"Camera CONNECTED — snapshot size={len(r.content)}B")
-        else:
-            FAIL(f"Camera returned HTTP {r.status_code}")
+    # Check camera connectivity if not using real image file
+    if not image_path:
+        INFO(f"Testing camera connectivity at {camera_ip}...")
+        try:
+            r = requests.get(f"http://{camera_ip}/axis-cgi/jpg/image.cgi?resolution=640x480",
+                            auth=(username, password), timeout=5)
+            if r.status_code == 200 and len(r.content) > 100:
+                PASS(f"Camera CONNECTED — snapshot size={len(r.content)}B")
+            else:
+                FAIL(f"Camera returned HTTP {r.status_code}")
+                sys.exit(1)
+        except Exception as e:
+            FAIL(f"Cannot connect to camera: {e}")
             sys.exit(1)
-    except Exception as e:
-        FAIL(f"Cannot connect to camera: {e}")
-        sys.exit(1)
+    else:
+        if not os.path.isfile(image_path):
+            FAIL(f"Real image file not found: {image_path}")
+            sys.exit(1)
+        PASS(f"Using REAL Axis Frame: {image_path} ({os.path.getsize(image_path)} bytes)")
     
     # Check AWS connectivity
     INFO(f"Testing AWS connectivity at {aws_url}...")
@@ -423,7 +448,8 @@ def run_continuous_test(
         
         result = run_single_test(
             camera_ip, username, password, aws_url,
-            frame_id, save_debug=save_debug, debug_dir=debug_dir
+            frame_id, image_path=image_path, zone_profile=zone_profile, config=config,
+            save_debug=save_debug, debug_dir=debug_dir
         )
         
         if result['aws_ok'] and result['latency_ms'] is not None:
@@ -529,9 +555,13 @@ def main():
                        help="Camera password")
     parser.add_argument("--aws", default="http://13.203.71.14:8000",
                        help="AWS cloud node base URL")
+    parser.add_argument("--image", default=None,
+                       help="Path to real Axis camera JPEG snapshot file to test directly")
+    parser.add_argument("--profile", default="traffic",
+                       help="Zone profile: traffic, security, factory, retail, smart_city, custom, micro_motion")
     parser.add_argument("--frames", type=int, default=20,
                        help="Number of frames to test (default: 20)")
-    parser.add_argument("--min-confidence", type=float, default=0.25,
+    parser.add_argument("--min-confidence", type=float, default=0.20,
                        help="Minimum confidence for detection counting")
     parser.add_argument("--no-debug", action="store_true",
                        help="Skip saving debug images")
@@ -551,6 +581,8 @@ def main():
         aws_url=args.aws,
         num_frames=args.frames,
         min_confidence=args.min_confidence,
+        image_path=args.image,
+        zone_profile=args.profile,
         save_debug=not args.no_debug,
         debug_dir=args.debug_dir
     )
