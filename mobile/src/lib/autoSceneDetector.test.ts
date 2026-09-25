@@ -33,7 +33,7 @@ describe("Auto Scene Detector & Solver", () => {
   });
 
   it("automatically detects Friant curved arterial expressway and sets cantilever boom", () => {
-    const camera = { id: "637e142c-ecac-4974-8a38-26fbb987dab7", name: "02", source: "https://www.youtube.com/watch?v=sTF-6_xinUU" };
+    const camera = { id: "637e142c-ecac-4974-8a38-26fbb987dab7", name: "02", source: "rtsp://192.168.1.100:554/stream1" };
     const profile = autoDetectSceneAndCalibrate(camera);
 
     expect(profile.archetype).toBe("curved_arterial_expressway");

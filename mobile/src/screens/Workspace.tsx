@@ -1403,13 +1403,8 @@ const CameraTile = memo(function CameraTile({ camera: c, site, engineOnline, onF
   }, [c.id, c.source]);
 
   const ytEmbedUrl = useMemo(() => {
-    const src = realSource || c.source || "";
-    const match = src.match(/(?:youtu\.be\/|youtube\.com\/(?:embed\/|v\/|watch\?v=|watch\?.+&v=))([\w-]{11})/);
-    if (match && match[1]) {
-      return `https://www.youtube.com/embed/${match[1]}?autoplay=1&mute=1&playsinline=1&controls=0&modestbranding=1&enablejsapi=1`;
-    }
     return null;
-  }, [realSource, c.source]);
+  }, []);
 
   const isDirectVideo = useMemo(() => {
     const src = (realSource || c.source || "").toLowerCase();

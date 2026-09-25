@@ -1548,7 +1548,7 @@ function DigitalTwin3DView({
   const pipImgRef = useRef<HTMLImageElement>(null);
 
   // Add Camera form state
-  const [newCamUrl, setNewCamUrl] = useState("https://www.youtube.com/watch?v=1H0iTzv2jiQ");
+  const [newCamUrl, setNewCamUrl] = useState("rtsp://admin:pass@192.168.1.100:554/live");
   const [newCamName, setNewCamName] = useState("Coldwater Intersection (Live)");
   const [newCamProfile, setNewCamProfile] = useState("traffic");
   const [isAddingCam, setIsAddingCam] = useState(false);
@@ -3256,7 +3256,7 @@ function DigitalTwin3DView({
       {/* End of Main Viewport Flex */}
     </div>
 
-      {/* Modal: Add Any Camera or YouTube Stream */}
+      {/* Modal: Add Any Camera or Live Stream */}
       {showAddModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-md p-4 pointer-events-auto">
           <div className="bg-zinc-900 border border-cyan-500/40 rounded-2xl p-6 max-w-lg w-full shadow-2xl relative space-y-4">
@@ -3287,7 +3287,7 @@ function DigitalTwin3DView({
                   type="text"
                   value={newCamUrl}
                   onChange={(e) => setNewCamUrl(e.target.value)}
-                  placeholder="YouTube URL, RTSP URL, or USB camera index"
+                  placeholder="RTSP URL, HLS URL, or USB camera index"
                   className="w-full bg-zinc-950 border border-zinc-700 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-cyan-400 font-mono"
                   required
                 />
@@ -3296,13 +3296,13 @@ function DigitalTwin3DView({
                   <button
                     type="button"
                     onClick={() => {
-                      setNewCamUrl("https://www.youtube.com/watch?v=1H0iTzv2jiQ");
-                      setNewCamName("Coldwater 4-Way Traffic (Live)");
+                      setNewCamUrl("rtsp://admin:pass@192.168.1.100:554/live");
+                      setNewCamName("4-Way Intersection Traffic (Live)");
                       setNewCamProfile("traffic");
                     }}
                     className="text-cyan-400 hover:underline"
                   >
-                    YouTube Traffic Cam (Coldwater)
+                    RTSP Traffic Cam (Live)
                   </button>
                   <span>•</span>
                   <button
