@@ -1369,7 +1369,7 @@ const CameraTile = memo(function CameraTile({ camera: c, site, engineOnline, onF
           </div>
         )}
 
-        {showingMedia && telemetry && !showSourceFault && (
+        {showingMedia && !showSourceFault && (
           <div className="absolute bottom-2 left-2 z-20 flex items-center gap-1.5 rounded bg-black/70 px-2 py-0.5 text-[10px] font-semibold text-zinc-200 shadow">
             {((telemetry as any)?.aws_status === "offline" || (telemetry as any)?.status === "error") ? (
               <span className="text-red-400 font-bold flex items-center gap-1">
@@ -1381,8 +1381,8 @@ const CameraTile = memo(function CameraTile({ camera: c, site, engineOnline, onF
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
                 <span>{shownDetections.length} detected</span>
                 {(() => {
-                  const streamFps = telemetry.camera_fps ?? (isAcapMode() ? 25.0 : telemetry.fps);
-                  const aiFps = telemetry.ai_fps ?? telemetry.fps;
+                  const streamFps = telemetry?.camera_fps ?? (isAcapMode() ? 25.0 : (telemetry?.fps ?? 25.0));
+                  const aiFps = telemetry?.ai_fps ?? telemetry?.fps;
                   return (
                     <>
                       {typeof streamFps === "number" && streamFps > 0 && (
@@ -1401,7 +1401,7 @@ const CameraTile = memo(function CameraTile({ camera: c, site, engineOnline, onF
                   );
                 })()}
                 {(() => {
-                  const lat = telemetry.inference_latency_ms ?? telemetry.inference_latency ?? telemetry.latency;
+                  const lat = telemetry?.inference_latency_ms ?? telemetry?.inference_latency ?? telemetry?.latency;
                   return typeof lat === "number" && lat > 0 ? (
                     <>
                       <span>·</span>
@@ -1410,7 +1410,7 @@ const CameraTile = memo(function CameraTile({ camera: c, site, engineOnline, onF
                   ) : null;
                 })()}
                 <span>·</span>
-                <span>{telemetry.device ? telemetry.device.toUpperCase() : "AWS CLOUD"}</span>
+                <span>{telemetry?.device ? telemetry.device.toUpperCase() : "AWS CLOUD"}</span>
               </>
             )}
           </div>

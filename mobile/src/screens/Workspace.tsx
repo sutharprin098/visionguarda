@@ -1800,10 +1800,50 @@ const CameraTile = memo(function CameraTile({ camera: c, site, engineOnline, onF
             Hidden while the source is faulted: "0 shown · 0.0 fps" is not a
             performance reading there, it is the absence of one, and it would sit
             on top of the banner that explains why. */}
-        {showingMedia && telemetry && !showSourceFault && (
-          <div className="absolute bottom-2 left-2 z-20 rounded bg-black/70 px-2 py-0.5 text-[10px] font-semibold text-zinc-200 shadow">
-            {shownDetections.length} shown · {(telemetry.fps ?? 0).toFixed(1)} fps
-            {telemetry.device ? ` · ${telemetry.device.toUpperCase()}` : ""}
+        {showingMedia && !showSourceFault && (
+          <div className="absolute bottom-2 left-2 z-20 flex items-center gap-1.5 rounded bg-black/70 px-2 py-0.5 text-[10px] font-semibold text-zinc-200 shadow">
+            {((telemetry as any)?.aws_status === "offline" || (telemetry as any)?.status === "error") ? (
+              <span className="text-red-400 font-bold flex items-center gap-1">
+                <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" />
+                AI: AWS OFFLINE
+              </span>
+            ) : (
+              <>
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                <span>{shownDetections.length} detected</span>
+                {(() => {
+                  const streamFps = telemetry?.camera_fps ?? telemetry?.decode_fps ?? telemetry?.fps ?? 25.0;
+                  const aiFps = telemetry?.ai_fps ?? telemetry?.fps;
+                  return (
+                    <>
+                      {typeof streamFps === "number" && streamFps > 0 && (
+                        <>
+                          <span>·</span>
+                          <span>{streamFps.toFixed(1)} FPS</span>
+                        </>
+                      )}
+                      {typeof aiFps === "number" && aiFps > 0 && Math.abs(aiFps - streamFps) > 0.5 && (
+                        <>
+                          <span>·</span>
+                          <span className="text-zinc-400">{aiFps.toFixed(1)} AI FPS</span>
+                        </>
+                      )}
+                    </>
+                  );
+                })()}
+                {(() => {
+                  const lat = telemetry?.inference_latency_ms ?? telemetry?.inference_latency ?? telemetry?.latency;
+                  return typeof lat === "number" && lat > 0 ? (
+                    <>
+                      <span>·</span>
+                      <span>{Math.round(lat)}ms</span>
+                    </>
+                  ) : null;
+                })()}
+                <span>·</span>
+                <span>{telemetry?.device ? telemetry.device.toUpperCase() : "AWS CLOUD"}</span>
+              </>
+            )}
           </div>
         )}
 
