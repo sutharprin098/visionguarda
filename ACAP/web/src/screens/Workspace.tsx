@@ -1081,13 +1081,16 @@ const CameraTile = memo(function CameraTile({ camera: c, site, engineOnline, onF
     };
   }, []);
 
+  const wasPausedRef = useRef(false);
   useEffect(() => {
     if (paused) {
+      wasPausedRef.current = true;
       if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
       if (imgRef.current) {
         imgRef.current.src = "";
       }
-    } else {
+    } else if (wasPausedRef.current) {
+      wasPausedRef.current = false;
       if (imgRef.current) {
         const base = mjpegStreamUrl(c.id);
         const sep = base.includes("?") ? "&" : "?";

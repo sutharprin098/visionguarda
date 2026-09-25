@@ -1070,11 +1070,22 @@ const CameraTile = memo(function CameraTile({ camera: c, site, engineOnline, onF
     };
   }, []);
 
+  const wasPausedRef = useRef(false);
   useEffect(() => {
-    if (paused && imgRef.current) {
-      imgRef.current.src = "";
+    if (paused) {
+      wasPausedRef.current = true;
+      if (imgRef.current) {
+        imgRef.current.src = "";
+      }
+    } else if (wasPausedRef.current) {
+      wasPausedRef.current = false;
+      if (imgRef.current) {
+        const base = mjpegStreamUrl(c.id);
+        const sep = base.includes("?") ? "&" : "?";
+        imgRef.current.src = `${base}${sep}_t=${Date.now()}`;
+      }
     }
-  }, [paused]);
+  }, [paused, c.id]);
 
   const ingestAlert = useAlertIngest();
 
