@@ -192,7 +192,7 @@ export default function FullscreenViewer({
     setTimeout(() => {
       if (target) {
         if (isAcapMode()) {
-          target.src = `/axis-cgi/jpg/image.cgi?resolution=800x450&compression=25&_t=${Date.now()}`;
+          target.src = `/local/camai_acap/frame.cgi?_t=${Date.now()}`;
         } else if (target.src) {
           try {
             const url = new URL(target.src);
@@ -284,12 +284,12 @@ export default function FullscreenViewer({
           className="h-full w-full object-contain"
           onLoad={() => {
             corsProvenRef.current = imgCors;
-            if (isAcapMode() && imgRef.current && imgRef.current.src.includes("/axis-cgi/jpg/image.cgi")) {
+            if (isAcapMode() && imgRef.current) {
               setTimeout(() => {
                 if (imgRef.current) {
-                  imgRef.current.src = `/axis-cgi/jpg/image.cgi?resolution=800x450&compression=25&_t=${Date.now()}`;
+                  imgRef.current.src = `/local/camai_acap/frame.cgi?_t=${Date.now()}`;
                 }
-              }, 100);
+              }, 35);
             }
           }}
           onError={handleImageError}

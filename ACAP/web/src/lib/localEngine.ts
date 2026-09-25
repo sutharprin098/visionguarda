@@ -58,7 +58,7 @@ export function mjpegStreamUrl(cameraId?: string): string {
     const isAcap = window.location.pathname.includes("/local/camai_acap/") ||
       window.location.port === "42093";
     if (isAcap) {
-      return "/axis-cgi/mjpg/video.cgi?resolution=800x450&fps=15";
+      return "/local/camai_acap/frame.cgi";
     }
   }
   return `${getEngineBase()}/api/cameras/${cid}/stream`;

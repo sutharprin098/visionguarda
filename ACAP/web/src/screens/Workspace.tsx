@@ -1274,14 +1274,19 @@ const CameraTile = memo(function CameraTile({ camera: c, site, engineOnline, onF
   }, [paused]);
 
   useEffect(() => {
-    if (!isAcapMode() || paused) {
+    if (isAcapMode() && !paused) {
+      const stopLoop = startAcapFrameLoop();
+      return () => {
+        if (stopLoop) stopLoop();
+      };
+    } else {
       frameLoopActiveRef.current = false;
     }
-  }, [paused]);
+  }, [paused, startAcapFrameLoop]);
 
   const getTileStreamSrc = () => {
     if (isAcapMode()) {
-      return `/axis-cgi/mjpg/video.cgi?resolution=800x450&fps=25`;
+      return `/local/camai_acap/frame.cgi`;
     }
     return mjpegStreamUrl(c.id);
   };
