@@ -217,8 +217,8 @@ def _extract(url: str) -> _Resolved:
         import yt_dlp  # imported lazily: the engine must still run without it
     except ImportError:
         raise StreamResolveError(
-            "yt-dlp is not installed - this engine build cannot open YouTube "
-            "or Twitch URLs. Use a direct stream address (.m3u8 / RTSP) instead."
+            "yt-dlp is not installed - this engine build cannot open web stream URLs. "
+            "Use a direct stream address (.m3u8 / RTSP) instead."
         )
 
     opts = {
@@ -228,43 +228,27 @@ def _extract(url: str) -> _Resolved:
         "logger": _QuietLogger(),
         "skip_download": True,
         "noplaylist": True,
-        # `noplaylist` is NOT enough on its own, and the difference is what
-        # wedged a capture thread indefinitely in production.
-        #
-        # noplaylist only suppresses the playlist ATTACHED to a video URL
-        # (?v=X&list=Y). A channel or tab URL — "youtube.com/@NASA/videos" —
-        # *is* the playlist, so yt-dlp enumerates it as requested. Combined with
-        # the entries[0] materialisation below, that paged through the channel's
-        # entire back catalogue over the network, one API call at a time, with
-        # no upper bound. py-spy caught it live: __process_playlist -> _entries
-        # -> get_requested_items, blocked on an SSL read, holding the camera's
-        # Cap thread forever while the UI showed the camera as "connecting".
-        #
-        # playlist_items caps the enumeration at the source, so a channel URL
-        # costs one page instead of hundreds.
+        "extractor_args": {
+            "youtube": {
+                "player_client": ["android", "web", "ios", "mweb"]
+            }
+        },
         "playlist_items": "1",
         "playlistend": 1,
         "format": _FORMAT,
         "socket_timeout": _SOCKET_TIMEOUT_S,
-        # Fail fast. This runs on the capture thread; a long retry schedule
-        # here stalls the camera instead of letting the loop back off.
-        "retries": 1,
-        "extractor_retries": 1,
-        "extractor_args": {
-            "youtube": {
-                "player_client": ["android", "ios", "mweb", "web"]
-            }
-        },
+        "retries": 2,
+        "extractor_retries": 2,
     }
     info = None
     try:
         with yt_dlp.YoutubeDL(opts) as ydl:
             info = ydl.extract_info(url, download=False)
     except Exception as e:
-        # Fallback retry without restrictive player_client if first pass fails
+        # Fallback retry with android client if first pass fails
         try:
             opts_fallback = dict(opts)
-            opts_fallback.pop("extractor_args", None)
+            opts_fallback["extractor_args"] = {"youtube": {"player_client": ["android"]}}
             with yt_dlp.YoutubeDL(opts_fallback) as ydl:
                 info = ydl.extract_info(url, download=False)
         except Exception as e2:
@@ -300,14 +284,10 @@ def _extract(url: str) -> _Resolved:
 
 
 def normalize_url(url: str) -> str:
-    """Clean and format bare YouTube IDs or tagged inputs into standard URLs."""
+    """Clean and format input URLs into standard scheme URLs."""
     s = str(url).strip()
-    if s.startswith("[youtube]"):
-        s = s[9:].strip()
-    if not s.startswith("http://") and not s.startswith("https://"):
-        if re.match(r"^[A-Za-z0-9_-]{10,12}$", s):
-            s = f"https://www.youtube.com/watch?v={s}"
-        elif "youtube.com" in s or "youtu.be" in s:
+    if not s.startswith("http://") and not s.startswith("https://") and not s.startswith("rtsp://") and not s.startswith("rtsps://"):
+        if "." in s and not s.startswith("/"):
             s = f"https://{s}"
     return s
 
@@ -343,12 +323,6 @@ def resolve(url: str, force: bool = False) -> str:
     try:
         resolved = _extract(src)
     except Exception as err:
-        err_msg = str(err)
-        if "truncated" in err_msg.lower() or "incomplete" in err_msg.lower():
-            raise StreamResolveError(
-                f"YouTube video ID '{url}' is incomplete. YouTube IDs require 11 characters. "
-                f"Please enter a valid link (e.g. https://www.youtube.com/watch?v=dQw4w9WgXcQ)"
-            )
         raise
     with _cache_lock:
         _cache[src] = resolved
