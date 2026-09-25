@@ -605,28 +605,38 @@ async def detect(request: Request):
     t_inf_start = time.perf_counter()
 
     # 1. Zero-DCE Night Vision Preprocessing (Auto-detect low-light or explicit profile feature)
+    nv_feat = profile_features.get("night_vision_zero_dce") or profile_features.get("zero_dce") or profile_features.get("night_vision") or {}
+    nv_enabled = False
+    nv_mode = "auto"
+    nv_threshold = 140.0
+    if isinstance(nv_feat, dict):
+        nv_enabled = bool(nv_feat.get("enabled", False))
+        nv_mode = str(nv_feat.get("mode", "auto")).lower()
+        nv_threshold = float(nv_feat.get("threshold", 140.0))
+    elif isinstance(nv_feat, bool):
+        nv_enabled = nv_feat
+
     is_night_vision_enabled = bool(
-        profile_features.get("night_vision", {}).get("enabled")
-        or profile_features.get("zero_dce", {}).get("enabled")
-        or profile_features.get("night_vision_zero_dce", {}).get("enabled")
+        nv_enabled
         or body.get("night_vision")
         or body.get("zero_dce")
         or zone_profile in ("night", "night_vision")
     )
     night_vision_stats = {"zero_dce_applied": False, "mean_luminance": 128.0, "method": "off"}
-    if zero_dce is not None:
+    if zero_dce is not None and is_night_vision_enabled:
         try:
             gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY) if len(frame.shape) == 3 else frame
             avg_brightness = float(np.mean(gray))
             night_vision_stats["mean_luminance"] = round(avg_brightness, 1)
-            # Enhance only when scene is actually dark (avg_brightness < 100) or force_enable requested
-            if is_night_vision_enabled and (avg_brightness < 100.0 or body.get("force_night_vision")):
-                frame, _ = zero_dce.enhance(frame, force_enable=True)
+            # Force ON if mode is "on" or body requested force, or auto mode when brightness < threshold
+            force_nv = (nv_mode == "on") or bool(body.get("force_night_vision")) or bool(body.get("force_enable"))
+            if force_nv or (avg_brightness < nv_threshold and nv_mode != "off"):
+                frame, nv_s = zero_dce.enhance(frame, override_threshold=nv_threshold, force_enable=force_nv)
                 night_vision_stats["zero_dce_applied"] = True
-                night_vision_stats["method"] = "fast_bgr_lut"
+                night_vision_stats["method"] = nv_s.get("method", "fast_bgr_lut")
                 model_inference_counts["zero_dce"] += 1
             else:
-                night_vision_stats["method"] = "idle" if is_night_vision_enabled else "off"
+                night_vision_stats["method"] = "idle"
         except Exception as e:
             print(f"[CLOUD_NODE] Zero-DCE enhance notice: {e}", flush=True)
 
@@ -782,16 +792,25 @@ async def detect(request: Request):
     )
     if motion_detector is not None and is_motion_enabled:
         try:
-            _, motion_res = motion_detector.process_frame(frame)
+            _, motion_res = motion_detector.process_frame(frame, return_annotated=False)
             model_inference_counts["screen_motion"] += 1
             for mr in motion_res:
-                mbx = mr.get("bbox", {})
-                x1_px, y1_px = max(0, int(mbx.get("x1", 0))), max(0, int(mbx.get("y1", 0)))
-                x2_px, y2_px = min(orig_w, int(mbx.get("x2", 0))), min(orig_h, int(mbx.get("y2", 0)))
+                mbx = mr.get("box") or mr.get("bbox") or []
+                if isinstance(mbx, list) and len(mbx) == 4:
+                    x1_px, y1_px = max(0, int(mbx[0])), max(0, int(mbx[1]))
+                    bw_px, bh_px = int(mbx[2]), int(mbx[3])
+                    x2_px, y2_px = min(orig_w, x1_px + bw_px), min(orig_h, y1_px + bh_px)
+                elif isinstance(mbx, dict):
+                    x1_px, y1_px = max(0, int(mbx.get("x1", 0))), max(0, int(mbx.get("y1", 0)))
+                    x2_px, y2_px = min(orig_w, int(mbx.get("x2", 0))), min(orig_h, int(mbx.get("y2", 0)))
+                else:
+                    continue
                 if x2_px > x1_px and y2_px > y1_px:
                     raw_detections.append({
                         "class": "micro_motion",
+                        "module": "micro_motion",
                         "confidence": round(float(mr.get("confidence", 0.75)), 2),
+                        "label": mr.get("tag", "SUBTLE MOTION TARGET"),
                         "bbox": {
                             "x1": round(x1_px / max(1, orig_w), 4),
                             "y1": round(y1_px / max(1, orig_h), 4),
@@ -985,14 +1004,30 @@ async def detect(request: Request):
 
     # Server-side module gate: drop detections belonging to explicitly disabled modules
     final_detections = []
+    KEY_ALIASES = {
+        "micro_motion": ["micro_motion", "micro_motion_hud", "screen_motion"],
+        "micro_motion_hud": ["micro_motion_hud", "micro_motion", "screen_motion"],
+        "night_vision": ["night_vision", "zero_dce", "night_vision_zero_dce"],
+        "anpr": ["anpr", "plate", "municipal_anpr"],
+        "helmet_detection": ["helmet_detection", "helmet", "two_wheeler_safety", "ppe_detection"],
+        "face_detection": ["face_detection", "face", "face_recognition", "customer_demographics"],
+    }
     for d in profile_dets:
         mod_tag = d.get("module")
-        if profile_features and mod_tag in profile_features:
-            cfg_v = profile_features[mod_tag]
-            is_on = cfg_v.get("enabled", False) if isinstance(cfg_v, dict) else bool(cfg_v)
-            if not is_on:
-                continue
-        final_detections.append(d)
+        aliases = KEY_ALIASES.get(mod_tag, [mod_tag])
+        is_disabled = False
+        if profile_features:
+            for a in aliases:
+                if a in profile_features:
+                    cfg_v = profile_features[a]
+                    is_on = cfg_v.get("enabled", False) if isinstance(cfg_v, dict) else bool(cfg_v)
+                    if not is_on:
+                        is_disabled = True
+                    else:
+                        is_disabled = False
+                        break
+        if not is_disabled:
+            final_detections.append(d)
 
     # Strict ROI polygon boundary filtering: objects outside drawn polygon zones are dropped
     if zones:

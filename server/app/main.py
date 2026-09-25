@@ -1039,14 +1039,25 @@ async def acap_detect_endpoint(request: Request):
                 h, w = img.shape[:2]
                 z_dce, m_mot, h_det, f_det, p_det, c_det = _get_acap_submodels()
 
-                is_nv_on = is_mod_enabled("night_vision") or is_mod_enabled("zero_dce") or is_mod_enabled("night_vision_zero_dce") or body.get("night_vision") or body.get("zero_dce")
+                nv_feat = profile_features.get("night_vision_zero_dce") or profile_features.get("zero_dce") or profile_features.get("night_vision") or {}
+                nv_enabled = False
+                nv_mode = "auto"
+                nv_threshold = 140.0
+                if isinstance(nv_feat, dict):
+                    nv_enabled = bool(nv_feat.get("enabled", False))
+                    nv_mode = str(nv_feat.get("mode", "auto")).lower()
+                    nv_threshold = float(nv_feat.get("threshold", 140.0))
+                elif isinstance(nv_feat, bool):
+                    nv_enabled = nv_feat
+
+                is_nv_on = is_mod_enabled("night_vision") or is_mod_enabled("zero_dce") or is_mod_enabled("night_vision_zero_dce") or nv_enabled or body.get("night_vision") or body.get("zero_dce")
                 _acap_night_vision_active = bool(is_nv_on)
 
                 if is_nv_on and z_dce is not None:
                     try:
                         t_nv0 = time.perf_counter()
-                        force_nv = bool(body.get("force_night_vision") or body.get("force_enable"))
-                        img, nv_stats = z_dce.enhance(img, force_enable=force_nv)
+                        force_nv = (nv_mode == "on") or bool(body.get("force_night_vision") or body.get("force_enable"))
+                        img, nv_stats = z_dce.enhance(img, override_threshold=nv_threshold, force_enable=force_nv)
                         nv_ms = round((time.perf_counter() - t_nv0) * 1000.0, 1)
                         if nv_stats.get("zero_dce_applied"):
                             print(f"[night_vision] [zero_dce] [frame_id={req_frame_id}] [inference_ms={nv_ms}] raw_result=1 final_result=1", flush=True)

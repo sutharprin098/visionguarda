@@ -154,7 +154,7 @@ class ScreenMicroMotionDetector:
                 
                 # Ignore extreme aspect ratio streaks (camera noise)
                 aspect = max(bw / max(1, bh), bh / max(1, bw))
-                if aspect > 8.0:
+                if aspect > 14.0:
                     continue
 
                 roi_delta = frame_delta[y:y+bh, x:x+bw]
@@ -163,8 +163,8 @@ class ScreenMicroMotionDetector:
                 flow_px = self._local_flow_score(prev_frame, blurred, x, y, bw, bh)
 
                 # Digital clocks / timers change numbers in place (intensity changes, but flow_px may be 0)
-                is_timer_change = (intensity >= adaptive_thr * 0.20 or active_ratio >= 0.02)
-                is_flow_motion = (flow_px >= 0.12)
+                is_timer_change = (intensity >= max(1.0, adaptive_thr * 0.15) or active_ratio >= 0.015)
+                is_flow_motion = (flow_px >= 0.08)
 
                 if not is_timer_change and not is_flow_motion:
                     continue
@@ -173,7 +173,7 @@ class ScreenMicroMotionDetector:
                 conf_intensity = intensity / max(3.0, adaptive_thr * 1.5)
                 conf_flow = min(flow_px, 2.0) * 0.25
                 conf_active = min(active_ratio * 3.0, 0.45)
-                confidence = min(0.99, max(0.55, conf_intensity + conf_flow + conf_active))
+                confidence = min(0.99, max(0.60, conf_intensity + conf_flow + conf_active))
 
                 if flow_px < 0.20 and is_timer_change:
                     tag = "TIMER / CLOCK DISPLAY CHANGE"
@@ -194,6 +194,8 @@ class ScreenMicroMotionDetector:
 
                 candidates.append({
                     "box": [orig_x, orig_y, orig_bw, orig_bh],
+                    "bbox": [orig_x, orig_y, orig_bw, orig_bh],
+                    "bbox_px": {"x1": orig_x, "y1": orig_y, "x2": orig_x + orig_bw, "y2": orig_y + orig_bh},
                     "area": int(area * scale_x * scale_y),
                     "confidence": round(confidence, 2),
                     "score": motion_score,

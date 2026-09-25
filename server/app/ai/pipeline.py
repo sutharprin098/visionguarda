@@ -741,6 +741,7 @@ class ByteTracker:
         for t in self.tracks:
             if t.time_since_update == 0 and t.state == "confirmed":
                 bbox = t.get_bbox()
+                is_norm = max(abs(float(bbox[0])), abs(float(bbox[1])), abs(float(bbox[2])), abs(float(bbox[3]))) <= 1.0
                 out.append({
                     "track_id":  t.track_id,
                     "class":     t.class_name,
@@ -748,8 +749,10 @@ class ByteTracker:
                     "first_seen": t.first_seen,
                     "dwell_time": round(now - t.first_seen, 1),
                     "bbox": {
-                        "x1": round(bbox[0]), "y1": round(bbox[1]),
-                        "x2": round(bbox[2]), "y2": round(bbox[3]),
+                        "x1": round(float(bbox[0]), 4) if is_norm else round(float(bbox[0]), 1),
+                        "y1": round(float(bbox[1]), 4) if is_norm else round(float(bbox[1]), 1),
+                        "x2": round(float(bbox[2]), 4) if is_norm else round(float(bbox[2]), 1),
+                        "y2": round(float(bbox[3]), 4) if is_norm else round(float(bbox[3]), 1),
                     }
                 })
         return out
@@ -775,6 +778,7 @@ class ByteTracker:
             if self.secs_since_update(t) > COAST_RENDER_SECONDS:
                 continue
             bbox = t.get_bbox()
+            is_norm = max(abs(float(bbox[0])), abs(float(bbox[1])), abs(float(bbox[2])), abs(float(bbox[3]))) <= 1.0
             out.append({
                 "track_id":  t.track_id,
                 "class":     t.class_name,
@@ -782,13 +786,15 @@ class ByteTracker:
                 "first_seen": t.first_seen,
                 "dwell_time": round(now - t.first_seen, 1),
                 "bbox": {
-                    "x1": round(bbox[0]), "y1": round(bbox[1]),
-                    "x2": round(bbox[2]), "y2": round(bbox[3])
+                    "x1": round(float(bbox[0]), 4) if is_norm else round(float(bbox[0]), 1),
+                    "y1": round(float(bbox[1]), 4) if is_norm else round(float(bbox[1]), 1),
+                    "x2": round(float(bbox[2]), 4) if is_norm else round(float(bbox[2]), 1),
+                    "y2": round(float(bbox[3]), 4) if is_norm else round(float(bbox[3]), 1),
                 }
             })
         return out
 
-COAST_RENDER_SECONDS = 0.8
+COAST_RENDER_SECONDS = 1.2
 
 
 def resolve_emitted_detections(tracker, tracks_raw, detections, masks,
@@ -842,11 +848,9 @@ def resolve_emitted_detections(tracker, tracks_raw, detections, masks,
             out_masks.append(masks[di] if masks_parallel else [])
         else:
             secs = tracker.secs_since_update(trk_obj) if trk_obj is not None else 0.0
-            # Drop coasting track immediately if it exceeds max coast duration
             if secs > coast_render_seconds:
                 continue
             
-            # Check edge boundary: if coasting near frame edge, drop instantly (object has exited)
             b = trk.get("bbox", {})
             x1, y1, x2, y2 = b.get("x1", 50), b.get("y1", 50), b.get("x2", 50), b.get("y2", 50)
             if x1 <= 15 or y1 <= 15 or x2 >= 1905 or y2 >= 1065:
@@ -867,6 +871,34 @@ def resolve_emitted_detections(tracker, tracks_raw, detections, masks,
                 if getattr(trk_obj, "track_label", None): coasted["label"] = trk_obj.track_label
             out_dets.append(coasted)
             out_masks.append([])
+
+    # Coasting tracks from tracker.tracks not in tracks_raw
+    for t in getattr(tracker, "tracks", []):
+        if t.track_id in matched_track_ids or t.track_id in [trk["track_id"] for trk in tracks_raw]:
+            continue
+        if t.state != "confirmed":
+            continue
+        secs = tracker.secs_since_update(t)
+        if secs > coast_render_seconds:
+            continue
+        cbbox = t.get_bbox()
+        is_norm = max(abs(float(cbbox[0])), abs(float(cbbox[1])), abs(float(cbbox[2])), abs(float(cbbox[3]))) <= 1.0
+        x1 = round(float(cbbox[0]), 4) if is_norm else round(float(cbbox[0]), 1)
+        y1 = round(float(cbbox[1]), 4) if is_norm else round(float(cbbox[1]), 1)
+        x2 = round(float(cbbox[2]), 4) if is_norm else round(float(cbbox[2]), 1)
+        y2 = round(float(cbbox[3]), 4) if is_norm else round(float(cbbox[3]), 1)
+        if not is_norm and (x1 <= 15 or y1 <= 15 or x2 >= 1905 or y2 >= 1065):
+            continue
+
+        out_dets.append({
+            "class": t.class_name,
+            "confidence": round(float(t.confidence), 2),
+            "track_id": t.track_id,
+            "dwell_time": round(time.time() - t.first_seen, 1),
+            "bbox": {"x1": x1, "y1": y1, "x2": x2, "y2": y2},
+            "tracking_status": "coasting",
+        })
+        out_masks.append([])
 
     # Unmatched raw detections are dropped. Only tracker-owned IDs are emitted;
 
