@@ -180,30 +180,53 @@ def build_eap_for_arch(arch):
     html_dir = os.path.join(script_dir, 'html')
     os.makedirs(html_dir, exist_ok=True)
 
-    detect_cgi_code = (
+    config_cgi_code = (
         "#!/bin/sh\n"
-        "printf \"Content-Type: application/json\\r\\n\\r\\n\"\n"
-        "curl -s -m 4 -H \"Content-Type: application/json\" -X POST --data-binary @- \"http://13.203.71.14:8000/api/detect\" 2>/dev/null || printf '{\"status\":\"error\",\"message\":\"AWS unreachable\",\"detections\":[]}'\n"
+        "printf \"Status: 200 OK\\r\\n\"\n"
+        "printf \"Content-Type: application/json\\r\\n\"\n"
+        "printf \"Cache-Control: no-cache, no-store, must-revalidate\\r\\n\"\n"
+        "printf \"Access-Control-Allow-Origin: *\\r\\n\\r\\n\"\n"
+        "mkdir -p /tmp/camai\n"
+        "cat > /tmp/camai/config.json\n"
+        "sed -n 's/.*\"zone_profile\":\"\\([^\"]*\\)\".*/\\1/p' /tmp/camai/config.json > /tmp/camai/active_profile.txt 2>/dev/null || true\n"
+        "printf '{\"status\":\"ok\"}'\n"
+        "printf \"\\n\"\n"
     ).encode()
 
     detections_cgi_code = (
         "#!/bin/sh\n"
-        "printf \"Content-Type: application/json\\r\\n\\r\\n\"\n"
-        "cat /tmp/camai/latest_detections.json 2>/dev/null || printf '{\"type\":\"telemetry\",\"count\":0,\"detections\":[]}'\n"
+        "printf \"Status: 200 OK\\r\\n\"\n"
+        "printf \"Content-Type: application/json\\r\\n\"\n"
+        "printf \"Cache-Control: no-cache, no-store, must-revalidate\\r\\n\"\n"
+        "printf \"Access-Control-Allow-Origin: *\\r\\n\\r\\n\"\n"
+        "if [ -f /tmp/camai/latest_detections.json ] && [ -s /tmp/camai/latest_detections.json ]; then\n"
+        "    cat /tmp/camai/latest_detections.json\n"
+        "else\n"
+        "    printf '{\"type\":\"telemetry\",\"status\":\"ok\",\"count\":0,\"detections\":[],\"alerts\":[]}'\n"
+        "fi\n"
+        "printf \"\\n\"\n"
     ).encode()
 
     telemetry_cgi_code = (
         "#!/bin/sh\n"
-        "printf \"Content-Type: application/json\\r\\n\\r\\n\"\n"
-        "cat /tmp/camai/latest_telemetry.json 2>/dev/null || printf '{\"type\":\"telemetry\",\"count\":0,\"detections\":[]}'\n"
+        "printf \"Status: 200 OK\\r\\n\"\n"
+        "printf \"Content-Type: application/json\\r\\n\"\n"
+        "printf \"Cache-Control: no-cache, no-store, must-revalidate\\r\\n\"\n"
+        "printf \"Access-Control-Allow-Origin: *\\r\\n\\r\\n\"\n"
+        "if [ -f /tmp/camai/latest_telemetry.json ] && [ -s /tmp/camai/latest_telemetry.json ]; then\n"
+        "    cat /tmp/camai/latest_telemetry.json\n"
+        "else\n"
+        "    printf '{\"type\":\"telemetry\",\"status\":\"ok\",\"count\":0,\"detections\":[],\"alerts\":[]}'\n"
+        "fi\n"
+        "printf \"\\n\"\n"
     ).encode()
 
-    with open(os.path.join(html_dir, 'detect.cgi'), 'wb') as f: f.write(detect_cgi_code)
+    with open(os.path.join(html_dir, 'config.cgi'), 'wb') as f: f.write(config_cgi_code)
     with open(os.path.join(html_dir, 'detections.cgi'), 'wb') as f: f.write(detections_cgi_code)
     with open(os.path.join(html_dir, 'telemetry.cgi'), 'wb') as f: f.write(telemetry_cgi_code)
 
     cgi_bridges = [
-        ('html/detect.cgi',     os.path.join(html_dir, 'detect.cgi')),
+        ('html/config.cgi',     os.path.join(html_dir, 'config.cgi')),
         ('html/detections.cgi', os.path.join(html_dir, 'detections.cgi')),
         ('html/telemetry.cgi',  os.path.join(html_dir, 'telemetry.cgi')),
     ]
@@ -224,7 +247,7 @@ def build_eap_for_arch(arch):
                 abs_path = os.path.join(root, file)
                 rel_path = os.path.relpath(abs_path, html_dir).replace('\\', '/')
                 # CGI bridges already added above with correct permissions
-                if rel_path in ('detections.cgi', 'telemetry.cgi'):
+                if rel_path in ('config.cgi', 'detections.cgi', 'telemetry.cgi'):
                     continue
                 with open(abs_path, 'rb') as hf:
                     file_data = hf.read()
