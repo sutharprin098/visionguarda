@@ -2160,16 +2160,8 @@ export default function AdminStudio({
                     src={mjpegStreamUrl(selectedCam.id)}
                     alt={selectedCam.name}
                     className="h-full w-full object-contain pointer-events-none bg-black"
-                    onLoad={(e) => {
+                    onLoad={() => {
                       setStreamFailed(false);
-                      if (isAcapMode()) {
-                        const target = e.currentTarget;
-                        setTimeout(() => {
-                          if (target) {
-                            target.src = `/local/camai_acap/frame.cgi?_t=${Date.now()}`;
-                          }
-                        }, 40);
-                      }
                     }}
                     onError={(e) => {
                       setStreamFailed(true);
@@ -2180,7 +2172,7 @@ export default function AdminStudio({
                           const sep = base.includes("?") ? "&" : "?";
                           target.src = `${base}${sep}_retry=${Date.now()}`;
                         }
-                      }, isAcapMode() ? 200 : 2000);
+                      }, isAcapMode() ? 1500 : 2000);
                     }}
                   />
                   {streamFailed && (

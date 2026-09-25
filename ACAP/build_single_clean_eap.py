@@ -239,6 +239,7 @@ def build_eap_for_arch(arch):
 
     detections_cgi_code = (
         "#!/bin/sh\n"
+        "echo \"Status: 200 OK\"\n"
         "echo \"Content-Type: application/json\"\n"
         "echo \"Cache-Control: no-cache, no-store, must-revalidate\"\n"
         "echo \"Pragma: no-cache\"\n"
@@ -254,6 +255,7 @@ def build_eap_for_arch(arch):
 
     telemetry_cgi_code = (
         "#!/bin/sh\n"
+        "echo \"Status: 200 OK\"\n"
         "echo \"Content-Type: application/json\"\n"
         "echo \"Cache-Control: no-cache, no-store, must-revalidate\"\n"
         "echo \"Pragma: no-cache\"\n"
@@ -269,6 +271,7 @@ def build_eap_for_arch(arch):
 
     frame_cgi_code = (
         "#!/bin/sh\n"
+        "echo \"Status: 200 OK\"\n"
         "echo \"Content-Type: image/jpeg\"\n"
         "echo \"Cache-Control: no-cache, no-store, must-revalidate\"\n"
         "echo \"Pragma: no-cache\"\n"
@@ -284,23 +287,11 @@ def build_eap_for_arch(arch):
 
     video_cgi_code = (
         "#!/bin/sh\n"
-        "echo \"HTTP/1.1 200 OK\"\n"
-        "echo \"Content-Type: multipart/x-mixed-replace; boundary=--myboundary\"\n"
+        "echo \"Status: 302 Found\"\n"
+        "echo \"Location: /axis-cgi/mjpg/video.cgi?resolution=800x450&fps=25\"\n"
         "echo \"Cache-Control: no-cache, no-store, must-revalidate\"\n"
-        "echo \"Pragma: no-cache\"\n"
         "echo \"Access-Control-Allow-Origin: *\"\n"
-        "echo \"Connection: close\"\n"
         "echo \"\"\n"
-        "while true; do\n"
-        "    if [ -f /tmp/camai/current_frame.jpg ] && [ -s /tmp/camai/current_frame.jpg ]; then\n"
-        "        echo \"--myboundary\"\n"
-        "        echo \"Content-Type: image/jpeg\"\n"
-        "        echo \"\"\n"
-        "        cat /tmp/camai/current_frame.jpg\n"
-        "        echo \"\"\n"
-        "    fi\n"
-        "    usleep 33000 2>/dev/null || sleep 1\n"
-        "done\n"
     ).encode()
 
     with open(os.path.join(html_dir, 'config.cgi'), 'wb') as f: f.write(config_cgi_code)

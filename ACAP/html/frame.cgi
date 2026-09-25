@@ -1,4 +1,5 @@
 #!/bin/sh
+echo "Status: 200 OK"
 echo "Content-Type: image/jpeg"
 echo "Cache-Control: no-cache, no-store, must-revalidate"
 echo "Pragma: no-cache"

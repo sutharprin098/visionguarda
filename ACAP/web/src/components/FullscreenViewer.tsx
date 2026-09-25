@@ -284,13 +284,7 @@ export default function FullscreenViewer({
           className="h-full w-full object-contain"
           onLoad={() => {
             corsProvenRef.current = imgCors;
-            if (isAcapMode() && imgRef.current) {
-              setTimeout(() => {
-                if (imgRef.current) {
-                  imgRef.current.src = `/local/camai_acap/frame.cgi?_t=${Date.now()}`;
-                }
-              }, 35);
-            }
+            setStreamFailed(false);
           }}
           onError={handleImageError}
         />

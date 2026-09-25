@@ -55,10 +55,9 @@ export async function controlHeaders(): Promise<Record<string, string>> {
 export function mjpegStreamUrl(cameraId?: string): string {
   const cid = encodeURIComponent(cameraId || 'axis-local-cam');
   if (typeof window !== "undefined") {
-    const isAcap = window.location.pathname.includes("/local/camai_acap/") ||
-      window.location.port === "42093";
+    const isAcap = isAcapMode();
     if (isAcap) {
-      return "/local/camai_acap/frame.cgi";
+      return "/axis-cgi/mjpg/video.cgi?resolution=800x450&fps=25";
     }
   }
   return `${getEngineBase()}/api/cameras/${cid}/stream`;

@@ -1239,75 +1239,7 @@ const CameraTile = memo(function CameraTile({ camera: c, site, engineOnline, onF
   // already works would just be noise. Which numbers are measured vs estimated
   // is still visible per box: the overlay marks estimates with "~".
 
-  const frameLoopActiveRef = useRef(false);
-
-  const startAcapFrameLoop = useCallback(() => {
-    if (frameLoopActiveRef.current || paused) return;
-    frameLoopActiveRef.current = true;
-
-    let isDestroyed = false;
-    let inFlight = false;
-    let failureCount = 0;
-
-    const fetchNext = () => {
-      if (isDestroyed || paused || !frameLoopActiveRef.current) return;
-      if (inFlight) return;
-      inFlight = true;
-
-      const loader = new Image();
-      let settled = false;
-
-      const onSettled = (success: boolean) => {
-        if (settled) return;
-        settled = true;
-        inFlight = false;
-        if (isDestroyed || paused || !frameLoopActiveRef.current) return;
-
-        if (success) {
-          failureCount = 0;
-          if (imgRef.current) {
-            imgRef.current.src = loader.src;
-            setStreamHealth("live");
-            retryCountRef.current = 0;
-          }
-          setTimeout(fetchNext, 40);
-        } else {
-          failureCount += 1;
-          const delay = failureCount > 4 ? 400 : 120;
-          setTimeout(fetchNext, delay);
-        }
-      };
-
-      loader.onload = () => onSettled(true);
-      loader.onerror = () => onSettled(false);
-
-      const endpoint = failureCount % 2 === 0 ? "/local/camai_acap/frame.jpg" : "/local/camai_acap/frame.cgi";
-      loader.src = `${endpoint}?_t=${Date.now()}`;
-    };
-
-    fetchNext();
-
-    return () => {
-      isDestroyed = true;
-      frameLoopActiveRef.current = false;
-    };
-  }, [paused]);
-
-  useEffect(() => {
-    if (isAcapMode() && !paused) {
-      const stopLoop = startAcapFrameLoop();
-      return () => {
-        if (stopLoop) stopLoop();
-      };
-    } else {
-      frameLoopActiveRef.current = false;
-    }
-  }, [paused, startAcapFrameLoop]);
-
   const getTileStreamSrc = () => {
-    if (isAcapMode()) {
-      return `/local/camai_acap/frame.cgi`;
-    }
     return mjpegStreamUrl(c.id);
   };
 
@@ -1348,21 +1280,16 @@ const CameraTile = memo(function CameraTile({ camera: c, site, engineOnline, onF
                 return;
               }
               if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
-              if (isAcapMode()) {
-                // Seamlessly fall back to continuous decoupled frame updates without React state thrashing
-                startAcapFrameLoop();
-              } else {
-                setStreamHealth("reconnecting");
-                const backoffMs = Math.min(10000, Math.round(1000 * Math.pow(1.8, retryCountRef.current)));
-                retryCountRef.current += 1;
-                reconnectTimerRef.current = setTimeout(() => {
-                  if (imgRef.current && !paused) {
-                    const base = mjpegStreamUrl(c.id);
-                    const sep = base.includes("?") ? "&" : "?";
-                    imgRef.current.src = `${base}${sep}_retry=${Date.now()}`;
-                  }
-                }, backoffMs);
-              }
+              setStreamHealth("reconnecting");
+              const backoffMs = isAcapMode() ? 1500 : Math.min(10000, Math.round(1000 * Math.pow(1.8, retryCountRef.current)));
+              retryCountRef.current += 1;
+              reconnectTimerRef.current = setTimeout(() => {
+                if (imgRef.current && !paused) {
+                  const base = mjpegStreamUrl(c.id);
+                  const sep = base.includes("?") ? "&" : "?";
+                  imgRef.current.src = `${base}${sep}_retry=${Date.now()}`;
+                }
+              }, backoffMs);
             }}
           />
         ) : isScreenShareCam ? (
