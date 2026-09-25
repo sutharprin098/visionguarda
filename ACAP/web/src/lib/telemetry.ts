@@ -278,29 +278,53 @@ class MultiTelemetryHub {
     };
   }
 
-  private cgiPollTimer: ReturnType<typeof setInterval> | null = null;
+  private cgiPollTimer: ReturnType<typeof setTimeout> | null = null;
+  private isPollingActive = false;
 
   private startCgiPolling(): void {
-    if (this.cgiPollTimer) return;
-    this.cgiPollTimer = setInterval(async () => {
-      if (this.ws && this.ws.readyState === WebSocket.OPEN) return;
-      try {
-        const cgiUrl = typeof window !== "undefined" && window.location.pathname.includes("/local/camai_acap/")
-          ? "/local/camai_acap/telemetry.cgi"
-          : "telemetry.cgi";
-        const res = await fetch(cgiUrl, { signal: AbortSignal.timeout(1500) });
-        if (res.ok) {
-          const data = await res.json();
-          if (data) {
-            this.listeners.forEach((callbacks) => {
-              callbacks.forEach((fn) => fn(data as CameraTelemetry));
-            });
-          }
-        }
-      } catch {
-        /* ignore */
+    if (this.isPollingActive) return;
+    this.isPollingActive = true;
+
+    let inFlight = false;
+    const pollTick = async () => {
+      if (!this.isPollingActive) return;
+      if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+        this.cgiPollTimer = setTimeout(pollTick, 500);
+        return;
       }
-    }, 120);
+      if (!inFlight) {
+        inFlight = true;
+        try {
+          const cgiUrl = typeof window !== "undefined" && window.location.pathname.includes("/local/camai_acap/")
+            ? `/local/camai_acap/telemetry.json?_t=${Date.now()}`
+            : `telemetry.json?_t=${Date.now()}`;
+          let res = await fetch(cgiUrl, { signal: AbortSignal.timeout(1200), cache: "no-store" });
+          if (!res.ok) {
+            const fallbackUrl = typeof window !== "undefined" && window.location.pathname.includes("/local/camai_acap/")
+              ? `/local/camai_acap/telemetry.cgi?_t=${Date.now()}`
+              : `telemetry.cgi?_t=${Date.now()}`;
+            res = await fetch(fallbackUrl, { signal: AbortSignal.timeout(1200), cache: "no-store" });
+          }
+          if (res.ok) {
+            const data = await res.json();
+            if (data) {
+              this.listeners.forEach((callbacks) => {
+                callbacks.forEach((fn) => fn(data as CameraTelemetry));
+              });
+            }
+          }
+        } catch {
+          /* ignore */
+        } finally {
+          inFlight = false;
+        }
+      }
+      if (this.isPollingActive) {
+        this.cgiPollTimer = setTimeout(pollTick, 150);
+      }
+    };
+
+    pollTick();
   }
 
   private startHeartbeat(): void {

@@ -1246,23 +1246,43 @@ const CameraTile = memo(function CameraTile({ camera: c, site, engineOnline, onF
     frameLoopActiveRef.current = true;
 
     let isDestroyed = false;
+    let inFlight = false;
+    let failureCount = 0;
+
     const fetchNext = () => {
       if (isDestroyed || paused || !frameLoopActiveRef.current) return;
+      if (inFlight) return;
+      inFlight = true;
+
       const loader = new Image();
-      loader.onload = () => {
+      let settled = false;
+
+      const onSettled = (success: boolean) => {
+        if (settled) return;
+        settled = true;
+        inFlight = false;
         if (isDestroyed || paused || !frameLoopActiveRef.current) return;
-        if (imgRef.current) {
-          imgRef.current.src = loader.src;
-          setStreamHealth("live");
-          retryCountRef.current = 0;
+
+        if (success) {
+          failureCount = 0;
+          if (imgRef.current) {
+            imgRef.current.src = loader.src;
+            setStreamHealth("live");
+            retryCountRef.current = 0;
+          }
+          setTimeout(fetchNext, 40);
+        } else {
+          failureCount += 1;
+          const delay = failureCount > 4 ? 400 : 120;
+          setTimeout(fetchNext, delay);
         }
-        setTimeout(fetchNext, 35);
       };
-      loader.onerror = () => {
-        if (isDestroyed || paused || !frameLoopActiveRef.current) return;
-        setTimeout(fetchNext, 200);
-      };
-      loader.src = `/local/camai_acap/frame.cgi?_t=${Date.now()}`;
+
+      loader.onload = () => onSettled(true);
+      loader.onerror = () => onSettled(false);
+
+      const endpoint = failureCount % 2 === 0 ? "/local/camai_acap/frame.jpg" : "/local/camai_acap/frame.cgi";
+      loader.src = `${endpoint}?_t=${Date.now()}`;
     };
 
     fetchNext();

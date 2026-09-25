@@ -7,12 +7,24 @@
 #         ├── Live Video (Independent, unblocked by AWS)
 #         └── AWS Worker Loop (Task 2)
 #
-# If AWS times out/errors, Live Camera CONTINUES uninterrupted.
+# Zero-fork static delivery + persistent stream architecture
 
 logger -t "camai_acap" "CamAI Real Vision Engine starting..."
 
 STATE_DIR="/tmp/camai"
 mkdir -p "$STATE_DIR"
+touch "$STATE_DIR/current_frame.jpg"
+touch "$STATE_DIR/latest_telemetry.json"
+touch "$STATE_DIR/latest_detections.json"
+
+# Create symlinks in web directories for zero-overhead static file serving
+for d in /usr/html/local/camai_acap /usr/local/packages/camai_acap/html /var/spool/storage/SD_DISK/local/camai_acap ./html .; do
+    if [ -d "$d" ]; then
+        ln -sf "$STATE_DIR/current_frame.jpg" "$d/frame.jpg" 2>/dev/null || true
+        ln -sf "$STATE_DIR/latest_telemetry.json" "$d/telemetry.json" 2>/dev/null || true
+        ln -sf "$STATE_DIR/latest_detections.json" "$d/detections.json" 2>/dev/null || true
+    fi
+done
 
 AWS_URL="http://13.203.71.14:8000/api/detect"
 AUTH="VLTUser:wY0-oD0jA6jft3"
@@ -78,7 +90,6 @@ aws_worker_loop() {
     while true; do
         FRAME_SRC="$STATE_DIR/current_frame.jpg"
         if [ -f "$FRAME_SRC" ] && [ -s "$FRAME_SRC" ]; then
-            # Non-destructive copy: live video retains current_frame.jpg continuously
             WORK_JPEG="$STATE_DIR/worker_$$.jpg"
             cp "$FRAME_SRC" "$WORK_JPEG" 2>/dev/null || true
 
@@ -94,11 +105,13 @@ aws_worker_loop() {
                     PROFILE="traffic"
                     if [ -f "$STATE_DIR/active_profile.txt" ]; then
                         PROFILE=$(cat "$STATE_DIR/active_profile.txt" 2>/dev/null || echo "traffic")
+                        [ -z "$PROFILE" ] && PROFILE="traffic"
                     fi
 
                     CONFIG_JSON="{}"
                     if [ -f "$STATE_DIR/config.json" ] && [ -s "$STATE_DIR/config.json" ]; then
                         CONFIG_JSON=$(cat "$STATE_DIR/config.json" 2>/dev/null || echo "{}")
+                        [ -z "$CONFIG_JSON" ] && CONFIG_JSON="{}"
                     fi
 
                     PAYLOAD_FILE="$STATE_DIR/payload_$$.json"
@@ -128,7 +141,7 @@ aws_worker_loop() {
     done
 }
 
-# Start the AWS Worker in the background so it CANNOT block camera frame capture
+# Start the AWS Worker in the background
 aws_worker_loop &
 WORKER_PID=$!
 
@@ -140,7 +153,8 @@ logger -t "camai_acap" "Camera capture loop starting..."
 if command -v python3 >/dev/null 2>&1 || command -v python >/dev/null 2>&1; then
     PY_BIN=$(command -v python3 || command -v python)
     logger -t "camai_acap" "Using Python persistent HTTP Keep-Alive capture worker ($PY_BIN)"
-    $PY_BIN -c '
+    while true; do
+        $PY_BIN -c '
 import urllib.request, time, os
 
 state_dir = "/tmp/camai"
@@ -155,11 +169,19 @@ if ":" in auth:
 
 opener = urllib.request.build_opener(urllib.request.HTTPDigestAuthHandler(mgr))
 
+web_dirs = [
+    "/usr/html/local/camai_acap",
+    "/usr/local/packages/camai_acap/html",
+    "/var/spool/storage/SD_DISK/local/camai_acap",
+    "./html",
+    "."
+]
+
 fail_count = 0
 while True:
     try:
         req = urllib.request.Request(url, headers={"Connection": "keep-alive"})
-        with opener.open(req, timeout=8) as stream:
+        with opener.open(req, timeout=12) as stream:
             buf = bytearray()
             while True:
                 chunk = stream.read(8192)
@@ -175,14 +197,20 @@ while True:
                     with open(tmp_path, "wb") as f:
                         f.write(jpeg)
                     os.replace(tmp_path, f"{state_dir}/current_frame.jpg")
+                    for d in web_dirs:
+                        if os.path.isdir(d):
+                            try:
+                                if not os.path.exists(f"{d}/frame.jpg"):
+                                    os.symlink(f"{state_dir}/current_frame.jpg", f"{d}/frame.jpg")
+                            except Exception:
+                                pass
                     fail_count = 0
     except Exception:
         fail_count += 1
-        # Fallback to single snapshot if continuous MJPEG loopback drops
         try:
             snap_url = "http://127.0.0.1/axis-cgi/jpg/image.cgi?resolution=800x450&compression=40"
             snap_req = urllib.request.Request(snap_url)
-            with opener.open(snap_req, timeout=2) as snap_resp:
+            with opener.open(snap_req, timeout=3) as snap_resp:
                 s_data = snap_resp.read()
                 if s_data and s_data.startswith(b"\xff\xd8"):
                     tmp_path = f"{state_dir}/capture_tmp_{os.getpid()}.jpg"
@@ -191,8 +219,10 @@ while True:
                     os.replace(tmp_path, f"{state_dir}/current_frame.jpg")
         except Exception:
             pass
-        time.sleep(0.5 if fail_count < 5 else 1.5)
+        time.sleep(0.3 if fail_count < 5 else 1.0)
 ' 2>/dev/null || true
+        sleep 1
+    done
 fi
 
 # Fallback shell capture worker (runs if python is not available)
@@ -203,14 +233,12 @@ while true; do
     CAPTURE_FRAME=$(( (CAPTURE_FRAME + 1) % 1000000 ))
     TEMP_JPEG="$STATE_DIR/capture_tmp_$$.jpg"
 
-    # Try local capture without auth first (most Axis cameras allow loopback 127.0.0.1)
     curl -s --max-time 1 --connect-timeout 1 \
         -c "$COOKIE_JAR" -b "$COOKIE_JAR" \
         -H "Connection: keep-alive" \
         -o "$TEMP_JPEG" \
         "$SNAP_URL" 2>/dev/null || true
 
-    # If empty or unauthorized, attempt digest authentication
     if [ ! -s "$TEMP_JPEG" ] || grep -q "401 Unauthorized" "$TEMP_JPEG" 2>/dev/null; then
         rm -f "$TEMP_JPEG"
         curl -s --max-time 1 --connect-timeout 1 \
