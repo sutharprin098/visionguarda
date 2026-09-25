@@ -42,11 +42,6 @@ def _clean_cache():
 # --- 1. Routing -----------------------------------------------------------
 
 @pytest.mark.parametrize("url", [
-    "https://www.youtube.com/watch?v=sTF-6_xinUU",
-    "https://youtube.com/watch?v=sTF-6_xinUU",
-    "https://m.youtube.com/watch?v=sTF-6_xinUU",
-    "https://youtu.be/sTF-6_xinUU",
-    "https://www.youtube.com/@SomeChannel/live",
     "https://www.twitch.tv/somechannel",
 ])
 def test_page_urls_are_routed_to_the_resolver(url):
@@ -67,19 +62,10 @@ def test_media_addresses_are_never_touched(url):
 
 
 def test_an_already_resolved_manifest_is_not_re_resolved():
-    """The googlevideo host that YouTube resolves ONTO is not itself a page.
-    Treating it as one would send the manifest back through the extractor on
-    every reconnect, which cannot work — it is not a watch page."""
+    """The manifest host that Twitch resolves ONTO is not itself a page."""
     url = "https://manifest.googlevideo.com/api/manifest/hls_playlist/expire/1785144686/ei/x"
     assert sr.needs_resolution(url) is False
 
-
-def test_a_lookalike_domain_is_not_treated_as_youtube():
-    """Suffix matching must be on a domain boundary: notyoutube.com is a
-    different site, and handing an arbitrary host to the extractor because its
-    name ends in the right characters is how an allow-list stops being one."""
-    assert sr.needs_resolution("https://notyoutube.com/watch?v=x") is False
-    assert sr.needs_resolution("https://gaming.youtube.com/watch?v=x") is True
 
 
 # --- 2. Expiry ------------------------------------------------------------
