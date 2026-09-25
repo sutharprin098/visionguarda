@@ -6,13 +6,13 @@ export default {
     extend: {
       colors: {
         surface: {
-          0: "#f8fafc", // Page canvas background (slate-50)
-          1: "#ffffff", // Pure white panels, sidebars, headers, cards
-          2: "#f1f5f9", // Crisp light grey button / input background (slate-100)
-          3: "#e2e8f0", // Subtle border / hover background (slate-200)
+          0: "#0b0d10", // Page canvas background (deep slate black)
+          1: "#12161f", // Pure dark panels, sidebars, headers, cards
+          2: "#1a202c", // Slate dark button / input background
+          3: "#2d3748", // Dark border / hover background
         },
-        line: "#e2e8f0",
-        "line-hover": "#cbd5e1",
+        line: "#2d3748",
+        "line-hover": "#4a5568",
         accent: { DEFAULT: "#2563eb", hover: "#1d4ed8" },
         ok: "#16a34a",
         warn: "#d97706",

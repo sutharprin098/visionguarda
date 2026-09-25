@@ -10,7 +10,7 @@ if (typeof window !== "undefined" && !(window as any).camai) {
     config: {
       appType: "desktop",
       isDevelopment: true,
-      supabaseUrl: "https://local-node.camai.cloud",
+      supabaseUrl: "http://13.203.71.14:8000",
       anonKey: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.e30.dummy",
     },
     getStoredSession: async () => ({ ok: true, session: { user: { email: "demo@camai.local" } } }),
