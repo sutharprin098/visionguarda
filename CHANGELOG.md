@@ -1,5 +1,15 @@
 # Changelog
 
+## 2026-09-26 — ACAP & Live Streaming Pipeline Stability Release
+
+### Fixed — ACAP & Video Streaming
+- **Eliminated `ERR_CONNECTION_CLOSED` on `/axis-cgi/mjpg/video.cgi?fps=25`:** Fixed candidate credential cycling in `ACAP/camai_acap_real.sh` by adding `_working_auth` caching and failure thresholding, preventing Axis Apache anti-brute-force rate limiting from tearing down live video sockets.
+- **Decoupled Local Hardware Stream from Cloud Status:** Fixed black screen bug in `Workspace.tsx` where temporary AWS/cloud inference outages caused local camera video to be hidden as a source fault. Local hardware stream now runs uninterrupted 24/7 regardless of cloud connectivity.
+- **Embedded ARM CPU & Socket Optimization:** Reduced CGI telemetry polling frequency to 250ms with 2000ms abort timeout, eliminating excessive `/bin/sh` process forks and preserving Apache connection pools.
+- **Frontend Stream Health Watchdog:** Implemented active watchdog timer in `Workspace.tsx` monitoring frame loads and automatically reconnecting stalled MJPEG streams without UI interruption.
+- **Cloud Inference Auto-Recovery:** Added 4.0s periodic recovery watchdog in `pipeline.py` to automatically restore cloud AI detections once network connectivity resumes.
+- **Zone Profile Contracts:** Corrected detection class assignments in `analytics.py` for zone profiles and verified with zero-mock compliance tests.
+
 ## 2026-09-12 — Desktop v1.1.0 & Mobile v1.0.2 — Digital Twin & Scene Intelligence Release
 
 ### Added — Mobile (v1.0.2)

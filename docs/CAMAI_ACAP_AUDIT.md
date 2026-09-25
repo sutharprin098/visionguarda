@@ -92,3 +92,40 @@ The existing CamAI codebase is structured as a multi-tier hybrid architecture ac
    - *Mitigation:* Non-blocking frame acquisition; drop oldest frame immediately if inference queue is occupied (`DROP_OLDEST` strategy).
 3. **Overheating & Thermal Throttling:** Sustained 100% NPU/CPU usage on outdoor dome cameras.
    - *Mitigation:* Adaptive FPS throttling (e.g., skip N frames when no motion detected or high temperature reported).
+
+---
+
+## 7. Video Pipeline & Daemon Stability Audit (Resolution Log)
+
+### Issue Summary
+Live MJPEG video streaming at `/axis-cgi/mjpg/video.cgi?fps=25` suffered from `ERR_CONNECTION_CLOSED` disconnections after ~3-5 seconds, resulting in black screens in the Web workspace and intermittent telemetry drops.
+
+### Root Cause Analysis
+1. **Axis Camera Daemon Credential Cycling (Apache Socket Teardown):**
+   - **Root Cause:** In `ACAP/camai_acap_real.sh`, `get_best_opener()` tested 6 candidate credentials on every snapshot failure or transient timeout. The Axis Apache server interpreted these rapid 401s as a brute-force attempt and severed all active HTTP/CGI sockets, terminating the browser's live video MJPEG stream.
+   - **Fix:** Implemented `_working_auth` caching and a 3-consecutive-failure threshold before re-authenticating. Paced local snapshot capture to ~2 FPS (500ms intervals) to eliminate encoder/socket contention.
+2. **Cloud Outage Propagating to Local Video (Black Screen):**
+   - **Root Cause:** When AWS cloud inference timed out or was offline, the daemon reported `"status": "error"`, causing `Workspace.tsx` to set `sourceFault = true` and hide the live video element.
+   - **Fix:** Decoupled local camera video rendering from cloud telemetry status (`!isAcapMode() && (telemetry?.health_status === "offline" ...)`). Daemon now reports `"status": "ok"` with `"aws_status": "offline"` on cloud drops.
+3. **CGI Polling Overhead on Embedded ARM:**
+   - **Root Cause:** Polling `/local/camai_acap/telemetry.cgi` every 150ms spawned 7 `/bin/sh` forks per second on the camera's CPU, exhausting Apache worker slots.
+   - **Fix:** Optimized polling interval to 250ms with a 2000ms timeout via `AbortController`.
+4. **Backend Cloud Recovery Watchdog:**
+   - **Root Cause:** If cloud inference threw a network exception, the backend remained trapped in an offline state without proactively re-probing.
+   - **Fix:** Added a 4.0s periodic retry watchdog in `_ai_loop_iteration_cloud` to automatically resume live cloud detections upon network restoration.
+5. **Frontend Stream Watchdog:**
+   - **Fix:** Added active stream watchdog timer checking `naturalWidth` and `complete` states on `imgRef`, automatically refreshing the MJPEG stream URL with cache-busting timestamp on freeze or disconnect without tearing down UI state.
+
+---
+
+## 8. Verification & Test Audit
+
+| Test Suite | Purpose | Result |
+|---|---|---|
+| `test_axis_stream_stability.py` | Verify continuous MJPEG stream under concurrent daemon snapshots | **PASSED** (1/1) |
+| `test_real_axis_to_aws.py` | Real Axis snapshot acquisition to AWS cloud inference | **PASSED** (1/1) |
+| `test_cloud_recovery.py` | Automatic recovery from network partition / cloud drop | **PASSED** (2/2) |
+| `test_confidence.py` | Confidence calibration & zero-mock validation | **PASSED** (17/17) |
+| `test_zone_profiles.py` | Zone profile & detection class contract validation | **PASSED** (16/16) |
+| `test_final_e2e_acap_validation.py` | End-to-end ACAP daemon, telemetry, and stream contract validation | **PASSED** (5/5) |
+
