@@ -13,7 +13,9 @@ export interface ShareCallbacks {
   onStream?: (stream: MediaStream | null) => void;
 }
 
-const WS_URL = "ws://127.0.0.1:8000/ws";
+const WS_URL = typeof window !== "undefined"
+  ? `${window.location.protocol === "https:" ? "wss:" : "ws:"}//${window.location.host}/ws`
+  : "ws://127.0.0.1:8000/ws";
 const FRAME_INTERVAL_MS = 100; // 10 FPS - balanced for real-time AI inference without heap/GPU exhaustion
 const HEARTBEAT_INTERVAL_MS = 5000;
 const HEARTBEAT_TIMEOUT_MS = 12000;
@@ -299,6 +301,9 @@ export class MediaShareSession {
 
   private connectWs(): void {
     if (this.stopped) return;
+    if (typeof window !== "undefined" && (window.location.pathname.includes("/local/camai_acap/") || window.location.protocol === "https:")) {
+      return;
+    }
     if (this.ws) {
       this.logDiag("info", "connectWs called while socket exists, cleaning old socket first");
       this.closeWs();
