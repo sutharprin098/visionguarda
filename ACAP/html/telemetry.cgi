@@ -1,3 +1,11 @@
 #!/bin/sh
-printf "Content-Type: application/json\r\n\r\n"
-cat /tmp/camai/latest_telemetry.json 2>/dev/null || printf '{"type":"telemetry","count":0,"detections":[]}'
+printf "Status: 200 OK\r\n"
+printf "Content-Type: application/json\r\n"
+printf "Cache-Control: no-cache, no-store, must-revalidate\r\n"
+printf "Access-Control-Allow-Origin: *\r\n\r\n"
+if [ -f /tmp/camai/latest_telemetry.json ] && [ -s /tmp/camai/latest_telemetry.json ]; then
+    cat /tmp/camai/latest_telemetry.json
+else
+    printf '{"type":"telemetry","status":"ok","count":0,"detections":[],"alerts":[]}'
+fi
+printf "\n"
