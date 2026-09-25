@@ -2156,7 +2156,7 @@ export default function AdminStudio({
               {engineOnline !== false ? (
                 <>
                   <img
-                    key={`${selectedCam.id}_${streamFailed ? "retry" : "live"}`}
+                    key={selectedCam.id}
                     src={mjpegStreamUrl(selectedCam.id)}
                     alt={selectedCam.name}
                     className="h-full w-full object-contain pointer-events-none bg-black"

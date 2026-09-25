@@ -10,6 +10,7 @@
 # Zero-fork static delivery + persistent stream architecture
 
 logger -t "camai_acap" "CamAI Real Vision Engine starting..."
+echo "[VIDEO] STREAM_START $(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
 STATE_DIR="/tmp/camai"
 mkdir -p "$STATE_DIR"
@@ -155,19 +156,56 @@ if command -v python3 >/dev/null 2>&1 || command -v python >/dev/null 2>&1; then
     logger -t "camai_acap" "Using Python persistent HTTP Keep-Alive capture worker ($PY_BIN)"
     while true; do
         $PY_BIN -c '
-import urllib.request, time, os
+import urllib.request, time, os, sys
 
 state_dir = "/tmp/camai"
 os.makedirs(state_dir, exist_ok=True)
 url = "http://127.0.0.1/axis-cgi/mjpg/video.cgi?resolution=800x450&fps=25"
-auth = "VLTUser:wY0-oD0jA6jft3"
 
-mgr = urllib.request.HTTPPasswordMgrWithDefaultRealm()
-if ":" in auth:
-    u, p = auth.split(":", 1)
+auth_candidates = [
+    ("", ""),
+    ("VLTUser", "wY0-oD0jA6jft3"),
+    ("root", "pass"),
+    ("root", "admin"),
+    ("admin", "admin"),
+    ("root", "root"),
+]
+
+try:
+    if os.path.exists(f"{state_dir}/config.json"):
+        import json
+        with open(f"{state_dir}/config.json") as cf:
+            cdata = json.load(cf)
+            if "camera_user" in cdata and "camera_pass" in cdata:
+                auth_candidates.insert(0, (cdata["camera_user"], cdata["camera_pass"]))
+except Exception:
+    pass
+
+def build_opener_for(u, p):
+    if not u and not p:
+        return urllib.request.build_opener()
+    mgr = urllib.request.HTTPPasswordMgrWithDefaultRealm()
     mgr.add_password(None, "http://127.0.0.1", u, p)
+    digest_handler = urllib.request.HTTPDigestAuthHandler(mgr)
+    basic_handler = urllib.request.HTTPBasicAuthHandler(mgr)
+    return urllib.request.build_opener(digest_handler, basic_handler)
 
-opener = urllib.request.build_opener(urllib.request.HTTPDigestAuthHandler(mgr))
+opener = None
+for u, p in auth_candidates:
+    try:
+        test_opener = build_opener_for(u, p)
+        test_req = urllib.request.Request("http://127.0.0.1/axis-cgi/jpg/image.cgi?resolution=800x450&compression=30")
+        with test_opener.open(test_req, timeout=3) as resp:
+            data = resp.read()
+            if data and data.startswith(b"\xff\xd8"):
+                opener = test_opener
+                print(f"[VIDEO] AUTH_SUCCESS user={u or 'anonymous'}", flush=True)
+                break
+    except Exception:
+        continue
+
+if not opener:
+    opener = build_opener_for("", "")
 
 web_dirs = [
     "/usr/html/local/camai_acap",
@@ -177,26 +215,51 @@ web_dirs = [
     "."
 ]
 
+frame_count = 0
+total_frames = 0
+first_frame_logged = False
+last_log_time = time.time()
 fail_count = 0
+
+print(f"[VIDEO] STREAM_CONNECTED pid={os.getpid()}", flush=True)
+
 while True:
     try:
         req = urllib.request.Request(url, headers={"Connection": "keep-alive"})
         with opener.open(req, timeout=12) as stream:
             buf = bytearray()
             while True:
-                chunk = stream.read(8192)
+                chunk = stream.read(16384)
                 if not chunk:
+                    print("[VIDEO] STREAM_CLOSED stream_ended", flush=True)
                     break
                 buf.extend(chunk)
-                soi = buf.find(b"\xff\xd8")
-                eoi = buf.find(b"\xff\xd9", soi + 2) if soi != -1 else -1
-                if soi != -1 and eoi != -1:
+                while True:
+                    soi = buf.find(b"\xff\xd8")
+                    if soi == -1:
+                        if len(buf) > 65536:
+                            del buf[:-2]
+                        break
+                    eoi = buf.find(b"\xff\xd9", soi + 2)
+                    if eoi == -1:
+                        if soi > 0:
+                            del buf[:soi]
+                        break
                     jpeg = buf[soi:eoi+2]
                     del buf[:eoi+2]
+                    
+                    frame_count += 1
+                    total_frames += 1
+                    
+                    if not first_frame_logged:
+                        print(f"[VIDEO] FIRST_FRAME size={len(jpeg)} bytes", flush=True)
+                        first_frame_logged = True
+                    
                     tmp_path = f"{state_dir}/capture_tmp_{os.getpid()}.jpg"
                     with open(tmp_path, "wb") as f:
                         f.write(jpeg)
                     os.replace(tmp_path, f"{state_dir}/current_frame.jpg")
+                    
                     for d in web_dirs:
                         if os.path.isdir(d):
                             try:
@@ -205,8 +268,26 @@ while True:
                             except Exception:
                                 pass
                     fail_count = 0
-    except Exception:
+                    
+                    now = time.time()
+                    if now - last_log_time >= 5.0:
+                        fps = frame_count / (now - last_log_time)
+                        # RSS memory check
+                        rss_kb = 0
+                        try:
+                            with open(f"/proc/{os.getpid()}/status") as ps:
+                                for line in ps:
+                                    if line.startswith("VmRSS:"):
+                                        rss_kb = line.split()[1]
+                                        break
+                        except Exception:
+                            pass
+                        print(f"[VIDEO] FRAME_COUNT={total_frames} FPS={fps:.1f} PID={os.getpid()} RSS={rss_kb}kB", flush=True)
+                        frame_count = 0
+                        last_log_time = now
+    except Exception as e:
         fail_count += 1
+        print(f"[VIDEO] STREAM_ERROR {e} (fail_count={fail_count})", flush=True)
         try:
             snap_url = "http://127.0.0.1/axis-cgi/jpg/image.cgi?resolution=800x450&compression=40"
             snap_req = urllib.request.Request(snap_url)
@@ -217,6 +298,7 @@ while True:
                     with open(tmp_path, "wb") as f:
                         f.write(s_data)
                     os.replace(tmp_path, f"{state_dir}/current_frame.jpg")
+                    total_frames += 1
         except Exception:
             pass
         time.sleep(0.3 if fail_count < 5 else 1.0)

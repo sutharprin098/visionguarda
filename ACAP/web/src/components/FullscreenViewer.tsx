@@ -276,7 +276,7 @@ export default function FullscreenViewer({
           so recovery re-requests the stream on its own. */}
       {!streamFailed ? (
         <img
-          key={`${cameraId}_${retryCount}_${imgCors ? "cors" : "plain"}`}
+          key={cameraId}
           ref={imgRef}
           crossOrigin={imgCors ? "anonymous" : undefined}
           src={mjpegStreamUrl(cameraId)}

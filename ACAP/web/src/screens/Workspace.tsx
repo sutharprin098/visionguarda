@@ -1330,7 +1330,7 @@ const CameraTile = memo(function CameraTile({ camera: c, site, engineOnline, onF
           />
         ) : showStream ? (
           <img
-            key={`${c.id}_${streamAttempt}_${imgCors ? "cors" : "plain"}`}
+            key={c.id}
             ref={imgRef}
             crossOrigin={imgCors ? "anonymous" : undefined}
             src={getTileStreamSrc()}
