@@ -183,6 +183,41 @@ function dedupDetections(dets: TelemetryDetection[]): TelemetryDetection[] {
 }
 
 
+const isDetectionModuleEnabled = (d: TelemetryDetection, pFeatures?: Record<string, any>): boolean => {
+  if (!pFeatures || Object.keys(pFeatures).length === 0) return true;
+  const isFeatOn = (k: string, dflt = true) => {
+    const v = pFeatures[k];
+    if (v === undefined || v === null) return dflt;
+    if (typeof v === "boolean") return v;
+    if (typeof v === "object" && v.enabled !== undefined) return Boolean(v.enabled);
+    return dflt;
+  };
+  if (d.module) {
+    return isFeatOn(d.module, false);
+  }
+  if (!d.class) return true;
+  const cls = d.class.toLowerCase();
+  if (d.custom_match || cls.startsWith("target:")) {
+    return isFeatOn("face_recognition", false) || isFeatOn("vip_face", false) || isFeatOn("customer_demographics", false) || isFeatOn("custom_detector", false) || isFeatOn("custom_detection_zone", false) || isFeatOn("detection_zone", false);
+  }
+  if (cls === "face") return isFeatOn("face_detection", false) || isFeatOn("face_recognition", false) || isFeatOn("vip_face", false) || isFeatOn("customer_demographics", false);
+  if (cls === "helmet" || cls === "no_helmet") return isFeatOn("helmet_detection", false) || isFeatOn("twowheeler_safety_helmet", false) || isFeatOn("ppe_detection", false);
+  if (cls === "vest" || cls === "no_vest") return isFeatOn("safety_vest", false) || isFeatOn("ppe_detection", false);
+  if (cls === "gloves" || cls === "no_gloves") return isFeatOn("gloves", false) || isFeatOn("ppe_detection", false);
+  if (cls === "shoes" || cls === "no_shoes") return isFeatOn("safety_shoes", false) || isFeatOn("shoes", false) || isFeatOn("ppe_detection", false);
+  if (cls === "fire" || cls === "smoke") return isFeatOn("fire_detection", false) || isFeatOn("smoke_detection", false);
+  if (cls === "forklift") return isFeatOn("forklift_detection", false);
+  if (cls === "number_plate") return isFeatOn("anpr", false) || isFeatOn("municipal_anpr", false);
+  if (cls === "micro_motion") return isFeatOn("micro_motion", false) || isFeatOn("micro_motion_hud", false);
+  if (cls === "person" || cls === "worker" || cls === "customer" || cls === "staff") {
+    return isFeatOn("person_detection", true) || isFeatOn("worker_detection", true) || isFeatOn("customer_staff_detection", true) || isFeatOn("person_counting", true);
+  }
+  if (VEHICLE_CLS_SET.has(cls)) {
+    return isFeatOn("vehicle_detection", true) || isFeatOn("speed_estimation", true) || isFeatOn("vehicle_classification", true);
+  }
+  return true;
+};
+
 export default function DetectionOverlay({ detections, refreshKey = 0, mediaRef, fit = "cover", profileFeatures }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const rectRef = useRef<{ width: number; height: number } | null>(null);
@@ -194,39 +229,13 @@ export default function DetectionOverlay({ detections, refreshKey = 0, mediaRef,
     let rawList = Array.isArray(detections) ? detections : [];
 
     if (profileFeatures && Object.keys(profileFeatures).length > 0) {
-      const isFeatOn = (k: string, dflt = true) => {
-        const v = profileFeatures[k];
-        if (v === undefined || v === null) return dflt;
-        if (typeof v === "boolean") return v;
-        if (typeof v === "object" && v.enabled !== undefined) return Boolean(v.enabled);
-        return dflt;
-      };
-
-      rawList = rawList.filter((d) => {
-        if (!d || !d.class) return false;
-        const cls = d.class.toLowerCase();
-        if (d.custom_match || cls.startsWith("target:")) {
-          return isFeatOn("face_recognition", false) || isFeatOn("vip_face", false) || isFeatOn("customer_demographics", false) || isFeatOn("custom_detector", false) || isFeatOn("custom_detection_zone", false) || isFeatOn("detection_zone", false);
-        }
-        if (cls === "face") return isFeatOn("face_detection", false) || isFeatOn("face_recognition", false) || isFeatOn("vip_face", false) || isFeatOn("customer_demographics", false);
-        if (cls === "helmet" || cls === "no_helmet") return isFeatOn("helmet_detection", false) || isFeatOn("twowheeler_safety_helmet", false) || isFeatOn("ppe_detection", false);
-        if (cls === "vest" || cls === "no_vest") return isFeatOn("safety_vest", false) || isFeatOn("ppe_detection", false);
-        if (cls === "gloves" || cls === "no_gloves") return isFeatOn("gloves", false) || isFeatOn("ppe_detection", false);
-        if (cls === "shoes" || cls === "no_shoes") return isFeatOn("safety_shoes", false) || isFeatOn("shoes", false) || isFeatOn("ppe_detection", false);
-        if (cls === "fire" || cls === "smoke") return isFeatOn("fire_detection", false) || isFeatOn("smoke_detection", false);
-        if (cls === "forklift") return isFeatOn("forklift_detection", false);
-        if (cls === "number_plate") return isFeatOn("anpr", false) || isFeatOn("municipal_anpr", false);
-        if (cls === "micro_motion") return isFeatOn("micro_motion", false) || isFeatOn("micro_motion_hud", false);
-        if (cls === "person" || cls === "worker" || cls === "customer" || cls === "staff") {
-          return isFeatOn("worker_detection", true) && isFeatOn("person_detection", true) && isFeatOn("customer_staff_detection", true);
-        }
-        return true;
-      });
+      rawList = rawList.filter((d) => isDetectionModuleEnabled(d, profileFeatures));
     }
 
-    // Clean up tracks older than TRACK_HOLD_MS (1200ms)
+    // Clean up tracks older than TRACK_HOLD_MS (1200ms) or matching disabled modules
     tracksMapRef.current.forEach((val, key) => {
-      if (now - val.lastSeen > TRACK_HOLD_MS) {
+      const isStillEnabled = isDetectionModuleEnabled(val.det, profileFeatures);
+      if (!isStillEnabled || (now - val.lastSeen > TRACK_HOLD_MS)) {
         tracksMapRef.current.delete(key);
       }
     });

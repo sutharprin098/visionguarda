@@ -683,10 +683,94 @@ def acap_mjpeg_stream(camera_id: Optional[str] = None):
     return StreamingResponse(_acap_mjpeg_generator(), media_type="multipart/x-mixed-replace; boundary=frame")
 
 from app.ai.pipeline import ByteTracker, resolve_emitted_detections
-from app.analytics import CameraAnalytics
+from app.analytics import CameraAnalytics, filter_by_features, filter_by_profile
 
 _acap_tracker = ByteTracker(max_lost_seconds=0.8, reid_ttl=30.0, n_init=1)
 _acap_analytics = CameraAnalytics("axis-cam-01")
+
+_acap_zero_dce = None
+_acap_micro_motion = None
+_acap_helmet_detector = None
+_acap_face_detector = None
+_acap_plate_detector = None
+_acap_custom_detector = None
+
+def _get_acap_submodels():
+    global _acap_zero_dce, _acap_micro_motion, _acap_helmet_detector, _acap_face_detector, _acap_plate_detector, _acap_custom_detector
+    if _acap_zero_dce is None:
+        try:
+            from app.ai.enhancer import zero_dce
+            _acap_zero_dce = zero_dce
+        except Exception:
+            _acap_zero_dce = None
+    if _acap_micro_motion is None:
+        try:
+            from app.ai.screen_motion_detector import ScreenMicroMotionDetector
+            _acap_micro_motion = ScreenMicroMotionDetector()
+        except Exception:
+            _acap_micro_motion = None
+    if _acap_helmet_detector is None:
+        try:
+            from app.ai import helmet
+            _acap_helmet_detector = helmet.get_detector()
+        except Exception:
+            _acap_helmet_detector = None
+    if _acap_face_detector is None:
+        try:
+            from app.ai import face
+            _acap_face_detector = face.get_detector()
+        except Exception:
+            _acap_face_detector = None
+    if _acap_plate_detector is None:
+        try:
+            from app.ai import plate
+            _acap_plate_detector = plate.get_detector()
+        except Exception:
+            _acap_plate_detector = None
+    if _acap_custom_detector is None:
+        try:
+            from app.ai import custom_detector as cd
+            _acap_custom_detector = cd
+        except Exception:
+            _acap_custom_detector = None
+    return _acap_zero_dce, _acap_micro_motion, _acap_helmet_detector, _acap_face_detector, _acap_plate_detector, _acap_custom_detector
+
+def _map_detection_module(cls_name: str, det: dict = None) -> str:
+    if det and det.get("module"):
+        return det["module"]
+    cn = str(cls_name or "").lower().strip()
+    if cn in ("car", "bus", "truck", "motorcycle", "bicycle", "van", "auto_rickshaw", "vehicle"):
+        return "vehicle_detection"
+    if cn in ("person", "worker", "customer", "staff", "rider"):
+        return "person_detection"
+    if cn in ("helmet", "no_helmet"):
+        return "helmet_detection"
+    if cn in ("vest", "no_vest"):
+        return "safety_vest"
+    if cn in ("gloves", "no_gloves"):
+        return "gloves"
+    if cn in ("shoes", "no_shoes"):
+        return "shoes"
+    if cn == "face":
+        return "face_detection"
+    if cn == "number_plate":
+        return "anpr"
+    if cn == "micro_motion":
+        return "micro_motion"
+    if cn == "fire":
+        return "fire_detection"
+    if cn == "smoke":
+        return "smoke_detection"
+    if cn in ("backpack", "handbag", "suitcase", "umbrella"):
+        return "object_left_behind"
+    if cn in ("dog", "cat", "cow", "horse", "sheep", "animal"):
+        return "animal_detection"
+    if cn == "forklift":
+        return "forklift_detection"
+    if det and (det.get("custom_match") or cn.startswith("target:")):
+        return "custom_detector"
+    return "general_detection"
+
 
 @app.post("/api/detect")
 @app.post("/detect.cgi")
@@ -702,7 +786,52 @@ async def acap_detect_endpoint(request: Request):
 
     image_b64 = body.get("image_b64") or body.get("image") or body.get("frame")
     req_frame_id = body.get("frame_id", 1)
-    
+    camera_id = str(body.get("camera_id") or "axis-cam-01")
+    zone_profile = str(body.get("zone_profile") or body.get("profile") or "security").lower().strip()
+
+    profile_features = body.get("profile_features") or body.get("features") or body.get("config", {}).get("profile_features") or {}
+    if isinstance(profile_features, str):
+        try:
+            profile_features = json.loads(profile_features)
+        except Exception:
+            profile_features = {}
+
+    def is_mod_on(mod_key: str) -> bool:
+        if profile_features and mod_key in profile_features:
+            cfg = profile_features[mod_key]
+            if isinstance(cfg, dict):
+                return bool(cfg.get("enabled", False))
+            if isinstance(cfg, bool):
+                return cfg
+        if zone_profile == "traffic":
+            return mod_key in ("vehicle_detection", "speed_estimation", "anpr", "helmet_detection")
+        elif zone_profile == "security":
+            return mod_key in ("person_detection", "intrusion_detection", "face_detection", "object_left_behind")
+        elif zone_profile == "factory":
+            return mod_key in ("person_detection", "ppe_detection", "helmet_detection", "safety_vest")
+        elif zone_profile == "retail":
+            return mod_key in ("person_detection", "customer_detection", "face_detection")
+        elif zone_profile == "smart_city":
+            return mod_key in ("vehicle_detection", "anpr", "helmet_detection", "person_detection")
+        elif zone_profile == "micro_motion":
+            return mod_key in ("micro_motion", "micro_motion_hud")
+        elif zone_profile == "custom":
+            return mod_key in ("custom_detector", "person_detection", "vehicle_detection")
+        return True
+
+    ALL_MODULES = [
+        "vehicle_detection", "speed_estimation", "person_detection", "worker_detection",
+        "customer_detection", "anpr", "helmet_detection", "safety_vest", "gloves",
+        "shoes", "ppe_detection", "face_detection", "face_recognition", "micro_motion",
+        "fire_detection", "smoke_detection", "animal_detection", "forklift_detection",
+        "object_left_behind", "target_matcher", "custom_detector", "night_vision"
+    ]
+    enabled_mods = [m for m in ALL_MODULES if is_mod_on(m)]
+    disabled_mods = [m for m in ALL_MODULES if not is_mod_on(m)]
+
+    # Requirement 3: Log exact configuration reaching server/AWS
+    logger.info(f"CAMERA: {camera_id} | ENABLED MODULES: {enabled_mods} | DISABLED MODULES: {disabled_mods}")
+
     _acap_frame_times.append(now_ts)
     if len(_acap_frame_times) > 1:
         dt = _acap_frame_times[-1] - _acap_frame_times[0]
@@ -719,28 +848,213 @@ async def acap_detect_endpoint(request: Request):
             nparr = np.frombuffer(img_bytes, np.uint8)
             img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
             if img is not None:
-                with _acap_jpeg_lock:
-                    _acap_latest_frame_jpeg = img_bytes
+                h, w = img.shape[:2]
+                z_dce, m_mot, h_det, f_det, p_det, c_det = _get_acap_submodels()
+
+                # Requirement 10 & 11: Zero-DCE Night Vision Frame Enhancement
+                is_nv_on = is_mod_enabled("night_vision") or is_mod_enabled("zero_dce") or body.get("night_vision") or body.get("zero_dce")
+                if is_nv_on and z_dce is not None:
+                    try:
+                        t_nv0 = time.perf_counter()
+                        img, nv_stats = z_dce.enhance(img, force_enable=True)
+                        nv_ms = round((time.perf_counter() - t_nv0) * 1000.0, 1)
+                        print(f"[night_vision] [zero_dce] [frame_id={req_frame_id}] [inference_ms={nv_ms}] raw_result=1 final_result=1", flush=True)
+                        # Ensure enhanced frame reaches displayed MJPEG video stream
+                        with _acap_jpeg_lock:
+                            _, nv_buf = cv2.imencode('.jpg', img)
+                            _acap_latest_frame_jpeg = nv_buf.tobytes()
+                    except Exception as e:
+                        logger.error(f"Night vision Zero-DCE error: {e}")
+                else:
+                    with _acap_jpeg_lock:
+                        _acap_latest_frame_jpeg = img_bytes
+
+                raw_candidate_dets = []
+
+                # 1. Primary YOLOX Detection Pass (if vehicle or person or general detection enabled)
                 backend = manager.ensure_backend_loaded()
                 if backend and hasattr(backend, "infer"):
+                    t_yolo0 = time.perf_counter()
                     det_results = backend.infer(img)
+                    yolo_ms = round((time.perf_counter() - t_yolo0) * 1000.0, 1)
                     if isinstance(det_results, list):
-                        h, w = img.shape[:2]
-                        tracks_raw = _acap_tracker.update(det_results, frame=img, frame_shape=(h, w), conf_thresh=0.25)
-                        detections, _ = resolve_emitted_detections(_acap_tracker, tracks_raw, det_results, [])
-                        _acap_analytics.update(detections, zones=[], lines=[], frame_w=w, frame_h=h, frame=img, zone_profile=body.get("zone_profile") or "security")
-                        for d in detections:
-                            if "speed" not in d and "speed_kmh" in d:
-                                d["speed"] = d["speed_kmh"]
-                            if "bbox" in d:
-                                bx = d["bbox"]
-                                if bx["x2"] > 1.0 or bx["y2"] > 1.0:
-                                    d["bbox"] = {
-                                        "x1": round(max(0.0, min(1.0, float(bx["x1"]) / w)), 4),
-                                        "y1": round(max(0.0, min(1.0, float(bx["y1"]) / h)), 4),
-                                        "x2": round(max(0.0, min(1.0, float(bx["x2"]) / w)), 4),
-                                        "y2": round(max(0.0, min(1.0, float(bx["y2"]) / h)), 4),
+                        for dr in det_results:
+                            d = dict(dr)
+                            d["module"] = _map_detection_module(d.get("class"), d)
+                            raw_candidate_dets.append(d)
+                        print(f"[yolox] [yolox_tiny] [frame_id={req_frame_id}] [inference_ms={yolo_ms}] raw_result={len(det_results)} final_result={len(raw_candidate_dets)}", flush=True)
+
+                # Extract bounding boxes for sub-models
+                vehicle_boxes_px = []
+                person_boxes_px = []
+                moto_boxes_px = []
+                for d in raw_candidate_dets:
+                    cls_name = str(d.get("class", "")).lower()
+                    bx = d.get("bbox", {})
+                    x1_px = int(bx.get("x1", 0) * w) if bx.get("x1", 0) <= 1.0 else int(bx.get("x1", 0))
+                    y1_px = int(bx.get("y1", 0) * h) if bx.get("y1", 0) <= 1.0 else int(bx.get("y1", 0))
+                    x2_px = int(bx.get("x2", 0) * w) if bx.get("x2", 0) <= 1.0 else int(bx.get("x2", 0))
+                    y2_px = int(bx.get("y2", 0) * h) if bx.get("y2", 0) <= 1.0 else int(bx.get("y2", 0))
+                    b_px = {"x1": x1_px, "y1": y1_px, "x2": x2_px, "y2": y2_px}
+                    if cls_name in ("car", "truck", "bus", "motorcycle", "van", "vehicle"):
+                        vehicle_boxes_px.append(b_px)
+                    if cls_name in ("person", "worker", "customer", "rider"):
+                        person_boxes_px.append(b_px)
+                    if cls_name in ("motorcycle", "twowheeler"):
+                        moto_boxes_px.append(b_px)
+
+                # 2. RT-DETR Helmet & Rider Safety Pass
+                if h_det is not None and (is_mod_enabled("helmet_detection") or is_mod_enabled("ppe_detection") or is_mod_enabled("two_wheeler_safety")) and (moto_boxes_px or person_boxes_px):
+                    try:
+                        t_h0 = time.perf_counter()
+                        helmet_results = h_det.detect_on_riders(img, moto_boxes_px if moto_boxes_px else person_boxes_px, person_boxes_px)
+                        h_ms = round((time.perf_counter() - t_h0) * 1000.0, 1)
+                        for hr in helmet_results:
+                            hconf = float(hr.get("confidence", 0.0))
+                            hbx = hr.get("bbox", {})
+                            x1_px, y1_px = max(0, int(hbx.get("x1", 0))), max(0, int(hbx.get("y1", 0)))
+                            x2_px, y2_px = min(w, int(hbx.get("x2", 0))), min(h, int(hbx.get("y2", 0)))
+                            if x2_px > x1_px and y2_px > y1_px:
+                                raw_candidate_dets.append({
+                                    "class": hr.get("class", "helmet"),
+                                    "module": "helmet_detection",
+                                    "confidence": round(hconf, 2),
+                                    "bbox": {
+                                        "x1": round(x1_px / max(1, w), 4),
+                                        "y1": round(y1_px / max(1, h), 4),
+                                        "x2": round(x2_px / max(1, w), 4),
+                                        "y2": round(y2_px / max(1, h), 4)
                                     }
+                                })
+                        print(f"[helmet_detection] [rtdetr_helmet] [frame_id={req_frame_id}] [inference_ms={h_ms}] raw_result={len(helmet_results)} final_result={len(helmet_results)}", flush=True)
+                    except Exception as e:
+                        logger.error(f"Helmet detector error: {e}")
+
+                # 3. YuNet Face Detector & SFace Recognition Pass
+                if f_det is not None and (is_mod_enabled("face_detection") or is_mod_enabled("face_recognition") or is_mod_enabled("customer_demographics")) and person_boxes_px:
+                    try:
+                        t_f0 = time.perf_counter()
+                        face_results = f_det.detect_on_persons(img, person_boxes_px)
+                        f_ms = round((time.perf_counter() - t_f0) * 1000.0, 1)
+                        for fr in face_results:
+                            fconf = float(fr.get("confidence", 0.0))
+                            fbx = fr.get("bbox", {})
+                            x1_px, y1_px = max(0, int(fbx.get("x1", 0))), max(0, int(fbx.get("y1", 0)))
+                            x2_px, y2_px = min(w, int(fbx.get("x2", 0))), min(h, int(fbx.get("y2", 0)))
+                            if x2_px > x1_px and y2_px > y1_px:
+                                raw_candidate_dets.append({
+                                    "class": "face",
+                                    "module": "face_detection",
+                                    "confidence": round(fconf, 2),
+                                    "bbox": {
+                                        "x1": round(x1_px / max(1, w), 4),
+                                        "y1": round(y1_px / max(1, h), 4),
+                                        "x2": round(x2_px / max(1, w), 4),
+                                        "y2": round(y2_px / max(1, h), 4)
+                                    }
+                                })
+                        print(f"[face_detection] [yunet_sface] [frame_id={req_frame_id}] [inference_ms={f_ms}] raw_result={len(face_results)} final_result={len(face_results)}", flush=True)
+                    except Exception as e:
+                        logger.error(f"Face detector error: {e}")
+
+                # 4. ANPR Plate Detector & CRNN OCR Reader Pass
+                if p_det is not None and (is_mod_enabled("anpr") or is_mod_enabled("municipal_anpr")):
+                    try:
+                        t_p0 = time.perf_counter()
+                        target_v_boxes = vehicle_boxes_px if vehicle_boxes_px else [{"x1": 0, "y1": 0, "x2": w, "y2": h}]
+                        plate_results = p_det.detect_on_vehicles(img, target_v_boxes, camera_id=camera_id)
+                        p_ms = round((time.perf_counter() - t_p0) * 1000.0, 1)
+                        for pr in plate_results:
+                            pconf = float(pr.get("confidence", 0.0))
+                            pbx = pr.get("bbox", {})
+                            ptext = pr.get("plate_text")
+                            x1_px, y1_px = max(0, int(pbx.get("x1", 0))), max(0, int(pbx.get("y1", 0)))
+                            x2_px, y2_px = min(w, int(pbx.get("x2", 0))), min(h, int(pbx.get("y2", 0)))
+                            if x2_px > x1_px and y2_px > y1_px:
+                                pstr = str(ptext).strip().upper() if ptext else None
+                                raw_candidate_dets.append({
+                                    "class": "number_plate",
+                                    "module": "anpr",
+                                    "confidence": round(pconf, 2),
+                                    "plate_text": pstr,
+                                    "label": f"PLATE: {pstr}" if pstr else "NUMBER PLATE",
+                                    "bbox": {
+                                        "x1": round(x1_px / max(1, w), 4),
+                                        "y1": round(y1_px / max(1, h), 4),
+                                        "x2": round(x2_px / max(1, w), 4),
+                                        "y2": round(y2_px / max(1, h), 4)
+                                    }
+                                })
+                        print(f"[anpr] [plate_crnn_ocr] [frame_id={req_frame_id}] [inference_ms={p_ms}] raw_result={len(plate_results)} final_result={len(plate_results)}", flush=True)
+                    except Exception as e:
+                        logger.error(f"ANPR plate detector error: {e}")
+
+                # 5. Screen Micro-Motion Optical Flow Engine Pass
+                if m_mot is not None and (is_mod_enabled("micro_motion") or is_mod_enabled("micro_motion_hud")):
+                    try:
+                        t_m0 = time.perf_counter()
+                        _, motion_res = m_mot.process_frame(img, return_annotated=False)
+                        m_ms = round((time.perf_counter() - t_m0) * 1000.0, 1)
+                        for mr in motion_res:
+                            mbx = mr.get("box") or mr.get("bbox", [0, 0, 0, 0])
+                            x1_px, y1_px = max(0, int(mbx[0])), max(0, int(mbx[1]))
+                            bw_px, bh_px = int(mbx[2]), int(mbx[3])
+                            x2_px, y2_px = min(w, x1_px + bw_px), min(h, y1_px + bh_px)
+                            if x2_px > x1_px and y2_px > y1_px:
+                                raw_candidate_dets.append({
+                                    "class": "micro_motion",
+                                    "module": "micro_motion",
+                                    "confidence": round(float(mr.get("confidence", 0.75)), 2),
+                                    "label": mr.get("tag", "SUBTLE MOTION TARGET"),
+                                    "bbox": {
+                                        "x1": round(x1_px / max(1, w), 4),
+                                        "y1": round(y1_px / max(1, h), 4),
+                                        "x2": round(x2_px / max(1, w), 4),
+                                        "y2": round(y2_px / max(1, h), 4)
+                                    }
+                                })
+                        print(f"[micro_motion] [mog2_optical_flow] [frame_id={req_frame_id}] [inference_ms={m_ms}] raw_result={len(motion_res)} final_result={len(motion_res)}", flush=True)
+                    except Exception as e:
+                        logger.error(f"Micro-motion detector error: {e}")
+
+                # Track candidates
+                tracks_raw = _acap_tracker.update(raw_candidate_dets, frame=img, frame_shape=(h, w), conf_thresh=0.25)
+                emitted_dets, _ = resolve_emitted_detections(_acap_tracker, tracks_raw, raw_candidate_dets, [])
+
+                # Assign explicit module tag to all emitted detections
+                for d in emitted_dets:
+                    d["module"] = _map_detection_module(d.get("class"), d)
+                    if "speed" not in d and "speed_kmh" in d:
+                        d["speed"] = d["speed_kmh"]
+                    if "bbox" in d:
+                        bx = d["bbox"]
+                        if bx["x2"] > 1.0 or bx["y2"] > 1.0:
+                            d["bbox"] = {
+                                "x1": round(max(0.0, min(1.0, float(bx["x1"]) / w)), 4),
+                                "y1": round(max(0.0, min(1.0, float(bx["y1"]) / h)), 4),
+                                "x2": round(max(0.0, min(1.0, float(bx["x2"]) / w)), 4),
+                                "y2": round(max(0.0, min(1.0, float(bx["y2"]) / h)), 4),
+                            }
+
+                # Requirement 1 & Requirement 2: Strict Server-Side Module Filtering
+                active_detections = []
+                for d in emitted_dets:
+                    mod_tag = d.get("module") or _map_detection_module(d.get("class"), d)
+                    d["module"] = mod_tag
+                    # OFF in Admin => do NOT return detections!
+                    if not is_mod_enabled(mod_tag):
+                        continue
+                    if mod_tag == "vehicle_detection" and not is_mod_enabled("vehicle_detection"):
+                        continue
+                    active_detections.append(d)
+
+                filtered_by_feat = filter_by_features(active_detections, profile_features)
+                detections = filter_by_profile(filtered_by_feat, zone_profile)
+
+                _acap_analytics.update(
+                    detections, zones=[], lines=[], frame_w=w, frame_h=h,
+                    frame=img, zone_profile=zone_profile, profile_features=profile_features
+                )
 
         except Exception as e:
             logger.error(f"Error in ACAP detection/tracking pipeline: {e}")
@@ -760,7 +1074,7 @@ async def acap_detect_endpoint(request: Request):
         "input_fps": dynamic_fps,
         "ai_fps": dynamic_fps,
         "inference_latency_ms": latency_ms,
-        "active_module": body.get("zone_profile") or "security",
+        "active_module": zone_profile,
         "vehicles": v_cnt,
         "people": p_cnt,
         "vehicles_count": v_cnt,

@@ -934,9 +934,50 @@ async def detect(request: Request):
         print(f"[CLOUD_NODE] Analytics update warning: {e}", flush=True)
         alerts, track_overlays, heatmap_list, zone_stats, line_stats, crowd_stats, parking_stats = [], [], [], {}, {}, {}, {}
 
-    # 6. Apply strict feature and profile filtering to output detections
+    # 6. Apply strict feature, profile, and module-level filtering to output detections
+    for d in tracked_detections:
+        cls_n = str(d.get("class", "")).lower()
+        if not d.get("module"):
+            if cls_n in ("car", "bus", "truck", "motorcycle", "bicycle", "van", "auto_rickshaw", "vehicle"):
+                d["module"] = "vehicle_detection"
+            elif cls_n in ("person", "worker", "customer", "staff", "rider"):
+                d["module"] = "person_detection"
+            elif cls_n in ("helmet", "no_helmet"):
+                d["module"] = "helmet_detection"
+            elif cls_n in ("vest", "no_vest"):
+                d["module"] = "safety_vest"
+            elif cls_n in ("gloves", "no_gloves"):
+                d["module"] = "gloves"
+            elif cls_n in ("shoes", "no_shoes"):
+                d["module"] = "shoes"
+            elif cls_n == "face":
+                d["module"] = "face_detection"
+            elif cls_n == "number_plate":
+                d["module"] = "anpr"
+            elif cls_n == "micro_motion":
+                d["module"] = "micro_motion"
+            elif cls_n == "fire":
+                d["module"] = "fire_detection"
+            elif cls_n == "smoke":
+                d["module"] = "smoke_detection"
+            elif cls_n in ("backpack", "handbag", "suitcase", "umbrella"):
+                d["module"] = "object_left_behind"
+            else:
+                d["module"] = "general_detection"
+
     filtered_dets = filter_by_features(tracked_detections, profile_features)
-    final_detections = filter_by_profile(filtered_dets, zone_profile)
+    profile_dets = filter_by_profile(filtered_dets, zone_profile)
+
+    # Server-side module gate: drop detections belonging to explicitly disabled modules
+    final_detections = []
+    for d in profile_dets:
+        mod_tag = d.get("module")
+        if profile_features and mod_tag in profile_features:
+            cfg_v = profile_features[mod_tag]
+            is_on = cfg_v.get("enabled", False) if isinstance(cfg_v, dict) else bool(cfg_v)
+            if not is_on:
+                continue
+        final_detections.append(d)
 
     frames_processed += 1
     processing_timestamps.append(time.time())
