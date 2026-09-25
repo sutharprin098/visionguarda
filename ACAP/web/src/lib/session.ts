@@ -55,9 +55,9 @@ export async function getSupabase(): Promise<SupabaseClient> {
 export function getSupabaseSync(): SupabaseClient {
   if (client) return client;
   const cfg = (typeof window !== "undefined" ? (window as any).camai?.config : null) || {};
-  const isHttps = typeof window !== "undefined" && window.location.protocol === "https:";
+  const isAcap = typeof window !== "undefined" && (window.location.pathname.includes("/local/camai_acap/") || window.location.port === "42093" || window.location.port !== "8000");
   let supabaseUrl = cfg.supabaseUrl || "http://13.203.71.14:8000";
-  if (isHttps && supabaseUrl.startsWith("http://")) {
+  if (isHttps && supabaseUrl.startsWith("http://") && !isAcap) {
     supabaseUrl = `${window.location.protocol}//${window.location.host}`;
   }
   const anonKey = cfg.anonKey || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.e30.dummy";

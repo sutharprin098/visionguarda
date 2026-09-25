@@ -647,22 +647,24 @@ export default function AdminStudio({
     let loaded: ProfileFeatures | null = null;
     let loadedConfigId: string | null = null;
 
-    try {
-      const sb = await getSupabase();
-      const { data: cfg } = await sb
-        .from("zone_profile_configs")
-        .select("*")
-        .eq("camera_id", cam.id)
-        .eq("profile", profileKey)
-        .is("deleted_at", null)
-        .maybeSingle();
+    if (!isAcapMode()) {
+      try {
+        const sb = await getSupabase();
+        const { data: cfg } = await sb
+          .from("zone_profile_configs")
+          .select("*")
+          .eq("camera_id", cam.id)
+          .eq("profile", profileKey)
+          .is("deleted_at", null)
+          .maybeSingle();
 
-      if (cfg) {
-        loadedConfigId = cfg.id;
-        loaded = reconcileFeatures(profileKey, cfg.features);
+        if (cfg) {
+          loadedConfigId = cfg.id;
+          loaded = reconcileFeatures(profileKey, cfg.features);
+        }
+      } catch (err) {
+        console.warn("[AdminStudio] loadProfileConfig Supabase check skipped:", err);
       }
-    } catch (err) {
-      console.warn("[AdminStudio] loadProfileConfig Supabase check skipped:", err);
     }
 
     if (!loaded) {
@@ -677,16 +679,18 @@ export default function AdminStudio({
     if (!loaded) {
       const defaults = buildDefaultFeatures(profileKey);
       loaded = defaults;
-      try {
-        const sb = await getSupabase();
-        const { data: created } = await sb
-          .from("zone_profile_configs")
-          .insert([{ org_id: effectiveOrgId, camera_id: cam.id, profile: profileKey, features: defaults, is_draft: true }])
-          .select()
-          .single();
-        loadedConfigId = created?.id ?? null;
-      } catch {
-        loadedConfigId = null;
+      if (!isAcapMode()) {
+        try {
+          const sb = await getSupabase();
+          const { data: created } = await sb
+            .from("zone_profile_configs")
+            .insert([{ org_id: effectiveOrgId, camera_id: cam.id, profile: profileKey, features: defaults, is_draft: true }])
+            .select()
+            .single();
+          loadedConfigId = created?.id ?? null;
+        } catch {
+          loadedConfigId = null;
+        }
       }
     }
 
@@ -734,18 +738,20 @@ export default function AdminStudio({
       }
 
       // 2. Also try Supabase safely
-      try {
-        const sb = await getSupabase();
-        const { data: cloudDraws } = await sb.from("analytics_drawings").select("*").eq("camera_id", cam.id).is("deleted_at", null);
-        if (cloudDraws && cloudDraws.length > 0) {
-          draws = cloudDraws;
+      if (!isAcapMode()) {
+        try {
+          const sb = await getSupabase();
+          const { data: cloudDraws } = await sb.from("analytics_drawings").select("*").eq("camera_id", cam.id).is("deleted_at", null);
+          if (cloudDraws && cloudDraws.length > 0) {
+            draws = cloudDraws;
+          }
+          const { data: cloudRules } = await sb.from("rule_engine_rules").select("*").eq("camera_id", cam.id).is("deleted_at", null);
+          if (cloudRules && cloudRules.length > 0) {
+            ruleList = cloudRules;
+          }
+        } catch (err) {
+          console.warn("[AdminStudio] Supabase drawings skipped:", err);
         }
-        const { data: cloudRules } = await sb.from("rule_engine_rules").select("*").eq("camera_id", cam.id).is("deleted_at", null);
-        if (cloudRules && cloudRules.length > 0) {
-          ruleList = cloudRules;
-        }
-      } catch (err) {
-        console.warn("[AdminStudio] Supabase drawings skipped:", err);
       }
 
       setDrawings(draws);
@@ -796,15 +802,17 @@ export default function AdminStudio({
           /* local cgi sync best effort */
         }
 
-        // 2. Post to Python local engine if active
-        try {
-          await fetch(`${getEngineBase()}/api/cameras/${selectedCam.id}/config`, {
-            method: "POST",
-            headers: await controlHeaders(),
-            body: payload,
-          });
-        } catch {
-          /* engine sync best effort */
+        // 2. Post to Python local engine if active (non-ACAP mode)
+        if (!isAcapMode()) {
+          try {
+            await fetch(`${getEngineBase()}/api/cameras/${selectedCam.id}/config`, {
+              method: "POST",
+              headers: await controlHeaders(),
+              body: payload,
+            });
+          } catch {
+            /* engine sync best effort */
+          }
         }
       })();
     },
@@ -825,11 +833,13 @@ export default function AdminStudio({
       }
     } catch {}
 
-    try {
-      const sb = await getSupabase();
-      await sb.from("cameras").update({ zone_profile: profileKey }).eq("id", selectedCam.id);
-    } catch (e) {
-      console.warn("[AdminStudio] Profile update Supabase skipped:", e);
+    if (!isAcapMode()) {
+      try {
+        const sb = await getSupabase();
+        await sb.from("cameras").update({ zone_profile: profileKey }).eq("id", selectedCam.id);
+      } catch (e) {
+        console.warn("[AdminStudio] Profile update Supabase skipped:", e);
+      }
     }
 
     setCameras((prev) => prev.map((c) => (c.id === selectedCam.id ? { ...c, zone_profile: profileKey } : c)));
@@ -851,19 +861,21 @@ export default function AdminStudio({
       const effectiveOrgId = orgId || bundle?.organization?.id || "org-local";
       saveTimer.current = setTimeout(async () => {
         try {
-          const sb = await getSupabase();
-          if (configId) {
-            await sb.from("zone_profile_configs").update({ features: next, is_draft: true }).eq("id", configId);
-          } else if (selectedCam && activeProfile) {
-            const { data } = await sb
-              .from("zone_profile_configs")
-              .upsert(
-                { org_id: effectiveOrgId, camera_id: selectedCam.id, profile: activeProfile, features: next, is_draft: true },
-                { onConflict: "camera_id,profile" },
-              )
-              .select()
-              .single();
-            if (data?.id) setConfigId(data.id);
+          if (!isAcapMode()) {
+            const sb = await getSupabase();
+            if (configId) {
+              await sb.from("zone_profile_configs").update({ features: next, is_draft: true }).eq("id", configId);
+            } else if (selectedCam && activeProfile) {
+              const { data } = await sb
+                .from("zone_profile_configs")
+                .upsert(
+                  { org_id: effectiveOrgId, camera_id: selectedCam.id, profile: activeProfile, features: next, is_draft: true },
+                  { onConflict: "camera_id,profile" },
+                )
+                .select()
+                .single();
+              if (data?.id) setConfigId(data.id);
+            }
           }
 
           // Also trigger direct sync inside debounced save
@@ -2148,7 +2160,17 @@ export default function AdminStudio({
                     src={mjpegStreamUrl(selectedCam.id)}
                     alt={selectedCam.name}
                     className="h-full w-full object-contain pointer-events-none bg-black"
-                    onLoad={() => setStreamFailed(false)}
+                    onLoad={(e) => {
+                      setStreamFailed(false);
+                      if (isAcapMode()) {
+                        const target = e.currentTarget;
+                        setTimeout(() => {
+                          if (target) {
+                            target.src = `/local/camai_acap/frame.cgi?_t=${Date.now()}`;
+                          }
+                        }, 40);
+                      }
+                    }}
                     onError={(e) => {
                       setStreamFailed(true);
                       const target = e.currentTarget;
@@ -2158,7 +2180,7 @@ export default function AdminStudio({
                           const sep = base.includes("?") ? "&" : "?";
                           target.src = `${base}${sep}_retry=${Date.now()}`;
                         }
-                      }, 2000);
+                      }, isAcapMode() ? 200 : 2000);
                     }}
                   />
                   {streamFailed && (
