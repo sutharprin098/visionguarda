@@ -152,7 +152,9 @@ export function detectionsRenderEqual(
   return true;
 }
 
-const WS_URL = "ws://127.0.0.1:8000/ws";
+const WS_URL = typeof window !== "undefined"
+  ? `${window.location.protocol === "https:" ? "wss:" : "ws:"}//${window.location.host}/ws`
+  : "ws://127.0.0.1:8000/ws";
 
 class MultiTelemetryHub {
   private ws: WebSocket | null = null;
@@ -165,6 +167,9 @@ class MultiTelemetryHub {
   private lastPingTs = 0;
 
   isConnected(): boolean {
+    if (typeof window !== "undefined" && (window.location.pathname.includes("/local/camai_acap/") || window.location.protocol === "https:")) {
+      return true;
+    }
     return this.ws !== null && this.ws.readyState === WebSocket.OPEN;
   }
 
@@ -173,6 +178,20 @@ class MultiTelemetryHub {
       this.listeners.set(cameraId, new Set());
     }
     this.listeners.get(cameraId)!.add(callback);
+
+    const isAcap = typeof window !== "undefined" && (window.location.pathname.includes("/local/camai_acap/") || window.location.protocol === "https:");
+    if (isAcap) {
+      this.startCgiPolling();
+      return () => {
+        const set = this.listeners.get(cameraId);
+        if (set) {
+          set.delete(callback);
+          if (set.size === 0) {
+            this.listeners.delete(cameraId);
+          }
+        }
+      };
+    }
 
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
       try {
@@ -199,6 +218,12 @@ class MultiTelemetryHub {
   }
 
   private connect(): void {
+    const isAcap = typeof window !== "undefined" && (window.location.pathname.includes("/local/camai_acap/") || window.location.protocol === "https:");
+    if (isAcap) {
+      this.startCgiPolling();
+      return;
+    }
+
     if (this.ws && (this.ws.readyState === WebSocket.CONNECTING || this.ws.readyState === WebSocket.OPEN)) {
       return;
     }
@@ -213,7 +238,6 @@ class MultiTelemetryHub {
     this.ws.onopen = () => {
       this.reconnectAttempt = 0;
       this.lastPongTs = Date.now();
-      // Subscribe to all active camera IDs on connection
       this.listeners.forEach((_, cameraId) => {
         try {
           this.ws?.send(JSON.stringify({ type: "subscribe", camera_id: cameraId }));
@@ -245,12 +269,11 @@ class MultiTelemetryHub {
       this.stopHeartbeat();
       if (this.listeners.size > 0) {
         this.scheduleReconnect();
-        this.startCgiPolling();
       }
     };
 
     this.ws.onerror = () => {
-      this.startCgiPolling();
+      /* Handled silently */
     };
   }
 
@@ -261,7 +284,10 @@ class MultiTelemetryHub {
     this.cgiPollTimer = setInterval(async () => {
       if (this.ws && this.ws.readyState === WebSocket.OPEN) return;
       try {
-        const res = await fetch("/local/camai_acap/telemetry.cgi", { signal: AbortSignal.timeout(1500) });
+        const cgiUrl = typeof window !== "undefined" && window.location.pathname.includes("/local/camai_acap/")
+          ? "/local/camai_acap/telemetry.cgi"
+          : "telemetry.cgi";
+        const res = await fetch(cgiUrl, { signal: AbortSignal.timeout(1500) });
         if (res.ok) {
           const data = await res.json();
           if (data) {
@@ -273,7 +299,7 @@ class MultiTelemetryHub {
       } catch {
         /* ignore */
       }
-    }, 300);
+    }, 80);
   }
 
   private startHeartbeat(): void {
