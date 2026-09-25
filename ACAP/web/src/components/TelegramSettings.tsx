@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { X, Send, Check, Loader2 } from "lucide-react";
 import { getSupabase } from "../lib/session";
+import { sendTelegramTest } from "../lib/localTelegram";
 
 /**
  * Telegram notification settings, in the desktop Admin Studio. This is the same
@@ -63,14 +64,11 @@ export default function TelegramSettings({ orgId, onClose }: { orgId: string | n
   async function test() {
     setTesting(true);
     setTestMsg(null);
-    const sb = await getSupabase();
-    const { error } = await sb.functions.invoke("telegram-test", {
-      body: { bot_token: form.bot_token.trim(), chat_id: form.chat_id.trim() },
-    });
+    const res = await sendTelegramTest(form.bot_token.trim(), form.chat_id.trim());
     setTesting(false);
-    setTestMsg(error
-      ? { tone: "err", msg: "Test failed — check the bot token and chat ID." }
-      : { tone: "ok", msg: "Test message sent — check your Telegram chat." });
+    setTestMsg(res.ok
+      ? { tone: "ok", msg: "Test message sent — check your Telegram chat." }
+      : { tone: "err", msg: res.error || "Test failed — check the bot token and chat ID." });
   }
 
   return (
