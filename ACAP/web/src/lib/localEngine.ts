@@ -14,10 +14,19 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { getSupabase } from "./session";
 
-export const ENGINE_BASE = "http://127.0.0.1:8000";
+export const DEFAULT_AWS_ENGINE = typeof window !== "undefined" && window.location.origin ? window.location.origin : "http://127.0.0.1:8000";
+export const ENGINE_BASE = DEFAULT_AWS_ENGINE;
 
 export function getEngineBase(): string {
-  return ENGINE_BASE;
+  if (typeof window !== "undefined") {
+    if (window.location.pathname.includes("/local/camai_acap/") || window.location.port === "8000" || window.location.hostname === "127.0.0.1" || window.location.hostname === "localhost") {
+      return window.location.origin;
+    }
+    const custom = (window as any).camai?.config?.cloudUrl;
+    if (custom && !custom.includes("13.203.71.14")) return custom;
+    return window.location.origin;
+  }
+  return "http://127.0.0.1:8000";
 }
 
 let registered = new Set<string>();
@@ -45,6 +54,11 @@ export async function controlHeaders(): Promise<Record<string, string>> {
 
 
 export function mjpegStreamUrl(cameraId: string): string {
+  if (typeof window !== "undefined") {
+    if (window.location.pathname.includes("/local/camai_acap/") || window.location.port !== "8000") {
+      return "/axis-cgi/mjpg/video.cgi";
+    }
+  }
   return `${ENGINE_BASE}/api/cameras/${cameraId}/stream`;
 }
 
@@ -98,13 +112,10 @@ export async function setCameraDisplay(
 export const TILE_MAX_WIDTH = 960;
 
 export async function isEngineOnline(): Promise<boolean> {
+  if (typeof window !== "undefined" && (window.location.pathname.includes("/local/camai_acap/") || window.location.port !== "8000")) {
+    return true;
+  }
   try {
-    // 2s was measured too tight — under active AI/pipeline load (a live
-    // screen/webcam share pushing frames every 100ms through the full
-    // decode→AI→tracking→recorder pipeline) /api/status can legitimately
-    // take several hundred ms to over a second to answer on a single-core-
-    // bound Python process; a request that gets aborted here reads to the
-    // UI as "engine offline" even though it's alive and just busy.
     const res = await fetch(`${ENGINE_BASE}/api/status`, { signal: AbortSignal.timeout(5000) });
     return res.ok;
   } catch {
