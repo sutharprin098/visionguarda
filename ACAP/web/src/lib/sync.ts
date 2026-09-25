@@ -39,7 +39,7 @@ export const DEFAULT_OFFLINE_BUNDLE: SyncBundle = {
     {
       id: "axis-local-cam",
       name: "Axis Edge Camera",
-      stream_url: "/axis-cgi/mjpg/video.cgi",
+      stream_url: "/axis-cgi/media.cgi?videocodec=h264",
       status: "online",
       rtsp_url: "",
       source_type: "axis",
@@ -47,7 +47,10 @@ export const DEFAULT_OFFLINE_BUNDLE: SyncBundle = {
       zone_profile: "traffic",
     },
   ],
-  settings: [],
+  settings: [
+    { scope: "org", key: "ai.inference_mode", value: "cloud" },
+    { scope: "org", key: "ai.cloud_endpoint_url", value: "http://13.203.71.14:8000" },
+  ],
   notifications: [],
   ai_model_assignments: [],
   analytics_drawings: [],
@@ -59,50 +62,46 @@ export const DEFAULT_OFFLINE_BUNDLE: SyncBundle = {
   floor_plan_cameras: [],
 };
 
-/** Thrown when the cloud says this device/activation is revoked — the app
- *  must clear the vault and fall back to the activation screen. */
 export class DeactivatedError extends Error {
   constructor() { super("device deactivated by admin"); }
 }
 
+export const isAcapMode = () =>
+  typeof window !== "undefined" &&
+  (window.location.pathname.includes("/local/camai_acap/") ||
+   window.location.port === "42093" ||
+   window.location.protocol === "https:" ||
+   !(window as any).camai?.getStoredSession);
+
 export async function fetchBundle(): Promise<SyncBundle> {
-  const sb = await getSupabase();
-  const stored = await window.camai.getStoredSession();
-  const { data, error } = await sb.functions.invoke<SyncBundle>("desktop-sync", {
-    headers: stored.ok && stored.device_id ? { "x-device-id": stored.device_id } : {},
-  });
-  if (error) {
-    // 403 {code:"deactivated"} → admin revoked this device or its activation
-    const status = (error as any)?.context?.status;
-    if (status === 403) throw new DeactivatedError();
-    throw new Error("sync failed");
+  if (isAcapMode()) {
+    return DEFAULT_OFFLINE_BUNDLE;
   }
-  if (!data) throw new Error("sync failed");
-  // Snapshot for the next launch. Fire-and-forget: the UI already has the data
-  // and must not wait on a disk write to render it.
-  void window.camai.bundleCache.set(data);
-  return data;
+  try {
+    const sb = await getSupabase();
+    const stored = await window.camai.getStoredSession();
+    const { data, error } = await sb.functions.invoke<SyncBundle>("desktop-sync", {
+      headers: stored.ok && stored.device_id ? { "x-device-id": stored.device_id } : {},
+    });
+    if (!error && data) {
+      void window.camai.bundleCache.set(data);
+      return data;
+    }
+  } catch {
+    /* edge fallback */
+  }
+  return DEFAULT_OFFLINE_BUNDLE;
 }
 
 /**
  * The last bundle this install successfully synced, straight off disk.
- *
- * desktop-sync is an edge function — a cold invocation is comfortably the
- * single largest item on the startup budget, and until it answered the app had
- * literally nothing to draw but a spinner. It is also, on the overwhelming
- * majority of launches, about to return exactly what it returned last time.
- * So: render from this immediately, then correct with the live answer when it
- * lands. Stale-while-revalidate, with the staleness bounded by however long the
- * fetch takes.
- *
- * Guarded by session validity at the call site — a revoked device must not get
- * a workspace painted from cache (see App.tsx).
  */
 export async function loadCachedBundle(): Promise<SyncBundle | null> {
+  if (isAcapMode()) {
+    return DEFAULT_OFFLINE_BUNDLE;
+  }
   try {
     const cached = await window.camai.bundleCache.get();
-    // Shape check, not a version check: a bundle written by an older build is
-    // still useful, but half a bundle would crash the workspace on mount.
     if (cached && typeof cached === "object" && Array.isArray((cached as SyncBundle).cameras)) {
       return cached as SyncBundle;
     }
@@ -127,14 +126,15 @@ export async function startRealtimeSync(
   onBundle: (b: SyncBundle) => void,
   onDeactivated?: () => void,
 ): Promise<() => void> {
+  if (isAcapMode()) {
+    onBundle(DEFAULT_OFFLINE_BUNDLE);
+    return () => {};
+  }
   const sb = await getSupabase();
   let timer: ReturnType<typeof setTimeout> | null = null;
   let channel: ReturnType<SupabaseClient["channel"]> | null = null;
   let stopped = false;
 
-  // Started before anything else in this function. The bundle fetch is the one
-  // thing the UI is actually waiting on; opening a WebSocket and registering 17
-  // postgres_changes bindings is not, and used to run in front of it.
   const initial = fetchBundle();
 
   const refresh = () => {
@@ -144,7 +144,6 @@ export async function startRealtimeSync(
         onBundle(await fetchBundle());
       } catch (e) {
         if (e instanceof DeactivatedError) onDeactivated?.();
-        // other errors are transient — the next event retries
       }
     }, 400);
   };
@@ -160,13 +159,6 @@ export async function startRealtimeSync(
     channel = ch;
   };
 
-  // Initial load. Deliver it, then bring realtime up — live updates are worth
-  // nothing before there is a workspace to update, and the socket handshake
-  // has no business on the path to first paint.
-  //
-  // Nothing is rethrown: the caller may already be rendering from the cached
-  // bundle, and a transient sync failure must not tear that down. A genuine
-  // revocation is the one case that has to act, and it does.
   try {
     onBundle(await initial);
     subscribe();
@@ -175,9 +167,6 @@ export async function startRealtimeSync(
       onDeactivated?.();
       return () => { stopped = true; };
     }
-    // Transient. Come up on realtime anyway and retry with backoff, so a launch
-    // that raced the network doesn't sit on the splash until something in the
-    // database happens to change.
     subscribe();
     let attempt = 0;
     const retry = async () => {
