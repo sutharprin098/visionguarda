@@ -19,8 +19,8 @@ interface Props {
   /** Authoritative profile features state object for UI overlay filtering */
   profileFeatures?: Record<string, any>;
 }
-// Drop lost objects after 600ms hold buffer so temporary frame skips don't cause lag
-const TRACK_HOLD_MS = 600;
+// Hold buffer (1200ms) prevents tracking gaps between AI subsampling frames
+const TRACK_HOLD_MS = 1200;
 
 interface TrailPoint {
   x: number;
@@ -384,7 +384,7 @@ export default function DetectionOverlay({ detections, refreshKey = 0, mediaRef,
 
     // --- 1. RENDER MOTION BREADCRUMB TRAILS ---
     for (const det of renderDets) {
-      if (det.confidence != null && det.confidence < 0.10) continue;
+      if (det.confidence != null && det.confidence < 0.38) continue;
       const item = detToItemMap.get(det);
       if (!item || !item.trail || item.trail.length < 2) continue;
 
@@ -430,7 +430,7 @@ export default function DetectionOverlay({ detections, refreshKey = 0, mediaRef,
 
     // --- 2. RENDER BOUNDING BOXES AND LABELS ---
     for (const det of renderDets) {
-      if (det.confidence != null && det.confidence < 0.10) continue;
+      if (det.confidence != null && det.confidence < 0.38) continue;
       const item = detToItemMap.get(det);
       const alpha = item ? item.alpha : 1.0;
 

@@ -745,6 +745,11 @@ async def acap_detect_endpoint(request: Request):
         except Exception as e:
             logger.error(f"Error in ACAP detection/tracking pipeline: {e}")
 
+    VEHICLE_CLS = {"car", "bus", "truck", "motorcycle", "bicycle", "van", "vehicle"}
+    PEOPLE_CLS = {"person", "worker", "customer", "staff", "rider", "face"}
+    v_cnt = sum(1 for d in detections if str(d.get("class", "")).lower() in VEHICLE_CLS)
+    p_cnt = sum(1 for d in detections if str(d.get("class", "")).lower() in PEOPLE_CLS)
+
     latency_ms = round((time.perf_counter() - t_start) * 1000.0, 2)
     _acap_latest_telemetry = {
         "status": "success",
@@ -756,6 +761,10 @@ async def acap_detect_endpoint(request: Request):
         "ai_fps": dynamic_fps,
         "inference_latency_ms": latency_ms,
         "active_module": body.get("zone_profile") or "security",
+        "vehicles": v_cnt,
+        "people": p_cnt,
+        "vehicles_count": v_cnt,
+        "people_count": p_cnt,
         "count": len(detections),
         "detections": detections,
         "alerts": [],

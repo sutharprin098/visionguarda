@@ -75,8 +75,9 @@ function tilesFor(profile: ZoneProfileKey | null, t: CameraTelemetry): Tile[] {
     const peak = speeds.length
       ? speeds.reduce((m, d) => ((d.speed ?? 0) > (m.speed ?? 0) ? d : m))
       : null;
+    const vehicleCount = (t.vehicles != null && t.vehicles > 0) ? t.vehicles : countClass(t, "car", "bus", "truck", "motorcycle", "bicycle", "vehicle");
     return [
-      { label: "Vehicles", value: String(t.vehicles ?? 0) },
+      { label: "Vehicles", value: String(vehicleCount) },
       // Per-type live counts, from the same detections the overlay draws. Only
       // yolox-producible classes get a tile (no auto-rickshaw / pedestrian tile
       // — see countClass()).
@@ -88,12 +89,12 @@ function tilesFor(profile: ZoneProfileKey | null, t: CameraTelemetry): Tile[] {
       { label: "Counted", value: `${c.vehicles_in ?? 0} in / ${c.vehicles_out ?? 0} out` },
       {
         label: "Avg Speed",
-        value: avg != null ? fmt(avg, " km/h") : "—",
+        value: avg != null ? fmt(Math.abs(avg), " km/h") : "—",
         hint: avg == null ? "Calibrated avg — needs a speed gate (two lines + real distance)" : undefined,
       },
       {
         label: "Peak Speed",
-        value: peak?.speed != null ? `${peak.speed_calibrated ? "" : "~"}${Math.round(peak.speed)} km/h` : "—",
+        value: peak?.speed != null ? `${peak.speed_calibrated ? "" : "~"}${Math.abs(Math.round(peak.speed))} km/h` : "—",
         hint: peak && !peak.speed_calibrated ? "Estimated from object height (~±25%)" : undefined,
       },
       // Real event tallies (analytics.py raises these; helmet.py / plate.py feed them).
