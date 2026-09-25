@@ -23,7 +23,7 @@ def test_ssrf_source_validation():
     """Verify SSRF validation blocks malicious loopback, cloud metadata, and unsafe schemes."""
     # Safe RTSP / HTTP media sources
     assert blocked_source_reason("rtsp://admin:pass@192.168.1.100:554/h264") is None
-    assert blocked_source_reason("https://www.youtube.com/watch?v=dQw4w9WgXcQ") is None
+    assert blocked_source_reason("https://example.com/live/playlist.m3u8") is None
 
     # Blocked dangerous sources (returns non-None refusal explanation string)
     assert blocked_source_reason("http://169.254.169.254/latest/meta-data/") is not None
