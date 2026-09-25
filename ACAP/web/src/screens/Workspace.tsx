@@ -1386,12 +1386,15 @@ const CameraTile = memo(function CameraTile({ camera: c, site, engineOnline, onF
                     <span>{telemetry.fps.toFixed(1)} FPS</span>
                   </>
                 )}
-                {typeof telemetry.inference_latency_ms === "number" && telemetry.inference_latency_ms > 0 && (
-                  <>
-                    <span>·</span>
-                    <span>{Math.round(telemetry.inference_latency_ms)}ms</span>
-                  </>
-                )}
+                {(() => {
+                  const lat = telemetry.inference_latency_ms ?? telemetry.inference_latency ?? telemetry.latency;
+                  return typeof lat === "number" && lat > 0 ? (
+                    <>
+                      <span>·</span>
+                      <span>{Math.round(lat)}ms</span>
+                    </>
+                  ) : null;
+                })()}
                 <span>·</span>
                 <span>{telemetry.device ? telemetry.device.toUpperCase() : "AWS CLOUD"}</span>
               </>

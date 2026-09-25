@@ -41,8 +41,10 @@ export interface CameraTelemetry {
    *  wrong_way, speed_limit, fall_alert, face_detection. */
   alert_counts?: Record<string, number>;
   fps?: number;
+  ai_fps?: number;
   latency?: number;
   inference_latency?: number;
+  inference_latency_ms?: number;
   /** 0 whenever the face module is off — see pipeline.py's face gate. */
   face_latency?: number;
   device?: string;
