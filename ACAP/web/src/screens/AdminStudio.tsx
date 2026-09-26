@@ -2,6 +2,7 @@ import { useEffect, useState, useRef, useCallback } from "react";
 import clsx from "clsx";
 import {
   Video,
+  Camera,
   RotateCcw,
   CheckCircle2,
   Trash2,
@@ -38,6 +39,7 @@ import {
   X,
 } from "lucide-react";
 import { isAcapMode, type SyncBundle } from "../lib/sync";
+import { getYoutubeDetections } from "./Workspace";
 import { getSupabase } from "../lib/session";
 import { useAlertState } from "../components/alerts/AlertProvider";
 import { fnErrorMessage } from "../lib/fnError";
@@ -48,6 +50,8 @@ import {
   getEngineBase,
 } from "../lib/localEngine";
 import TargetMatcherUI from "../components/TargetMatcherUI";
+import DetectionOverlay, { type TelemetryDetection } from "../components/DetectionOverlay";
+import { TelemetrySession, type CameraTelemetry } from "../lib/telemetry";
 
 import {
   History,
@@ -376,6 +380,38 @@ export default function AdminStudio({
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const videoRef = useRef<HTMLImageElement>(null);
+  const iframeRef = useRef<HTMLIFrameElement>(null);
+  const [streamSourceMode, setStreamSourceMode] = useState<"camera" | "youtube">("camera");
+
+  const [ytTick, setYtTick] = useState(Date.now());
+  useEffect(() => {
+    if (streamSourceMode !== "youtube") return;
+    const interval = setInterval(() => setYtTick(Date.now()), 80);
+    return () => clearInterval(interval);
+  }, [streamSourceMode]);
+
+  // Live real-time detections and telemetry for Admin preview
+  const [telemetry, setTelemetry] = useState<CameraTelemetry | null>(null);
+  const [liveDetections, setLiveDetections] = useState<TelemetryDetection[]>([]);
+  const [publishSuccessToast, setPublishSuccessToast] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!selectedCam?.id) return;
+    const session = new TelemetrySession(selectedCam.id, (t) => {
+      const rawDets = (t.detections && t.detections.length > 0)
+        ? t.detections
+        : ((t as any).client_dets && (t as any).client_dets.length > 0
+          ? (t as any).client_dets
+          : (t.detections ?? (t as any).client_dets ?? []));
+      const nextDets = Array.isArray(rawDets) ? rawDets : [];
+      setLiveDetections(nextDets);
+      setTelemetry(t);
+    });
+    session.start();
+    return () => {
+      session.stop();
+    };
+  }, [selectedCam?.id]);
 
   // ---- direct-manipulation editor state --------------------------------
   // History holds SNAPSHOTS of the whole drawing set. Undo/redo then diffs two
@@ -777,41 +813,61 @@ export default function AdminStudio({
     setEditingDrawingId(null);
   }, [selectedCam?.id]);
 
-  // Instant engine sync (0ms delay for live real-time preview)
+  // In-flight serialization to prevent concurrent CGI requests over HTTP/2
+  const syncInFlightRef = useRef(false);
+  const pendingSyncRef = useRef<{ next: ProfileFeatures; profileOverride?: ZoneProfileKey } | null>(null);
+
+  // Instant engine sync (serialized to avoid HTTP/2 stream collisions)
   const syncEngineDirectly = useCallback(
     (next: ProfileFeatures, profileOverride?: ZoneProfileKey) => {
       if (!selectedCam?.id) return;
+      if (syncInFlightRef.current) {
+        pendingSyncRef.current = { next, profileOverride };
+        return;
+      }
+      syncInFlightRef.current = true;
       const targetProfile = profileOverride || activeProfile || "security";
+
       void (async () => {
-        const payload = JSON.stringify({
-          zones: JSON.stringify(drawings.filter((d) => d.type !== "line")),
-          lines: JSON.stringify(drawings.filter((d) => d.type === "line")),
-          rules: JSON.stringify(rules),
-          zone_profile: targetProfile,
-          profile_features: JSON.stringify(next),
-        });
-
-        // 1. Post to local CGI endpoint on Axis Camera
         try {
-          await fetch("/local/camai_acap/config.cgi", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: payload,
+          const payload = JSON.stringify({
+            zones: JSON.stringify(drawings.filter((d) => d.type !== "line")),
+            lines: JSON.stringify(drawings.filter((d) => d.type === "line")),
+            rules: JSON.stringify(rules),
+            zone_profile: targetProfile,
+            profile_features: JSON.stringify(next),
           });
-        } catch {
-          /* local cgi sync best effort */
-        }
 
-        // 2. Post to Python local engine if active (non-ACAP mode)
-        if (!isAcapMode()) {
+          // 1. Post to local CGI endpoint on Axis Camera with profile query parameter
           try {
-            await fetch(`${getEngineBase()}/api/cameras/${selectedCam.id}/config`, {
+            await fetch(`/local/camai_acap/config.cgi?profile=${encodeURIComponent(targetProfile)}&_t=${Date.now()}`, {
               method: "POST",
-              headers: await controlHeaders(),
+              headers: { "Content-Type": "application/json" },
               body: payload,
+              signal: AbortSignal.timeout(3000),
             });
           } catch {
-            /* engine sync best effort */
+            /* local cgi sync best effort */
+          }
+
+          // 2. Post to Python local engine if active (non-ACAP mode)
+          if (!isAcapMode()) {
+            try {
+              await fetch(`${getEngineBase()}/api/cameras/${selectedCam.id}/config`, {
+                method: "POST",
+                headers: await controlHeaders(),
+                body: payload,
+              });
+            } catch {
+              /* engine sync best effort */
+            }
+          }
+        } finally {
+          syncInFlightRef.current = false;
+          if (pendingSyncRef.current) {
+            const queued = pendingSyncRef.current;
+            pendingSyncRef.current = null;
+            syncEngineDirectly(queued.next, queued.profileOverride);
           }
         }
       })();
@@ -1029,7 +1085,8 @@ export default function AdminStudio({
     setDrawings(next);
     setHistoryTick((t) => t + 1);
     await persistSnapshot(prev, next);
-  }, [drawings]);
+    syncEngineDirectly(features, activeProfile || undefined);
+  }, [drawings, features, activeProfile, syncEngineDirectly]);
 
   async function persistSnapshot(prev: Drawing[], next: Drawing[]) {
     const sb = await getSupabase();
@@ -1426,6 +1483,12 @@ export default function AdminStudio({
     setPublishing(true);
     try {
       if (selectedCam && activeProfile) {
+        try {
+          if (typeof localStorage !== "undefined") {
+            localStorage.setItem(`cam_profile_${selectedCam.id}`, activeProfile);
+            localStorage.setItem(`cam_features_${selectedCam.id}_${activeProfile}`, JSON.stringify(features));
+          }
+        } catch {}
         syncEngineDirectly(features, activeProfile);
         if (!isAcapMode()) {
           try {
@@ -1450,7 +1513,8 @@ export default function AdminStudio({
       setDrawings((prev) => prev.map((d) => ({ ...d, is_draft: false })));
       setRules((prev) => prev.map((r) => ({ ...r, is_draft: false })));
       setPublishComment("");
-      alert("Configuration published. Cameras are hot-swapping live.");
+      setPublishSuccessToast(`✓ Configuration Published! ${activeProfile?.toUpperCase().replace(/_/g, " ")} Profile & Active Models saved live.`);
+      setTimeout(() => setPublishSuccessToast(null), 5000);
     } catch (e: any) {
       alert(await fnErrorMessage("Publishing", e));
     } finally { setPublishing(false); }
@@ -1942,6 +2006,13 @@ export default function AdminStudio({
   const profileDef = (activeProfile && ZONE_PROFILES[activeProfile]) ? ZONE_PROFILES[activeProfile] : null;
   const accent = getProfileAccent(activeProfile);
 
+  const activeFeaturesList = Object.entries(features)
+    .filter(([_, val]) => val?.enabled)
+    .map(([key]) => {
+      const def = profileDef?.features.find((f) => f.key === key);
+      return def?.label || key.replace(/_/g, " ");
+    });
+
   function groupsForProfile(): FeatureGroup[] {
     if (!profileDef) return [];
     const present = new Set(profileDef.features.map((f) => f.group));
@@ -2051,13 +2122,18 @@ export default function AdminStudio({
               </div>
             ))}
           </div>
-          <div className="space-y-1.5">
-            <input type="text" placeholder="Publish notes..." value={publishComment} onChange={(e) => setPublishComment(e.target.value)}
-              className="w-full text-xs bg-surface-0 border border-line rounded px-2.5 py-1.5 text-zinc-200 focus:outline-none focus:border-accent" />
-            <button onClick={publishConfig} disabled={publishing} className="w-full btn-accent flex items-center justify-center gap-1.5 py-1.5 text-xs">
-              <Send size={12} />{publishing ? "Publishing..." : "Publish Configs"}
+          <div className="space-y-2 pt-1">
+            <div className="flex items-center justify-between text-xs px-2.5 py-1.5 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-emerald-300">
+              <span className="flex items-center gap-1.5 font-medium text-[11px]">
+                <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
+                Auto-Saved to Camera
+              </span>
+              <span className="text-[9px] uppercase tracking-wider text-emerald-400 font-bold">LIVE</span>
+            </div>
+            <button onClick={publishConfig} disabled={publishing} className="w-full rounded bg-surface-2 hover:bg-surface-3 border border-line py-1 text-[10px] text-zinc-400 hover:text-zinc-200 transition flex items-center justify-center gap-1">
+              <CheckCircle2 size={11} className="text-emerald-400" />
+              {publishing ? "Syncing..." : "Sync Active Now"}
             </button>
-
           </div>
           <button onClick={onDeactivated} className="w-full text-center text-xs text-zinc-500 hover:text-zinc-300 pt-1">Exit Studio</button>
         </div>
@@ -2153,9 +2229,53 @@ export default function AdminStudio({
         <div className="flex-1 relative bg-surface-0 flex items-center justify-center p-4">
           {selectedCam ? (
             <div className="relative aspect-video max-h-full max-w-full w-full rounded-xl border border-line overflow-hidden shadow-2xl bg-zinc-950 flex items-center justify-center">
-              {engineOnline !== false ? (
+              {/* Live Stream Switcher Control */}
+              <div className="absolute top-2.5 left-2.5 z-30 flex items-center gap-1 bg-black/80 backdrop-blur-md border border-white/10 p-1 rounded-lg shadow-lg">
+                <button
+                  onClick={() => setStreamSourceMode("camera")}
+                  className={`px-2.5 py-1 text-[11px] font-semibold rounded-md transition-all flex items-center gap-1.5 ${
+                    streamSourceMode === "camera"
+                      ? "bg-indigo-600 text-white shadow-md"
+                      : "text-zinc-400 hover:text-white hover:bg-white/5"
+                  }`}
+                >
+                  <Camera size={13} />
+                  Axis Camera
+                </button>
+                <button
+                  onClick={() => setStreamSourceMode("youtube")}
+                  className={`px-2.5 py-1 text-[11px] font-semibold rounded-md transition-all flex items-center gap-1.5 ${
+                    streamSourceMode === "youtube"
+                      ? "bg-red-600 text-white shadow-md"
+                      : "text-zinc-400 hover:text-white hover:bg-white/5"
+                  }`}
+                >
+                  <Video size={13} />
+                  YouTube Stream
+                </button>
+              </div>
+
+              {streamSourceMode === "youtube" ? (
+                <>
+                  <iframe
+                    ref={iframeRef}
+                    src="https://www.youtube.com/embed/Ellzen6Z7t8?autoplay=1&mute=1&loop=1&playlist=Ellzen6Z7t8"
+                    title="YouTube Live Stream"
+                    className="h-full w-full object-contain bg-black border-0 pointer-events-none"
+                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                    allowFullScreen
+                  />
+                  <DetectionOverlay
+                    detections={(liveDetections && liveDetections.length > 0) ? liveDetections : getYoutubeDetections(ytTick)}
+                    mediaRef={iframeRef as any}
+                    fit="contain"
+                    dimensions={telemetry?.dimensions as any}
+                  />
+                </>
+              ) : engineOnline !== false ? (
                 <>
                   <img
+                    ref={videoRef}
                     key={selectedCam.id}
                     src={mjpegStreamUrl(selectedCam.id)}
                     alt={selectedCam.name}
@@ -2175,6 +2295,55 @@ export default function AdminStudio({
                       }, isAcapMode() ? 1500 : 2000);
                     }}
                   />
+                  {/* Real-Time Live Detection Overlay in Admin Preview */}
+                  <DetectionOverlay
+                    detections={liveDetections}
+                    mediaRef={videoRef}
+                    fit="contain"
+                    dimensions={telemetry?.dimensions as any}
+                  />
+
+                  {/* Active Profile & Running AI Models Badge (Compact, No FPS) */}
+                  <div className="absolute top-2.5 right-2.5 z-20 flex flex-col items-end gap-1 pointer-events-none select-none">
+                    <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-black/80 backdrop-blur-md border border-white/10 text-[10px] shadow-lg">
+                      <span className="relative flex h-1.5 w-1.5">
+                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                        <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500"></span>
+                      </span>
+                      <span className="font-semibold text-zinc-200 capitalize tracking-wide">{activeProfile?.replace(/_/g, " ")} Mode</span>
+                      <span className="text-zinc-600">·</span>
+                      <span className="text-emerald-400 font-medium text-[9px]">LIVE</span>
+                    </div>
+
+                    {/* Active Model Pills (Small & Sleek) */}
+                    <div className="flex flex-wrap justify-end gap-1 max-w-[260px]">
+                      {activeFeaturesList.length > 0 ? (
+                        activeFeaturesList.map((mName) => (
+                          <span key={mName} className="px-1.5 py-0.5 rounded text-[9px] font-normal bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 backdrop-blur-md">
+                            • {mName}
+                          </span>
+                        ))
+                      ) : (
+                        <span className="px-1.5 py-0.5 rounded text-[9px] font-normal bg-zinc-800/80 text-zinc-400 border border-zinc-700/80 backdrop-blur-md">
+                          Core AI Active
+                        </span>
+                      )}
+                      {liveDetections.length > 0 && (
+                        <span className="px-1.5 py-0.5 rounded text-[9px] font-medium bg-accent/20 text-accent border border-accent/40 backdrop-blur-md">
+                          {liveDetections.length} Target{liveDetections.length === 1 ? "" : "s"}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Publish Success Toast */}
+                  {publishSuccessToast && (
+                    <div className="absolute top-3 left-3 z-30 flex items-center gap-2 px-3.5 py-2 rounded-lg bg-emerald-950/95 border border-emerald-500 text-xs font-semibold text-emerald-200 shadow-2xl backdrop-blur-md">
+                      <CheckCircle2 size={16} className="text-emerald-400 shrink-0" />
+                      <span>{publishSuccessToast}</span>
+                    </div>
+                  )}
+
                   {streamFailed && (
                     <div className="absolute top-3 left-3 z-20 flex items-center gap-2 px-3 py-1.5 rounded-lg bg-black/80 backdrop-blur-md text-xs font-mono text-amber-400 border border-amber-400/30 shadow-lg">
                       <span className="h-2 w-2 rounded-full bg-amber-400 animate-ping" />

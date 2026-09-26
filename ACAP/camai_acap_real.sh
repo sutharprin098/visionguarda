@@ -19,233 +19,34 @@ touch "$STATE_DIR/current_frame.jpg"
 touch "$STATE_DIR/latest_telemetry.json"
 touch "$STATE_DIR/latest_detections.json"
 
+SCRIPT_DIR=$(cd "$(dirname "$0")" 2>/dev/null && pwd || dirname "$0")
+
+# Symlink static telemetry into webroot for Apache zero-fork direct file serving
+for webdir in "/usr/html/local/camai_acap" "$SCRIPT_DIR/html" "$SCRIPT_DIR"; do
+    if [ -d "$webdir" ]; then
+        ln -sf "$STATE_DIR/latest_telemetry.json" "$webdir/telemetry.json" 2>/dev/null || true
+        ln -sf "$STATE_DIR/latest_detections.json" "$webdir/detections.json" 2>/dev/null || true
+    fi
+done
+
 # Check if Python (python3 or python) is available on Axis OS
 if command -v python3 >/dev/null 2>&1 || command -v python >/dev/null 2>&1; then
     PY_BIN=$(command -v python3 || command -v python)
-    logger -t "camai_acap" "Starting unified in-memory Python AI worker ($PY_BIN)"
+    logger -t "camai_acap" "Starting 10-Agent CamAI Real-Time Processing System ($PY_BIN)"
     
-    exec $PY_BIN -c '
-import urllib.request
-import urllib.error
-import json
-import base64
-import time
-import os
-import sys
-
-STATE_DIR = "/tmp/camai"
-os.makedirs(STATE_DIR, exist_ok=True)
-
-AWS_URL = "http://13.203.71.14:8000/api/detect"
-SNAP_URL = "http://127.0.0.1/axis-cgi/jpg/image.cgi"
-
-auth_candidates = [
-    ("", ""),
-    ("VLTUser", "wY0-oD0jA6jft3"),
-    ("root", "pass"),
-    ("root", "admin"),
-    ("admin", "admin"),
-    ("root", "root"),
-]
-
-def load_user_auth():
-    cfg_path = os.path.join(STATE_DIR, "config.json")
-    if os.path.exists(cfg_path):
-        try:
-            with open(cfg_path, "r") as f:
-                c = json.load(f)
-                if "camera_user" in c and "camera_pass" in c:
-                    return [(c["camera_user"], c["camera_pass"])]
-        except Exception:
-            pass
-    return []
-
-def build_opener(u, p):
-    handlers = [urllib.request.HTTPCookieProcessor()]
-    if u or p:
-        mgr = urllib.request.HTTPPasswordMgrWithDefaultRealm()
-        mgr.add_password(None, "http://127.0.0.1", u, p)
-        handlers.append(urllib.request.HTTPDigestAuthHandler(mgr))
-        handlers.append(urllib.request.HTTPBasicAuthHandler(mgr))
-    return urllib.request.build_opener(*handlers)
-
-_working_auth = None
-
-def get_best_opener():
-    global _working_auth
-    if _working_auth is not None:
-        try:
-            u, p = _working_auth
-            opener = build_opener(u, p)
-            req = urllib.request.Request(SNAP_URL)
-            with opener.open(req, timeout=2.5) as resp:
-                data = resp.read()
-                if data and data.startswith(b"\xff\xd8"):
-                    return opener
-        except Exception:
-            pass
-
-    candidates = load_user_auth() + auth_candidates
-    for u, p in candidates:
-        try:
-            opener = build_opener(u, p)
-            req = urllib.request.Request(SNAP_URL)
-            with opener.open(req, timeout=2.5) as resp:
-                data = resp.read()
-                if data and data.startswith(b"\xff\xd8"):
-                    print(f"[AUTH] Connected with user={u or 'anonymous'}", flush=True)
-                    _working_auth = (u, p)
-                    return opener
-        except Exception:
-            continue
-    return build_opener("", "")
-
-opener = get_best_opener()
-frame_id = 0
-last_auth_check = time.time()
-consecutive_snap_fails = 0
-frame_timestamps = []
-print(f"[DAEMON] CamAI Python AI worker running, PID={os.getpid()}", flush=True)
-
-while True:
-    loop_start = time.time()
-    frame_id = (frame_id + 1) % 1000000
-
-    jpeg_bytes = None
-    try:
-        req = urllib.request.Request(SNAP_URL)
-        with opener.open(req, timeout=2.0) as resp:
-            jpeg_bytes = resp.read()
-        consecutive_snap_fails = 0
-    except Exception:
-        consecutive_snap_fails += 1
-        if consecutive_snap_fails >= 3:
-            _working_auth = None
-            opener = get_best_opener()
-            consecutive_snap_fails = 0
-            try:
-                req = urllib.request.Request(SNAP_URL)
-                with opener.open(req, timeout=2.0) as resp:
-                    jpeg_bytes = resp.read()
-            except Exception:
-                jpeg_bytes = None
-
-    if jpeg_bytes and jpeg_bytes.startswith(b"\xff\xd8"):
-        frame_timestamps.append(loop_start)
-        if len(frame_timestamps) > 10:
-            frame_timestamps.pop(0)
-
-        ai_fps = 0.0
-        if len(frame_timestamps) >= 2:
-            dt = frame_timestamps[-1] - frame_timestamps[0]
-            if dt > 0.01:
-                ai_fps = round((len(frame_timestamps) - 1) / dt, 1)
-
-        tmp_frame = os.path.join(STATE_DIR, f"frame_tmp_{os.getpid()}.jpg")
-        try:
-            with open(tmp_frame, "wb") as f:
-                f.write(jpeg_bytes)
-            os.replace(tmp_frame, os.path.join(STATE_DIR, "current_frame.jpg"))
-        except Exception:
-            pass
-
-        profile = "traffic"
-        profile_file = os.path.join(STATE_DIR, "active_profile.txt")
-        if os.path.exists(profile_file):
-            try:
-                with open(profile_file, "r") as pf:
-                    p = pf.read().strip()
-                    if p:
-                        profile = p
-            except Exception:
-                pass
-
-        config_obj = {}
-        cfg_file = os.path.join(STATE_DIR, "config.json")
-        if os.path.exists(cfg_file):
-            try:
-                with open(cfg_file, "r") as cf:
-                    config_obj = json.load(cf)
-            except Exception:
-                pass
-
-        try:
-            image_b64 = base64.b64encode(jpeg_bytes).decode("ascii")
-            payload = {
-                "image_b64": image_b64,
-                "frame_id": frame_id,
-                "zone_profile": profile,
-                "camera_id": "axis-local-cam",
-                "config": config_obj
-            }
-            
-            payload_data = json.dumps(payload).encode("utf-8")
-            aws_req = urllib.request.Request(
-                AWS_URL,
-                data=payload_data,
-                headers={"Content-Type": "application/json"}
-            )
-
-            t_post = time.time()
-            with urllib.request.urlopen(aws_req, timeout=3.0) as aws_resp:
-                resp_bytes = aws_resp.read()
-                resp_json = json.loads(resp_bytes.decode("utf-8"))
-                
-                resp_json["camera_fps"] = 25.0
-                resp_json["ai_fps"] = ai_fps or round(resp_json.get("fps") or 0.0, 1)
-                resp_json["fps"] = 25.0
-                if "inference_latency_ms" not in resp_json or not resp_json["inference_latency_ms"]:
-                    resp_json["inference_latency_ms"] = round((time.time() - t_post) * 1000)
-
-                tmp_json = os.path.join(STATE_DIR, f"pub_tmp_{os.getpid()}.json")
-                with open(tmp_json, "w") as jf:
-                    json.dump(resp_json, jf)
-                
-                dest_telem = os.path.join(STATE_DIR, "latest_telemetry.json")
-                dest_dets = os.path.join(STATE_DIR, "latest_detections.json")
-                os.replace(tmp_json, dest_telem)
-                
-                try:
-                    with open(dest_dets, "w") as df:
-                        json.dump(resp_json, df)
-                except Exception:
-                    pass
-        except Exception as e:
-            err_payload = {
-                "type": "telemetry",
-                "frame_id": frame_id,
-                "timestamp": int(time.time() * 1000),
-                "status": "ok",
-                "aws_status": "offline",
-                "error": f"AWS AI Server unreachable: {str(e)}",
-                "active_module": profile,
-                "count": 0,
-                "detections": [],
-                "alerts": [],
-                "camera_fps": 25.0,
-                "fps": 25.0,
-                "ai_fps": ai_fps,
-                "inference_latency_ms": None
-            }
-            tmp_json = os.path.join(STATE_DIR, f"pub_tmp_{os.getpid()}.json")
-            try:
-                with open(tmp_json, "w") as jf:
-                    json.dump(err_payload, jf)
-                os.replace(tmp_json, os.path.join(STATE_DIR, "latest_telemetry.json"))
-            except Exception:
-                pass
-
-    elapsed = time.time() - loop_start
-    sleep_time = max(0.15, 0.45 - elapsed)
-    time.sleep(sleep_time)
-'
+    SCRIPT_DIR=$(cd "$(dirname "$0")" 2>/dev/null && pwd || dirname "$0")
+    for cand in "$SCRIPT_DIR/camai_acap_multi_agent.py" "./camai_acap_multi_agent.py" "/usr/html/local/camai_acap/camai_acap_multi_agent.py"; do
+        if [ -f "$cand" ]; then
+            exec $PY_BIN "$cand"
+        fi
+    done
 fi
 
 # Fallback POSIX shell loop if python is not present
 logger -t "camai_acap" "Python not found, running fallback curl worker"
 AWS_URL="http://13.203.71.14:8000/api/detect"
 SNAP_URL="http://127.0.0.1/axis-cgi/jpg/image.cgi"
-AUTH="VLTUser:wY0-oD0jA6jft3"
+AUTH="VLTuser:wM1_hTNvkrdkuY"
 COOKIE_JAR="$STATE_DIR/cookie_jar.txt"
 FRAME_ID=0
 
@@ -274,7 +75,14 @@ while true; do
             PAYLOAD_FILE="$STATE_DIR/payload_$$.json"
             printf '{"image_b64":"' > "$PAYLOAD_FILE"
             cat "$B64_FILE" >> "$PAYLOAD_FILE"
-            printf '","frame_id":%s,"zone_profile":"%s","camera_id":"axis-local-cam"}' "$FRAME_ID" "$PROFILE" >> "$PAYLOAD_FILE"
+            printf '","frame_id":%s,"zone_profile":"%s","camera_id":"axis-local-cam"' "$FRAME_ID" "$PROFILE" >> "$PAYLOAD_FILE"
+
+            # Attach active config (modules, profile_features, zones, lines, rules) if available
+            if [ -f "$STATE_DIR/config.json" ] && [ -s "$STATE_DIR/config.json" ]; then
+                printf ',"config":' >> "$PAYLOAD_FILE"
+                cat "$STATE_DIR/config.json" >> "$PAYLOAD_FILE"
+            fi
+            printf '}' >> "$PAYLOAD_FILE"
             rm -f "$B64_FILE"
             
             RESP=$(curl -s --max-time 3 --connect-timeout 2 \
@@ -285,8 +93,15 @@ while true; do
             rm -f "$PAYLOAD_FILE"
             
             if echo "$RESP" | grep -q '"detections"' 2>/dev/null; then
-                printf "%s" "$RESP" > "$STATE_DIR/latest_telemetry.json" 2>/dev/null || true
+                printf "%s" "$RESP" > "$STATE_DIR/latest_telemetry.json.tmp" 2>/dev/null || true
+                mv -f "$STATE_DIR/latest_telemetry.json.tmp" "$STATE_DIR/latest_telemetry.json" 2>/dev/null || true
                 cp "$STATE_DIR/latest_telemetry.json" "$STATE_DIR/latest_detections.json" 2>/dev/null || true
+                for webdir in "/usr/html/local/camai_acap" "$SCRIPT_DIR/html" "$SCRIPT_DIR"; do
+                    if [ -d "$webdir" ]; then
+                        printf "%s" "$RESP" > "$webdir/telemetry.json.tmp" 2>/dev/null || true
+                        mv -f "$webdir/telemetry.json.tmp" "$webdir/telemetry.json" 2>/dev/null || true
+                    fi
+                done
             fi
         fi
     else

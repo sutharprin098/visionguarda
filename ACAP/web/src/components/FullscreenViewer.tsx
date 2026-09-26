@@ -298,6 +298,7 @@ export default function FullscreenViewer({
           detections={shown}
           mediaRef={imgRef as React.RefObject<HTMLImageElement>}
           fit="contain"
+          dimensions={telemetry?.dimensions as any}
         />
       )}
 

@@ -18,6 +18,9 @@ export interface TelemetryDetection {
   overspeed?: boolean;
   plate_text?: string | null;
   custom_match?: boolean;
+  reid_active?: boolean;
+  face_matched?: boolean;
+  target_name?: string;
   label?: string;
   module?: string;
   bbox: { x1: number; y1: number; x2: number; y2: number };

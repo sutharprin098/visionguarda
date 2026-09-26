@@ -19,7 +19,7 @@ interface Props {
   profileFeatures?: Record<string, any>;
 }
 // Drop lost objects after 600ms hold buffer so temporary frame skips don't cause lag
-const TRACK_HOLD_MS = 600;
+const TRACK_HOLD_MS = 350;
 
 interface TrailPoint {
   x: number;
@@ -111,28 +111,29 @@ function labelFor(det: TelemetryDetection): string {
   if (det.class === "micro_motion") {
     const rawTitle = det.label || "SUBTLE MOTION";
     const title = rawTitle === "MICRO MOTION" ? "SUBTLE MOTION" : rawTitle;
-    const idStr = det.track_id != null ? ` #${String(det.track_id).padStart(2, '0')}` : "";
-    const confStr = ` ${Math.round(det.confidence * 100)}%`;
+    const idStr = det.track_id != null ? ` #${det.track_id}` : "";
+    const confStr = det.confidence != null ? ` ${Math.round(det.confidence * 100)}%` : "";
     return `${title.toUpperCase()}${idStr}${confStr}`;
   }
 
-  if (det.label) {
-    const idStr = det.track_id != null ? ` #${String(det.track_id).padStart(2, '0')}` : "";
-    return `${det.label}${idStr}`;
-  }
-
-  if (det.label) return det.label;
-  const cls = det.class || "object";
-  const titleClass = cls.charAt(0).toUpperCase() + cls.slice(1);
   const idStr = det.track_id != null ? ` #${det.track_id}` : "";
   const confStr = det.confidence != null ? ` ${Math.round(det.confidence * 100)}%` : "";
+  const reidBadge = det.reid_active ? " (ReID ACTIVE)" : "";
+
+  if (det.label) {
+    const hasTrackInLabel = det.label.includes("#") || det.label.toLowerCase().includes("track");
+    return `${det.label}${!hasTrackInLabel ? idStr : ""}${confStr}${reidBadge}`;
+  }
+
+  const cls = det.class || "object";
+  const titleClass = cls.charAt(0).toUpperCase() + cls.slice(1);
   let speedStr = "";
   if (det.speed != null) {
     const overBadge = det.overspeed ? " 🚨 OVERSPEED" : "";
     speedStr = ` | ${det.speed.toFixed(0)} km/h${overBadge}`;
   }
 
-  return `${titleClass}${idStr}${confStr}${speedStr}`;
+  return `${titleClass}${idStr}${confStr}${speedStr}${reidBadge}`;
 }
 
 function dedupDetections(dets: TelemetryDetection[]): TelemetryDetection[] {
@@ -231,12 +232,12 @@ export default function DetectionOverlay({ detections, refreshKey = 0, mediaRef,
 
       const cx = (d.bbox.x1 + d.bbox.x2) / 2;
       const cy = (d.bbox.y1 + d.bbox.y2) / 2;
-      const isNumericId = typeof d.track_id === "number" || (typeof d.track_id === "string" && /^\d+$/.test(d.track_id));
+      const hasTrackId = d.track_id != null && String(d.track_id).trim() !== "";
       let matchedKey: string | null = null;
-      if (isNumericId) {
+      if (hasTrackId) {
         matchedKey = `id_${d.track_id}`;
       } else {
-        let minDist = 0.35;
+        let minDist = 0.10;
         tracksMapRef.current.forEach((val, k) => {
           const dCls = (d.class || "").toLowerCase();
           const vCls = (val.det.class || "").toLowerCase();
@@ -257,8 +258,8 @@ export default function DetectionOverlay({ detections, refreshKey = 0, mediaRef,
       }
 
       if (!matchedKey) {
-        // Use deterministic spatial bucket key if numeric track_id is absent
-        matchedKey = isNumericId ? `id_${d.track_id}` : `sp_${d.class}_${Math.round(cx * 15)}_${Math.round(cy * 15)}`;
+        // High-resolution spatial bucket key (200 fine grid cells)
+        matchedKey = hasTrackId ? `id_${d.track_id}` : `sp_${d.class}_${Math.round(cx * 200)}_${Math.round(cy * 200)}`;
       }
 
       const existing = tracksMapRef.current.get(matchedKey);
@@ -321,12 +322,8 @@ export default function DetectionOverlay({ detections, refreshKey = 0, mediaRef,
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
-    let rect = rectRef.current;
-    if (!rect || rect.width === 0 || rect.height === 0) {
-      const b = media.getBoundingClientRect();
-      rect = { width: b.width, height: b.height };
-      rectRef.current = rect;
-    }
+    const b = media.getBoundingClientRect();
+    const rect = { width: b.width, height: b.height };
     const dpr = window.devicePixelRatio || 1;
     if (rect.width === 0 || rect.height === 0) return;
     const bw = Math.round(rect.width * dpr);

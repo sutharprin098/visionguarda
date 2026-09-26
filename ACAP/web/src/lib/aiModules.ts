@@ -29,7 +29,6 @@ export const AI_MODULES: AiModule[] = [
   { key: "person", label: "Person & Worker Detection", classes: ["person", "worker"] },
   { key: "vehicle", label: "Vehicle Classification", classes: ["car", "truck", "bus", "motorcycle", "bicycle", "van"] },
   { key: "face", label: "Face Detection (YuNet)", classes: ["face"], ownModel: true },
-  { key: "plate", label: "ANPR / License Plate OCR", classes: ["number_plate", "plate"], ownModel: true },
   { key: "helmet", label: "Helmet & Rider Safety (RT-DETR)", classes: ["helmet", "no_helmet", "triple_riding"], ownModel: true },
   { key: "animal", label: "Animals & Livestock", classes: ["dog", "cat", "cow", "horse", "sheep", "bird", "animal"] },
   { key: "item", label: "Unattended Bags & Assets", classes: ["backpack", "umbrella", "handbag", "suitcase", "bottle", "laptop", "cell phone"] },

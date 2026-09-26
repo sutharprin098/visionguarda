@@ -360,13 +360,6 @@ const TRAFFIC: ProfileDef = {
       params: [{ key: "min_angle", label: "Min Turn Angle", type: "slider", min: 90, max: 180, step: 5, unit: "°", default: 150 }],
     },
     {
-      key: "anpr", label: "ANPR (Number Plate)", group: "Events & Violations", defaultEnabled: false,
-      description: "Reads number plates on detected vehicles (plate detector on vehicle crops + CRNN OCR) and logs each plate with a snapshot and crop.",
-      params: [confidence(0.15), { key: "region", label: "Plate Region", type: "select", default: "auto", options: [
-        { value: "auto", label: "Auto" }, { value: "eu", label: "Europe" }, { value: "us", label: "North America" }, { value: "in", label: "India" }, { value: "me", label: "Middle East" },
-      ] }],
-    },
-    {
       key: "helmet_detection", label: "Helmet Detection", group: "Events & Violations", defaultEnabled: false,
       description: "Flags helmetless motorcycle riders (and triple-riding) using an RT-DETR helmet model on rider crops. Raises a helmet_violation event with a snapshot and clip.",
       params: [confidence(0.35)],
@@ -672,11 +665,6 @@ const SMART_CITY: ProfileDef = {
       drawTool: { label: "Bus/Transit Lane", purpose: "no_parking_zone" },
       description: "Flag unauthorized vehicles blocking bus or emergency lanes.",
       params: [seconds("grace_seconds", "Grace Period", 10)],
-    },
-    {
-      key: "anpr", label: "Municipal ANPR / Plate Reader", group: "Events & Violations", defaultEnabled: false,
-      description: "Reads number plates on urban traffic corridors.",
-      params: [confidence(0.2)],
     },
     {
       key: "helmet_detection", label: "Two-Wheeler Safety & Helmet Compliance", group: "Events & Violations", defaultEnabled: false,

@@ -97,14 +97,12 @@ function tilesFor(profile: ZoneProfileKey | null, t: CameraTelemetry): Tile[] {
         value: peak?.speed != null ? `${peak.speed_calibrated ? "" : "~"}${Math.abs(Math.round(peak.speed))} km/h` : "—",
         hint: peak && !peak.speed_calibrated ? "Estimated from object height (~±25%)" : undefined,
       },
-      // Real event tallies (analytics.py raises these; helmet.py / plate.py feed them).
+      // Real event tallies (analytics.py raises these; helmet.py feeds them).
       { label: "Helmet Violations", value: String(alerts(t, "helmet_violation", "triple_riding")) },
-      { label: "Plates Read", value: String(alerts(t, "number_plate")) },
       // wrong_direction + speed_limit are what analytics actually raises for a
       // traffic camera. stop-line / u-turn / red-light have no alert type yet,
       // so they are not silently folded in as a zero.
       { label: "Violations", value: String(alerts(t, "wrong_direction", "speed_limit")) },
-      fps,
     ];
   }
 
@@ -125,32 +123,17 @@ function tilesFor(profile: ZoneProfileKey | null, t: CameraTelemetry): Tile[] {
       // rides on each detection (analytics sets it from the track's first_seen),
       // so this needs no extra plumbing — it was simply never surfaced.
       { label: "Dwell", value: maxDwell != null ? `${Math.round(maxDwell)}s` : "—" },
-      fps,
     ];
-    // Deliberately no "Unknown Faces" tile: that needs face RECOGNITION, which
-    // is coming-soon (the model is licence-clean but there is no enrolment
-    // database yet). A tile reading "0 unknown faces" would say the camera had
-    // checked and cleared everyone.
   }
 
   if (profile === "factory") {
     return [
       { label: "Workers", value: String(t.people ?? 0) },
       { label: "Counted", value: `${c.people_in ?? 0} in / ${c.people_out ?? 0} out` },
-      // Both of these are backed by features that genuinely run: fall_alert is
-      // the bbox-aspect heuristic, human_entry is restricted_machine_zone /
-      // hazard_zone presence.
       { label: "Falls", value: String(alerts(t, "fall_alert")) },
       { label: "Machine Events", value: String(alerts(t, "human_entry")) },
       { label: "Zones", value: t.zone_stats?.length ? String(t.zone_stats.length) : "—" },
-      fps,
     ];
-    // Deliberately no "PPE Compliance" / "Fire Alerts" / "Smoke Alerts" tiles.
-    // analytics still has ppe_violation / fire_alert / smoke_alert branches, but
-    // their producers were removed with the colour-threshold fabrications, so
-    // those counts can only ever be 0. A "Fire Alerts: 0" tile is the most
-    // dangerous thing on this page — it reads as "no fire detected" from a
-    // detector that does not exist.
   }
 
   if (profile === "retail") {
@@ -160,7 +143,6 @@ function tilesFor(profile: ZoneProfileKey | null, t: CameraTelemetry): Tile[] {
       { label: "Queue Alerts", value: String(alerts(t, "overcrowding", "crowd_density")) },
       { label: "Loitering", value: String(alerts(t, "loitering")) },
       nvTile,
-      fps,
     ];
   }
 
@@ -169,10 +151,8 @@ function tilesFor(profile: ZoneProfileKey | null, t: CameraTelemetry): Tile[] {
       { label: "Pedestrians", value: String(t.people ?? 0) },
       { label: "Vehicles", value: String(t.vehicles ?? 0) },
       { label: "Crowd Gatherings", value: String(alerts(t, "crowd_density", "overcrowding")) },
-      { label: "Plates Read", value: String(alerts(t, "number_plate")) },
       { label: "Helmet Violations", value: String(alerts(t, "helmet_violation", "triple_riding")) },
       nvTile,
-      fps,
     ];
   }
 
@@ -183,7 +163,6 @@ function tilesFor(profile: ZoneProfileKey | null, t: CameraTelemetry): Tile[] {
       { label: "People", value: String(t.people ?? 0) },
       { label: "Vehicles", value: String(t.vehicles ?? 0) },
       nvTile,
-      fps,
     ];
   }
 
@@ -193,14 +172,13 @@ function tilesFor(profile: ZoneProfileKey | null, t: CameraTelemetry): Tile[] {
     { label: "Vehicles", value: String(t.vehicles ?? 0) },
     { label: "Items", value: String(t.items ?? 0) },
     nvTile,
-    fps,
   ];
 }
 
 function filterActiveTiles(tiles: Tile[]): Tile[] {
   const active = tiles.filter((tile) => {
-    // FPS is always active
-    if (tile.label === "FPS") return true;
+    // FPS completely removed per requirements
+    if (tile.label === "FPS") return false;
 
     // Primary summary counts are always active for context
     if (["People", "Vehicles", "Subtle Motion", "Workers"].includes(tile.label)) return true;
@@ -228,7 +206,7 @@ function filterActiveTiles(tiles: Tile[]): Tile[] {
     return true;
   });
 
-  return active.length > 0 ? active : tiles.filter(t => t.label === "FPS" || ["People", "Vehicles"].includes(t.label));
+  return active.length > 0 ? active : tiles.filter(t => ["People", "Vehicles"].includes(t.label));
 }
 
 export default function ProfileDashboard({ profile, t }: Props) {

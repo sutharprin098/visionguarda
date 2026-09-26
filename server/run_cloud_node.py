@@ -674,6 +674,20 @@ async def detect(request: Request):
             print(f"[CLOUD_NODE] Primary detection error: {e}", flush=True)
 
     # 3. Sub-Model Detection Passes (Gated by active features & profile)
+    def _is_feat_active(feat_name: str, default: bool = False) -> bool:
+        v = profile_features.get(feat_name)
+        if isinstance(v, dict):
+            return bool(v.get("enabled", default))
+        if isinstance(v, bool):
+            return v
+        if feat_name in body:
+            bv = body.get(feat_name)
+            return bool(bv.get("enabled", default) if isinstance(bv, dict) else bv)
+        if feat_name in cfg:
+            cv = cfg.get(feat_name)
+            return bool(cv.get("enabled", default) if isinstance(cv, dict) else cv)
+        return default
+
     vehicle_boxes_px = [d["bbox_px"] for d in raw_detections if d.get("class") in ("car", "truck", "bus", "motorcycle", "van", "twowheeler")]
     person_boxes_px = [d["bbox_px"] for d in raw_detections if d.get("class") in ("person", "worker", "customer")]
     moto_boxes_px = [d["bbox_px"] for d in raw_detections if d.get("class") in ("motorcycle", "twowheeler")]
@@ -681,9 +695,9 @@ async def detect(request: Request):
     # 3a. Helmet & Rider Safety Detection Pass (RT-DETR)
     is_helmet_enabled = bool(
         zone_profile in ("traffic", "factory", "smart_city")
-        or profile_features.get("helmet_detection", {}).get("enabled")
-        or profile_features.get("two_wheeler_safety", {}).get("enabled")
-        or profile_features.get("ppe_detection", {}).get("enabled")
+        or _is_feat_active("helmet_detection")
+        or _is_feat_active("two_wheeler_safety")
+        or _is_feat_active("ppe_detection")
     )
     if helmet_detector is not None and is_helmet_enabled and (moto_boxes_px or person_boxes_px):
         try:
@@ -716,9 +730,9 @@ async def detect(request: Request):
     # 3b. Face Detection & Recognition Pass (YuNet + SFace)
     is_face_enabled = bool(
         zone_profile in ("security", "retail", "factory")
-        or profile_features.get("face_detection", {}).get("enabled")
-        or profile_features.get("face_recognition", {}).get("enabled")
-        or profile_features.get("customer_demographics", {}).get("enabled")
+        or _is_feat_active("face_detection")
+        or _is_feat_active("face_recognition")
+        or _is_feat_active("customer_demographics")
     )
     if face_detector is not None and is_face_enabled and person_boxes_px:
         try:
@@ -746,20 +760,21 @@ async def detect(request: Request):
 
     # 3c. ANPR Plate Detection & CRNN OCR Reading Pass
     is_anpr_enabled = bool(
-        zone_profile in ("traffic", "smart_city", "anpr", "security", "night", "retail", "factory")
-        or profile_features.get("anpr", {}).get("enabled")
-        or profile_features.get("municipal_anpr", {}).get("enabled")
-        or True
+        zone_profile in ("anpr", "municipal_anpr")
+        or _is_feat_active("anpr", default=False)
+        or _is_feat_active("plate", default=False)
+        or _is_feat_active("municipal_anpr", default=False)
     )
     if plate_detector is not None and is_anpr_enabled:
         try:
             target_vehicle_boxes = vehicle_boxes_px if vehicle_boxes_px else [
                 {"x1": 0, "y1": 0, "x2": orig_w, "y2": orig_h},
-                {"x1": int(orig_w * 0.2), "y1": int(orig_h * 0.2), "x2": int(orig_w * 0.8), "y2": int(orig_h * 0.8)}
+                {"x1": int(orig_w * 0.02), "y1": int(orig_h * 0.05), "x2": int(orig_w * 0.55), "y2": int(orig_h * 0.55)},
+                {"x1": int(orig_w * 0.40), "y1": int(orig_h * 0.05), "x2": int(orig_w * 0.95), "y2": int(orig_h * 0.55)}
             ]
             plate_results = plate_detector.detect_on_vehicles(frame, target_vehicle_boxes, camera_id=camera_id)
             model_inference_counts["plate_detector"] += 1
-            for p in plate_results:
+            for p in (plate_results or []):
                 conf = float(p.get("confidence", 0.0))
                 pbx = p.get("bbox", {})
                 ptext = p.get("plate_text")
@@ -769,6 +784,7 @@ async def detect(request: Request):
                     plate_str = str(ptext).strip().upper() if ptext else None
                     raw_detections.append({
                         "class": "number_plate",
+                        "module": "anpr",
                         "confidence": round(conf, 2),
                         "bbox": {
                             "x1": round(x1_px / max(1, orig_w), 4),
@@ -786,9 +802,11 @@ async def detect(request: Request):
     # 3d. Micro-Motion Detection Pass (MOG2 + Lucas-Kanade)
     is_motion_enabled = bool(
         zone_profile == "micro_motion"
-        or profile_features.get("micro_motion", {}).get("enabled")
-        or profile_features.get("micro_motion_hud", {}).get("enabled")
-        or profile_features.get("screen_motion", {}).get("enabled")
+        or _is_feat_active("micro_motion")
+        or _is_feat_active("micro_motion_hud")
+        or _is_feat_active("screen_motion")
+        or body.get("micro_motion")
+        or cfg.get("micro_motion")
     )
     if motion_detector is not None and is_motion_enabled:
         try:
@@ -825,8 +843,8 @@ async def detect(request: Request):
     # 3e. Target Matcher Pass (Face & Visual Recognition)
     is_target_matcher_enabled = bool(
         zone_profile in ("security", "retail", "custom")
-        or profile_features.get("face_recognition", {}).get("enabled")
-        or profile_features.get("target_matcher", {}).get("enabled")
+        or _is_feat_active("face_recognition")
+        or _is_feat_active("target_matcher")
     )
     if is_target_matcher_enabled and raw_detections:
         try:
@@ -874,73 +892,44 @@ async def detect(request: Request):
     inf_latency_ms = round((time.perf_counter() - t_inf_start) * 1000, 1)
     inference_latencies.append(inf_latency_ms)
 
-    # 4. Multi-Object Tracking Step (ByteTrack + IoU Association)
+    # 4. Multi-Object Tracking Step (ByteTrack + ReID + IoU Association)
     tracked_detections = []
     if tracker is not None and len(raw_detections) > 0:
         try:
-            formatted_dets = []
+            from app.ai.pipeline import resolve_emitted_detections
+            h, w = frame.shape[:2]
             for det in raw_detections:
-                px = det["bbox_px"]
-                formatted_dets.append({
-                    "bbox": [px["x1"], px["y1"], px["x2"], px["y2"]],
-                    "confidence": det["confidence"],
-                    "class_name": det["class"]
-                })
+                if "bbox" not in det and "bbox_px" in det:
+                    px = det["bbox_px"]
+                    det["bbox"] = {
+                        "x1": round(max(0.0, min(1.0, px["x1"] / w)), 4),
+                        "y1": round(max(0.0, min(1.0, px["y1"] / h)), 4),
+                        "x2": round(max(0.0, min(1.0, px["x2"] / w)), 4),
+                        "y2": round(max(0.0, min(1.0, px["y2"] / h)), 4)
+                    }
+            tracks_raw = tracker.update(raw_detections, frame=frame, frame_shape=(h, w), conf_thresh=0.20)
+            emitted_dets, _ = resolve_emitted_detections(tracker, tracks_raw, raw_detections, [])
+            tracked_detections = emitted_dets
 
-            tracked_objs = tracker.update(formatted_dets, frame.shape[:2])
+            # Preserve micro_motion candidates so subtle motion appears immediately
+            for rd in raw_detections:
+                if rd.get("class") == "micro_motion" or rd.get("module") == "micro_motion":
+                    if not any(td.get("class") == "micro_motion" for td in tracked_detections):
+                        rd_copy = dict(rd)
+                        rd_copy.setdefault("track_id", 99000 + len(tracked_detections) + 1)
+                        rd_copy.setdefault("tracking_status", "detected")
+                        tracked_detections.append(rd_copy)
             model_inference_counts["bytetrack"] += 1
-
-            # Match raw_detections to tracked_objs using IoU to preserve continuous track_ids
-            pairs = []
-            for di, det in enumerate(raw_detections):
-                dbx = det["bbox_px"]
-                d_box = [dbx["x1"], dbx["y1"], dbx["x2"], dbx["y2"]]
-                for ti, trk in enumerate(tracked_objs):
-                    t_box = trk.tlbr if hasattr(trk, "tlbr") else (trk.get("bbox") if isinstance(trk, dict) else [0, 0, 0, 0])
-                    xx1 = max(d_box[0], t_box[0]); yy1 = max(d_box[1], t_box[1])
-                    xx2 = min(d_box[2], t_box[2]); yy2 = min(d_box[3], t_box[3])
-                    w = max(0.0, xx2 - xx1); h = max(0.0, yy2 - yy1)
-                    inter = w * h
-                    area_d = max(1.0, (d_box[2] - d_box[0]) * (d_box[3] - d_box[1]))
-                    area_t = max(1.0, (t_box[2] - t_box[0]) * (t_box[3] - t_box[1]))
-                    iou = inter / (area_d + area_t - inter)
-                    if iou > 0.05:
-                        pairs.append((iou, di, trk))
-
-            pairs.sort(key=lambda p: p[0], reverse=True)
-            matched_d = set()
-            matched_t = set()
-            det_to_trk = {}
-            for iou, di, trk in pairs:
-                tid = getattr(trk, "track_id", id(trk))
-                if di in matched_d or tid in matched_t:
-                    continue
-                matched_d.add(di)
-                matched_t.add(tid)
-                det_to_trk[di] = trk
-
-            for di, det in enumerate(raw_detections):
-                d = dict(det)
-                trk = det_to_trk.get(di)
-                if trk is not None:
-                    d["track_id"] = getattr(trk, "track_id", di + 1)
-                    d["state"] = "ACTIVE"
-                else:
-                    d["track_id"] = di + 1
-                    d["state"] = "ACTIVE"
-                tracked_detections.append(d)
         except Exception as e:
             print(f"[CLOUD_NODE] Tracking error: {e}", flush=True)
-            for idx, det in enumerate(raw_detections):
+            for det in raw_detections:
                 d = dict(det)
-                d["track_id"] = idx + 1
-                d["state"] = "ACTIVE"
+                d.setdefault("state", "ACTIVE")
                 tracked_detections.append(d)
     else:
-        for idx, det in enumerate(raw_detections):
+        for det in raw_detections:
             d = dict(det)
-            d["track_id"] = idx + 1
-            d["state"] = "ACTIVE"
+            d.setdefault("state", "ACTIVE")
             tracked_detections.append(d)
 
     # 5. Full Analytics & Rules Engine Step (Single Source of Truth)

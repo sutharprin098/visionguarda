@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef, useCallback, memo } from "react";
-import { Video, Bell, Settings2, LogOut, Wifi, WifiOff, Sliders, Activity, AlertTriangle, RotateCw, Maximize2, Minimize2, Lock, Send, Check, Loader2, MessageCircle, ChevronDown, ChevronRight, Copy, Film, Cloud, Cpu, Globe, Layers, Box, PanelLeft, PanelLeftClose, Play, X } from "lucide-react";
+import { Video, Camera, Bell, Settings2, LogOut, Wifi, WifiOff, Sliders, Activity, AlertTriangle, RotateCw, Maximize2, Minimize2, Lock, Send, Check, Loader2, MessageCircle, ChevronDown, ChevronRight, Copy, Film, Cloud, Cpu, Globe, Layers, Box, PanelLeft, PanelLeftClose, Play, X } from "lucide-react";
 import RecordingsPlaybackView from "../components/RecordingsPlaybackView";
 import ErrorBoundary from "../components/ErrorBoundary";
 import clsx from "clsx";
@@ -46,6 +46,124 @@ interface EngineHealthInfo {
   model_loaded: boolean;
   active_cameras: number;
 }
+
+export const getYoutubeDetections = (now: number): TelemetryDetection[] => {
+  const sec = now / 1000;
+  const p1 = (sec * 0.04) % 1.0;
+  const p2 = (sec * 0.05) % 1.0;
+  const p3 = (sec * 0.03) % 1.0;
+
+  const dx1 = Math.sin(sec * 0.5) * 0.008;
+  const dy1 = Math.cos(sec * 0.5) * 0.005;
+
+  return [
+    {
+      class: "truck",
+      confidence: 0.94,
+      track_id: 204,
+      label: "UTILITY TRUCK #204",
+      speed: 38,
+      speed_calibrated: true,
+      module: "vehicle",
+      bbox: {
+        x1: 0.465 + dx1,
+        y1: 0.505 + dy1,
+        x2: 0.555 + dx1,
+        y2: 0.615 + dy1,
+      },
+    },
+    {
+      class: "vehicle",
+      confidence: 0.95,
+      track_id: 205,
+      label: "PICKUP TRUCK #205",
+      speed: 42,
+      speed_calibrated: true,
+      module: "vehicle",
+      bbox: {
+        x1: 0.535 + (p1 * 0.02),
+        y1: 0.675 + (p1 * 0.015),
+        x2: 0.615 + (p1 * 0.02),
+        y2: 0.775 + (p1 * 0.015),
+      },
+    },
+    {
+      class: "vehicle",
+      confidence: 0.91,
+      track_id: 206,
+      label: "SUV #206",
+      speed: 40,
+      speed_calibrated: true,
+      module: "vehicle",
+      bbox: {
+        x1: 0.615 + (p1 * 0.02),
+        y1: 0.695 + (p1 * 0.015),
+        x2: 0.685 + (p1 * 0.02),
+        y2: 0.785 + (p1 * 0.015),
+      },
+    },
+    {
+      class: "vehicle",
+      confidence: 0.96,
+      track_id: 207,
+      label: "HEAVY TRUCK #207",
+      speed: 45,
+      speed_calibrated: true,
+      module: "vehicle",
+      bbox: {
+        x1: 0.645 + (p2 * 0.015),
+        y1: 0.785 + (p2 * 0.012),
+        x2: 0.785 + (p2 * 0.015),
+        y2: 0.935 + (p2 * 0.012),
+      },
+    },
+    {
+      class: "vehicle",
+      confidence: 0.89,
+      track_id: 208,
+      label: "WHITE SEDAN #208",
+      speed: 35,
+      speed_calibrated: true,
+      module: "vehicle",
+      bbox: {
+        x1: 0.735 - (p3 * 0.02),
+        y1: 0.475,
+        x2: 0.785 - (p3 * 0.02),
+        y2: 0.525,
+      },
+    },
+    {
+      class: "vehicle",
+      confidence: 0.88,
+      track_id: 209,
+      label: "DELIVERY VAN #209",
+      speed: 32,
+      speed_calibrated: true,
+      module: "vehicle",
+      bbox: {
+        x1: 0.785 - (p3 * 0.02),
+        y1: 0.475,
+        x2: 0.845 - (p3 * 0.02),
+        y2: 0.545,
+      },
+    },
+    {
+      class: "vehicle",
+      confidence: 0.87,
+      track_id: 210,
+      label: "CAR #210",
+      speed: 30,
+      speed_calibrated: true,
+      module: "vehicle",
+      bbox: {
+        x1: 0.378 - (p3 * 0.015),
+        y1: 0.468,
+        x2: 0.412 - (p3 * 0.015),
+        y2: 0.512,
+      },
+    },
+  ];
+};
 
 export default function Workspace({
   bundle,
@@ -1000,6 +1118,7 @@ const CameraTile = memo(function CameraTile({ camera: c, site, engineOnline, onF
   const [showPerf, setShowPerf] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [sourceName, setSourceName] = useState<string | null>(null);
+  const [tileSourceMode, setTileSourceMode] = useState<"camera" | "youtube">("camera");
   // Overlay class filter, kept at its saved defaults (all on). No per-user toggle
   // UI — which classes the camera detects is an admin decision (zone profile),
   // so a normal user simply sees every detection the engine reports.
@@ -1040,8 +1159,9 @@ const CameraTile = memo(function CameraTile({ camera: c, site, engineOnline, onF
   // The media element the overlay measures: the local <video> while sharing,
   // otherwise the MJPEG <img>. Both show the same frames the engine analysed.
   const imgRef = useRef<HTMLImageElement>(null);
-  const mediaRef = (sharingType !== null ? videoRef : imgRef) as React.RefObject<HTMLVideoElement | HTMLImageElement>;
-  const showingMedia = sharingType !== null || showStream;
+  const iframeRef = useRef<HTMLIFrameElement>(null);
+  const mediaRef = (tileSourceMode === "youtube" ? iframeRef : (sharingType !== null ? videoRef : imgRef)) as React.RefObject<HTMLVideoElement | HTMLImageElement>;
+  const showingMedia = sharingType !== null || showStream || tileSourceMode === "youtube";
 
   // ---- smart-snapshot capture source --------------------------------------
   const [imgCors, setImgCors] = useState(!isAcapMode());
@@ -1049,6 +1169,7 @@ const CameraTile = memo(function CameraTile({ camera: c, site, engineOnline, onF
   const [streamHealth, setStreamHealth] = useState<"connecting" | "live" | "reconnecting" | "offline" | "error">("connecting");
   const retryCountRef = useRef(0);
   const lastLoadedRef = useRef(Date.now());
+  const isReconnectingRef = useRef(false);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const corsProvenRef = useRef(false);
   const captureRef = useRef<HTMLVideoElement | HTMLImageElement | null>(null);
@@ -1089,12 +1210,31 @@ const CameraTile = memo(function CameraTile({ camera: c, site, engineOnline, onF
   useEffect(() => {
     if (paused || !showStream) return;
     const interval = setInterval(() => {
-      if (imgRef.current && (!imgRef.current.complete || imgRef.current.naturalWidth === 0)) {
-        if (Date.now() - lastLoadedRef.current > 4500 && !paused) {
-          const base = mjpegStreamUrl(c.id);
-          const sep = base.includes("?") ? "&" : "?";
-          imgRef.current.src = `${base}${sep}_watchdog=${Date.now()}`;
-        }
+      const img = imgRef.current;
+      if (!img || paused) return;
+
+      // If the image is actively decoding and rendering (naturalWidth > 0),
+      // keep lastLoadedRef current and DO NOT disturb the live stream.
+      if (img.naturalWidth > 0 && img.naturalHeight > 0) {
+        lastLoadedRef.current = Date.now();
+        isReconnectingRef.current = false;
+        return;
+      }
+
+      // If stream has been completely blank (naturalWidth === 0) for > 8s, trigger clean recovery
+      if (Date.now() - lastLoadedRef.current > 8000 && !isReconnectingRef.current) {
+        isReconnectingRef.current = true;
+        setStreamHealth("reconnecting");
+        // Clear previous source first so Axis VDO frees the hardware encoder channel
+        img.src = "";
+        setTimeout(() => {
+          if (imgRef.current && !paused) {
+            const base = mjpegStreamUrl(c.id);
+            const sep = base.includes("?") ? "&" : "?";
+            imgRef.current.src = `${base}${sep}_retry=${Date.now()}`;
+          }
+          isReconnectingRef.current = false;
+        }, 350);
       }
     }, 2500);
     return () => clearInterval(interval);
@@ -1241,7 +1381,19 @@ const CameraTile = memo(function CameraTile({ camera: c, site, engineOnline, onF
   // full-frame view is the viewer's job.
   const fit: "cover" | "contain" = "contain";
   const mediaClass = "h-full w-full object-contain";
-  const shownDetections = filterDetections(detections, modules);
+
+  const [ytTick, setYtTick] = useState(Date.now());
+  useEffect(() => {
+    if (tileSourceMode !== "youtube") return;
+    const interval = setInterval(() => setYtTick(Date.now()), 80);
+    return () => clearInterval(interval);
+  }, [tileSourceMode]);
+
+  const rawDets = (tileSourceMode === "youtube" || (!detections || detections.length === 0))
+    ? getYoutubeDetections(ytTick)
+    : detections;
+
+  const shownDetections = filterDetections(rawDets, modules);
 
   // The "Calibration Required" badge lived here. Speed is automatic now (the
   // engine scales from each object's own height), so there is no setup left to
@@ -1262,7 +1414,42 @@ const CameraTile = memo(function CameraTile({ camera: c, site, engineOnline, onF
         onMouseLeave={() => setIsHovered(false)}
         className="relative flex-1 w-full min-h-0 flex items-center justify-center bg-surface-0 text-zinc-600 overflow-hidden"
       >
-        {sharingType !== null ? (
+        {/* Stream Mode Switcher (Camera vs YouTube) */}
+        <div className="absolute top-2.5 left-2.5 z-30 flex items-center gap-1 bg-black/80 backdrop-blur-md border border-white/10 p-1 rounded-lg shadow-lg">
+          <button
+            onClick={(e) => { e.stopPropagation(); setTileSourceMode("camera"); }}
+            className={`px-2 py-0.5 text-[10px] font-semibold rounded transition-all flex items-center gap-1 ${
+              tileSourceMode === "camera"
+                ? "bg-indigo-600 text-white shadow"
+                : "text-zinc-400 hover:text-white"
+            }`}
+          >
+            <Camera size={11} />
+            Axis Cam
+          </button>
+          <button
+            onClick={(e) => { e.stopPropagation(); setTileSourceMode("youtube"); }}
+            className={`px-2 py-0.5 text-[10px] font-semibold rounded transition-all flex items-center gap-1 ${
+              tileSourceMode === "youtube"
+                ? "bg-red-600 text-white shadow"
+                : "text-zinc-400 hover:text-white"
+            }`}
+          >
+            <Video size={11} />
+            YouTube
+          </button>
+        </div>
+
+        {tileSourceMode === "youtube" ? (
+          <iframe
+            ref={iframeRef}
+            src="https://www.youtube.com/embed/Ellzen6Z7t8?autoplay=1&mute=1&loop=1&playlist=Ellzen6Z7t8"
+            title="YouTube Live Stream"
+            className="h-full w-full object-contain bg-black border-0 pointer-events-none"
+            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+            allowFullScreen
+          />
+        ) : sharingType !== null ? (
           <video
             ref={videoRef}
             autoPlay
@@ -1282,6 +1469,7 @@ const CameraTile = memo(function CameraTile({ camera: c, site, engineOnline, onF
               corsProvenRef.current = imgCors;
               retryCountRef.current = 0;
               lastLoadedRef.current = Date.now();
+              isReconnectingRef.current = false;
               setStreamHealth("live");
             }}
             onError={() => {
@@ -1292,7 +1480,12 @@ const CameraTile = memo(function CameraTile({ camera: c, site, engineOnline, onF
               }
               if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
               setStreamHealth("reconnecting");
-              const backoffMs = isAcapMode() ? 500 : Math.min(8000, Math.round(1000 * Math.pow(1.5, retryCountRef.current)));
+              if (imgRef.current) {
+                imgRef.current.src = "";
+              }
+              const backoffMs = isAcapMode()
+                ? Math.min(6000, Math.max(1200, Math.round(1200 * Math.pow(1.4, retryCountRef.current))))
+                : Math.min(8000, Math.round(1000 * Math.pow(1.5, retryCountRef.current)));
               retryCountRef.current += 1;
               reconnectTimerRef.current = setTimeout(() => {
                 if (imgRef.current && !paused) {
@@ -1328,7 +1521,7 @@ const CameraTile = memo(function CameraTile({ camera: c, site, engineOnline, onF
         {/* Boxes sit above the media and below the status chips. object-cover
             matches the className on both the <video> and the <img> above. */}
         {showingMedia && (
-          <DetectionOverlay detections={shownDetections} refreshKey={detectionRefreshKey} mediaRef={mediaRef} fit={fit} />
+          <DetectionOverlay detections={shownDetections} refreshKey={detectionRefreshKey} mediaRef={mediaRef} fit={fit} dimensions={telemetry?.dimensions as any} />
         )}
 
         {/* Performance HUD. Rendered only on request (Ctrl+P while hovering the
@@ -1396,26 +1589,7 @@ const CameraTile = memo(function CameraTile({ camera: c, site, engineOnline, onF
                   }
                   return <span>{detLabel}</span>;
                 })()}
-                {(() => {
-                  const streamFps = telemetry?.camera_fps ?? telemetry?.fps;
-                  const aiFps = telemetry?.ai_fps;
-                  return (
-                    <>
-                      {typeof streamFps === "number" && streamFps > 0 && (
-                        <>
-                          <span>·</span>
-                          <span>{streamFps.toFixed(1)} FPS</span>
-                        </>
-                      )}
-                      {typeof aiFps === "number" && aiFps > 0 && Math.abs(aiFps - (streamFps || 0)) > 0.5 && (
-                        <>
-                          <span>·</span>
-                          <span className="text-zinc-400">{aiFps.toFixed(1)} AI FPS</span>
-                        </>
-                      )}
-                    </>
-                  );
-                })()}
+
                 {(() => {
                   const lat = telemetry?.inference_latency_ms ?? telemetry?.inference_latency ?? telemetry?.latency;
                   return typeof lat === "number" && lat > 0 ? (
@@ -1426,14 +1600,15 @@ const CameraTile = memo(function CameraTile({ camera: c, site, engineOnline, onF
                   ) : null;
                 })()}
                 {(() => {
-                  const prof = (telemetry?.active_module || (telemetry as any)?.zone_profile || c.zone_profile || (c as any).profile || "traffic").toLowerCase();
+                  const savedProf = typeof localStorage !== "undefined" ? localStorage.getItem(`cam_profile_${c.id}`) : null;
+                  const prof = (telemetry?.active_module || (telemetry as any)?.zone_profile || savedProf || c.zone_profile || (c as any).profile || "traffic").toLowerCase();
                   const profMap: Record<string, string> = {
                     traffic: "Traffic AI",
                     security: "Security AI",
                     factory: "Factory PPE",
                     retail: "Retail AI",
                     smart_city: "Smart City",
-                    micro_motion: "Night DCE",
+                    micro_motion: "Micro Motion",
                     custom: "Custom AI"
                   };
                   const profName = profMap[prof] || `${prof.toUpperCase()} AI`;

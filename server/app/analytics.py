@@ -201,8 +201,8 @@ def filter_by_features(detections, features):
     for d in detections:
         cls_name = str(d.get("class", "")).lower().strip()
 
-        # Retain custom target matches
-        if d.get("custom_match") or str(d.get("class", "")).startswith("TARGET:"):
+        # Retain custom target matches and micro_motion
+        if d.get("custom_match") or str(d.get("class", "")).startswith("TARGET:") or cls_name == "micro_motion" or d.get("module") == "micro_motion":
             filtered.append(d)
             continue
 
@@ -405,7 +405,10 @@ def filter_detections_by_user_zones(detections, zones, frame_w: int = 1920, fram
                     is_inside_active_zone = True
                     break
             if not is_inside_active_zone:
-                continue
+                if det.get("class") == "micro_motion" or det.get("module") == "micro_motion":
+                    pass
+                else:
+                    continue
 
         filtered.append(det)
 

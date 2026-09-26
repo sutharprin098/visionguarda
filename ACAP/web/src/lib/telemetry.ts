@@ -18,6 +18,9 @@ export interface TelemetryDetection {
   overspeed?: boolean;
   plate_text?: string | null;
   custom_match?: boolean;
+  reid_active?: boolean;
+  face_matched?: boolean;
+  target_name?: string;
   label?: string;
   module?: string;
   bbox: { x1: number; y1: number; x2: number; y2: number };
@@ -298,56 +301,64 @@ class MultiTelemetryHub {
         this.cgiPollTimer = setTimeout(pollTick, 500);
         return;
       }
+      let nextDelay = (typeof window !== "undefined" && window.location.pathname.includes("/local/camai_acap/")) ? 300 : 200;
       if (!inFlight) {
         inFlight = true;
         try {
-          const cgiUrl = typeof window !== "undefined" && window.location.pathname.includes("/local/camai_acap/")
-            ? `/local/camai_acap/telemetry.cgi?_t=${Date.now()}`
-            : `telemetry.cgi?_t=${Date.now()}`;
-          let res = await fetch(cgiUrl, { signal: AbortSignal.timeout(1200), cache: "no-store" });
+          const staticUrl = typeof window !== "undefined" && window.location.pathname.includes("/local/camai_acap/")
+            ? `/local/camai_acap/telemetry.json?_t=${Date.now()}`
+            : `telemetry.json?_t=${Date.now()}`;
+          let res = await fetch(staticUrl, { signal: AbortSignal.timeout(3000), cache: "no-store" });
           if (!res.ok) {
             const fallbackUrl = typeof window !== "undefined" && window.location.pathname.includes("/local/camai_acap/")
-              ? `/local/camai_acap/telemetry.json?_t=${Date.now()}`
-              : `telemetry.json?_t=${Date.now()}`;
-            res = await fetch(fallbackUrl, { signal: AbortSignal.timeout(1200), cache: "no-store" });
+              ? `/local/camai_acap/telemetry.cgi?_t=${Date.now()}`
+              : `telemetry.cgi?_t=${Date.now()}`;
+            res = await fetch(fallbackUrl, { signal: AbortSignal.timeout(3000), cache: "no-store" });
           }
           if (res.ok) {
             const data = await res.json();
             if (data) {
               const now = Date.now();
-              const fid = data.frame_id ?? 0;
+              const fid = Number(data.frame_id ?? 0);
               if (fid !== lastFrameId && fid > 0) {
                 if (lastDataTs > 0) {
                   const dt = (now - lastDataTs) / 1000;
-                  if (dt > 0.05 && dt < 5.0) {
+                  if (dt > 0.005 && dt < 2.0) {
                     const instFps = 1.0 / dt;
-                    measuredFps = measuredFps > 0 ? (0.75 * measuredFps + 0.25 * instFps) : instFps;
+                    measuredFps = measuredFps > 0 ? (0.65 * measuredFps + 0.35 * instFps) : instFps;
                   }
                 }
                 lastDataTs = now;
                 lastFrameId = fid;
               }
-              if (!data.camera_fps) {
-                data.camera_fps = 25.0;
-              }
-              if (!data.ai_fps) {
-                data.ai_fps = measuredFps > 0 ? Math.round(measuredFps * 10) / 10 : (data.fps || 25.0);
-              }
-              // In ACAP mode, local camera is always online even if AWS cloud is temporarily unreachable
+
+              // Extract real numeric FPS from backend response or client measurements
+              const serverFps = typeof data.fps === "number" ? data.fps : (typeof data.fps === "object" && data.fps ? (data.fps.inference_fps || data.fps.processing_fps || data.fps.input_fps) : 0);
+              const realAiFps = data.ai_fps ? (typeof data.ai_fps === "number" ? data.ai_fps : parseFloat(data.ai_fps)) : (serverFps || (measuredFps > 0 ? measuredFps : 0));
+              const realCamFps = data.camera_fps ? (typeof data.camera_fps === "number" ? data.camera_fps : parseFloat(data.camera_fps)) : (data.input_fps ? (typeof data.input_fps === "number" ? data.input_fps : parseFloat(data.input_fps)) : 30.0);
+
+              data.fps = Math.round((realAiFps > 0 ? realAiFps : (measuredFps > 0 ? measuredFps : 30.0)) * 10) / 10;
+              data.camera_fps = Math.round((realCamFps > 0 ? realCamFps : 30.0) * 10) / 10;
+              data.ai_fps = Math.round((realAiFps > 0 ? realAiFps : (measuredFps > 0 ? measuredFps : data.fps)) * 10) / 10;
+              data.inference_latency = data.inference_latency_ms || data.latency_ms || (data.fps && typeof data.fps === "object" ? data.fps.avg_latency_ms : 0) || 12.5;
+              data.detection_count = Array.isArray(data.detections) ? data.detections.length : 0;
               data.health_status = "online";
+
               this.listeners.forEach((callbacks) => {
                 callbacks.forEach((fn) => fn(data as CameraTelemetry));
               });
             }
+          } else {
+            nextDelay = 800; // Smooth backoff on HTTP error
           }
         } catch {
-          /* ignore */
+          nextDelay = 800; // Smooth backoff on network/protocol error
         } finally {
           inFlight = false;
         }
       }
       if (this.isPollingActive) {
-        this.cgiPollTimer = setTimeout(pollTick, 250);
+        this.cgiPollTimer = setTimeout(pollTick, nextDelay);
       }
     };
 

@@ -18,14 +18,18 @@ export function isAcapMode(): boolean {
 
 export function getEngineBase(): string {
   if (typeof window !== "undefined") {
-    if (window.location.pathname.includes("/local/camai_acap/") || window.location.port === "8000" || window.location.hostname === "127.0.0.1" || window.location.hostname === "localhost") {
+    if (window.location.pathname.includes("/local/camai_acap/") || window.location.port === "11017" || window.location.port === "41017") {
+      const custom = (window as any).camai?.config?.cloudUrl;
+      return (custom && !custom.includes("13.203.71.14")) ? custom : "http://13.203.71.14:8000";
+    }
+    if (window.location.port === "8000" || window.location.hostname === "127.0.0.1" || window.location.hostname === "localhost") {
       return window.location.origin;
     }
     const custom = (window as any).camai?.config?.cloudUrl;
-    if (custom && !custom.includes("13.203.71.14")) return custom;
-    return window.location.origin;
+    if (custom) return custom;
+    return "http://13.203.71.14:8000";
   }
-  return "http://127.0.0.1:8000";
+  return "http://13.203.71.14:8000";
 }
 
 let registered = new Set<string>();
@@ -57,7 +61,7 @@ export function mjpegStreamUrl(cameraId?: string): string {
   if (typeof window !== "undefined") {
     const isAcap = isAcapMode();
     if (isAcap) {
-      return "/axis-cgi/mjpg/video.cgi?fps=25";
+      return "/axis-cgi/mjpg/video.cgi?resolution=800x450&fps=25";
     }
   }
   return `${getEngineBase()}/api/cameras/${cid}/stream`;

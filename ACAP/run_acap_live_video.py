@@ -1,32 +1,29 @@
 #!/usr/bin/env python3
 """
-CamAI ACAP Live Video Stream Runner - DECOUPLED ARCHITECTURE
-=============================================================
+CamAI ACAP Live Video Stream Runner - SYNCHRONIZED REAL-TIME PIPELINE
+====================================================================
 
-PIPELINE A (VIDEO - 30 FPS):
-  Source -> cap.read() @ 30FPS -> JPEG -> _acap_latest_frame_jpeg -> MJPEG -> browser <img>
+Architecture:
+  Source -> cap.read() -> display -> in-process AI detection -> 
+  simultaneous atomic update of:
+    1) _acap_latest_frame_jpeg (MJPEG stream: /local/camai_acap/video.mjpg)
+    2) _acap_latest_telemetry (Telemetry: /local/camai_acap/telemetry.json)
 
-PIPELINE B (AI - ~6 FPS independent):
-  Subsampled frames -> /api/detect -> AWS inference -> detections -> overlay
-
-The two pipelines NEVER block each other.
-Browser receives smooth 30 FPS MJPEG.
-AI results update the overlay at its own rate.
+Both video and telemetry share the exact same frame_id and timestamp,
+guaranteeing ZERO lag between video stream and detection bounding boxes.
 
 Dashboard: http://127.0.0.1:8000/local/camai_acap/index.html
 """
 import sys
 import os
 os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "timeout;3000000|stimeout;3000000|rtsp_transport;tcp|fflags;nobuffer|flags;low_delay|max_delay;500000"
+os.environ["CAMAI_INFERENCE_MODE"] = os.getenv("CAMAI_INFERENCE_MODE", "local")
 import time
-import base64
-import threading
 import subprocess
 import cv2
 import requests
 import numpy as np
 
-# Add server directory to path
 ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 SERVER_DIR = os.path.join(ROOT_DIR, "server")
 if SERVER_DIR not in sys.path:
@@ -40,7 +37,8 @@ except ImportError:
     from server.app.ai.stream_resolver import resolve, needs_resolution  # type: ignore
 
 AXIS_SNAPSHOT = os.path.join(ROOT_DIR, "ACAP", "axis_snapshot.jpg")
-DEFAULT_VIDEO_URL = "https://www.youtube.com/watch?v=Ellzen6Z7t8&t=191s"
+AXIS_CAMERA_STREAM_URL = "http://127.0.0.1/axis-cgi/mjpg/video.cgi"
+DEFAULT_VIDEO_URL = AXIS_CAMERA_STREAM_URL
 LOCAL_VIDEO_FALLBACK = os.path.join(ROOT_DIR, "videos", "CamAI_Enterprise_Demo_50s.mp4")
 LOCAL_IMAGE_FALLBACK = AXIS_SNAPSHOT
 
@@ -91,9 +89,9 @@ def ensure_server_running():
 
     print("[*] Starting local ACAP FastAPI Server on http://127.0.0.1:8000 ...", flush=True)
     cmd = [sys.executable, "-m", "uvicorn", "app.main:app", "--host", "127.0.0.1", "--port", "8000"]
-    subprocess.Popen(cmd, cwd=SERVER_DIR, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    subprocess.Popen(cmd, cwd=SERVER_DIR, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=os.environ.copy())
 
-    for _ in range(20):
+    for _ in range(25):
         time.sleep(0.3)
         try:
             r = requests.get("http://127.0.0.1:8000/local/camai_acap/telemetry.json", timeout=1)
@@ -141,7 +139,13 @@ def get_playable_stream(video_url):
         except Exception as e:
             print(f"[!] Online stream resolution notice: {e}", flush=True)
 
-    # Fallback to Axis snapshot
+    # Fallback to local video or snapshot
+    if os.path.exists(LOCAL_VIDEO_FALLBACK):
+        print(f"[+] Fallback to Local Video Demo: {LOCAL_VIDEO_FALLBACK}", flush=True)
+        cap = cv2.VideoCapture(LOCAL_VIDEO_FALLBACK)
+        if cap.isOpened():
+            return cap, LOCAL_VIDEO_FALLBACK
+
     if os.path.exists(AXIS_SNAPSHOT):
         print(f"[+] Fallback to Axis Camera Snapshot: {AXIS_SNAPSHOT}", flush=True)
         return ImageStreamCapture(AXIS_SNAPSHOT), AXIS_SNAPSHOT
@@ -149,80 +153,27 @@ def get_playable_stream(video_url):
     return None, "None"
 
 
-# ==============================================================
-# SHARED STATE
-# ==============================================================
-_state_lock = threading.Lock()
-_latest_ai_payload = None
-_running = True
-
-
-# ==============================================================
-# PIPELINE B - AI WORKER (~6 FPS, fully independent of video)
-# ==============================================================
-def _ai_worker_loop(server_url):
-    global _latest_ai_payload, _running
-    last_processed_id = -1
-    ai_session = requests.Session()
-    ai_session.headers.update({"Content-Type": "application/json", "Connection": "keep-alive"})
-
-    while _running:
-        with _state_lock:
-            payload = _latest_ai_payload
-
-        if payload is not None and payload.get("frame_id") != last_processed_id:
-            last_processed_id = payload["frame_id"]
-            try:
-                t0 = time.perf_counter()
-                r = ai_session.post(f"{server_url}/api/detect", json=payload, timeout=5)
-                t_ms = round((time.perf_counter() - t0) * 1000.0, 1)
-                if r.status_code == 200:
-                    tel = r.json()
-                    dets = tel.get("detections", [])
-                    print(
-                        f"  [AI {last_processed_id:05d}] FPS:{tel.get('fps', 0)} "
-                        f"HTTP:{t_ms}ms Lat:{tel.get('inference_latency_ms', 0)}ms "
-                        f"Det:{len(dets)}",
-                        flush=True
-                    )
-                else:
-                    print(f"  [AI {last_processed_id:05d}] HTTP {r.status_code}", flush=True)
-            except Exception as e:
-                print(f"  [AI {last_processed_id:05d}] Error: {e}", flush=True)
-        else:
-            time.sleep(0.003)
-
-
-# ==============================================================
-# PIPELINE A - VIDEO MJPEG BUFFER WRITER (30 FPS)
-# In-process write - zero HTTP overhead
-# ==============================================================
-def _push_frame_to_mjpeg_buffer(jpeg_bytes):
-    """Write JPEG directly to server MJPEG buffer - no HTTP, no latency."""
-    try:
-        try:
-            import app.main as server_main
-        except ImportError:
-            import server.app.main as server_main  # type: ignore
-        with server_main._acap_jpeg_lock:
-            server_main._acap_latest_frame_jpeg = jpeg_bytes
-    except Exception:
-        pass
-
-
 def run_acap_live_pipeline(video_url=DEFAULT_VIDEO_URL, server_url="http://127.0.0.1:8000"):
-    global _latest_ai_payload, _running
-
     print("==================================================")
-    print(" CamAI ACAP - DECOUPLED VIDEO + AI PIPELINE")
+    print(" CamAI ACAP - ZERO-LAG SYNCHRONIZED PIPELINE")
     print("==================================================")
     print(f"[*] Video Source: {video_url}")
-    print(f"[*] PIPELINE A: Capture -> MJPEG @ 30 FPS  (video)")
-    print(f"[*] PIPELINE B: Subsampled -> AWS @ ~6 FPS  (AI)")
+    print(f"[*] Mode: Real-time In-Process Inference")
     print(f"[*] Dashboard: {server_url}/local/camai_acap/index.html")
     print("==================================================")
 
     ensure_server_running()
+
+    # Import server detection engine in-process
+    try:
+        import app.main as server_main
+    except ImportError:
+        import server.app.main as server_main
+
+    # Warm up YOLO model
+    print("[*] Loading and warming up YOLO inference backend...", flush=True)
+    server_main.manager.ensure_backend_loaded()
+    print("[+] YOLO backend ready!", flush=True)
 
     cap, active_src = get_playable_stream(video_url)
     if not cap or not cap.isOpened():
@@ -233,20 +184,11 @@ def run_acap_live_pipeline(video_url=DEFAULT_VIDEO_URL, server_url="http://127.0
     src_w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     src_h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
     print(f"[+] Source: {src_w}x{src_h} @ {src_fps:.1f} FPS", flush=True)
-    print(f"[+] Dashboard: {server_url}/local/camai_acap/index.html\n", flush=True)
-
-    _running = True
-
-    worker_thread = threading.Thread(target=_ai_worker_loop, args=(server_url,), daemon=True)
-    worker_thread.start()
-
-    frame_counter = 0
-    ai_subsample_counter = 0
 
     TARGET_FPS = min(src_fps, 30.0)
     FRAME_INTERVAL = 1.0 / TARGET_FPS
-    AI_SUBSAMPLE = max(1, round(TARGET_FPS / 6.0))
 
+    frame_counter = 0
     fps_window = []
     last_fps_log = time.perf_counter()
 
@@ -270,51 +212,35 @@ def run_acap_live_pipeline(video_url=DEFAULT_VIDEO_URL, server_url="http://127.0
                         frame = np.zeros((720, 1280, 3), dtype=np.uint8)
 
             frame_counter += 1
-            ai_subsample_counter += 1
 
-            # PIPELINE A: High-Definition resize + optional Night Vision + encode + push to MJPEG buffer
+            # Standard display scaling: 1280x720
             h, w = frame.shape[:2]
-            tw = 1920 if w >= 1280 else 1280
+            tw = 1280
             th = max(480, int(h * tw / float(w)))
-            display = cv2.resize(frame, (tw, th), interpolation=cv2.INTER_CUBIC)
+            display = cv2.resize(frame, (tw, th), interpolation=cv2.INTER_LINEAR)
 
-            try:
-                try:
-                    import app.main as server_main
-                except ImportError:
-                    import server.app.main as server_main
-                if getattr(server_main, "_acap_night_vision_active", False):
-                    z_dce = server_main._get_acap_submodels()[0]
-                    if z_dce is not None:
-                        display, _ = z_dce.enhance(display, force_enable=True)
-            except Exception:
-                pass
+            # In-process synchronized frame inference and MJPEG update
+            # This updates BOTH _acap_latest_frame_jpeg and _acap_latest_telemetry atomically
+            tel = server_main.process_acap_frame_direct(
+                img=display,
+                req_frame_id=frame_counter,
+                camera_id="axis-cam-01",
+                publish_mjpeg=True
+            )
 
-            # High Quality Crystal Clear JPEG Stream (Quality 95)
-            _, buf = cv2.imencode('.jpg', display, [cv2.IMWRITE_JPEG_QUALITY, 95])
-            _push_frame_to_mjpeg_buffer(buf.tobytes())
-
-            # Log real video FPS every 5 seconds
+            # Track rolling FPS
             now = time.perf_counter()
             fps_window.append(now)
             if len(fps_window) > 90:
                 fps_window.pop(0)
-            if now - last_fps_log >= 5.0:
+
+            if now - last_fps_log >= 3.0:
                 if len(fps_window) > 1:
                     rfps = round((len(fps_window) - 1) / (fps_window[-1] - fps_window[0]), 1)
-                    print(f"[VIDEO] Real capture FPS: {rfps} | Frame #{frame_counter}", flush=True)
+                    lat = tel.get("inference_latency_ms", 0)
+                    dets_len = len(tel.get("detections", []))
+                    print(f"[LIVE PIPELINE] FPS: {rfps} | Latency: {lat}ms | Detections: {dets_len} | Frame #{frame_counter}", flush=True)
                 last_fps_log = now
-
-            # PIPELINE B: subsampled frames only -> AI worker
-            if ai_subsample_counter >= AI_SUBSAMPLE:
-                ai_subsample_counter = 0
-                _, ai_buf = cv2.imencode('.jpg', display, [cv2.IMWRITE_JPEG_QUALITY, 92])
-                with _state_lock:
-                    _latest_ai_payload = {
-                        "image_b64": base64.b64encode(ai_buf).decode('utf-8'),
-                        "frame_id": frame_counter,
-                        "camera_id": "axis-cam-01",
-                    }
 
             # Rate-limit to TARGET_FPS
             elapsed = time.perf_counter() - t_start
@@ -325,7 +251,6 @@ def run_acap_live_pipeline(video_url=DEFAULT_VIDEO_URL, server_url="http://127.0
     except KeyboardInterrupt:
         print("\n[*] ACAP Engine stopped cleanly.", flush=True)
     finally:
-        _running = False
         cap.release()
 
 

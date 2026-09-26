@@ -186,8 +186,15 @@ def build_eap_for_arch(arch):
         ('LICENSE',                license_data,  0o644),
         ('camai_acap_LICENSE.txt', license_data,  0o644),
         ('html/LICENSE',           license_data,  0o644),
-        (app,                      shell_script,  0o755),  # Real inference script (exec)
+        (app,                      shell_script,  0o755),  # Real inference launcher script (exec)
     ]
+
+    multi_agent_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'camai_acap_multi_agent.py')
+    if os.path.isfile(multi_agent_path):
+        with open(multi_agent_path, 'rb') as maf:
+            ma_bytes = maf.read()
+        entries.append(('camai_acap_multi_agent.py', ma_bytes, 0o755))
+        print(f" -> Multi-Agent System script: {multi_agent_path} ({len(ma_bytes)} bytes)")
 
     # ── CGI bridges — MUST be 0o755 for Axis httpd to execute ─────────────────
     # ── Auto-generate CGI bridges so they are never wiped by Vite build ─────
@@ -197,39 +204,63 @@ def build_eap_for_arch(arch):
 
     config_cgi_code = (
         "#!/bin/sh\n"
-        "echo \"Status: 200 OK\"\n"
-        "echo \"Content-Type: application/json\"\n"
-        "echo \"Cache-Control: no-cache, no-store, must-revalidate\"\n"
-        "echo \"Pragma: no-cache\"\n"
-        "echo \"Expires: 0\"\n"
-        "echo \"Access-Control-Allow-Origin: *\"\n"
-        "echo \"Access-Control-Allow-Methods: GET, POST, OPTIONS\"\n"
-        "echo \"Access-Control-Allow-Headers: Content-Type, Authorization, X-Requested-With, X-CamAI-Token\"\n"
-        "echo \"\"\n"
-        "if [ \"$REQUEST_METHOD\" = \"OPTIONS\" ]; then\n"
-        "    exit 0\n"
-        "fi\n"
         "STATE_DIR=\"/tmp/camai\"\n"
         "mkdir -p \"$STATE_DIR\"\n"
+        "\n"
+        "# Preflight\n"
+        "if [ \"$REQUEST_METHOD\" = \"OPTIONS\" ]; then\n"
+        "    echo \"Status: 204 No Content\"\n"
+        "    echo \"Access-Control-Allow-Origin: *\"\n"
+        "    echo \"Access-Control-Allow-Methods: GET, POST, OPTIONS\"\n"
+        "    echo \"Access-Control-Allow-Headers: Content-Type, Authorization, X-Requested-With, X-CamAI-Token\"\n"
+        "    echo \"\"\n"
+        "    exit 0\n"
+        "fi\n"
+        "\n"
+        "# 1. Parse profile directly from query string (immediate, 0-latency, 100% reliable)\n"
+        "if [ -n \"$QUERY_STRING\" ]; then\n"
+        "    PROF_Q=$(echo \"$QUERY_STRING\" | sed -n 's/.*profile=\\([^&]*\\).*/\\1/p' | sed 's/%20/ /g')\n"
+        "    if [ -n \"$PROF_Q\" ]; then\n"
+        "        printf \"%s\" \"$PROF_Q\" > \"$STATE_DIR/active_profile.txt\" 2>/dev/null || true\n"
+        "    fi\n"
+        "fi\n"
+        "\n"
         "if [ \"$REQUEST_METHOD\" = \"POST\" ]; then\n"
         "    TMP_CFG=\"$STATE_DIR/cfg_in_$$.json\"\n"
+        "    # Read POST body safely without ever hanging on pipe\n"
         "    if [ -n \"$CONTENT_LENGTH\" ] && [ \"$CONTENT_LENGTH\" -gt 0 ] 2>/dev/null; then\n"
-        "        dd bs=1 count=\"$CONTENT_LENGTH\" 2>/dev/null > \"$TMP_CFG\" || head -c \"$CONTENT_LENGTH\" 2>/dev/null > \"$TMP_CFG\" || cat > \"$TMP_CFG\" 2>/dev/null\n"
+        "        head -c \"$CONTENT_LENGTH\" > \"$TMP_CFG\" 2>/dev/null || dd bs=\"$CONTENT_LENGTH\" count=1 > \"$TMP_CFG\" 2>/dev/null\n"
         "    else\n"
-        "        cat > \"$TMP_CFG\" 2>/dev/null || true\n"
+        "        # Bounded read to avoid hanging on HTTP/2 streams\n"
+        "        dd bs=32768 count=1 > \"$TMP_CFG\" 2>/dev/null\n"
         "    fi\n"
+        "\n"
         "    if [ -s \"$TMP_CFG\" ]; then\n"
         "        mv \"$TMP_CFG\" \"$STATE_DIR/config.json\" 2>/dev/null || rm -f \"$TMP_CFG\"\n"
-        "        PROF=$(sed -n 's/.*\"zone_profile\"[[:space:]]*:[[:space:]]*\"\\([^\"]*\\)\".*/\\1/p' \"$STATE_DIR/config.json\" 2>/dev/null | head -n 1)\n"
-        "        if [ -n \"$PROF\" ]; then\n"
-        "            printf \"%s\" \"$PROF\" > \"$STATE_DIR/active_profile.txt\" 2>/dev/null || true\n"
+        "        PROF_BODY=$(sed -n 's/.*\"zone_profile\"[[:space:]]*:[[:space:]]*\"\\([^\"]*\\)\".*/\\1/p' \"$STATE_DIR/config.json\" 2>/dev/null | head -n 1)\n"
+        "        if [ -n \"$PROF_BODY\" ]; then\n"
+        "            printf \"%s\" \"$PROF_BODY\" > \"$STATE_DIR/active_profile.txt\" 2>/dev/null || true\n"
         "        fi\n"
         "    else\n"
         "        rm -f \"$TMP_CFG\"\n"
         "    fi\n"
+        "\n"
+        "    # Output headers AFTER processing is done so Apache HTTP/2 stream is clean\n"
+        "    echo \"Status: 200 OK\"\n"
+        "    echo \"Content-Type: application/json\"\n"
+        "    echo \"Cache-Control: no-cache, no-store, must-revalidate\"\n"
+        "    echo \"Access-Control-Allow-Origin: *\"\n"
+        "    echo \"\"\n"
         "    echo '{\"status\":\"ok\"}'\n"
         "    exit 0\n"
         "fi\n"
+        "\n"
+        "# GET request: return existing config or default\n"
+        "echo \"Status: 200 OK\"\n"
+        "echo \"Content-Type: application/json\"\n"
+        "echo \"Cache-Control: no-cache, no-store, must-revalidate\"\n"
+        "echo \"Access-Control-Allow-Origin: *\"\n"
+        "echo \"\"\n"
         "if [ -f \"$STATE_DIR/config.json\" ] && [ -s \"$STATE_DIR/config.json\" ]; then\n"
         "    cat \"$STATE_DIR/config.json\"\n"
         "else\n"
@@ -288,7 +319,7 @@ def build_eap_for_arch(arch):
     video_cgi_code = (
         "#!/bin/sh\n"
         "echo \"Status: 302 Found\"\n"
-        "echo \"Location: /axis-cgi/mjpg/video.cgi?fps=25\"\n"
+        "echo \"Location: /axis-cgi/mjpg/video.cgi?resolution=800x450&fps=25\"\n"
         "echo \"Cache-Control: no-cache, no-store, must-revalidate\"\n"
         "echo \"Access-Control-Allow-Origin: *\"\n"
         "echo \"\"\n"
@@ -324,7 +355,7 @@ def build_eap_for_arch(arch):
                 abs_path = os.path.join(root, file)
                 rel_path = os.path.relpath(abs_path, html_dir).replace('\\', '/')
                 # CGI bridges already added above with correct permissions
-                if rel_path in ('config.cgi', 'detections.cgi', 'telemetry.cgi'):
+                if rel_path in ('config.cgi', 'detections.cgi', 'telemetry.cgi', 'frame.cgi', 'video.cgi'):
                     continue
                 with open(abs_path, 'rb') as hf:
                     file_data = hf.read()

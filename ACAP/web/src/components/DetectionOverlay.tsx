@@ -18,9 +18,11 @@ interface Props {
   fit?: "cover" | "contain";
   /** Authoritative profile features state object for UI overlay filtering */
   profileFeatures?: Record<string, any>;
+  /** Native video/stream pixel dimensions from telemetry (e.g. 1280x720) */
+  dimensions?: { width: number; height: number };
 }
-// Hold buffer (1200ms) prevents tracking gaps between AI subsampling frames
-const TRACK_HOLD_MS = 1200;
+// Hold buffer (120ms) allows instant frame-accurate box tracking without trailing ghost boxes
+const TRACK_HOLD_MS = 120;
 
 interface TrailPoint {
   x: number;
@@ -36,11 +38,21 @@ interface ActiveTrackRecord {
   trail: TrailPoint[];
 }
 
-function sourceSize(el: HTMLVideoElement | HTMLImageElement | null): { w: number; h: number } {
-  if (!el) return { w: 1280, h: 720 };
-  const w = (el as HTMLVideoElement).videoWidth || (el as HTMLImageElement).naturalWidth || (el as HTMLElement).clientWidth || 1280;
-  const h = (el as HTMLVideoElement).videoHeight || (el as HTMLImageElement).naturalHeight || (el as HTMLElement).clientHeight || 720;
-  return { w: w || 1280, h: h || 720 };
+function sourceSize(
+  el: HTMLVideoElement | HTMLImageElement | null,
+  dims?: { width: number; height: number }
+): { w: number; h: number } {
+  if (dims && dims.width > 0 && dims.height > 0) {
+    return { w: dims.width, h: dims.height };
+  }
+  if (el) {
+    const nw = (el as HTMLVideoElement).videoWidth || (el as HTMLImageElement).naturalWidth;
+    const nh = (el as HTMLVideoElement).videoHeight || (el as HTMLImageElement).naturalHeight;
+    if (nw > 0 && nh > 0) {
+      return { w: nw, h: nh };
+    }
+  }
+  return { w: 1280, h: 720 };
 }
 
 
@@ -81,9 +93,11 @@ const ANIMAL_CLS_SET = new Set([
 ]);
 
 function colorFor(det: TelemetryDetection): string {
-  const c = det.class.toLowerCase();
+  const c = (det.class || "").toLowerCase();
+  const lbl = (det.label || "").toLowerCase();
   
   if (det.custom_match || c.startsWith("target:")) return COLORS.target_match;
+  if (c === "micro_motion" || c.includes("motion") || lbl.includes("motion") || lbl.includes("target")) return COLORS.micro_motion;
 
   // Color coding by speed for vehicle classes:
   if (VEHICLE_CLS_SET.has(c) && det.speed != null) {
@@ -104,37 +118,40 @@ function colorFor(det: TelemetryDetection): string {
   if (c === "helmet") return COLORS.helmet;
   if (c === "no_helmet") return COLORS.no_helmet;
   if (c === "number_plate") return COLORS.number_plate;
-  if (c === "micro_motion") return COLORS.micro_motion;
   return COLORS.other;
 }
 
 /** Label for one detection: CLASS #ID  [SPEED km/h]. */
 function labelFor(det: TelemetryDetection): string {
-  if (det.class === "micro_motion") {
+  const c = (det.class || "").toLowerCase();
+  const lbl = (det.label || "").toLowerCase();
+
+  if (c === "micro_motion" || c.includes("motion") || lbl.includes("motion")) {
     const rawTitle = det.label || "SUBTLE MOTION";
     const title = rawTitle === "MICRO MOTION" ? "SUBTLE MOTION" : rawTitle;
-    const idStr = det.track_id != null ? ` #${String(det.track_id).padStart(2, '0')}` : "";
-    const confStr = ` ${Math.round(det.confidence * 100)}%`;
+    const idStr = det.track_id != null ? ` #${det.track_id}` : "";
+    const confStr = det.confidence != null ? ` ${Math.round(det.confidence * 100)}%` : "";
     return `${title.toUpperCase()}${idStr}${confStr}`;
   }
 
-  if (det.label) {
-    const idStr = det.track_id != null ? ` #${String(det.track_id).padStart(2, '0')}` : "";
-    return `${det.label}${idStr}`;
-  }
-
-  if (det.label) return det.label;
-  const cls = det.class || "object";
-  const titleClass = cls.charAt(0).toUpperCase() + cls.slice(1);
   const idStr = det.track_id != null ? ` #${det.track_id}` : "";
   const confStr = det.confidence != null ? ` ${Math.round(det.confidence * 100)}%` : "";
+  const reidBadge = det.reid_active ? " (ReID ACTIVE)" : "";
+
+  if (det.label) {
+    const hasTrackInLabel = det.label.includes("#") || det.label.toLowerCase().includes("track");
+    return `${det.label}${!hasTrackInLabel ? idStr : ""}${confStr}${reidBadge}`;
+  }
+
+  const cls = det.class || "object";
+  const titleClass = cls.charAt(0).toUpperCase() + cls.slice(1);
   let speedStr = "";
   if (det.speed != null) {
     const overBadge = det.overspeed ? " 🚨 OVERSPEED" : "";
     speedStr = ` | ${det.speed.toFixed(0)} km/h${overBadge}`;
   }
 
-  return `${titleClass}${idStr}${confStr}${speedStr}`;
+  return `${titleClass}${idStr}${confStr}${speedStr}${reidBadge}`;
 }
 
 function dedupDetections(dets: TelemetryDetection[]): TelemetryDetection[] {
@@ -191,17 +208,18 @@ const isDetectionModuleEnabled = (d: TelemetryDetection, pFeatures?: Record<stri
     if (typeof v === "object" && v !== null && v.enabled === false) return true;
     return false;
   };
+  const cls = (d.class || "").toLowerCase();
+  const lbl = (d.label || "").toLowerCase();
+  if (cls === "micro_motion" || cls.includes("motion") || lbl.includes("motion")) return true;
   if (d.module && isExplicitlyOff(d.module)) return false;
   if (!d.class) return true;
-  const cls = d.class.toLowerCase();
-  if ((cls === "number_plate" || cls === "plate") && isExplicitlyOff("anpr") && isExplicitlyOff("plate")) return false;
-  if (cls === "micro_motion" && isExplicitlyOff("micro_motion") && isExplicitlyOff("micro_motion_hud")) return false;
+  if (cls === "number_plate" || cls === "plate" || lbl.includes("plate")) return false;
   if (cls === "face" && isExplicitlyOff("face_detection") && isExplicitlyOff("face")) return false;
   if ((cls === "helmet" || cls === "no_helmet") && isExplicitlyOff("helmet_detection") && isExplicitlyOff("ppe_detection")) return false;
   return true;
 };
 
-export default function DetectionOverlay({ detections, refreshKey = 0, mediaRef, fit = "cover", profileFeatures }: Props) {
+export default function DetectionOverlay({ detections, refreshKey = 0, mediaRef, fit = "contain", profileFeatures, dimensions }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const rectRef = useRef<{ width: number; height: number } | null>(null);
   const tracksMapRef = useRef<Map<string, ActiveTrackRecord & { lastSeen: number }>>(new Map());
@@ -233,12 +251,12 @@ export default function DetectionOverlay({ detections, refreshKey = 0, mediaRef,
 
       const cx = (d.bbox.x1 + d.bbox.x2) / 2;
       const cy = (d.bbox.y1 + d.bbox.y2) / 2;
-      const isNumericId = typeof d.track_id === "number" || (typeof d.track_id === "string" && /^\d+$/.test(d.track_id));
+      const hasTrackId = d.track_id != null && String(d.track_id).trim() !== "";
       let matchedKey: string | null = null;
-      if (isNumericId) {
+      if (hasTrackId) {
         matchedKey = `id_${d.track_id}`;
       } else {
-        let minDist = 0.35;
+        let minDist = 0.10;
         tracksMapRef.current.forEach((val, k) => {
           const dCls = (d.class || "").toLowerCase();
           const vCls = (val.det.class || "").toLowerCase();
@@ -259,8 +277,8 @@ export default function DetectionOverlay({ detections, refreshKey = 0, mediaRef,
       }
 
       if (!matchedKey) {
-        // Use deterministic spatial bucket key if numeric track_id is absent
-        matchedKey = isNumericId ? `id_${d.track_id}` : `sp_${d.class}_${Math.round(cx * 15)}_${Math.round(cy * 15)}`;
+        // High-resolution spatial bucket key (200 fine grid cells)
+        matchedKey = hasTrackId ? `id_${d.track_id}` : `sp_${d.class}_${Math.round(cx * 200)}_${Math.round(cy * 200)}`;
       }
 
       const existing = tracksMapRef.current.get(matchedKey);
@@ -296,13 +314,8 @@ export default function DetectionOverlay({ detections, refreshKey = 0, mediaRef,
         vx = 0.70 * instVx + 0.30 * (existing.vx || 0);
         vy = 0.70 * instVy + 0.30 * (existing.vy || 0);
 
-        // Light EMA interpolation for smooth box movement directly on the object
-        nextDet.bbox = {
-          x1: 0.85 * nb.x1 + 0.15 * ob.x1,
-          y1: 0.85 * nb.y1 + 0.15 * ob.y1,
-          x2: 0.85 * nb.x2 + 0.15 * ob.x2,
-          y2: 0.85 * nb.y2 + 0.15 * ob.y2,
-        };
+        // Use exact frame bbox for true object alignment
+        nextDet.bbox = { ...nb };
       }
 
       // Append point to motion breadcrumb trail history
@@ -323,12 +336,8 @@ export default function DetectionOverlay({ detections, refreshKey = 0, mediaRef,
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
-    let rect = rectRef.current;
-    if (!rect || rect.width === 0 || rect.height === 0) {
-      const b = media.getBoundingClientRect();
-      rect = { width: b.width, height: b.height };
-      rectRef.current = rect;
-    }
+    const b = media.getBoundingClientRect();
+    const rect = { width: b.width, height: b.height };
     const dpr = window.devicePixelRatio || 1;
     if (rect.width === 0 || rect.height === 0) return;
     const bw = Math.round(rect.width * dpr);
@@ -340,7 +349,7 @@ export default function DetectionOverlay({ detections, refreshKey = 0, mediaRef,
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, rect.width, rect.height);
 
-    const src = sourceSize(media);
+    const src = sourceSize(media, dimensions);
     if (!src) return; // stream not up yet — next telemetry tick redraws
 
     const scale =
@@ -358,8 +367,7 @@ export default function DetectionOverlay({ detections, refreshKey = 0, mediaRef,
     tracksMapRef.current.forEach((val, key) => {
       const elapsed = now - val.lastSeen;
       if (elapsed <= TRACK_HOLD_MS) {
-        // Solid opacity for first 700ms; smooth decay from 700ms to 1200ms
-        const alpha = elapsed <= 700 ? 1.0 : Math.max(0.1, 1.0 - (elapsed - 700) / 500);
+        const alpha = elapsed <= 80 ? 1.0 : Math.max(0.1, 1.0 - (elapsed - 80) / 40);
         renderItems.push({ det: val.det, alpha, trail: val.trail, lastSeen: val.lastSeen });
       } else {
         tracksMapRef.current.delete(key);
@@ -422,7 +430,7 @@ export default function DetectionOverlay({ detections, refreshKey = 0, mediaRef,
 
     // --- 2. RENDER BOUNDING BOXES AND LABELS ---
     for (const det of renderDets) {
-      if (det.confidence != null && det.confidence < 0.38) continue;
+      if (det.confidence != null && det.confidence < 0.1) continue;
       const item = detToItemMap.get(det);
       const alpha = item ? item.alpha : 1.0;
 

@@ -20,8 +20,8 @@ type Props = {
   getPushStats?: () => { sent: number; dropped: number; buffered: number; stalledMs: number };
 };
 
-/** Repaint rate. Fast enough to read as live, slow enough to be free. */
-const HUD_HZ = 4;
+/** Repaint rate. Fast enough to read as live in real time. */
+const HUD_HZ = 10;
 
 function fmt(n: number | undefined | null, digits = 0, unit = ""): string {
   if (n == null || Number.isNaN(n)) return "—";
