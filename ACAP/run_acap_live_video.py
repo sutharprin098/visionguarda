@@ -40,7 +40,7 @@ except ImportError:
     from server.app.ai.stream_resolver import resolve, needs_resolution  # type: ignore
 
 AXIS_SNAPSHOT = os.path.join(ROOT_DIR, "ACAP", "axis_snapshot.jpg")
-DEFAULT_VIDEO_URL = AXIS_SNAPSHOT
+DEFAULT_VIDEO_URL = "https://www.youtube.com/watch?v=Ellzen6Z7t8&t=191s"
 LOCAL_VIDEO_FALLBACK = os.path.join(ROOT_DIR, "videos", "CamAI_Enterprise_Demo_50s.mp4")
 LOCAL_IMAGE_FALLBACK = AXIS_SNAPSHOT
 
@@ -109,8 +109,8 @@ def get_playable_stream(video_url):
     """Resolve Axis camera stream, local image/video or direct media stream."""
     print(f"[*] Resolving video stream source: {video_url}", flush=True)
 
-    if not video_url or video_url == "default" or "youtube" in str(video_url).lower():
-        video_url = AXIS_SNAPSHOT
+    if not video_url or video_url == "default":
+        video_url = DEFAULT_VIDEO_URL
 
     # Check if local image
     if os.path.exists(video_url) and (video_url.lower().endswith(('.jpg', '.jpeg', '.png', '.bmp'))):
