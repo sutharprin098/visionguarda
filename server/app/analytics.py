@@ -53,14 +53,14 @@ PRODUCIBLE_ANIMAL_CLASSES = {"dog", "cat", "cow", "horse", "sheep"}
 PRODUCIBLE_PPE_CLASSES = {"helmet", "no_helmet", "vest", "no_vest", "gloves", "shoes", "mask", "goggles", "fire", "smoke", "forklift"}
 
 PROFILE_CLASSES = {
-    "traffic": set(PRODUCIBLE_VEHICLE_CLASSES) | {"person", "traffic_light", "stop_sign", "helmet", "no_helmet", "number_plate", "fire", "smoke"},
-    "security": set(PRODUCIBLE_VEHICLE_CLASSES) | set(PRODUCIBLE_ANIMAL_CLASSES) | {"person", "backpack", "handbag", "suitcase", "umbrella", "face", "fire", "smoke", "micro_motion"},
-    "factory": set(PRODUCIBLE_VEHICLE_CLASSES) | set(PRODUCIBLE_ANIMAL_CLASSES) | {"person", "face", "helmet", "no_helmet", "vest", "no_vest", "gloves", "shoes", "mask", "goggles", "fire", "smoke", "forklift", "number_plate"},
-    "retail": set(PRODUCIBLE_VEHICLE_CLASSES) | {"person", "backpack", "handbag", "suitcase", "cell phone", "face", "number_plate"},
-    "smart_city": set(PRODUCIBLE_VEHICLE_CLASSES) | set(PRODUCIBLE_ANIMAL_CLASSES) | {"person", "traffic_light", "stop_sign", "fire", "smoke", "number_plate", "helmet", "no_helmet", "face"},
-    "micro_motion": set(PRODUCIBLE_VEHICLE_CLASSES) | set(PRODUCIBLE_ANIMAL_CLASSES) | {"person", "backpack", "handbag", "suitcase", "umbrella", "face", "micro_motion"},
-    "night": set(PRODUCIBLE_VEHICLE_CLASSES) | set(PRODUCIBLE_ANIMAL_CLASSES) | {"person", "face", "number_plate", "helmet", "no_helmet", "micro_motion"},
-    "custom": set(PRODUCIBLE_VEHICLE_CLASSES) | set(PRODUCIBLE_ANIMAL_CLASSES) | {"person", "backpack", "handbag", "suitcase", "umbrella", "face", "custom_object", "fire", "smoke", "helmet", "vest", "number_plate", "micro_motion"},
+    "traffic": set(PRODUCIBLE_VEHICLE_CLASSES) | {"person", "traffic_light", "stop_sign", "helmet", "no_helmet", "number_plate", "fire", "smoke", "micro_motion", "cell phone"},
+    "security": set(PRODUCIBLE_VEHICLE_CLASSES) | set(PRODUCIBLE_ANIMAL_CLASSES) | {"person", "backpack", "handbag", "suitcase", "umbrella", "face", "fire", "smoke", "micro_motion", "number_plate", "helmet", "no_helmet", "cell phone"},
+    "factory": set(PRODUCIBLE_VEHICLE_CLASSES) | set(PRODUCIBLE_ANIMAL_CLASSES) | {"person", "face", "helmet", "no_helmet", "vest", "no_vest", "gloves", "shoes", "mask", "goggles", "fire", "smoke", "forklift", "number_plate", "micro_motion", "cell phone"},
+    "retail": set(PRODUCIBLE_VEHICLE_CLASSES) | {"person", "backpack", "handbag", "suitcase", "cell phone", "face", "number_plate", "micro_motion"},
+    "smart_city": set(PRODUCIBLE_VEHICLE_CLASSES) | set(PRODUCIBLE_ANIMAL_CLASSES) | {"person", "traffic_light", "stop_sign", "fire", "smoke", "number_plate", "helmet", "no_helmet", "face", "micro_motion", "cell phone"},
+    "micro_motion": set(PRODUCIBLE_VEHICLE_CLASSES) | set(PRODUCIBLE_ANIMAL_CLASSES) | {"person", "backpack", "handbag", "suitcase", "umbrella", "face", "micro_motion", "number_plate", "helmet", "cell phone"},
+    "night": set(PRODUCIBLE_VEHICLE_CLASSES) | set(PRODUCIBLE_ANIMAL_CLASSES) | {"person", "face", "number_plate", "helmet", "no_helmet", "micro_motion", "cell phone"},
+    "custom": set(PRODUCIBLE_VEHICLE_CLASSES) | set(PRODUCIBLE_ANIMAL_CLASSES) | {"person", "backpack", "handbag", "suitcase", "umbrella", "face", "custom_object", "fire", "smoke", "helmet", "vest", "number_plate", "micro_motion", "cell phone", "laptop", "bottle"},
 }
 
 
@@ -233,7 +233,9 @@ def filter_by_profile(detections, zone_profile):
     return [
         d for d in detections
         if d.get("class") in allowed
-        or (d.get("custom_match") and ("face" in allowed or "person" in allowed))
+        or str(d.get("class", "")).lower() in allowed
+        or d.get("module") in ("micro_motion", "custom_detector", "night_vision")
+        or (d.get("custom_match") and ("face" in allowed or "person" in allowed or "custom_object" in allowed))
     ]
 
 

@@ -274,9 +274,9 @@ class LightweightKalmanFilter:
         x1, y1, x2, y2 = bbox
         cx = (x1 + x2) / 2.0
         cy = (y1 + y2) / 2.0
-        w  = max(1.0, x2 - x1)
-        h  = max(1.0, y2 - y1)
-        a  = w / h
+        w  = max(1e-4, x2 - x1)
+        h  = max(1e-4, y2 - y1)
+        a  = w / max(1e-4, h)
 
         self.state = np.array([cx, cy, a, h, 0, 0, 0, 0], dtype=np.float32)
         self.covariance  = np.eye(8, dtype=np.float32) * 10.0
@@ -309,8 +309,8 @@ class LightweightKalmanFilter:
     def update(self, bbox):
         x1, y1, x2, y2 = bbox
         cx = (x1 + x2) / 2.0; cy = (y1 + y2) / 2.0
-        w  = max(1.0, x2 - x1); h = max(1.0, y2 - y1)
-        z  = np.array([cx, cy, w / h, h], dtype=np.float32)
+        w  = max(1e-4, x2 - x1); h = max(1e-4, y2 - y1)
+        z  = np.array([cx, cy, w / max(1e-4, h), h], dtype=np.float32)
         y  = z - np.dot(self.measurement, self.state)
         S  = np.dot(np.dot(self.measurement, self.covariance), self.measurement.T) + self.measurement_noise
         K  = np.dot(np.dot(self.covariance, self.measurement.T), np.linalg.inv(S))
@@ -323,7 +323,7 @@ class LightweightKalmanFilter:
         c = self._bbox_cache
         if c is None:
             cx, cy, a, h = self.state[0:4]
-            h = max(1.0, float(h)); a = max(0.1, float(a)); w = a * h
+            h = max(1e-4, float(h)); a = max(1e-4, float(a)); w = a * h
             c = self._bbox_cache = (cx - w/2, cy - h/2, cx + w/2, cy + h/2)
         return [c[0], c[1], c[2], c[3]]
 
@@ -345,11 +345,17 @@ class AppearanceEmbedder:
 
     @staticmethod
     def extract(frame, bbox):
-        if frame is None:
+        if frame is None or bbox is None:
             return None
         h, w = frame.shape[:2]
-        x1 = max(0, min(w - 1, int(bbox[0]))); x2 = max(x1 + 1, min(w, int(bbox[2])))
-        y1 = max(0, min(h - 1, int(bbox[1]))); y2 = max(y1 + 1, min(h, int(bbox[3])))
+        is_norm = max(abs(float(b)) for b in bbox) <= 1.05
+        if is_norm:
+            bx1, by1 = bbox[0] * w, bbox[1] * h
+            bx2, by2 = bbox[2] * w, bbox[3] * h
+        else:
+            bx1, by1, bx2, by2 = bbox[0], bbox[1], bbox[2], bbox[3]
+        x1 = max(0, min(w - 1, int(bx1))); x2 = max(x1 + 1, min(w, int(bx2)))
+        y1 = max(0, min(h - 1, int(by1))); y2 = max(y1 + 1, min(h, int(by2)))
         crop = frame[y1:y2, x1:x2]
         if crop.size == 0:
             return None
@@ -900,10 +906,21 @@ def resolve_emitted_detections(tracker, tracks_raw, detections, masks,
         })
         out_masks.append([])
 
-    # Unmatched raw detections are dropped. Only tracker-owned IDs are emitted;
-
-    # Coasting tracks are suppressed for live detection output per Rule 1:
-    # Only render/emit tracks with a current-frame detector match (time_since_update == 0).
+    # Emit fresh raw detections that were not claimed by existing confirmed tracks
+    for di, det in enumerate(detections):
+        if di not in det_to_track:
+            fresh_det = dict(det)
+            if "tracking_status" not in fresh_det:
+                fresh_det["tracking_status"] = "detected"
+            if "dwell_time" not in fresh_det:
+                fresh_det["dwell_time"] = 0.0
+            if "track_id" not in fresh_det or fresh_det["track_id"] is None:
+                for t in getattr(tracker, "tracks", []):
+                    if t.time_since_update == 0 and (t.class_name == det.get("class") or _classes_compatible(t.class_name, det.get("class"))):
+                        fresh_det["track_id"] = t.track_id
+                        break
+            out_dets.append(fresh_det)
+            out_masks.append(masks[di] if masks_parallel else [])
 
     # Final safety net against "N boxes on one object". A single person can end
     if len(out_dets) > 1:

@@ -17,6 +17,7 @@ Dashboard: http://127.0.0.1:8000/local/camai_acap/index.html
 """
 import sys
 import os
+os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "timeout;3000000|stimeout;3000000|rtsp_transport;tcp|fflags;nobuffer|flags;low_delay|max_delay;500000"
 import time
 import base64
 import threading
@@ -106,19 +107,19 @@ def ensure_server_running():
 
 def get_playable_stream(video_url):
     """Resolve Axis camera stream, local image/video or direct media stream."""
-    print(f"[*] Resolving video stream source: {video_url}")
+    print(f"[*] Resolving video stream source: {video_url}", flush=True)
 
     if not video_url or video_url == "default" or "youtube" in str(video_url).lower():
         video_url = AXIS_SNAPSHOT
 
     # Check if local image
     if os.path.exists(video_url) and (video_url.lower().endswith(('.jpg', '.jpeg', '.png', '.bmp'))):
-        print(f"[+] Loading Axis Camera Snapshot stream: {video_url}")
+        print(f"[+] Loading Axis Camera Snapshot stream: {video_url}", flush=True)
         return ImageStreamCapture(video_url), video_url
 
     # Check if local video
     if os.path.exists(video_url) and (video_url.lower().endswith(('.mp4', '.avi', '.mkv', '.mov'))):
-        print(f"[+] Loading local camera video feed: {video_url}")
+        print(f"[+] Loading local camera video feed: {video_url}", flush=True)
         cap = cv2.VideoCapture(video_url)
         if cap.isOpened():
             return cap, video_url
@@ -128,20 +129,21 @@ def get_playable_stream(video_url):
         try:
             if needs_resolution(video_url):
                 direct = resolve(video_url)
-                print(f"[+] Resolved direct media stream URL: {direct[:80]}...")
-                cap = cv2.VideoCapture(direct)
+                print(f"[+] Resolved direct media stream URL: {direct[:80]}...", flush=True)
+                cap = cv2.VideoCapture(direct, cv2.CAP_FFMPEG)
                 if cap.isOpened():
                     return cap, video_url
             else:
-                cap = cv2.VideoCapture(video_url)
+                print(f"[+] Connecting to camera stream: {video_url}", flush=True)
+                cap = cv2.VideoCapture(video_url, cv2.CAP_FFMPEG)
                 if cap.isOpened():
                     return cap, video_url
         except Exception as e:
-            print(f"[!] Online stream resolution notice: {e}")
+            print(f"[!] Online stream resolution notice: {e}", flush=True)
 
     # Fallback to Axis snapshot
     if os.path.exists(AXIS_SNAPSHOT):
-        print(f"[+] Fallback to Axis Camera Snapshot: {AXIS_SNAPSHOT}")
+        print(f"[+] Fallback to Axis Camera Snapshot: {AXIS_SNAPSHOT}", flush=True)
         return ImageStreamCapture(AXIS_SNAPSHOT), AXIS_SNAPSHOT
 
     return None, "None"
@@ -224,14 +226,14 @@ def run_acap_live_pipeline(video_url=DEFAULT_VIDEO_URL, server_url="http://127.0
 
     cap, active_src = get_playable_stream(video_url)
     if not cap or not cap.isOpened():
-        print("[!] ERROR: Could not open video stream source.")
+        print("[!] ERROR: Could not open video stream source.", flush=True)
         return
 
     src_fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
     src_w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     src_h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-    print(f"[+] Source: {src_w}x{src_h} @ {src_fps:.1f} FPS")
-    print(f"[+] Dashboard: {server_url}/local/camai_acap/index.html\n")
+    print(f"[+] Source: {src_w}x{src_h} @ {src_fps:.1f} FPS", flush=True)
+    print(f"[+] Dashboard: {server_url}/local/camai_acap/index.html\n", flush=True)
 
     _running = True
 
