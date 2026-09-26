@@ -377,9 +377,19 @@ def build_eap_for_arch(arch):
         for d in dest_dirs:
             if os.path.exists(d):
                 fp = os.path.join(d, fn)
-                with open(fp, 'wb') as f:
-                    f.write(eap_bytes)
-                print(f" -> Deployed: {fp}")
+                tmp_fp = os.path.join(d, f"{fn}.tmp")
+                try:
+                    with open(tmp_fp, 'wb') as f:
+                        f.write(eap_bytes)
+                    if os.path.exists(fp):
+                        try:
+                            os.remove(fp)
+                        except Exception:
+                            pass
+                    os.replace(tmp_fp, fp)
+                    print(f" -> Deployed: {fp}")
+                except Exception as e:
+                    print(f" -> Deploy warning for {fp}: {e}")
 
     print(f"[SUCCESS] Built {arch} packages ({len(eap_bytes)} bytes)")
     return filenames[0]

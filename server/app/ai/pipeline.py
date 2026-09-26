@@ -389,7 +389,7 @@ class Track:
     object's entire time in view, not one ID per detection streak.
     """
     def __init__(self, track_id, bbox, class_name, confidence, embedding=None, n_init=2,
-                 custom_match=False, target_name=None, target_id=None, track_label=None):
+                 custom_match=False, target_name=None, target_id=None, track_label=None, face_matched=False):
         self.track_id   = track_id
         self.class_name = class_name
         self._class_votes = deque([class_name], maxlen=7)
@@ -409,6 +409,7 @@ class Track:
         self.target_name = target_name
         self.target_id = target_id
         self.track_label = track_label
+        self.face_matched = face_matched
 
         # Tracker-clock reading of the last match. `time_since_update` counts
         self.last_clock = 0.0
@@ -427,14 +428,18 @@ class Track:
         return self.kf.predict(dt)
 
     def _vote_class(self, class_name):
-        if class_name:
-            c_str = str(class_name).lower()
-            if c_str.startswith("target:") or "target" in c_str or "vip" in c_str:
-                self.class_name = class_name
-                self.custom_match = True
-                self._class_votes.append(class_name)
-            else:
-                self._class_votes.append(class_name)
+        if not class_name:
+            return
+        c_str = str(class_name).lower()
+        if c_str.startswith("target:") or "target" in c_str or "vip" in c_str:
+            self.class_name = class_name
+            self.custom_match = True
+            self._class_votes.append(class_name)
+        else:
+            self._class_votes.append(class_name)
+            # CRITICAL: If this track is already recognized as a custom/target identity,
+            # do not allow generic "person" votes to overwrite the target identity.
+            if not self.custom_match and not str(self.class_name).lower().startswith("target:"):
                 self.class_name = max(set(self._class_votes), key=self._class_votes.count)
 
     def _blend_embedding(self, embedding, new_weight):
@@ -448,7 +453,7 @@ class Track:
         self.embedding = blended / norm if norm > 1e-6 else blended
 
     def update(self, bbox, confidence, embedding=None, class_name=None,
-               custom_match=False, target_name=None, target_id=None, track_label=None):
+               custom_match=False, target_name=None, target_id=None, track_label=None, face_matched=False):
         self.time_since_update = 0
         self.hits += 1
         self.confidence = confidence
@@ -459,26 +464,41 @@ class Track:
             if target_name: self.target_name = target_name
             if target_id: self.target_id = target_id
             if track_label: self.track_label = track_label
-            self.class_name = class_name or self.class_name
+            self.face_matched = face_matched
+            if class_name: self.class_name = class_name
+        elif self.custom_match:
+            # Persistent identity tracking: Face might not be visible in this frame,
+            # but body tracking continues under the SAME track ID and identity!
+            self.face_matched = False
+            if self.target_name and not str(self.class_name).lower().startswith("target:"):
+                self.class_name = f"TARGET: {self.target_name}"
+            if self.target_name and not self.track_label:
+                self.track_label = f"TARGET: {self.target_name} (ReID)"
         self._vote_class(class_name)
         self._blend_embedding(embedding, new_weight=0.15)
         if self.state == "tentative" and self.hits >= self.n_init:
             self.state = "confirmed"
 
-    def revive(self, bbox, confidence, embedding, class_name):
-        """Re-activate a track pulled from the lost gallery under its ORIGINAL id.
-
-        This is the re-identification path: the object was gone long enough
-        to leave the short-term occlusion window, but a new detection's
-        appearance matched it closely enough (see ByteTracker._reid_gate) to
-        be confident it's the same object, not a new one.
-        """
+    def revive(self, bbox, confidence, embedding, class_name,
+               custom_match=False, target_name=None, target_id=None, track_label=None, face_matched=False):
+        """Re-activate a track pulled from the lost gallery under its ORIGINAL id."""
         self.kf = LightweightKalmanFilter(bbox)
         self.time_since_update = 0
         self.hits += 1
         self.confidence = confidence
         self.last_seen = time.time()
         self.state = "confirmed"
+        if custom_match or (class_name and str(class_name).lower().startswith("target:")):
+            self.custom_match = True
+            if target_name: self.target_name = target_name
+            if target_id: self.target_id = target_id
+            if track_label: self.track_label = track_label
+            self.face_matched = face_matched
+            if class_name: self.class_name = class_name
+        elif self.custom_match:
+            self.face_matched = False
+            if self.target_name and not str(self.class_name).lower().startswith("target:"):
+                self.class_name = f"TARGET: {self.target_name}"
         self._vote_class(class_name)
         self._blend_embedding(embedding, new_weight=0.35)
 
@@ -491,27 +511,13 @@ class ByteTracker:
     Multi-object tracker built for ID persistence under occlusion, overlap,
     stopping, and lighting change:
 
-      1. Kalman constant-velocity motion prediction per track (unchanged).
-      2. Optimal (Hungarian / scipy linear_sum_assignment) data association
-         instead of greedy nearest-match — greedy matching is a well-known
-         source of avoidable ID switches whenever two tracks' candidate
-         detections overlap in ambiguous ways (crowds, crossing paths).
-      3. Appearance re-identification: every detection gets an HSV-histogram
-         embedding; association cost fuses IoU with appearance distance, and
-         weighting shifts toward appearance the longer a track has gone
-         unmatched (motion prediction alone drifts increasingly wrong the
-         longer an object is occluded).
-      4. A "lost gallery": tracks that exceed the short active-occlusion
-         window move into long-term memory (id, last embedding, class,
-         first_seen) instead of being deleted. New detections that don't
-         match any active track are checked against the gallery — on an
-         appearance + spatial match, the ORIGINAL id is revived rather than
-         minting a new one. This is what lets an object that fully leaves
-         Kalman's prediction window (walked behind a truck for 4 seconds,
-         say) keep its ID when it reappears.
+      1. Kalman constant-velocity motion prediction per track.
+      2. Optimal (Hungarian / scipy linear_sum_assignment) data association.
+      3. Appearance re-identification with HSV-histogram embedding.
+      4. A "lost gallery" with persistent identity retention across occlusion.
     """
 
-    # Bhattacharyya distance threshold for gallery re-identification. Same
+    # Bhattacharyya distance threshold for gallery re-identification.
     _REID_APPEARANCE_GATE = 0.40
     # Cap how far (as a fraction of the frame diagonal) a revived track's new
     _REID_SPATIAL_GATE = 0.5
@@ -537,19 +543,13 @@ class ByteTracker:
         xA = max(boxA[0], boxB[0]); yA = max(boxA[1], boxB[1])
         xB = min(boxA[2], boxB[2]); yB = min(boxA[3], boxB[3])
         inter = max(0.0, xB - xA) * max(0.0, yB - yA)
-        areaA = (boxA[2]-boxA[0]) * (boxA[3]-boxA[1])
-        areaB = (boxB[2]-boxB[0]) * (boxB[3]-boxB[1])
-        return inter / max(1.0, areaA + areaB - inter)
+        areaA = max(0.0, boxA[2] - boxA[0]) * max(0.0, boxA[3] - boxA[1])
+        areaB = max(0.0, boxB[2] - boxB[0]) * max(0.0, boxB[3] - boxB[1])
+        return inter / max(1e-6, areaA + areaB - inter)
 
     @staticmethod
     def _hungarian_match(tracks, dets, iou_gate, w_iou, w_app, app_gate=None, spatial_gate=None, frame_diag=None):
-        """Optimal assignment on a fused IoU + appearance cost, with hard gates.
-
-        Invalid pairs (class mismatch, or failing a gate) get a sentinel cost
-        strictly above any achievable real cost (max 1.0), so Hungarian only
-        ever falls back to them when no valid pairing exists to complete the
-        assignment — then the post-hoc validity check discards those.
-        """
+        """Optimal assignment on a fused IoU + appearance cost, with hard gates."""
         n_t, n_d = len(tracks), len(dets)
         if n_t == 0 or n_d == 0:
             return [], [], list(range(n_t)), list(range(n_d))
@@ -560,9 +560,9 @@ class ByteTracker:
             for di, d in enumerate(dets):
                 if t.class_name == d["class"]:
                     class_penalty = 0.0
-                elif _vehicle_classes_compatible(t.class_name, d["class"]):
-                    # Detectors routinely flip a single real vehicle between
-                    class_penalty = 0.15
+                elif _classes_compatible(t.class_name, d["class"]):
+                    # Small penalty for compatible transitions (e.g. TARGET: Prince <-> person or car <-> truck)
+                    class_penalty = 0.05
                 else:
                     continue
                 # Gates are ordered cheapest-first, and each is skipped when it
@@ -612,7 +612,17 @@ class ByteTracker:
             b = det["bbox"]
             bbox = [b["x1"], b["y1"], b["x2"], b["y2"]]
             embedding = AppearanceEmbedder.extract(frame, bbox)
-            item = {"bbox": bbox, "class": det["class"], "confidence": det["confidence"], "embedding": embedding}
+            item = {
+                "bbox": bbox,
+                "class": det["class"],
+                "confidence": det["confidence"],
+                "embedding": embedding,
+                "custom_match": det.get("custom_match", False),
+                "target_name": det.get("target_name"),
+                "target_id": det.get("target_id"),
+                "track_label": det.get("track_label") or det.get("label"),
+                "face_matched": det.get("face_matched", False),
+            }
             if det["confidence"] >= conf_thresh:
                 high_dets.append(item)
             elif det["confidence"] >= 0.08:
@@ -632,7 +642,14 @@ class ByteTracker:
         matched_track_objs = set()
         for ti, di in zip(m_t, m_d):
             trk, det = active_tracks[ti], high_dets[di]
-            trk.update(det["bbox"], det["confidence"], det["embedding"], det["class"])
+            trk.update(
+                det["bbox"], det["confidence"], det["embedding"], det["class"],
+                custom_match=det.get("custom_match", False),
+                target_name=det.get("target_name"),
+                target_id=det.get("target_id"),
+                track_label=det.get("track_label"),
+                face_matched=det.get("face_matched", False),
+            )
             matched_track_objs.add(id(trk))
         rem_high   = [high_dets[i] for i in un_d]
         rem_active = [t for t in active_tracks if id(t) not in matched_track_objs]
@@ -648,7 +665,14 @@ class ByteTracker:
         )
         for ti, di in zip(m_t2, m_d2):
             trk, det = stage2_pool[ti], rem_high[di]
-            trk.update(det["bbox"], det["confidence"], det["embedding"], det["class"])
+            trk.update(
+                det["bbox"], det["confidence"], det["embedding"], det["class"],
+                custom_match=det.get("custom_match", False),
+                target_name=det.get("target_name"),
+                target_id=det.get("target_id"),
+                track_label=det.get("track_label"),
+                face_matched=det.get("face_matched", False),
+            )
             matched_track_objs.add(id(trk))
         rem_high2 = [rem_high[i] for i in un_d2]
         rem_unmatched_tracks = [stage2_pool[i] for i in un_t2]
@@ -657,7 +681,14 @@ class ByteTracker:
         m_t3, m_d3, _, _ = self._hungarian_match(rem_unmatched_tracks, low_dets, iou_gate=0.1, w_iou=1.0, w_app=0.0)
         for ti, di in zip(m_t3, m_d3):
             trk, det = rem_unmatched_tracks[ti], low_dets[di]
-            trk.update(det["bbox"], det["confidence"], det.get("embedding"), det["class"])
+            trk.update(
+                det["bbox"], det["confidence"], det.get("embedding"), det["class"],
+                custom_match=det.get("custom_match", False),
+                target_name=det.get("target_name"),
+                target_id=det.get("target_id"),
+                track_label=det.get("track_label"),
+                face_matched=det.get("face_matched", False),
+            )
 
         # Stage 4: gallery re-identification before minting new IDs.
         still_unmatched_high = rem_high2
@@ -672,7 +703,14 @@ class ByteTracker:
             revived_det_idx = set()
             for ti, di in zip(g_t, g_d):
                 trk, det = gallery_tracks[ti], still_unmatched_high[di]
-                trk.revive(det["bbox"], det["confidence"], det["embedding"], det["class"])
+                trk.revive(
+                    det["bbox"], det["confidence"], det["embedding"], det["class"],
+                    custom_match=det.get("custom_match", False),
+                    target_name=det.get("target_name"),
+                    target_id=det.get("target_id"),
+                    track_label=det.get("track_label"),
+                    face_matched=det.get("face_matched", False),
+                )
                 self.tracks.append(trk)
                 del self.lost_gallery[trk.track_id]
                 revived_det_idx.add(di)
@@ -680,8 +718,15 @@ class ByteTracker:
 
         # Mint new tracks for unmatched high-confidence detections.
         for det in still_unmatched_high:
-            self.tracks.append(Track(self.next_track_id, det["bbox"], det["class"], det["confidence"],
-                                      embedding=det["embedding"], n_init=self.n_init))
+            self.tracks.append(Track(
+                self.next_track_id, det["bbox"], det["class"], det["confidence"],
+                embedding=det["embedding"], n_init=self.n_init,
+                custom_match=det.get("custom_match", False),
+                target_name=det.get("target_name"),
+                target_id=det.get("target_id"),
+                track_label=det.get("track_label"),
+                face_matched=det.get("face_matched", False),
+            ))
             self.next_track_id += 1
 
         # Stamp the tracker clock on everything matched, revived or created
@@ -711,11 +756,11 @@ class ByteTracker:
                 iou = self._compute_iou(bi, bj)
                 ci_x, ci_y = (bi[0] + bi[2]) / 2.0, (bi[1] + bi[3]) / 2.0
                 cj_x, cj_y = (bj[0] + bj[2]) / 2.0, (bj[1] + bj[3]) / 2.0
-                wi, hi = max(1.0, bi[2] - bi[0]), max(1.0, bi[3] - bi[1])
-                wj, hj = max(1.0, bj[2] - bj[0]), max(1.0, bj[3] - bj[1])
+                wi, hi = max(1e-6, bi[2] - bi[0]), max(1e-6, bi[3] - bi[1])
+                wj, hj = max(1e-6, bj[2] - bj[0]), max(1e-6, bj[3] - bj[1])
                 cdist = ((ci_x - cj_x) ** 2 + (ci_y - cj_y) ** 2) ** 0.5
-                max_reach = max(wi, hi, wj, hj) * 0.75
-                if iou >= DUP_IOU_THRESH or cdist <= max_reach:
+                max_reach = min(max(wi, hi, wj, hj) * 0.75, 0.40)
+                if iou >= DUP_IOU_THRESH or (cdist <= max_reach and iou > 0.10):
                     dup = tj if ti.hits >= tj.hits else ti
                     merged_ids.add(dup.track_id)
         if merged_ids:
@@ -748,7 +793,7 @@ class ByteTracker:
             if t.time_since_update == 0 and t.state == "confirmed":
                 bbox = t.get_bbox()
                 is_norm = max(abs(float(bbox[0])), abs(float(bbox[1])), abs(float(bbox[2])), abs(float(bbox[3]))) <= 1.0
-                out.append({
+                item = {
                     "track_id":  t.track_id,
                     "class":     t.class_name,
                     "confidence": round(float(t.confidence), 2),
@@ -760,7 +805,15 @@ class ByteTracker:
                         "x2": round(float(bbox[2]), 4) if is_norm else round(float(bbox[2]), 1),
                         "y2": round(float(bbox[3]), 4) if is_norm else round(float(bbox[3]), 1),
                     }
-                })
+                }
+                if getattr(t, "custom_match", False):
+                    item["custom_match"] = True
+                    if getattr(t, "target_name", None): item["target_name"] = t.target_name
+                    if getattr(t, "target_id", None): item["target_id"] = t.target_id
+                    if getattr(t, "track_label", None): item["label"] = t.track_label
+                    item["face_matched"] = getattr(t, "face_matched", False)
+                    item["reid_active"] = True
+                out.append(item)
         return out
 
     def predict_only(self, dt=None):
@@ -785,7 +838,7 @@ class ByteTracker:
                 continue
             bbox = t.get_bbox()
             is_norm = max(abs(float(bbox[0])), abs(float(bbox[1])), abs(float(bbox[2])), abs(float(bbox[3]))) <= 1.0
-            out.append({
+            item = {
                 "track_id":  t.track_id,
                 "class":     t.class_name,
                 "confidence": round(float(t.confidence), 2),
@@ -797,7 +850,15 @@ class ByteTracker:
                     "x2": round(float(bbox[2]), 4) if is_norm else round(float(bbox[2]), 1),
                     "y2": round(float(bbox[3]), 4) if is_norm else round(float(bbox[3]), 1),
                 }
-            })
+            }
+            if getattr(t, "custom_match", False):
+                item["custom_match"] = True
+                if getattr(t, "target_name", None): item["target_name"] = t.target_name
+                if getattr(t, "target_id", None): item["target_id"] = t.target_id
+                if getattr(t, "track_label", None): item["label"] = t.track_label
+                item["face_matched"] = getattr(t, "face_matched", False)
+                item["reid_active"] = True
+            out.append(item)
         return out
 
 COAST_RENDER_SECONDS = 1.2
@@ -847,9 +908,15 @@ def resolve_emitted_detections(tracker, tracks_raw, detections, masks,
             det["tracking_status"] = "tracked"
             if trk_obj and getattr(trk_obj, "custom_match", False):
                 det["custom_match"] = True
-                if getattr(trk_obj, "target_name", None): det["target_name"] = trk_obj.target_name
-                if getattr(trk_obj, "target_id", None): det["target_id"] = trk_obj.target_id
-                if getattr(trk_obj, "track_label", None): det["label"] = trk_obj.track_label
+                if getattr(trk_obj, "target_name", None):
+                    det["target_name"] = trk_obj.target_name
+                    det["class"] = f"TARGET: {trk_obj.target_name}"
+                if getattr(trk_obj, "target_id", None):
+                    det["target_id"] = trk_obj.target_id
+                if getattr(trk_obj, "track_label", None):
+                    det["label"] = trk_obj.track_label
+                det["face_matched"] = getattr(trk_obj, "face_matched", False)
+                det["reid_active"] = True
             out_dets.append(det)
             out_masks.append(masks[di] if masks_parallel else [])
         else:
@@ -872,9 +939,15 @@ def resolve_emitted_detections(tracker, tracks_raw, detections, masks,
             }
             if trk_obj and getattr(trk_obj, "custom_match", False):
                 coasted["custom_match"] = True
-                if getattr(trk_obj, "target_name", None): coasted["target_name"] = trk_obj.target_name
-                if getattr(trk_obj, "target_id", None): coasted["target_id"] = trk_obj.target_id
-                if getattr(trk_obj, "track_label", None): coasted["label"] = trk_obj.track_label
+                if getattr(trk_obj, "target_name", None):
+                    coasted["target_name"] = trk_obj.target_name
+                    coasted["class"] = f"TARGET: {trk_obj.target_name}"
+                if getattr(trk_obj, "target_id", None):
+                    coasted["target_id"] = trk_obj.target_id
+                if getattr(trk_obj, "track_label", None):
+                    coasted["label"] = trk_obj.track_label
+                coasted["face_matched"] = getattr(trk_obj, "face_matched", False)
+                coasted["reid_active"] = True
             out_dets.append(coasted)
             out_masks.append([])
 
@@ -896,14 +969,26 @@ def resolve_emitted_detections(tracker, tracks_raw, detections, masks,
         if not is_norm and (x1 <= 15 or y1 <= 15 or x2 >= 1905 or y2 >= 1065):
             continue
 
-        out_dets.append({
+        c_det = {
             "class": t.class_name,
             "confidence": round(float(t.confidence), 2),
             "track_id": t.track_id,
             "dwell_time": round(time.time() - t.first_seen, 1),
             "bbox": {"x1": x1, "y1": y1, "x2": x2, "y2": y2},
             "tracking_status": "coasting",
-        })
+        }
+        if getattr(t, "custom_match", False):
+            c_det["custom_match"] = True
+            if getattr(t, "target_name", None):
+                c_det["target_name"] = t.target_name
+                c_det["class"] = f"TARGET: {t.target_name}"
+            if getattr(t, "target_id", None):
+                c_det["target_id"] = t.target_id
+            if getattr(t, "track_label", None):
+                c_det["label"] = t.track_label
+            c_det["face_matched"] = getattr(t, "face_matched", False)
+            c_det["reid_active"] = True
+        out_dets.append(c_det)
         out_masks.append([])
 
     # Emit fresh raw detections that were not claimed by existing confirmed tracks
@@ -943,11 +1028,11 @@ def resolve_emitted_detections(tracker, tracks_raw, detections, masks,
                 iou = tracker._compute_iou(box_i, box_j)
                 ci_x, ci_y = (box_i[0] + box_i[2]) / 2.0, (box_i[1] + box_i[3]) / 2.0
                 cj_x, cj_y = (box_j[0] + box_j[2]) / 2.0, (box_j[1] + box_j[3]) / 2.0
-                wi, hi = max(1.0, box_i[2] - box_i[0]), max(1.0, box_i[3] - box_i[1])
-                wj, hj = max(1.0, box_j[2] - box_j[0]), max(1.0, box_j[3] - box_j[1])
+                wi, hi = max(1e-6, box_i[2] - box_i[0]), max(1e-6, box_i[3] - box_i[1])
+                wj, hj = max(1e-6, box_j[2] - box_j[0]), max(1e-6, box_j[3] - box_j[1])
                 cdist = ((ci_x - cj_x) ** 2 + (ci_y - cj_y) ** 2) ** 0.5
-                max_reach = max(wi, hi, wj, hj) * 0.75
-                if iou > 0.30 or cdist <= max_reach:
+                max_reach = min(max(wi, hi, wj, hj) * 0.75, 0.40)
+                if iou > 0.45 or (cdist <= max_reach and iou > 0.20):
                     dup = True
                     break
             if not dup:
@@ -1685,122 +1770,109 @@ class PipelineCoordinator:
         return default
 
     def _wants_face_detection(self) -> bool:
-        """Returns True ONLY if face_detection is explicitly toggled ON in profile_features."""
-        if self.profile_features:
+        if self.profile_features and "face_detection" in self.profile_features:
             return self._feature_enabled(self.profile_features, "face_detection", default=False)
-        return False
+        return self.zone_profile in ("security", "retail", "smart_city", "custom", "factory")
 
     def _wants_face_recognition(self) -> bool:
-        """Returns True ONLY if face_recognition, vip_face, or customer_demographics is explicitly toggled ON."""
-        if self.profile_features:
+        if self.profile_features and any(k in self.profile_features for k in ("face_recognition", "vip_face", "customer_demographics")):
             return (
                 self._feature_enabled(self.profile_features, "face_recognition", default=False)
                 or self._feature_enabled(self.profile_features, "vip_face", default=False)
                 or self._feature_enabled(self.profile_features, "customer_demographics", default=False)
             )
-        return False
+        return self.zone_profile in ("security", "retail", "custom")
 
     def _wants_faces(self) -> bool:
-        """Returns True if face_detection, face_recognition, vip_face, or customer_demographics is explicitly toggled ON."""
         return self._wants_face_detection() or self._wants_face_recognition()
 
     def _wants_helmet(self) -> bool:
-        """Returns True ONLY if helmet_detection or twowheeler_safety_helmet is explicitly enabled in profile_features."""
-        if self.profile_features:
+        if self.profile_features and any(k in self.profile_features for k in ("helmet_detection", "twowheeler_safety_helmet", "ppe_detection")):
             return (
                 self._feature_enabled(self.profile_features, "helmet_detection", default=False)
                 or self._feature_enabled(self.profile_features, "twowheeler_safety_helmet", default=False)
+                or self._feature_enabled(self.profile_features, "ppe_detection", default=False)
             )
-        return False
+        return self.zone_profile in ("traffic", "factory", "smart_city", "security", "custom")
 
     def _wants_ppe(self) -> bool:
-        """Returns True ONLY if ppe_detection is explicitly enabled in profile_features."""
-        if self.profile_features:
+        if self.profile_features and "ppe_detection" in self.profile_features:
             return self._feature_enabled(self.profile_features, "ppe_detection", default=False)
-        return False
+        return self.zone_profile in ("factory", "custom")
 
     def _wants_vest(self) -> bool:
-        """Returns True ONLY if safety_vest is explicitly enabled in profile_features."""
-        if self.profile_features:
-            return self._feature_enabled(self.profile_features, "safety_vest", default=False)
-        return False
+        if self.profile_features and ("safety_vest" in self.profile_features or "ppe_detection" in self.profile_features):
+            return self._feature_enabled(self.profile_features, "safety_vest", default=False) or self._feature_enabled(self.profile_features, "ppe_detection", default=False)
+        return self.zone_profile in ("factory", "custom")
 
     def _wants_gloves(self) -> bool:
-        """Returns True ONLY if gloves is explicitly enabled in profile_features."""
-        if self.profile_features:
-            return self._feature_enabled(self.profile_features, "gloves", default=False)
-        return False
+        if self.profile_features and ("gloves" in self.profile_features or "ppe_detection" in self.profile_features):
+            return self._feature_enabled(self.profile_features, "gloves", default=False) or self._feature_enabled(self.profile_features, "ppe_detection", default=False)
+        return self.zone_profile in ("factory", "custom")
 
     def _wants_shoes(self) -> bool:
-        """Returns True ONLY if safety_shoes or shoes is explicitly enabled in profile_features."""
-        if self.profile_features:
+        if self.profile_features and any(k in self.profile_features for k in ("safety_shoes", "shoes", "ppe_detection")):
             return (
                 self._feature_enabled(self.profile_features, "safety_shoes", default=False)
                 or self._feature_enabled(self.profile_features, "shoes", default=False)
+                or self._feature_enabled(self.profile_features, "ppe_detection", default=False)
             )
-        return False
+        return self.zone_profile in ("factory", "custom")
 
     def _wants_zero_dce(self) -> bool:
-        """Returns True ONLY if zero_dce or night_vision is explicitly enabled in profile_features."""
-        if self.profile_features:
+        if self.profile_features and any(k in self.profile_features for k in ("zero_dce", "night_vision_zero_dce", "night_vision")):
             return (
-                self._feature_enabled(self.profile_features, "zero_dce", default=False)
-                or self._feature_enabled(self.profile_features, "night_vision_zero_dce", default=False)
-                or self._feature_enabled(self.profile_features, "night_vision", default=False)
+                self._feature_enabled(self.profile_features, "zero_dce", default=True)
+                or self._feature_enabled(self.profile_features, "night_vision_zero_dce", default=True)
+                or self._feature_enabled(self.profile_features, "night_vision", default=True)
             )
-        return False
+        return True  # Auto-gated based on luminance across all standard profiles
 
     def _wants_fire(self) -> bool:
-        """Returns True ONLY if fire_detection or smoke_detection is enabled in profile_features."""
-        if self.profile_features:
+        if self.profile_features and any(k in self.profile_features for k in ("fire_detection", "smoke_detection")):
             return (
                 self._feature_enabled(self.profile_features, "fire_detection", default=False)
                 or self._feature_enabled(self.profile_features, "smoke_detection", default=False)
             )
-        return False
+        return self.zone_profile in ("security", "factory", "custom")
 
     def _wants_forklift(self) -> bool:
-        """Returns True ONLY if forklift_detection is enabled in profile_features."""
-        if self.profile_features:
+        if self.profile_features and "forklift_detection" in self.profile_features:
             return self._feature_enabled(self.profile_features, "forklift_detection", default=False)
-        return False
+        return self.zone_profile in ("factory", "custom")
 
     def _wants_machine_monitoring(self) -> bool:
-        """Returns True ONLY if machine_monitoring is enabled in profile_features."""
-        if self.profile_features:
+        if self.profile_features and "machine_monitoring" in self.profile_features:
             return self._feature_enabled(self.profile_features, "machine_monitoring", default=False)
-        return False
+        return self.zone_profile in ("factory", "custom")
 
     def _wants_conveyor_monitoring(self) -> bool:
-        """Returns True ONLY if conveyor_monitoring is enabled in profile_features."""
-        if self.profile_features:
+        if self.profile_features and "conveyor_monitoring" in self.profile_features:
             return self._feature_enabled(self.profile_features, "conveyor_monitoring", default=False)
-        return False
+        return self.zone_profile in ("factory", "custom")
 
     def _wants_anpr(self) -> bool:
-        """Returns True ONLY if ANPR feature is explicitly enabled in profile_features."""
-        if self.profile_features:
-            return self._feature_enabled(self.profile_features, "anpr", default=False)
-        return False
+        if self.profile_features and any(k in self.profile_features for k in ("anpr", "plate", "municipal_anpr")):
+            return self._feature_enabled(self.profile_features, "anpr", default=False) or self._feature_enabled(self.profile_features, "plate", default=False) or self._feature_enabled(self.profile_features, "municipal_anpr", default=False)
+        return self.zone_profile in ("traffic", "smart_city", "security", "custom")
 
     def _wants_micro_motion(self) -> bool:
-        """Returns True ONLY if micro_motion or micro_motion_hud is explicitly enabled in profile_features."""
-        if self.profile_features:
+        if self.profile_features and any(k in self.profile_features for k in ("micro_motion", "micro_motion_hud", "screen_motion")):
             return (
-                self._feature_enabled(self.profile_features, "micro_motion", default=False)
-                or self._feature_enabled(self.profile_features, "micro_motion_hud", default=False)
+                self._feature_enabled(self.profile_features, "micro_motion", default=True)
+                or self._feature_enabled(self.profile_features, "micro_motion_hud", default=True)
+                or self._feature_enabled(self.profile_features, "screen_motion", default=True)
             )
-        return False
+        return self.zone_profile in ("micro_motion", "security", "custom", "night", "smart_city", "traffic") or not self.profile_features
 
     def _wants_custom(self) -> bool:
-        """Returns True ONLY if custom_detector, custom_detection_zone, or detection_zone is explicitly enabled in profile_features."""
-        if self.profile_features:
+        if self.profile_features and any(k in self.profile_features for k in ("custom_detector", "custom_detection_zone", "detection_zone")):
             return (
                 self._feature_enabled(self.profile_features, "custom_detector", default=False)
                 or self._feature_enabled(self.profile_features, "custom_detection_zone", default=False)
                 or self._feature_enabled(self.profile_features, "detection_zone", default=False)
             )
-        return False
+        return self.zone_profile in ("custom", "security", "retail", "factory")
 
     def _wants_tracking(self) -> bool:
         """Returns True ONLY if multi-object tracking is enabled in profile_features."""
@@ -2576,15 +2648,6 @@ class PipelineCoordinator:
                 t_pre, t_post  = tile_res.t_pre, tile_res.t_post
                 t_inf          = tile_res.t_inf
 
-
-                if roi and detections:
-                    rx1, ry1, _, _ = roi
-                    for d in detections:
-                        if "bbox" in d and isinstance(d["bbox"], dict):
-                            d["bbox"]["x1"] += rx1
-                            d["bbox"]["x2"] += rx1
-                            d["bbox"]["y1"] += ry1
-                            d["bbox"]["y2"] += ry1
 
 
                 # Adaptive-resolution tuning below must see the cost of ONE

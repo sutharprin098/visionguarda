@@ -586,6 +586,27 @@ class PlateDetector:
                                     f"{len(keep_idx)} vehicle crop(s) examined")
         return out
 
+    def detect(self, frame: np.ndarray, camera_id: str = "") -> List[Dict[str, Any]]:
+        """Run plate detection directly on the full frame."""
+        self.last_reason = None
+        fh, fw = frame.shape[:2]
+        work, up = self._upscale(frame)
+        try:
+            dets, why = self._run(work)
+        except Exception as e:
+            self.last_error = str(e)
+            return []
+        if why:
+            self.last_reason = why
+        if not dets:
+            return []
+        if up != 1.0:
+            for d in dets:
+                for k in ("x1", "x2", "y1", "y2"):
+                    d["bbox"][k] /= up
+        self.read_text(frame, dets, camera_id=camera_id, frame=frame)
+        return dets
+
 
 _INSTANCE: Optional[PlateDetector] = None
 _LOAD_FAILED = False

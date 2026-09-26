@@ -432,6 +432,55 @@ class HelmetDetector:
                 continue
         return self._nms(out)
 
+    def detect(self, frame: np.ndarray) -> List[Dict[str, Any]]:
+        """Run helmet detection directly on the full frame."""
+        fh, fw = frame.shape[:2]
+        canvas, scale = _letterbox(frame, self.input_size)
+        rgb = cv2.cvtColor(canvas, cv2.COLOR_BGR2RGB)
+        try:
+            with self._lock:
+                outputs = self._run(rgb)
+                dets = self._decode(outputs, scale, 0, 0)
+            return self._nms(dets)
+        except Exception as e:
+            self.last_error = str(e)
+            return []
+
+    def detect_on_persons(self, frame: np.ndarray, person_boxes: List[Dict[str, float]]) -> List[Dict[str, Any]]:
+        """Run helmet detection on person bounding box crops (e.g. top portion / head region)."""
+        if not person_boxes:
+            return self.detect(frame)
+        fh, fw = frame.shape[:2]
+        out: List[Dict[str, Any]] = []
+        for pb in person_boxes:
+            px1, py1 = float(pb["x1"]), float(pb["y1"])
+            px2, py2 = float(pb["x2"]), float(pb["y2"])
+            pw, ph = px2 - px1, py2 - py1
+            if pw < _MIN_CROP_PX or ph < _MIN_CROP_PX:
+                continue
+            # focus on top 40% of person (head area) with horizontal padding
+            pad_x = pw * 0.15
+            cx1 = max(0, int(px1 - pad_x))
+            cy1 = max(0, int(py1 - ph * 0.1))
+            cx2 = min(fw, int(px2 + pad_x))
+            cy2 = min(fh, int(py1 + ph * 0.45))
+            if cx2 - cx1 < _MIN_CROP_PX or cy2 - cy1 < _MIN_CROP_PX:
+                continue
+            crop = frame[cy1:cy2, cx1:cx2]
+            if crop.size == 0:
+                continue
+            canvas, scale = _letterbox(crop, self.input_size)
+            rgb = cv2.cvtColor(canvas, cv2.COLOR_BGR2RGB)
+            try:
+                with self._lock:
+                    outputs = self._run(rgb)
+                    dets = self._decode(outputs, scale, cx1, cy1)
+                out.extend(dets)
+            except Exception as e:
+                self.last_error = str(e)
+                continue
+        return self._nms(out)
+
 
 _INSTANCE: Optional[HelmetDetector] = None
 _LOAD_FAILED = False

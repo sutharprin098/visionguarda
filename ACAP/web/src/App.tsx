@@ -1,6 +1,6 @@
 import { useEffect, useState, lazy, Suspense } from "react";
 import { canConfigure } from "./lib/rbac";
-import type { SyncBundle } from "./lib/sync";
+import { DEFAULT_OFFLINE_BUNDLE, type SyncBundle } from "./lib/sync";
 import AlertProvider from "./components/alerts/AlertProvider";
 
 import { Loader2 } from "lucide-react";
@@ -76,7 +76,7 @@ function SplashLoading({ title, subtitle }: { title: string; subtitle: string })
         {/* Footer info */}
         <div className="mt-6 flex items-center gap-2 text-[11px] font-medium text-slate-500">
           <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
-          <span>Local Engine & Encrypted Vault Active</span>
+          <span>Edge Vision Pipeline Online</span>
         </div>
       </div>
     </div>
@@ -84,12 +84,12 @@ function SplashLoading({ title, subtitle }: { title: string; subtitle: string })
 }
 
 export default function App() {
-  const [phase, setPhase] = useState<Phase>("booting");
+  const [phase, setPhase] = useState<Phase>("ready");
   // Known synchronously from preload now, so the splash never renders just to
   // wait for it (this used to be null on the first frame and gated everything).
-  const [appType] = useState<"desktop" | "admin">(() => window.camai.config.appType);
+  const [appType] = useState<"desktop" | "admin">(() => window.camai?.config?.appType || "desktop");
   const [currentScreen, setCurrentScreen] = useState<"workspace" | "admin-studio">("workspace");
-  const [bundle, setBundle] = useState<SyncBundle | null>(null);
+  const [bundle, setBundle] = useState<SyncBundle>(() => DEFAULT_OFFLINE_BUNDLE);
   // "Open Live Feed" clicked on an alert row in the Alerts page — opening a
   // camera live means switching screens (if the click came from Admin
   // Studio's bell) AND telling Workspace which camera. Nonce so the same
@@ -101,7 +101,7 @@ export default function App() {
   // pattern: switching TO Workspace and bumping this in the same click has to
   // work even if Workspace was already the visible screen.
   const [openAlertsSignal, setOpenAlertsSignal] = useState<{ nonce: number } | null>(null);
-  const [modeSynced, setModeSynced] = useState<boolean>(false);
+  const [modeSynced, setModeSynced] = useState<boolean>(true);
 
   useEffect(() => {
     let cancelled = false;
@@ -258,8 +258,8 @@ export default function App() {
 
   const bootSplash = (
     <SplashLoading
-      title="Starting CamAI Enterprise Node…"
-      subtitle="Verifying Windows DPAPI hardware vault & initializing local AI supervisor."
+      title="Starting CamAI Edge Node…"
+      subtitle="Initializing camera stream & on-device AI vision pipeline."
     />
   );
 

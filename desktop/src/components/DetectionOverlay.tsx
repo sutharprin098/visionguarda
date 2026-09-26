@@ -192,32 +192,24 @@ export default function DetectionOverlay({ detections, refreshKey = 0, mediaRef,
     let rawList = Array.isArray(detections) ? detections : [];
 
     if (profileFeatures && Object.keys(profileFeatures).length > 0) {
-      const isFeatOn = (k: string, dflt = true) => {
+      const isFeatExplicitlyOff = (k: string) => {
         const v = profileFeatures[k];
-        if (v === undefined || v === null) return dflt;
-        if (typeof v === "boolean") return v;
-        if (typeof v === "object" && v.enabled !== undefined) return Boolean(v.enabled);
-        return dflt;
+        if (v === false) return true;
+        if (typeof v === "object" && v !== null && v.enabled === false) return true;
+        return false;
       };
 
       rawList = rawList.filter((d) => {
         if (!d || !d.class) return false;
         const cls = d.class.toLowerCase();
         if (d.custom_match || cls.startsWith("target:")) {
-          return isFeatOn("face_recognition", false) || isFeatOn("vip_face", false) || isFeatOn("customer_demographics", false) || isFeatOn("custom_detector", false) || isFeatOn("custom_detection_zone", false) || isFeatOn("detection_zone", false);
+          if (isFeatExplicitlyOff("custom_detector") && isFeatExplicitlyOff("vip_face") && isFeatExplicitlyOff("custom_detection_zone")) return false;
         }
-        if (cls === "face") return isFeatOn("face_detection", false) || isFeatOn("face_recognition", false) || isFeatOn("vip_face", false) || isFeatOn("customer_demographics", false);
-        if (cls === "helmet" || cls === "no_helmet") return isFeatOn("helmet_detection", false) || isFeatOn("twowheeler_safety_helmet", false) || isFeatOn("ppe_detection", false);
-        if (cls === "vest" || cls === "no_vest") return isFeatOn("safety_vest", false) || isFeatOn("ppe_detection", false);
-        if (cls === "gloves" || cls === "no_gloves") return isFeatOn("gloves", false) || isFeatOn("ppe_detection", false);
-        if (cls === "shoes" || cls === "no_shoes") return isFeatOn("safety_shoes", false) || isFeatOn("shoes", false) || isFeatOn("ppe_detection", false);
-        if (cls === "fire" || cls === "smoke") return isFeatOn("fire_detection", false) || isFeatOn("smoke_detection", false);
-        if (cls === "forklift") return isFeatOn("forklift_detection", false);
-        if (cls === "number_plate") return isFeatOn("anpr", false) || isFeatOn("municipal_anpr", false);
-        if (cls === "micro_motion") return isFeatOn("micro_motion", false) || isFeatOn("micro_motion_hud", false);
-        if (cls === "person" || cls === "worker" || cls === "customer" || cls === "staff") {
-          return isFeatOn("worker_detection", true) && isFeatOn("person_detection", true) && isFeatOn("customer_staff_detection", true);
-        }
+        if (cls === "face" && isFeatExplicitlyOff("face_detection") && isFeatExplicitlyOff("face_recognition")) return false;
+        if ((cls === "helmet" || cls === "no_helmet") && isFeatExplicitlyOff("helmet_detection") && isFeatExplicitlyOff("ppe_detection")) return false;
+        if ((cls === "vest" || cls === "no_vest") && isFeatExplicitlyOff("safety_vest") && isFeatExplicitlyOff("ppe_detection")) return false;
+        if (cls === "number_plate" && isFeatExplicitlyOff("anpr") && isFeatExplicitlyOff("municipal_anpr")) return false;
+        if (cls === "micro_motion" && isFeatExplicitlyOff("micro_motion") && isFeatExplicitlyOff("micro_motion_hud")) return false;
         return true;
       });
     }

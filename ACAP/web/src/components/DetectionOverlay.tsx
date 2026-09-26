@@ -185,48 +185,19 @@ function dedupDetections(dets: TelemetryDetection[]): TelemetryDetection[] {
 
 const isDetectionModuleEnabled = (d: TelemetryDetection, pFeatures?: Record<string, any>): boolean => {
   if (!pFeatures || Object.keys(pFeatures).length === 0) return true;
-  const isFeatOn = (k: string, dflt = true) => {
+  const isExplicitlyOff = (k: string) => {
     const v = pFeatures[k];
-    if (v === undefined || v === null) return dflt;
-    if (typeof v === "boolean") return v;
-    if (typeof v === "object" && v.enabled !== undefined) return Boolean(v.enabled);
-    return dflt;
+    if (v === false) return true;
+    if (typeof v === "object" && v !== null && v.enabled === false) return true;
+    return false;
   };
-  const isAnyOn = (keys: string[], dflt = true) => {
-    return keys.some((k) => isFeatOn(k, dflt));
-  };
-  if (d.module) {
-    if (d.module === "vehicle_detection" || d.module === "vehicle") {
-      return isAnyOn(["vehicle", "vehicle_detection", "vehicle_classification", "speed_estimation", "anpr"], true);
-    }
-    if (d.module === "person_detection" || d.module === "person") {
-      return isAnyOn(["person", "person_detection", "worker_detection", "customer_staff_detection", "person_counting"], true);
-    }
-    if (d.module === "night_vision" || d.module === "zero_dce" || d.module === "night_vision_zero_dce") {
-      return isAnyOn(["night_vision", "zero_dce", "night_vision_zero_dce"], false);
-    }
-    return isFeatOn(d.module, false);
-  }
+  if (d.module && isExplicitlyOff(d.module)) return false;
   if (!d.class) return true;
   const cls = d.class.toLowerCase();
-  if (d.custom_match || cls.startsWith("target:")) {
-    return isAnyOn(["face_recognition", "vip_face", "customer_demographics", "custom_detector", "custom_detection_zone", "detection_zone"], false);
-  }
-  if (cls === "face") return isAnyOn(["face", "face_detection", "face_recognition", "vip_face", "customer_demographics"], false);
-  if (cls === "helmet" || cls === "no_helmet") return isAnyOn(["helmet", "helmet_detection", "twowheeler_safety_helmet", "ppe_detection"], false);
-  if (cls === "vest" || cls === "no_vest") return isAnyOn(["safety_vest", "ppe_detection"], false);
-  if (cls === "gloves" || cls === "no_gloves") return isAnyOn(["gloves", "ppe_detection"], false);
-  if (cls === "shoes" || cls === "no_shoes") return isAnyOn(["safety_shoes", "shoes", "ppe_detection"], false);
-  if (cls === "fire" || cls === "smoke") return isAnyOn(["fire_detection", "smoke_detection"], false);
-  if (cls === "forklift") return isFeatOn("forklift_detection", false);
-  if (cls === "number_plate" || cls === "plate") return isAnyOn(["plate", "anpr", "municipal_anpr"], false);
-  if (cls === "micro_motion") return isAnyOn(["micro_motion", "micro_motion_hud"], false);
-  if (cls === "person" || cls === "worker" || cls === "customer" || cls === "staff") {
-    return isAnyOn(["person", "person_detection", "worker_detection", "customer_staff_detection", "person_counting"], true);
-  }
-  if (VEHICLE_CLS_SET.has(cls)) {
-    return isAnyOn(["vehicle", "vehicle_detection", "speed_estimation", "vehicle_classification", "anpr"], true);
-  }
+  if ((cls === "number_plate" || cls === "plate") && isExplicitlyOff("anpr") && isExplicitlyOff("plate")) return false;
+  if (cls === "micro_motion" && isExplicitlyOff("micro_motion") && isExplicitlyOff("micro_motion_hud")) return false;
+  if (cls === "face" && isExplicitlyOff("face_detection") && isExplicitlyOff("face")) return false;
+  if ((cls === "helmet" || cls === "no_helmet") && isExplicitlyOff("helmet_detection") && isExplicitlyOff("ppe_detection")) return false;
   return true;
 };
 

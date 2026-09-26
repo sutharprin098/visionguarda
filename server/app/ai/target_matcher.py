@@ -320,13 +320,6 @@ class TargetMatcherEngine:
 
         Attaches `custom_match=True`, `target_name`, `target_id`, `match_score`, and `track_label`.
         Auto-enrolls unknown faces with unique IDs when auto_enroll_enabled is active.
-        Ensures continuous face tracking boxes for all detected persons.
-        """
-    def match_detections(self, frame: np.ndarray, detections: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """Scans detections against enrolled targets.
-
-        Attaches `custom_match=True`, `target_name`, `target_id`, `match_score`, and `track_label`.
-        Auto-enrolls unknown faces with unique IDs when auto_enroll_enabled is active.
         Ensures continuous face tracking boxes for all detected persons and direct full-frame faces.
         """
         if frame is None or not self.targets:

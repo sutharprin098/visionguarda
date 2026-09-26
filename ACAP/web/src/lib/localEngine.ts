@@ -987,4 +987,3 @@ export async function updateRecordingSettings(settings: RecordingSettings): Prom
   }
 }
 
-

@@ -1,0 +1,20 @@
+=== CAMAI DETECTION PIPELINE DIAGNOSTIC ===
+Python: 3.11.9 (tags/v3.11.9:de54cf5, Apr  2 2024, 10:12:12) [MSC v.1938 64 bit (AMD64)]
+Loaded snapshot: (480, 640, 3)
+
+--- 1. Testing Primary YOLOX Backend ---
+[AI Backend] Resolving model 'yolox_tiny'. Searched dirs: ['D:\\camAI', 'D:\\CamAI-data\\models', 'D:\\camAI\\server', 'D:\\camAI']
+[AI Backend] Candidate files -> OpenVINO XML: D:\camAI\server\yolox_tiny_openvino_model\yolox_tiny.xml (exists=True), ONNX: D:\camAI\server\yolox_tiny.onnx (exists=True)
+[AI Backend] Candidate order (best acceleration first): [('openvino', 80), ('onnx', 10)]
+[AI Backend] Attempting to load model via openvino: D:\camAI\server\yolox_tiny_openvino_model\yolox_tiny.xml
+[AI Backend] OpenVINO available devices: ['CPU', 'GPU']
+[AI Backend] Intel GPU detected ù pinning static input shape [1,3,416,416] (one cached kernel, no runtime recompiles).
+[AI Backend] OpenVINO compile cache dir: D:\CamAI-data\history\ov_cache
+[AI Backend] Successfully initialized OpenVINO engine on GPU.
+[AI Backend] [OK] MODEL LOADED: 'yolox_tiny' via OPENVINO on GPU (runtime=GPU)
+[Accelerator] [OK] primary detector (yolox_tiny): executing on 'openvino:GPU'.
+Traceback (most recent call last):
+  File "D:\camAI\scratch_test_ai_pipeline.py", line 31, in <module>
+    print(f"Backend loaded: model_path={backend.model_path}, device={getattr(backend, 'backend_device', 'unknown')}, is_visdrone={getattr(backend, 'is_visdrone', False)}")
+                                        ^^^^^^^^^^^^^^^^^^
+AttributeError: 'EngineBackend' object has no attribute 'model_path'. Did you mean: 'model_name'?

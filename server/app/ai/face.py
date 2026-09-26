@@ -225,6 +225,17 @@ class FaceDetector:
             pass
         return res
 
+    def detect_on_persons(self, frame: np.ndarray, person_boxes: List[Dict[str, float]]) -> List[Dict[str, Any]]:
+        """Alias for detect_in_persons."""
+        return self.detect_in_persons(frame, person_boxes)
+
+    def detect(self, frame: np.ndarray) -> List[Dict[str, Any]]:
+        """Direct face detection on full frame or crops."""
+        if frame is None or frame.size == 0:
+            return []
+        h, w = frame.shape[:2]
+        return self.detect_in_persons(frame, [{"x1": 0, "y1": 0, "x2": w, "y2": h}])
+
 
 _INSTANCE: Optional[FaceDetector] = None
 _LOAD_FAILED = False

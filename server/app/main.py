@@ -630,6 +630,24 @@ def get_camera_telemetry(camera_id: str):
     return getattr(thread, "latest_telemetry", {}) or {}
 
 
+from app.agent_orchestrator import orchestrator
+
+
+@app.get("/api/agents")
+@app.get("/health/agents")
+def get_orchestrator_agents():
+    return orchestrator.get_system_health()
+
+
+@app.post("/api/agents/{agent_name}/toggle")
+def toggle_orchestrator_agent(agent_name: str, enable: bool = True):
+    if agent_name in orchestrator.agents:
+        orchestrator.agents[agent_name].enabled = enable
+        orchestrator.agents[agent_name].status = "healthy" if enable else "disabled"
+        return {"status": "ok", "agent": agent_name, "enabled": enable}
+    return JSONResponse({"status": "error", "message": f"Agent '{agent_name}' not found"}, status_code=404)
+
+
 _acap_latest_telemetry = {
     "status": "success",
     "type": "telemetry",
@@ -1037,6 +1055,7 @@ async def acap_detect_endpoint(request: Request):
 
     if image_b64:
         try:
+            orchestrator.stream.record_frame(req_frame_id)
             if "," in image_b64:
                 image_b64 = image_b64.split(",", 1)[1]
             img_bytes = base64.b64decode(image_b64)
@@ -1113,9 +1132,12 @@ async def acap_detect_endpoint(request: Request):
                 if h_det is not None and (is_mod_enabled("helmet_detection") or is_mod_enabled("ppe_detection") or is_mod_enabled("two_wheeler_safety")):
                     try:
                         t_h0 = time.perf_counter()
-                        target_m = moto_boxes_px if moto_boxes_px else (person_boxes_px if person_boxes_px else [{"x1": 0, "y1": 0, "x2": w, "y2": h}])
-                        target_p = person_boxes_px if person_boxes_px else target_m
-                        helmet_results = h_det.detect_on_riders(img, target_m, target_p)
+                        if moto_boxes_px:
+                            helmet_results = h_det.detect_on_riders(img, moto_boxes_px, person_boxes_px or moto_boxes_px)
+                        elif person_boxes_px:
+                            helmet_results = h_det.detect_on_persons(img, person_boxes_px)
+                        else:
+                            helmet_results = h_det.detect(img)
                         h_ms = round((time.perf_counter() - t_h0) * 1000.0, 1)
                         for hr in (helmet_results or []):
                             hconf = float(hr.get("confidence", 0.0))
@@ -1143,8 +1165,10 @@ async def acap_detect_endpoint(request: Request):
                 if f_det is not None and (is_mod_enabled("face_detection") or is_mod_enabled("face_recognition") or is_mod_enabled("customer_demographics")):
                     try:
                         t_f0 = time.perf_counter()
-                        target_persons = person_boxes_px if person_boxes_px else [{"x1": 0, "y1": 0, "x2": w, "y2": h}]
-                        face_results = f_det.detect_on_persons(img, target_persons)
+                        if person_boxes_px:
+                            face_results = f_det.detect_on_persons(img, person_boxes_px)
+                        else:
+                            face_results = f_det.detect(img)
                         f_ms = round((time.perf_counter() - t_f0) * 1000.0, 1)
                         for fr in (face_results or []):
                             fconf = float(fr.get("confidence", 0.0))
@@ -1172,8 +1196,10 @@ async def acap_detect_endpoint(request: Request):
                 if p_det is not None and (is_mod_enabled("anpr") or is_mod_enabled("municipal_anpr") or is_mod_enabled("plate")):
                     try:
                         t_p0 = time.perf_counter()
-                        target_v_boxes = vehicle_boxes_px if vehicle_boxes_px else [{"x1": 0, "y1": 0, "x2": w, "y2": h}]
-                        plate_results = p_det.detect_on_vehicles(img, target_v_boxes, camera_id=camera_id)
+                        if vehicle_boxes_px:
+                            plate_results = p_det.detect_on_vehicles(img, vehicle_boxes_px, camera_id=camera_id)
+                        else:
+                            plate_results = p_det.detect(img, camera_id=camera_id)
                         p_ms = round((time.perf_counter() - t_p0) * 1000.0, 1)
                         for pr in (plate_results or []):
                             pconf = float(pr.get("confidence", 0.0))
@@ -1333,30 +1359,20 @@ async def acap_detect_endpoint(request: Request):
     p_cnt = sum(1 for d in detections if str(d.get("class", "")).lower() in PEOPLE_CLS)
 
     latency_ms = round((time.perf_counter() - t_start) * 1000.0, 2)
-    _acap_latest_telemetry = {
-        "status": "success",
-        "type": "telemetry",
-        "service": "CamAI AXIS ACAP Engine",
-        "frame_id": req_frame_id,
-        "fps": dynamic_fps,
-        "input_fps": dynamic_fps,
-        "ai_fps": dynamic_fps,
-        "inference_latency_ms": latency_ms,
-        "active_module": zone_profile,
-        "vehicles": v_cnt,
-        "people": p_cnt,
-        "vehicles_count": v_cnt,
-        "people_count": p_cnt,
-        "count": len(detections),
-        "detections": detections,
-        "alerts": alerts,
-        "track_overlays": track_overlays,
-        "zone_stats": zone_stats,
-        "line_stats": line_stats,
-        "crowd_stats": crowd_stats,
-        "parking_stats": parking_stats,
-        "timestamp": now_ts
-    }
+    _acap_latest_telemetry = orchestrator.telemetry.build_payload(
+        frame_id=req_frame_id,
+        fps=dynamic_fps,
+        latency_ms=latency_ms,
+        zone_profile=zone_profile,
+        detections=detections,
+        alerts=alerts,
+        track_overlays=track_overlays,
+        zone_stats=zone_stats,
+        line_stats=line_stats,
+        crowd_stats=crowd_stats,
+        parking_stats=parking_stats,
+        now_ts=now_ts
+    )
     return _acap_latest_telemetry
 
 
